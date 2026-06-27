@@ -1,0 +1,21 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    pub listen_address: String,
+    pub tls_cert_path: String,
+    pub tls_key_path: String,
+    pub auth_token: String,
+    #[serde(default = "default_heartbeat_timeout")]
+    pub heartbeat_timeout_secs: u64,
+    #[serde(default = "default_db_path")]
+    pub db_path: String,
+}
+
+fn default_heartbeat_timeout() -> u64 {
+    30
+}
+
+fn default_db_path() -> String {
+    "./nession-server.db".to_string()
+}
