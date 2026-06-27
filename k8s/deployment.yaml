@@ -18,6 +18,7 @@ spec:
       containers:
         - name: nession
           image: ghcr.io/bestnathan/nession:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
               name: http
