@@ -69,20 +69,20 @@ enum AgentAction {
         foreground: bool,
 
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-agent.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
     /// Stop the agent
     Stop {
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-agent.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
     /// Show agent status
     Status {
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-agent.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
 }
 
@@ -99,20 +99,20 @@ enum ServerAction {
         foreground: bool,
 
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-server.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
     /// Stop the server
     Stop {
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-server.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
     /// Show server status
     Status {
         /// Path to PID file
-        #[arg(long, default_value = "/tmp/nession-server.pid")]
-        pid_file: String,
+        #[arg(long)]
+        pid_file: Option<String>,
     },
 }
 
@@ -190,18 +190,60 @@ async fn main() -> Result<()> {
                 config,
                 foreground,
                 pid_file,
-            } => commands::agent::start(config, foreground, pid_file).await?,
-            AgentAction::Stop { pid_file } => commands::agent::stop(pid_file).await?,
-            AgentAction::Status { pid_file } => commands::agent::status(pid_file).await?,
+            } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::agent_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::agent::start(config, foreground, pid_file).await?
+            }
+            AgentAction::Stop { pid_file } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::agent_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::agent::stop(pid_file).await?
+            }
+            AgentAction::Status { pid_file } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::agent_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::agent::status(pid_file).await?
+            }
         },
         Commands::Server { action } => match action {
             ServerAction::Start {
                 config,
                 foreground,
                 pid_file,
-            } => commands::server::start(config, foreground, pid_file).await?,
-            ServerAction::Stop { pid_file } => commands::server::stop(pid_file).await?,
-            ServerAction::Status { pid_file } => commands::server::status(pid_file).await?,
+            } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::server_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::server::start(config, foreground, pid_file).await?
+            }
+            ServerAction::Stop { pid_file } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::server_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::server::stop(pid_file).await?
+            }
+            ServerAction::Status { pid_file } => {
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::server_pid_path()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::server::status(pid_file).await?
+            }
         },
         Commands::Agents { action } => match action {
             AgentsAction::List => {
