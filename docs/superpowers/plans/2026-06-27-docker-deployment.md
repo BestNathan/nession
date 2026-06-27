@@ -295,7 +295,7 @@ RUN cargo build --release --bin nession-server
 # ---- Stage 3: Runtime ----
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy compiled binary
