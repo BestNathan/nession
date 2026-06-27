@@ -32,3 +32,5 @@ base64.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+nession-server = { path = "../nession-server" }
+base64.workspace = true
