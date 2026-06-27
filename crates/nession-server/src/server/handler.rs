@@ -79,7 +79,10 @@ impl ConnectionHandler {
     ) -> anyhow::Result<HandlerAction> {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
 
-        if payload.auth_token != self.server_auth_token {
+        // Empty server auth_token means no-auth mode: accept any agent
+        let auth_ok = self.server_auth_token.is_empty() || payload.auth_token == self.server_auth_token;
+
+        if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
@@ -206,7 +209,10 @@ impl ConnectionHandler {
         let payload: serde_json::Value = msg.payload;
         let auth_token = payload["auth_token"].as_str().unwrap_or("");
 
-        if auth_token == self.server_auth_token {
+        // Empty server auth_token means no-auth mode: accept any client
+        let auth_ok = self.server_auth_token.is_empty() || auth_token == self.server_auth_token;
+
+        if auth_ok {
             self.authenticated_client = true;
             info!("Client authenticated successfully");
 

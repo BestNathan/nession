@@ -33,11 +33,6 @@ function App() {
   }, []);
 
   const handleConnect = async () => {
-    if (!authToken.trim()) {
-      alert('Please enter an auth token');
-      return;
-    }
-
     // Persist to localStorage so it survives page reloads
     localStorage.setItem('nession_token', authToken);
     localStorage.setItem('nession_server_url', serverUrl);
