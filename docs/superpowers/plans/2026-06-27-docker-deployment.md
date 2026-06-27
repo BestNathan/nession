@@ -285,7 +285,7 @@ COPY web/ .
 RUN npm run build
 
 # ---- Stage 2: Build Rust server ----
-FROM rust:1.80-bookworm AS server-builder
+FROM rust:1.87-bookworm AS server-builder
 WORKDIR /build
 # Cache dependency compilation: copy manifests first, then source
 COPY Cargo.toml Cargo.lock ./
