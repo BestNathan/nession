@@ -99,6 +99,178 @@ pub async fn list_sessions(
     Ok(())
 }
 
+/// Attach to a remote tmux session.
+///
+/// Connects to the server, requests to attach to the specified session,
+/// and then establishes either a P2P or relay connection to the agent.
+/// Terminal I/O is forwarded bidirectionally until the session ends or
+/// the user detaches.
+///
+/// # Arguments
+///
+/// * `server_url` - URL of the nession server
+/// * `auth_token` - Authentication token
+/// * `session_id` - Session ID in format "agent_id:session_name"
+/// * `force_mode` - Optional mode override ("p2p" or "relay")
+pub async fn attach_session(
+    server_url: &str,
+    auth_token: &str,
+    session_id: &str,
+    force_mode: Option<&str>,
+) -> Result<()> {
+    // Connect to server
+    let mut conn = ClientConnection::connect(server_url, auth_token)
+        .await
+        .with_context(|| "Failed to connect to server. Is the server running?")?;
+
+    // Determine preferred mode
+    let preferred_mode = match force_mode {
+        Some("relay") => "relay",
+        Some("p2p") | None => "p2p",
+        Some(other) => {
+            anyhow::bail!("Invalid mode '{}'. Use 'p2p' or 'relay'.", other);
+        }
+    };
+
+    println!("Requesting to attach to session '{}' (mode: {})...", session_id, preferred_mode);
+
+    // Request attach
+    let attach_resp = conn.request_attach(session_id, preferred_mode).await
+        .with_context(|| "Failed to attach to session")?;
+
+    match attach_resp {
+        crate::client::connection::AttachResponse::P2P(p2p_info) => {
+            println!("Connecting to agent at {} (P2P mode)...", p2p_info.agent_address);
+
+            // Connect directly to agent
+            let agent_ws = crate::client::connection::connect_to_agent(&p2p_info.agent_address)
+                .await
+                .with_context(|| format!("Failed to connect to agent at {}", p2p_info.agent_address))?;
+
+            // Create WebSocket transport
+            let transport = crate::terminal::raw::WebSocketTransport::new(agent_ws);
+
+            // Send client.attach to agent with session name
+            use nession_agent::server::websocket::{
+                ClientAttachPayload, Message as AgentMessage, msg_types as agent_msg_types,
+            };
+            let (cols, rows) = crate::terminal::raw::RawTerminal::size()?;
+            let attach_msg = AgentMessage {
+                msg_type: agent_msg_types::CLIENT_ATTACH.to_string(),
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                payload: ClientAttachPayload {
+                    session_name: p2p_info.session_name.clone(),
+                    width: cols,
+                    height: rows,
+                },
+            };
+            let attach_json = serde_json::to_string(&attach_msg)?;
+            use crate::terminal::TerminalTransport;
+            let mut transport = transport;
+            transport.send_text(attach_json).await?;
+
+            println!("Attached to session '{}'. Press Ctrl+B then D to detach.", p2p_info.session_name);
+
+            // Create cancellation channel
+            let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+            // Spawn Ctrl+C handler
+            let cancel_tx_clone = cancel_tx.clone();
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.ok();
+                let _ = cancel_tx_clone.send(true);
+            });
+
+            // Create and run terminal session
+            let session = crate::terminal::TerminalSession::new(
+                p2p_info.session_name,
+                transport,
+                cancel_rx,
+            );
+
+            // Detach key: Ctrl+B followed by 'd'
+            let detach_key = crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('b'),
+                crossterm::event::KeyModifiers::CONTROL,
+            );
+
+            session.run(Some(detach_key)).await?;
+
+            println!("\nDetached from session.");
+        }
+        crate::client::connection::AttachResponse::Relay => {
+            println!("Using relay mode (server proxies I/O)...");
+
+            // Use server connection as relay transport
+            let relay_ws = conn.into_relay_transport();
+            let transport = crate::terminal::raw::WebSocketTransport::new(relay_ws);
+
+            // For relay mode, the server expects us to send terminal protocol messages
+            // The server will forward them to the agent
+            use nession_agent::server::websocket::{
+                ClientAttachPayload, Message as AgentMessage, msg_types as agent_msg_types,
+            };
+            let (cols, rows) = crate::terminal::raw::RawTerminal::size()?;
+
+            // Parse session_name from session_id (format: agent_id:session_name)
+            let session_name = session_id.split(':').nth(1).unwrap_or(session_id);
+
+            let attach_msg = AgentMessage {
+                msg_type: agent_msg_types::CLIENT_ATTACH.to_string(),
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                payload: ClientAttachPayload {
+                    session_name: session_name.to_string(),
+                    width: cols,
+                    height: rows,
+                },
+            };
+            let attach_json = serde_json::to_string(&attach_msg)?;
+            use crate::terminal::TerminalTransport;
+            let mut transport = transport;
+            transport.send_text(attach_json).await?;
+
+            println!("Attached to session '{}' via relay.", session_name);
+
+            // Create cancellation channel
+            let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+            // Spawn Ctrl+C handler
+            let cancel_tx_clone = cancel_tx.clone();
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.ok();
+                let _ = cancel_tx_clone.send(true);
+            });
+
+            // Create and run terminal session
+            let session = crate::terminal::TerminalSession::new(
+                session_name.to_string(),
+                transport,
+                cancel_rx,
+            );
+
+            // Detach key: Ctrl+B followed by 'd'
+            let detach_key = crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('b'),
+                crossterm::event::KeyModifiers::CONTROL,
+            );
+
+            session.run(Some(detach_key)).await?;
+
+            println!("\nDetached from session.");
+        }
+    }
+
+    Ok(())
+}
+
 /// Format a timestamp string (ISO 8601 or Unix seconds) into "Xs ago" or "Xm ago".
 fn format_time_ago(timestamp: &str) -> String {
     // Try to parse as a datetime

@@ -40,6 +40,23 @@ pub struct SessionInfo {
     pub attached_clients: u32,
 }
 
+/// P2P connection info returned from the server for direct agent connection.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct P2PAttachInfo {
+    pub agent_address: String,
+    pub connection_token: String,
+    pub session_name: String,
+}
+
+/// Result of an attach request to the central server.
+#[derive(Debug, Clone)]
+pub enum AttachResponse {
+    /// P2P mode: connect directly to agent at the given address.
+    P2P(P2PAttachInfo),
+    /// Relay mode: the server is relaying I/O on the existing connection.
+    Relay,
+}
+
 impl ClientConnection {
     /// Connect to the server with WebSocket (supports TLS).
     pub async fn connect(server_url: &str, auth_token: &str) -> Result<Self> {
@@ -208,10 +225,98 @@ impl ClientConnection {
         }
     }
 
+    /// Request to attach to a session. Sends `client.session.attach` with the
+    /// given preferred mode. Returns either P2P connection info (to connect
+    /// directly to the agent) or Relay (the server relays I/O).
+    pub async fn request_attach(
+        &mut self,
+        session_id: &str,
+        preferred_mode: &str,
+    ) -> Result<AttachResponse> {
+        if !self.authenticated {
+            anyhow::bail!("Not authenticated");
+        }
+
+        let msg_id = format!("attach_{}", SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis());
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs();
+
+        let request = json!({
+            "msg_type": "client.session.attach",
+            "id": msg_id,
+            "timestamp": timestamp,
+            "payload": {
+                "session_id": session_id,
+                "preferred_mode": preferred_mode
+            }
+        });
+
+        debug!("Sending session attach request: {}", request);
+        self.ws_stream.send(Message::Text(request.to_string())).await?;
+
+        // Wait for response
+        if let Some(msg) = self.ws_stream.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    let response: serde_json::Value = serde_json::from_str(&text)?;
+                    let msg_type = response["msg_type"].as_str().unwrap_or("");
+
+                    if msg_type != "client.session.attach.response" {
+                        anyhow::bail!(
+                            "Unexpected response: expected client.session.attach.response, got {}",
+                            msg_type
+                        );
+                    }
+
+                    let status = response["payload"]["status"].as_str().unwrap_or("");
+                    if status != "success" {
+                        let message = response["payload"]["message"].as_str().unwrap_or("unknown error");
+                        anyhow::bail!("Attach request failed: {}", message);
+                    }
+
+                    let mode = response["payload"]["mode"].as_str().unwrap_or("relay");
+                    if mode == "relay" {
+                        Ok(AttachResponse::Relay)
+                    } else {
+                        let p2p: P2PAttachInfo = serde_json::from_value(response["payload"].clone())?;
+                        Ok(AttachResponse::P2P(p2p))
+                    }
+                }
+                Ok(_) => anyhow::bail!("Unexpected message type from server"),
+                Err(e) => anyhow::bail!("Error receiving attach response: {}", e),
+            }
+        } else {
+            anyhow::bail!("Server closed connection")
+        }
+    }
+
+    /// Split the underlying WebSocket stream for relay-mode terminal I/O.
+    /// Returns (sink, stream) halves that can be used as a TerminalTransport.
+    pub fn into_relay_transport(self) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+        self.ws_stream
+    }
+
     /// Close the connection gracefully.
     pub async fn close(&mut self) -> Result<()> {
         info!("Closing connection");
         self.ws_stream.close(None).await?;
         Ok(())
     }
+}
+
+/// Connect to an agent's WebSocket server for P2P terminal I/O.
+/// Returns the WebSocketStream for use as a TerminalTransport.
+pub async fn connect_to_agent(agent_address: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    let url = format!("ws://{}", agent_address);
+    info!("Connecting to agent at: {}", url);
+
+    let (ws_stream, _) = connect_async(&url)
+        .await
+        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+
+    info!("Agent WebSocket connection established");
+    Ok(ws_stream)
 }

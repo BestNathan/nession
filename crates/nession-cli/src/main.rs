@@ -7,6 +7,8 @@ mod commands;
 
 mod client;
 
+mod terminal;
+
 /// Default server URL (ws://127.0.0.1:8080).
 const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:8080";
 
@@ -128,6 +130,16 @@ enum SessionsAction {
         #[arg(short = 'a', long)]
         agent_id: Option<String>,
     },
+    /// Attach to a session (interactive terminal)
+    Attach {
+        /// Session ID in format "agent_id:session_name"
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Force connection mode (p2p or relay)
+        #[arg(short = 'm', long)]
+        mode: Option<String>,
+    },
 }
 
 /// Resolve the effective server URL from CLI flag, env, or default.
@@ -176,6 +188,17 @@ async fn main() -> Result<()> {
                 let auth_token = resolve_auth_token(cli.auth_token);
                 commands::client::list_sessions(&server_url, &auth_token, agent_id.as_deref())
                     .await?;
+            }
+            SessionsAction::Attach { session_id, mode } => {
+                let server_url = resolve_server_url(cli.server_url);
+                let auth_token = resolve_auth_token(cli.auth_token);
+                commands::client::attach_session(
+                    &server_url,
+                    &auth_token,
+                    &session_id,
+                    mode.as_deref(),
+                )
+                .await?;
             }
         },
     }

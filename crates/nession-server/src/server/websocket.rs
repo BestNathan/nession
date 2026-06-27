@@ -6,7 +6,7 @@ use tracing::{info, error};
 
 use crate::registry::{AgentRegistry, SessionRegistry};
 use nession_common::config::ServerConfig;
-use super::handler::ConnectionHandler;
+use super::handler::{ConnectionHandler, HandlerAction};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -126,13 +126,100 @@ where
     let mut handler = ConnectionHandler::new(agent_registry, session_registry, auth_token);
 
     use futures_util::StreamExt;
+    use futures_util::SinkExt;
+
     while let Some(msg) = read.next().await {
         let msg = msg?;
-        if let Some(response) = handler.handle_message(msg).await? {
-            use futures_util::SinkExt;
-            write.send(response).await?;
+        match handler.handle_message(msg).await? {
+            HandlerAction::Reply(Some(response)) => {
+                write.send(response).await?;
+            }
+            HandlerAction::Reply(None) => {
+                // No response needed, continue
+            }
+            HandlerAction::Relay { agent_ws_url } => {
+                // Enter relay mode: connect to agent and forward messages bidirectionally
+                relay_bidirectional(&mut write, &mut read, &agent_ws_url).await?;
+                break; // Exit main loop after relay
+            }
+            HandlerAction::Close => {
+                break;
+            }
         }
     }
 
+    Ok(())
+}
+
+/// Relay mode: connect to agent WebSocket and forward messages bidirectionally
+/// between client and agent.
+async fn relay_bidirectional<WS, RS>(
+    client_write: &mut WS,
+    client_read: &mut RS,
+    agent_ws_url: &str,
+) -> anyhow::Result<()>
+where
+    WS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+    <WS as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Display,
+    RS: futures_util::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    use futures_util::StreamExt;
+    use futures_util::SinkExt;
+
+    info!("Entering relay mode, connecting to agent at {}", agent_ws_url);
+
+    // Connect to agent WebSocket
+    let (agent_ws, _) = tokio_tungstenite::connect_async(agent_ws_url).await?;
+    let (mut agent_write, mut agent_read) = agent_ws.split();
+
+    info!("Relay connection established");
+
+    // Spawn task to forward client -> agent
+    let client_to_agent = async {
+        while let Some(msg) = client_read.next().await {
+            match msg {
+                Ok(msg) => {
+                    if let Err(e) = agent_write.send(msg).await {
+                        error!("Failed to forward client message to agent: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading from client: {}", e);
+                    break;
+                }
+            }
+        }
+    };
+
+    // Forward agent -> client in current task
+    let agent_to_client = async {
+        while let Some(msg) = agent_read.next().await {
+            match msg {
+                Ok(msg) => {
+                    if let Err(e) = client_write.send(msg).await {
+                        error!("Failed to forward agent message to client: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading from agent: {}", e);
+                    break;
+                }
+            }
+        }
+    };
+
+    // Run both directions concurrently, exit when either completes
+    tokio::select! {
+        _ = client_to_agent => {
+            info!("Client to agent relay ended");
+        }
+        _ = agent_to_client => {
+            info!("Agent to client relay ended");
+        }
+    }
+
+    info!("Relay mode ended");
     Ok(())
 }

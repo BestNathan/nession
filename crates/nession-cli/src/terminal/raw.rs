@@ -22,7 +22,10 @@ use crossterm::{
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpStream;
 use tokio::sync::watch;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::protocol::Message as WsMessage};
 use tracing::{debug, trace, warn};
 
 use nession_agent::server::websocket::{
@@ -292,6 +295,46 @@ pub struct TerminalSession<T: TerminalTransport> {
     session_name: String,
     transport: T,
     cancel: watch::Receiver<bool>,
+}
+
+/// WebSocket-based terminal transport. Wraps a WebSocket connection to an
+/// agent (P2P or relay mode).
+pub struct WebSocketTransport {
+    ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+}
+
+impl WebSocketTransport {
+    /// Create a new transport wrapping an existing WebSocket connection.
+    pub fn new(ws: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+        Self { ws }
+    }
+}
+
+#[async_trait::async_trait]
+impl TerminalTransport for WebSocketTransport {
+    async fn send_text(&mut self, text: String) -> Result<()> {
+        self.ws
+            .send(WsMessage::Text(text))
+            .await
+            .context("WebSocket send failed")
+    }
+
+    async fn recv_text(&mut self) -> Result<Option<String>> {
+        loop {
+            match self.ws.next().await {
+                Some(Ok(WsMessage::Text(text))) => return Ok(Some(text)),
+                Some(Ok(WsMessage::Ping(data))) => {
+                    // Respond to pings to keep the connection alive.
+                    let _ = self.ws.send(WsMessage::Pong(data)).await;
+                }
+                Some(Ok(_)) => {
+                    // Ignore binary, pong, close frames (keep looping)
+                }
+                Some(Err(e)) => return Err(anyhow::Error::from(e).context("WebSocket recv error")),
+                None => return Ok(None), // Connection closed
+            }
+        }
+    }
 }
 
 impl<T: TerminalTransport> TerminalSession<T> {

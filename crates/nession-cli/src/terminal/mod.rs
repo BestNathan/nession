@@ -5,4 +5,4 @@
 
 pub mod raw;
 
-pub use raw::{RawTerminal, TerminalSession, TerminalTransport};
+pub use raw::{RawTerminal, TerminalSession, TerminalTransport, WebSocketTransport};

@@ -6,6 +6,17 @@ use tracing::{info, warn};
 use crate::registry::{AgentRegistry, SessionRegistry, AgentInfo, AgentStatus, SessionStatus};
 use nession_common::protocol::{ProtocolMessage, AgentRegisterPayload};
 
+/// Action returned by the connection handler after processing a message.
+pub enum HandlerAction {
+    /// Send an optional reply message back to the sender.
+    Reply(Option<Message>),
+    /// Enter relay mode: forward messages between this client and the agent
+    /// at the given WebSocket address.
+    Relay { agent_ws_url: String },
+    /// Close the connection.
+    Close,
+}
+
 pub struct ConnectionHandler {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
@@ -29,7 +40,7 @@ impl ConnectionHandler {
         }
     }
 
-    pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<Option<Message>> {
+    pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
         match msg {
             Message::Text(text) => {
                 let protocol_msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)?;
@@ -37,25 +48,26 @@ impl ConnectionHandler {
             }
             Message::Close(_) => {
                 info!("Client disconnected");
-                Ok(None)
+                Ok(HandlerAction::Close)
             }
-            _ => Ok(None),
+            _ => Ok(HandlerAction::Reply(None)),
         }
     }
 
     async fn handle_protocol_message(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         match msg.msg_type.as_str() {
             "agent.register" => self.handle_agent_register(msg).await,
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
             "client.auth" => self.handle_client_auth(msg).await,
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
+            "client.session.attach" => self.handle_client_session_attach(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
-                Ok(None)
+                Ok(HandlerAction::Reply(None))
             }
         }
     }
@@ -63,12 +75,12 @@ impl ConnectionHandler {
     async fn handle_agent_register(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
 
         if payload.auth_token != self.server_auth_token {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
-            return Ok(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "agent.register.response",
                     "id": msg.id,
@@ -78,7 +90,7 @@ impl ConnectionHandler {
                         "message": "Invalid auth token"
                     }
                 }).to_string()
-            )));
+            ))));
         }
 
         let agent_info = AgentInfo {
@@ -99,7 +111,7 @@ impl ConnectionHandler {
 
         info!("Agent {} registered successfully", payload.agent_id);
 
-        Ok(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
                 "msg_type": "agent.register.response",
                 "id": msg.id,
@@ -109,19 +121,19 @@ impl ConnectionHandler {
                     "message": "Registration successful"
                 }
             }).to_string()
-        )))
+        ))))
     }
 
     async fn handle_agent_heartbeat(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
         let agent_id = payload["agent_id"].as_str().unwrap_or("");
 
         if self.agent_registry.get(agent_id).await.is_none() {
             warn!("Heartbeat from unregistered agent: {}", agent_id);
-            return Ok(None);
+            return Ok(HandlerAction::Reply(None));
         }
 
         let session_count = payload["session_count"].as_u64().unwrap_or(0) as u32;
@@ -131,13 +143,13 @@ impl ConnectionHandler {
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;
 
-        Ok(None)
+        Ok(HandlerAction::Reply(None))
     }
 
     async fn handle_client_auth(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
         let auth_token = payload["auth_token"].as_str().unwrap_or("");
 
@@ -145,7 +157,7 @@ impl ConnectionHandler {
             self.authenticated_client = true;
             info!("Client authenticated successfully");
 
-            Ok(Some(Message::Text(
+            Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.auth.response",
                     "id": msg.id,
@@ -155,11 +167,11 @@ impl ConnectionHandler {
                         "message": "Authentication successful"
                     }
                 }).to_string()
-            )))
+            ))))
         } else {
             info!("Client authentication failed");
 
-            Ok(Some(Message::Text(
+            Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.auth.response",
                     "id": msg.id,
@@ -169,7 +181,7 @@ impl ConnectionHandler {
                         "message": "Invalid auth token"
                     }
                 }).to_string()
-            )))
+            ))))
         }
     }
 
@@ -177,10 +189,10 @@ impl ConnectionHandler {
     async fn handle_client_agents_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
             warn!("Unauthenticated client requested agents list");
-            return Ok(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.agents.list.response",
                     "id": msg.id,
@@ -190,7 +202,7 @@ impl ConnectionHandler {
                         "message": "Not authenticated"
                     }
                 }).to_string()
-            )));
+            ))));
         }
 
         let agents = self.agent_registry.list().await;
@@ -216,7 +228,7 @@ impl ConnectionHandler {
 
         info!("Client requested agents list, returning {} agents", agents_json.len());
 
-        Ok(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
                 "msg_type": "client.agents.list.response",
                 "id": msg.id,
@@ -225,17 +237,17 @@ impl ConnectionHandler {
                     "agents": agents_json
                 }
             }).to_string()
-        )))
+        ))))
     }
 
     /// Handle `client.sessions.list` - returns all sessions, optionally filtered by agent_id.
     async fn handle_client_sessions_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
-    ) -> anyhow::Result<Option<Message>> {
+    ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
             warn!("Unauthenticated client requested sessions list");
-            return Ok(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.sessions.list.response",
                     "id": msg.id,
@@ -245,7 +257,7 @@ impl ConnectionHandler {
                         "message": "Not authenticated"
                     }
                 }).to_string()
-            )));
+            ))));
         }
 
         let agent_id = msg.payload["agent_id"].as_str();
@@ -277,7 +289,7 @@ impl ConnectionHandler {
 
         info!("Client requested sessions list, returning {} sessions", sessions_json.len());
 
-        Ok(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
                 "msg_type": "client.sessions.list.response",
                 "id": msg.id,
@@ -286,7 +298,118 @@ impl ConnectionHandler {
                     "sessions": sessions_json
                 }
             }).to_string()
-        )))
+        ))))
+    }
+
+    /// Handle `client.session.attach` - returns P2P agent address or enters relay mode.
+    ///
+    /// In P2P mode, the response includes the agent's IP:port so the client can
+    /// connect directly. In relay mode, the server opens a WebSocket to the agent
+    /// and bidirectionally forwards terminal I/O.
+    async fn handle_client_session_attach(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.attach.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "error",
+                        "message": "Not authenticated"
+                    }
+                }).to_string()
+            ))));
+        }
+
+        let session_id = msg.payload["session_id"].as_str().unwrap_or("");
+        let preferred_mode = msg.payload["preferred_mode"].as_str().unwrap_or("p2p");
+
+        // Parse session_id as "agent_id:session_name"
+        let (agent_id, session_name) = match session_id.split_once(':') {
+            Some((aid, sname)) => (aid.to_string(), sname.to_string()),
+            None => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.attach.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "error",
+                            "message": "Invalid session_id format. Expected 'agent_id:session_name'"
+                        }
+                    }).to_string()
+                ))));
+            }
+        };
+
+        // Look up the session in the registry
+        let session = self.session_registry.get(session_id).await;
+        if session.is_none() {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.attach.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "error",
+                        "message": format!("Session '{}' not found", session_id)
+                    }
+                }).to_string()
+            ))));
+        }
+
+        // Look up the agent
+        let agent = self.agent_registry.get(&agent_id).await;
+        let agent = match agent {
+            Some(a) => a,
+            None => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.attach.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "error",
+                            "message": format!("Agent '{}' not found or offline", agent_id)
+                        }
+                    }).to_string()
+                ))));
+            }
+        };
+
+        let agent_address = format!("{}:{}", agent.ip_address, agent.port);
+        let connection_token = uuid::Uuid::new_v4().to_string();
+
+        info!(
+            "Client requested attach to session {} (mode: {}), agent at {}",
+            session_id, preferred_mode, agent_address
+        );
+
+        if preferred_mode == "relay" {
+            // For relay mode, the server will proxy I/O between client and agent.
+            // The handler loop must transition into relay mode.
+            let agent_ws_url = format!("ws://{}", agent_address);
+            Ok(HandlerAction::Relay { agent_ws_url })
+        } else {
+            // P2P mode: return agent address so the client can connect directly.
+            Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.attach.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "success",
+                        "mode": "p2p",
+                        "agent_address": agent_address,
+                        "connection_token": connection_token,
+                        "session_name": session_name
+                    }
+                }).to_string()
+            ))))
+        }
     }
 }
 
