@@ -41,6 +41,10 @@ pub struct AgentConfig {
     /// Session poll interval in seconds.
     #[serde(default = "default_session_poll_interval")]
     pub session_poll_interval_secs: u64,
+    /// Address advertised to clients for P2P connections (optional).
+    /// If not set, the agent auto-detects its IP. Useful for NAT/VPN setups.
+    #[serde(default)]
+    pub advertise_address: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -54,6 +58,7 @@ impl Default for AgentConfig {
             tls_key_path: None,
             heartbeat_interval_secs: default_heartbeat_interval(),
             session_poll_interval_secs: default_session_poll_interval(),
+            advertise_address: None,
         }
     }
 }

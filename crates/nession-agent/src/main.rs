@@ -62,7 +62,8 @@ async fn main() -> Result<()> {
 
     // 5. Connect to central server
     let hostname = get_hostname();
-    let ip_address = get_ip_address();
+    // Use advertise_address (IP) if configured, otherwise auto-detect
+    let ip_address = config.advertise_address.unwrap_or_else(get_ip_address);
     let port = extract_port(&config.listen_address);
 
     let tmux_version = get_tmux_version().await;
