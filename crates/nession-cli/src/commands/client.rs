@@ -271,6 +271,123 @@ pub async fn attach_session(
     Ok(())
 }
 
+/// Create a new tmux session on an agent.
+///
+/// Connects to the server to look up the agent's address, then connects
+/// directly to the agent to send the `session.create` command.
+///
+/// # Arguments
+///
+/// * `server_url` - URL of the nession server
+/// * `auth_token` - Authentication token
+/// * `agent_id` - ID of the agent to create the session on
+/// * `session_name` - Name for the new session
+/// * `width` - Terminal width in columns
+/// * `height` - Terminal height in rows
+pub async fn create_session(
+    server_url: &str,
+    auth_token: &str,
+    agent_id: &str,
+    session_name: &str,
+    width: u16,
+    height: u16,
+) -> Result<()> {
+    // Connect to server to look up agent address
+    let mut conn = ClientConnection::connect(server_url, auth_token)
+        .await
+        .with_context(|| "Failed to connect to server. Is the server running?")?;
+
+    // Find the agent
+    let agents = conn.list_agents().await?;
+    conn.close().await.ok();
+
+    let agent = agents
+        .iter()
+        .find(|a| a.agent_id == agent_id)
+        .with_context(|| format!("Agent '{}' not found. Is it registered?", agent_id))?;
+
+    if agent.status != "online" {
+        anyhow::bail!(
+            "Agent '{}' is not online (status: {}). Cannot create session.",
+            agent_id,
+            agent.status
+        );
+    }
+
+    let agent_address = format!("{}:{}", agent.ip_address, agent.port);
+    println!(
+        "Creating session '{}' on agent '{}' ({}x{})...",
+        session_name, agent_id, width, height
+    );
+
+    let created_name =
+        crate::client::connection::create_session_on_agent(&agent_address, session_name, width, height)
+            .await
+            .with_context(|| format!("Failed to create session '{}' on agent '{}'", session_name, agent_id))?;
+
+    println!("Session '{}' created successfully.", created_name);
+
+    Ok(())
+}
+
+/// Kill a tmux session on an agent.
+///
+/// Parses the session_id (format: `agent_id:session_name`), looks up the
+/// agent's address from the server, then connects directly to the agent
+/// to send the `session.kill` command.
+///
+/// # Arguments
+///
+/// * `server_url` - URL of the nession server
+/// * `auth_token` - Authentication token
+/// * `session_id` - Session ID in format "agent_id:session_name"
+pub async fn kill_session(
+    server_url: &str,
+    auth_token: &str,
+    session_id: &str,
+) -> Result<()> {
+    // Parse session_id (format: agent_id:session_name)
+    let (agent_id, session_name) = session_id
+        .split_once(':')
+        .with_context(|| {
+            format!(
+                "Invalid session ID '{}'. Expected format: agent_id:session_name",
+                session_id
+            )
+        })?;
+
+    // Connect to server to look up agent address
+    let mut conn = ClientConnection::connect(server_url, auth_token)
+        .await
+        .with_context(|| "Failed to connect to server. Is the server running?")?;
+
+    // Find the agent
+    let agents = conn.list_agents().await?;
+    conn.close().await.ok();
+
+    let agent = agents
+        .iter()
+        .find(|a| a.agent_id == agent_id)
+        .with_context(|| format!("Agent '{}' not found. Is it registered?", agent_id))?;
+
+    let agent_address = format!("{}:{}", agent.ip_address, agent.port);
+    println!("Killing session '{}' on agent '{}'...", session_name, agent_id);
+
+    let killed_name =
+        crate::client::connection::kill_session_on_agent(&agent_address, session_name)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to kill session '{}' on agent '{}'",
+                    session_name, agent_id
+                )
+            })?;
+
+    println!("Session '{}' killed successfully.", killed_name);
+
+    Ok(())
+}
+
 /// Format a timestamp string (ISO 8601 or Unix seconds) into "Xs ago" or "Xm ago".
 fn format_time_ago(timestamp: &str) -> String {
     // Try to parse as a datetime

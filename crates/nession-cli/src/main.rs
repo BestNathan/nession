@@ -140,6 +140,34 @@ enum SessionsAction {
         #[arg(short = 'm', long)]
         mode: Option<String>,
     },
+    /// Create a new tmux session on an agent
+    Create {
+        /// Agent ID to create the session on
+        #[arg(short = 'a', long)]
+        agent_id: String,
+
+        /// Name for the new session
+        #[arg(short = 'n', long)]
+        name: String,
+
+        /// Terminal width in columns
+        #[arg(long, default_value_t = 80)]
+        width: u16,
+
+        /// Terminal height in rows
+        #[arg(long, default_value_t = 24)]
+        height: u16,
+    },
+    /// Kill a tmux session on an agent
+    Kill {
+        /// Session ID in format "agent_id:session_name"
+        #[arg(short = 's', long)]
+        session_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
 }
 
 /// Resolve the effective server URL from CLI flag, env, or default.
@@ -199,6 +227,44 @@ async fn main() -> Result<()> {
                     mode.as_deref(),
                 )
                 .await?;
+            }
+            SessionsAction::Create {
+                agent_id,
+                name,
+                width,
+                height,
+            } => {
+                let server_url = resolve_server_url(cli.server_url);
+                let auth_token = resolve_auth_token(cli.auth_token);
+                commands::client::create_session(
+                    &server_url,
+                    &auth_token,
+                    &agent_id,
+                    &name,
+                    width,
+                    height,
+                )
+                .await?;
+            }
+            SessionsAction::Kill { session_id, force } => {
+                // Prompt for confirmation unless --force is set
+                if !force {
+                    print!("Are you sure you want to kill session '{}'? [y/N] ", session_id);
+                    use std::io::Write;
+                    std::io::stdout().flush()?;
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input)?;
+                    let input = input.trim().to_lowercase();
+                    if input != "y" && input != "yes" {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+
+                let server_url = resolve_server_url(cli.server_url);
+                let auth_token = resolve_auth_token(cli.auth_token);
+                commands::client::kill_session(&server_url, &auth_token, &session_id)
+                    .await?;
             }
         },
     }

@@ -320,3 +320,166 @@ pub async fn connect_to_agent(agent_address: &str) -> Result<WebSocketStream<May
     info!("Agent WebSocket connection established");
     Ok(ws_stream)
 }
+
+/// Create a new tmux session directly on an agent via its WebSocket server.
+///
+/// Connects to the agent at `agent_address` (host:port), sends a
+/// `session.create` message, and waits for the response. The agent does not
+/// require authentication for management operations.
+///
+/// Returns the name of the created session on success.
+pub async fn create_session_on_agent(
+    agent_address: &str,
+    session_name: &str,
+    width: u16,
+    height: u16,
+) -> Result<String> {
+    use futures_util::StreamExt;
+
+    let url = format!("ws://{}", agent_address);
+    info!("Connecting to agent at {} to create session", url);
+
+    let (mut ws_stream, _) = connect_async(&url)
+        .await
+        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+
+    let msg_id = format!(
+        "create_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis()
+    );
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs();
+
+    let request = json!({
+        "msg_type": "session.create",
+        "id": msg_id,
+        "timestamp": timestamp,
+        "payload": {
+            "name": session_name,
+            "width": width,
+            "height": height
+        }
+    });
+
+    debug!("Sending session.create to agent: {}", request);
+    ws_stream
+        .send(Message::Text(request.to_string()))
+        .await
+        .with_context(|| "Failed to send session.create to agent")?;
+
+    // Wait for response
+    if let Some(msg) = ws_stream.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let response: serde_json::Value = serde_json::from_str(&text)?;
+                let resp_type = response["msg_type"].as_str().unwrap_or("");
+
+                if resp_type == "ok" {
+                    let name = response["payload"]["name"]
+                        .as_str()
+                        .unwrap_or(session_name)
+                        .to_string();
+                    info!("Session '{}' created on agent", name);
+                    Ok(name)
+                } else if resp_type == "error" {
+                    let code = response["payload"]["code"].as_str().unwrap_or("unknown");
+                    let message = response["payload"]["message"]
+                        .as_str()
+                        .unwrap_or("unknown error");
+                    anyhow::bail!("Agent error ({}): {}", code, message)
+                } else {
+                    anyhow::bail!(
+                        "Unexpected response from agent: expected 'ok' or 'error', got '{}'",
+                        resp_type
+                    )
+                }
+            }
+            Ok(_) => anyhow::bail!("Unexpected message type from agent"),
+            Err(e) => anyhow::bail!("Error receiving response from agent: {}", e),
+        }
+    } else {
+        anyhow::bail!("Agent closed connection during session creation")
+    }
+}
+
+/// Kill a tmux session directly on an agent via its WebSocket server.
+///
+/// Connects to the agent at `agent_address` (host:port), sends a
+/// `session.kill` message, and waits for the response.
+///
+/// Returns the name of the killed session on success.
+pub async fn kill_session_on_agent(
+    agent_address: &str,
+    session_name: &str,
+) -> Result<String> {
+    use futures_util::StreamExt;
+
+    let url = format!("ws://{}", agent_address);
+    info!("Connecting to agent at {} to kill session", url);
+
+    let (mut ws_stream, _) = connect_async(&url)
+        .await
+        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+
+    let msg_id = format!(
+        "kill_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis()
+    );
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs();
+
+    let request = json!({
+        "msg_type": "session.kill",
+        "id": msg_id,
+        "timestamp": timestamp,
+        "payload": {
+            "name": session_name
+        }
+    });
+
+    debug!("Sending session.kill to agent: {}", request);
+    ws_stream
+        .send(Message::Text(request.to_string()))
+        .await
+        .with_context(|| "Failed to send session.kill to agent")?;
+
+    // Wait for response
+    if let Some(msg) = ws_stream.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let response: serde_json::Value = serde_json::from_str(&text)?;
+                let resp_type = response["msg_type"].as_str().unwrap_or("");
+
+                if resp_type == "ok" {
+                    let name = response["payload"]["name"]
+                        .as_str()
+                        .unwrap_or(session_name)
+                        .to_string();
+                    info!("Session '{}' killed on agent", name);
+                    Ok(name)
+                } else if resp_type == "error" {
+                    let code = response["payload"]["code"].as_str().unwrap_or("unknown");
+                    let message = response["payload"]["message"]
+                        .as_str()
+                        .unwrap_or("unknown error");
+                    anyhow::bail!("Agent error ({}): {}", code, message)
+                } else {
+                    anyhow::bail!(
+                        "Unexpected response from agent: expected 'ok' or 'error', got '{}'",
+                        resp_type
+                    )
+                }
+            }
+            Ok(_) => anyhow::bail!("Unexpected message type from agent"),
+            Err(e) => anyhow::bail!("Error receiving response from agent: {}", e),
+        }
+    } else {
+        anyhow::bail!("Agent closed connection during session kill")
+    }
+}
