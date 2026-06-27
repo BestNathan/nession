@@ -5,6 +5,14 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 
+mod client;
+
+/// Default server URL (ws://127.0.0.1:8080).
+const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:8080";
+
+/// Default auth token (empty string, should be overridden).
+const DEFAULT_AUTH_TOKEN: &str = "";
+
 #[derive(Parser)]
 #[command(name = "nession")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
@@ -12,6 +20,14 @@ mod commands;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Server URL (ws:// or wss://). Overrides config and NENSION_SERVER_URL env var.
+    #[arg(long, global = true, env = "NENSION_SERVER_URL")]
+    server_url: Option<String>,
+
+    /// Auth token for server authentication. Overrides config and NENSION_AUTH_TOKEN env var.
+    #[arg(long, global = true, env = "NENSION_AUTH_TOKEN")]
+    auth_token: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -25,6 +41,16 @@ enum Commands {
     Server {
         #[command(subcommand)]
         action: ServerAction,
+    },
+    /// Agents listing and management (connects to central server)
+    Agents {
+        #[command(subcommand)]
+        action: AgentsAction,
+    },
+    /// Sessions listing and management (connects to central server)
+    Sessions {
+        #[command(subcommand)]
+        action: SessionsAction,
     },
 }
 
@@ -88,6 +114,32 @@ enum ServerAction {
     },
 }
 
+#[derive(Subcommand)]
+enum AgentsAction {
+    /// List all agents connected to the server
+    List,
+}
+
+#[derive(Subcommand)]
+enum SessionsAction {
+    /// List all sessions (optionally filtered by agent)
+    List {
+        /// Filter sessions by agent ID
+        #[arg(short = 'a', long)]
+        agent_id: Option<String>,
+    },
+}
+
+/// Resolve the effective server URL from CLI flag, env, or default.
+fn resolve_server_url(cli_url: Option<String>) -> String {
+    cli_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
+}
+
+/// Resolve the effective auth token from CLI flag, env, or default.
+fn resolve_auth_token(cli_token: Option<String>) -> String {
+    cli_token.unwrap_or_else(|| DEFAULT_AUTH_TOKEN.to_string())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -110,6 +162,21 @@ async fn main() -> Result<()> {
             } => commands::server::start(config, foreground, pid_file).await?,
             ServerAction::Stop { pid_file } => commands::server::stop(pid_file).await?,
             ServerAction::Status { pid_file } => commands::server::status(pid_file).await?,
+        },
+        Commands::Agents { action } => match action {
+            AgentsAction::List => {
+                let server_url = resolve_server_url(cli.server_url);
+                let auth_token = resolve_auth_token(cli.auth_token);
+                commands::client::list_agents(&server_url, &auth_token).await?;
+            }
+        },
+        Commands::Sessions { action } => match action {
+            SessionsAction::List { agent_id } => {
+                let server_url = resolve_server_url(cli.server_url);
+                let auth_token = resolve_auth_token(cli.auth_token);
+                commands::client::list_sessions(&server_url, &auth_token, agent_id.as_deref())
+                    .await?;
+            }
         },
     }
 
