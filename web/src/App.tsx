@@ -5,10 +5,17 @@ import { Dashboard } from './components/Dashboard';
 import './App.css';
 
 function App() {
+  // Read initial values from URL params, then localStorage, then defaults
+  const params = new URLSearchParams(window.location.search);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
-  const [authToken, setAuthToken] = useState('');
-  const [serverUrl, setServerUrl] = useState('ws://localhost:3000/ws');
+  const [authToken, setAuthToken] = useState(
+    () => params.get('token') || localStorage.getItem('nession_token') || ''
+  );
+  const [serverUrl, setServerUrl] = useState(
+    () => params.get('server_url') || localStorage.getItem('nession_server_url') || 'ws://localhost:3000/ws'
+  );
+  const autoConnect = params.get('token') !== null;
 
   useEffect(() => {
     return () => {
@@ -18,11 +25,22 @@ function App() {
     };
   }, [wsService]);
 
+  // Auto-connect if token was provided via URL param
+  useEffect(() => {
+    if (autoConnect && authToken && connectionStatus === 'disconnected') {
+      handleConnect();
+    }
+  }, []);
+
   const handleConnect = async () => {
     if (!authToken.trim()) {
       alert('Please enter an auth token');
       return;
     }
+
+    // Persist to localStorage so it survives page reloads
+    localStorage.setItem('nession_token', authToken);
+    localStorage.setItem('nession_server_url', serverUrl);
 
     try {
       const service = createWebSocketService(serverUrl, authToken);
