@@ -1,0 +1,23 @@
+# nession-agent configuration
+
+# Unique identifier for this agent (auto-generated if omitted)
+agent_id = "my-agent-01"
+
+# Central server WebSocket URL
+server_url = "ws://localhost:8443"
+
+# Authentication token for the central server
+auth_token = "secret_token_123"
+
+# Address for the agent WebSocket server to listen on
+listen_address = "0.0.0.0:8080"
+
+# TLS certificate and key paths (optional, for encrypted P2P connections)
+# tls_cert_path = "/path/to/cert.pem"
+# tls_key_path = "/path/to/key.pem"
+
+# Interval between heartbeat messages to the central server (seconds)
+heartbeat_interval_secs = 10
+
+# Interval for polling tmux session changes (seconds)
+session_poll_interval_secs = 5
