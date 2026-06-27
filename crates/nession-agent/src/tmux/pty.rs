@@ -167,6 +167,8 @@ impl PtySession {
     pub async fn attach(session_name: &str, width: u16, height: u16) -> Result<Self> {
         let mut cmd = CommandBuilder::new("tmux");
         cmd.args(&["attach-session", "-t", session_name]);
+        // tmux requires TERM to be set when attaching via PTY
+        cmd.env("TERM", "xterm-256color");
         Self::spawn_inner(cmd, session_name.to_string(), width, height).await
     }
 
