@@ -1,0 +1,3 @@
+# PVC removed - using emptyDir in deployment for now.
+# For production, configure a working StorageClass and re-add PVC.
+# The nfs-client provisioner is currently not running in this cluster.

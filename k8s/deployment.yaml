@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession
+  namespace: nession
+  labels:
+    app: nession
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nession
+  template:
+    metadata:
+      labels:
+        app: nession
+    spec:
+      containers:
+        - name: nession
+          image: ghcr.io/bestnathan/nession:latest
+          ports:
+            - containerPort: 80
+              name: http
+            - containerPort: 443
+              name: https
+          env:
+            - name: NESION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nession-secret
+                  key: auth-token
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}

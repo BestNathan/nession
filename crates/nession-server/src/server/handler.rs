@@ -61,6 +61,7 @@ impl ConnectionHandler {
         match msg.msg_type.as_str() {
             "agent.register" => self.handle_agent_register(msg).await,
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
+            "agent.session.update" => self.handle_agent_session_update(msg).await,
             "client.auth" => self.handle_client_auth(msg).await,
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
@@ -142,6 +143,58 @@ impl ConnectionHandler {
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;
+
+        Ok(HandlerAction::Reply(None))
+    }
+
+    async fn handle_agent_session_update(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let payload: serde_json::Value = msg.payload;
+        let agent_id = payload["agent_id"].as_str().unwrap_or("");
+        let session_name = payload["session_name"].as_str().unwrap_or("");
+        let status_str = payload["status"].as_str().unwrap_or("");
+
+        if self.agent_registry.get(agent_id).await.is_none() {
+            warn!("Session update from unregistered agent: {}", agent_id);
+            return Ok(HandlerAction::Reply(None));
+        }
+
+        let session_id = format!("{}:{}", agent_id, session_name);
+
+        if status_str == "gone" {
+            info!("Session {} removed (agent: {})", session_name, agent_id);
+            self.session_registry.remove(&session_id).await;
+            return Ok(HandlerAction::Reply(None));
+        }
+
+        let status = match status_str {
+            "active" => crate::registry::session::SessionStatus::Active,
+            "detached" => crate::registry::session::SessionStatus::Detached,
+            "zombie" => crate::registry::session::SessionStatus::Zombie,
+            _ => {
+                warn!("Unknown session status '{}' for {}", status_str, session_id);
+                return Ok(HandlerAction::Reply(None));
+            }
+        };
+
+        let window_count = payload["window_count"].as_u64().unwrap_or(0) as u32;
+        let attached_clients = payload["attached_clients"].as_u64().unwrap_or(0) as u32;
+
+        let session_info = crate::registry::session::SessionInfo {
+            session_id: session_id.clone(),
+            agent_id: agent_id.to_string(),
+            session_name: session_name.to_string(),
+            status,
+            window_count,
+            attached_clients,
+            last_activity: chrono::Utc::now(),
+        };
+
+        info!("Session {} updated (agent: {}, status: {:?}, windows: {}, clients: {})",
+              session_name, agent_id, session_info.status, window_count, attached_clients);
+        self.session_registry.update_session(session_info).await;
 
         Ok(HandlerAction::Reply(None))
     }
