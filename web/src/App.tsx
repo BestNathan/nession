@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createWebSocketService, destroyWebSocketService, WebSocketService } from './services/websocket';
 import { ConnectionStatus } from './types';
+import { Terminal } from './components/Terminal';
 import './App.css';
 
 function App() {
@@ -8,6 +9,11 @@ function App() {
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
   const [authToken, setAuthToken] = useState('');
   const [serverUrl, setServerUrl] = useState('ws://localhost:3000/ws');
+
+  // Terminal state
+  const [sessionId, setSessionId] = useState('');
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalMode, setTerminalMode] = useState<'relay' | 'p2p'>('relay');
 
   useEffect(() => {
     return () => {
@@ -48,7 +54,36 @@ function App() {
       destroyWebSocketService();
       setWsService(null);
       setConnectionStatus('disconnected');
+      // Also close any open terminal since the relay connection is gone.
+      setShowTerminal(false);
     }
+  };
+
+  const handleOpenTerminal = () => {
+    if (!sessionId.trim()) {
+      alert('Please enter a session ID');
+      return;
+    }
+    if (terminalMode === 'relay' && !wsService) {
+      alert('Please connect to the server first (relay mode requires an active server connection)');
+      return;
+    }
+    setShowTerminal(true);
+  };
+
+  const handleCloseTerminal = () => {
+    setShowTerminal(false);
+  };
+
+  const handleTerminalDisconnect = () => {
+    console.log('Terminal disconnected');
+    setShowTerminal(false);
+  };
+
+  const handleTerminalError = (error: Error) => {
+    console.error('Terminal error:', error);
+    alert(`Terminal error: ${error.message}`);
+    setShowTerminal(false);
   };
 
   const getStatusColor = () => {
@@ -152,6 +187,76 @@ function App() {
           <li>✓ P2P connection support for terminal sessions</li>
           <li>✓ Terminal I/O handling (input/output/resize)</li>
         </ul>
+      </div>
+
+      <div className="card">
+        <h2>Terminal Session</h2>
+
+        {!showTerminal ? (
+          <>
+            <div className="form-group">
+              <label htmlFor="terminalMode">Connection Mode:</label>
+              <select
+                id="terminalMode"
+                value={terminalMode}
+                onChange={(e) => setTerminalMode(e.target.value as 'relay' | 'p2p')}
+                disabled={showTerminal}
+              >
+                <option value="relay">Relay (via server)</option>
+                <option value="p2p">P2P (direct to agent)</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="sessionId">Session ID:</label>
+              <input
+                id="sessionId"
+                type="text"
+                value={sessionId}
+                onChange={(e) => setSessionId(e.target.value)}
+                placeholder="e.g. agent-1:my-session"
+              />
+            </div>
+
+            <div className="button-group">
+              <button onClick={handleOpenTerminal} disabled={!sessionId.trim()}>
+                Open Terminal
+              </button>
+            </div>
+
+            <p className="info">
+              {terminalMode === 'relay'
+                ? 'Relay mode forwards terminal I/O through the server. Make sure you are connected and authenticated above.'
+                : 'P2P mode connects directly to the agent. Requires the agent WebSocket URL and a connection token (obtained from the server attach response).'}
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="terminal-header">
+              <span className="terminal-session-label">
+                Session: <strong>{sessionId}</strong>
+                <span className={`terminal-mode-badge terminal-mode-${terminalMode}`}>
+                  {terminalMode.toUpperCase()}
+                </span>
+              </span>
+              <button
+                className="terminal-close-btn"
+                onClick={handleCloseTerminal}
+              >
+                Close Terminal
+              </button>
+            </div>
+            <div className="terminal-wrapper">
+              <Terminal
+                sessionId={sessionId}
+                mode={terminalMode}
+                serverConnection={terminalMode === 'relay' ? wsService ?? undefined : undefined}
+                onDisconnect={handleTerminalDisconnect}
+                onError={handleTerminalError}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
