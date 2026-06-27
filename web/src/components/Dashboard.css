@@ -1,0 +1,421 @@
+/* ── Dashboard ──────────────────────────────────────────────────────── */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: #1a1a2e;
+  color: #e0e0e0;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background-color: #16213e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.dashboard-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+/* ── Connection badge ──────────────────────────────────────────────── */
+
+.connection-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connection-disconnected .connection-dot { background-color: #f44336; }
+.connection-connecting .connection-dot  { background-color: #ff9800; animation: pulse 1s infinite; }
+.connection-connected .connection-dot   { background-color: #4caf50; }
+.connection-authenticated .connection-dot { background-color: #2196f3; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* ── Error banner ──────────────────────────────────────────────────── */
+
+.dashboard-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.2rem;
+  background-color: rgba(244, 67, 54, 0.15);
+  border-bottom: 1px solid rgba(244, 67, 54, 0.3);
+  color: #ef9a9a;
+  font-size: 0.9rem;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: #ef9a9a;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+  line-height: 1;
+  flex: none;
+}
+
+.error-dismiss:hover {
+  color: #fff;
+}
+
+/* ── Panels ────────────────────────────────────────────────────────── */
+
+.dashboard-panels {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.agents-panel {
+  flex: 0 0 260px;
+  min-width: 200px;
+}
+
+.sessions-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-refresh {
+  background: none;
+  border: none;
+  color: #9e9e9e;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+  flex: none;
+  line-height: 1;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+/* ── Filter badge ──────────────────────────────────────────────────── */
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background-color: rgba(100, 108, 255, 0.2);
+  color: #b0b6ff;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.filter-clear {
+  background: none;
+  border: none;
+  color: #b0b6ff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex: none;
+}
+
+.filter-clear:hover {
+  color: #fff;
+}
+
+/* ── Item list ─────────────────────────────────────────────────────── */
+
+.item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Agent items ───────────────────────────────────────────────────── */
+
+.agent-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.agent-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.agent-item.selected {
+  background-color: rgba(100, 108, 255, 0.12);
+  border: 1px solid rgba(100, 108, 255, 0.25);
+}
+
+.agent-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-hostname {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-meta {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: capitalize;
+}
+
+/* ── Status dots ───────────────────────────────────────────────────── */
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.status-online   { background-color: #4caf50; }
+.status-dot.status-offline  { background-color: #616161; }
+.status-dot.status-degraded { background-color: #ff9800; }
+.status-dot.status-active   { background-color: #4caf50; }
+.status-dot.status-detached { background-color: #616161; }
+
+/* ── Session items ─────────────────────────────────────────────────── */
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+}
+
+.session-item:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.btn-attach {
+  flex: none;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background-color: #646cff;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.btn-attach:hover:not(:disabled) {
+  background-color: #535bf2;
+}
+
+.btn-attach:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Empty / loading messages ──────────────────────────────────────── */
+
+.empty-message,
+.loading-message {
+  text-align: center;
+  color: #666;
+  font-size: 0.85rem;
+  padding: 1.5rem 0;
+  margin: 0;
+}
+
+/* ── Terminal View (full-screen) ───────────────────────────────────── */
+
+.terminal-view {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #1a1a2e;
+  color: #e0e0e0;
+}
+
+.terminal-view-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background-color: #16213e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.btn-back {
+  flex: none;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-back:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.terminal-view-title {
+  font-size: 0.9rem;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.terminal-view-title strong {
+  color: #fff;
+}
+
+.mode-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.mode-p2p   { background-color: #4caf50; color: #fff; }
+.mode-relay { background-color: #2196f3; color: #fff; }
+
+.terminal-view-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.5rem;
+}
+
+/* ── Responsive: stack panels on narrow screens ────────────────────── */
+
+@media (max-width: 768px) {
+  .dashboard-panels {
+    flex-direction: column;
+    padding: 0.75rem;
+  }
+
+  .agents-panel {
+    flex: none;
+    max-height: 220px;
+  }
+
+  .sessions-panel {
+    flex: 1;
+  }
+
+  .dashboard-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .dashboard-title {
+    font-size: 1.1rem;
+  }
+}

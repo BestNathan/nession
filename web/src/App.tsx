@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createWebSocketService, destroyWebSocketService, WebSocketService } from './services/websocket';
 import { ConnectionStatus } from './types';
-import { Terminal } from './components/Terminal';
+import { Dashboard } from './components/Dashboard';
 import './App.css';
 
 function App() {
@@ -10,14 +10,8 @@ function App() {
   const [authToken, setAuthToken] = useState('');
   const [serverUrl, setServerUrl] = useState('ws://localhost:3000/ws');
 
-  // Terminal state
-  const [sessionId, setSessionId] = useState('');
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [terminalMode, setTerminalMode] = useState<'relay' | 'p2p'>('relay');
-
   useEffect(() => {
     return () => {
-      // Cleanup on unmount
       if (wsService) {
         destroyWebSocketService();
       }
@@ -34,7 +28,6 @@ function App() {
       const service = createWebSocketService(serverUrl, authToken);
       setWsService(service);
 
-      // Subscribe to connection status changes
       const unsubscribe = service.onConnectionChange((status) => {
         setConnectionStatus(status);
       });
@@ -54,36 +47,7 @@ function App() {
       destroyWebSocketService();
       setWsService(null);
       setConnectionStatus('disconnected');
-      // Also close any open terminal since the relay connection is gone.
-      setShowTerminal(false);
     }
-  };
-
-  const handleOpenTerminal = () => {
-    if (!sessionId.trim()) {
-      alert('Please enter a session ID');
-      return;
-    }
-    if (terminalMode === 'relay' && !wsService) {
-      alert('Please connect to the server first (relay mode requires an active server connection)');
-      return;
-    }
-    setShowTerminal(true);
-  };
-
-  const handleCloseTerminal = () => {
-    setShowTerminal(false);
-  };
-
-  const handleTerminalDisconnect = () => {
-    console.log('Terminal disconnected');
-    setShowTerminal(false);
-  };
-
-  const handleTerminalError = (error: Error) => {
-    console.error('Terminal error:', error);
-    alert(`Terminal error: ${error.message}`);
-    setShowTerminal(false);
   };
 
   const getStatusColor = () => {
@@ -115,12 +79,23 @@ function App() {
     }
   };
 
+  // Once authenticated, render the Dashboard as the main view
+  if (connectionStatus === 'authenticated' && wsService) {
+    return (
+      <Dashboard
+        wsService={wsService}
+        connectionStatus={connectionStatus}
+      />
+    );
+  }
+
+  // Otherwise show the connection form
   return (
     <div className="app">
-      <h1>Nession Web UI</h1>
+      <h1>Nession</h1>
 
       <div className="card">
-        <h2>WebSocket Connection</h2>
+        <h2>Connect to Server</h2>
 
         <div className="status-indicator">
           <div
@@ -173,90 +148,19 @@ function App() {
           {connectionStatus === 'disconnected' && 'Enter your auth token and click Connect to establish a WebSocket connection to the server.'}
           {connectionStatus === 'connecting' && 'Establishing connection to the server...'}
           {connectionStatus === 'connected' && 'Connected! Authenticating...'}
-          {connectionStatus === 'authenticated' && 'Successfully connected and authenticated. Ready to manage agents and sessions.'}
         </p>
       </div>
 
       <div className="card">
         <h2>Features</h2>
         <ul className="feature-list">
-          <li>✓ WebSocket connection management with auto-reconnect</li>
-          <li>✓ Authentication with server</li>
-          <li>✓ Request/response pattern for commands</li>
-          <li>✓ Event subscriptions for real-time updates</li>
-          <li>✓ P2P connection support for terminal sessions</li>
-          <li>✓ Terminal I/O handling (input/output/resize)</li>
+          <li>&#x2713; Real-time dashboard with agents and sessions overview</li>
+          <li>&#x2713; WebSocket connection management with auto-reconnect</li>
+          <li>&#x2713; P2P and relay terminal session support</li>
+          <li>&#x2713; Live agent and session updates via events</li>
+          <li>&#x2713; Full-screen terminal with xterm.js</li>
+          <li>&#x2713; Mobile-responsive dark theme UI</li>
         </ul>
-      </div>
-
-      <div className="card">
-        <h2>Terminal Session</h2>
-
-        {!showTerminal ? (
-          <>
-            <div className="form-group">
-              <label htmlFor="terminalMode">Connection Mode:</label>
-              <select
-                id="terminalMode"
-                value={terminalMode}
-                onChange={(e) => setTerminalMode(e.target.value as 'relay' | 'p2p')}
-                disabled={showTerminal}
-              >
-                <option value="relay">Relay (via server)</option>
-                <option value="p2p">P2P (direct to agent)</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="sessionId">Session ID:</label>
-              <input
-                id="sessionId"
-                type="text"
-                value={sessionId}
-                onChange={(e) => setSessionId(e.target.value)}
-                placeholder="e.g. agent-1:my-session"
-              />
-            </div>
-
-            <div className="button-group">
-              <button onClick={handleOpenTerminal} disabled={!sessionId.trim()}>
-                Open Terminal
-              </button>
-            </div>
-
-            <p className="info">
-              {terminalMode === 'relay'
-                ? 'Relay mode forwards terminal I/O through the server. Make sure you are connected and authenticated above.'
-                : 'P2P mode connects directly to the agent. Requires the agent WebSocket URL and a connection token (obtained from the server attach response).'}
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="terminal-header">
-              <span className="terminal-session-label">
-                Session: <strong>{sessionId}</strong>
-                <span className={`terminal-mode-badge terminal-mode-${terminalMode}`}>
-                  {terminalMode.toUpperCase()}
-                </span>
-              </span>
-              <button
-                className="terminal-close-btn"
-                onClick={handleCloseTerminal}
-              >
-                Close Terminal
-              </button>
-            </div>
-            <div className="terminal-wrapper">
-              <Terminal
-                sessionId={sessionId}
-                mode={terminalMode}
-                serverConnection={terminalMode === 'relay' ? wsService ?? undefined : undefined}
-                onDisconnect={handleTerminalDisconnect}
-                onError={handleTerminalError}
-              />
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
