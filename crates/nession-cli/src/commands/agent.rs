@@ -10,6 +10,10 @@ use tracing::{error, info};
 
 /// Start the agent process.
 pub async fn start(config_path: String, foreground: bool, pid_file: String) -> Result<()> {
+    // Ensure component directories exist before any file operations (PID file)
+    nession_common::paths::ensure_component_dirs()
+        .context("failed to create nession component directories")?;
+
     // Check if agent is already running
     if let Ok(pid) = read_pid_file(&pid_file) {
         if is_process_running(pid) {
