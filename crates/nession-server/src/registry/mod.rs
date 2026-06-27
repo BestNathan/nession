@@ -1,1 +1,1 @@
-// Placeholder for registry module
+pub mod agent;
