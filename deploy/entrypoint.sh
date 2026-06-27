@@ -19,8 +19,8 @@ if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then
   sed -i 's|server_name _;|server_name _;\n    return 301 https://\$host\$request_uri;|' \
     /etc/nginx/conf.d/default.conf
 
-  # Append HTTPS server block
-  cat >> /etc/nginx/conf.d/default.conf <<'NGINX'
+  # Append HTTPS server block (unquoted heredoc so shell vars expand; nginx vars escaped with \$)
+  cat >> /etc/nginx/conf.d/default.conf <<NGINX
 server {
     listen 443 ssl;
     server_name _;
@@ -37,22 +37,22 @@ server {
     location /ws {
         proxy_pass http://${SERVER_BACKEND};
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
 
     location /api {
         proxy_pass http://${SERVER_BACKEND};
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
     }
 
     location / {
         root /usr/share/nginx/html;
         index index.html;
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 }
 NGINX
