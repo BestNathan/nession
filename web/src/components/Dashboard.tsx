@@ -317,6 +317,7 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
       <div className="terminal-view-body">
         <Terminal
           sessionId={sessionId}
+          sessionName={sessionName}
           mode={attachInfo.mode}
           agentUrl={isP2P ? `ws://${attachInfo.agent_address}/ws` : undefined}
           connectionToken={isP2P ? attachInfo.connection_token : undefined}

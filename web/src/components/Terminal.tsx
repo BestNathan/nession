@@ -6,9 +6,33 @@ import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import type { WebSocketService } from '../services/websocket';
 
+// Simple unique ID generator for agent protocol messages
+let _msgCounter = 0;
+function generateId(): string {
+  return `web-${Date.now()}-${++_msgCounter}`;
+}
+
+// Base64 encode a string (handles UTF-8 via TextEncoder)
+function encodeB64(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// Base64 decode to string (handles UTF-8 via TextDecoder)
+function decodeB64(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 export interface TerminalProps {
-  /** The tmux session ID to attach to */
+  /** The tmux session ID (agent_id:session_name) for relay mode */
   sessionId: string;
+  /** The short tmux session name (without agent prefix) for P2P agent protocol */
+  sessionName: string;
   /** Connection mode: 'p2p' for direct agent connection, 'relay' via server */
   mode: 'p2p' | 'relay';
   /** Agent WebSocket URL for P2P mode (e.g. ws://192.168.1.10:8080/ws) */
@@ -32,6 +56,7 @@ export interface TerminalProps {
  */
 export function Terminal({
   sessionId,
+  sessionName,
   mode,
   agentUrl,
   connectionToken,
@@ -130,7 +155,9 @@ export function Terminal({
           p2pWs.send(
             JSON.stringify({
               msg_type: 'terminal.resize',
-              payload: { session_id: sessionId, width: cols, height: rows },
+              id: generateId(),
+              timestamp: Math.floor(Date.now() / 1000),
+              payload: { session_name: sessionName, width: cols, height: rows },
             })
           );
         } else if (mode === 'relay' && serverConnection?.isConnected()) {
@@ -151,17 +178,11 @@ export function Terminal({
           term.dispose();
         };
       }
-      if (!connectionToken) {
-        reportError(new Error('connectionToken is required for P2P mode'));
-        return () => {
-          term.dispose();
-        };
-      }
-
+      // connectionToken is optional — agent may not require it in dev setups
       // Build the WebSocket URL with the auth token as a query parameter
-      // so the agent can authenticate the connection before any tmux data flows.
-      const separator = agentUrl.includes('?') ? '&' : '?';
-      const wsUrl = `${agentUrl}${separator}token=${encodeURIComponent(connectionToken)}`;
+      const wsUrl = connectionToken
+        ? `${agentUrl}${agentUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(connectionToken)}`
+        : agentUrl;
 
       const ws = new WebSocket(wsUrl);
       p2pWs = ws;
@@ -174,12 +195,29 @@ export function Terminal({
           return;
         }
         // Inform the remote end of our initial terminal size.
-        sendResize();
+        // Agent protocol: first send client.attach, then terminal.input/resize
+        // Use base64 for data, session_name (not session_id) for session identifier
+        ws.send(
+          JSON.stringify({
+            msg_type: 'client.attach',
+            id: generateId(),
+            timestamp: Math.floor(Date.now() / 1000),
+            payload: {
+              session_name: sessionName,
+              width: term.cols,
+              height: term.rows,
+            },
+          })
+        );
         // Trigger a prompt redraw from the remote shell.
+        const encoder = new TextEncoder();
+        const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
         ws.send(
           JSON.stringify({
             msg_type: 'terminal.input',
-            payload: { session_id: sessionId, data: '\r' },
+            id: generateId(),
+            timestamp: Math.floor(Date.now() / 1000),
+            payload: { session_name: sessionName, data: b64 },
           })
         );
       };
@@ -192,8 +230,12 @@ export function Terminal({
             switch (msg.msg_type) {
               case 'terminal.output':
                 if (msg.payload?.data) {
-                  term.write(msg.payload.data);
+                  // Agent sends base64-encoded binary data
+                  term.write(decodeB64(msg.payload.data));
                 }
+                break;
+              case 'ok':
+                // Response to client.attach — ignore
                 break;
               case 'error':
                 reportError(new Error(msg.payload?.message || 'Remote error'));
@@ -278,7 +320,9 @@ export function Terminal({
         p2pWs.send(
           JSON.stringify({
             msg_type: 'terminal.input',
-            payload: { session_id: sessionId, data },
+            id: generateId(),
+            timestamp: Math.floor(Date.now() / 1000),
+            payload: { session_name: sessionName, data: encodeB64(data) },
           })
         );
       }
@@ -339,7 +383,7 @@ export function Terminal({
     // serverConnection is intentionally included: if the caller swaps the
     // underlying connection the terminal must reconnect through the new one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, mode, agentUrl, connectionToken, serverConnection]);
+  }, [sessionId, sessionName, mode, agentUrl, connectionToken, serverConnection]);
 
   return (
     <div className="nession-terminal">
