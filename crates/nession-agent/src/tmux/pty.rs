@@ -188,8 +188,12 @@ impl PtySession {
 
     /// Read terminal output from the PTY's stdout.
     ///
-    /// Returns up to `buf.len()` bytes. Waits up to `timeout_ms` for data
-    /// to become available; returns 0 if no data arrives within the timeout.
+    /// Returns:
+    /// - `Ok(n > 0)` — `n` bytes were copied into `buf`.
+    /// - `Ok(0)` — true EOF (the child exited).
+    /// - `Err(PtyError::Timeout)` — no data within `timeout_ms`; caller
+    ///   should retry.
+    /// - `Err(other)` — an I/O error occurred.
     ///
     /// Runs entirely in `spawn_blocking` against the internal read buffer,
     /// so it never blocks a tokio worker longer than the timeout.
@@ -218,6 +222,18 @@ impl PtySession {
             if let Some(err) = guard.error.as_ref() {
                 if guard.data.is_empty() {
                     return Err(anyhow::anyhow!("PTY reader error: {}", err));
+                }
+            }
+
+            // Distinguish true EOF from a timeout-with-no-data.
+            // If data is empty AND not EOF, we simply timed out — return
+            // a specific error so the caller can retry rather than
+            // treating this as stream end.
+            if guard.data.is_empty() {
+                if guard.eof {
+                    return Ok(0); // true EOF
+                } else {
+                    return Err(anyhow::anyhow!("PTY_READ_TIMEOUT"));
                 }
             }
 
