@@ -1,1 +1,4 @@
-// Placeholder for server module
+mod websocket;
+mod handler;
+
+pub use websocket::WebSocketServer;

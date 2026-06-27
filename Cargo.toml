@@ -26,3 +26,5 @@ thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 rusqlite = { version = "0.30", features = ["bundled"] }
+futures-util = "0.3"
+tokio-rustls = "0.25"

@@ -19,6 +19,8 @@ impl<T> Message<T> {
     }
 }
 
+pub type ProtocolMessage<T> = Message<T>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterPayload {
     pub agent_id: String,
