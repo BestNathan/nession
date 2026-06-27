@@ -1,1 +1,1 @@
-// Placeholder for tmux module
+pub mod manager;
