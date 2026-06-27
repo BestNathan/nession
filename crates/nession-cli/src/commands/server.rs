@@ -248,10 +248,6 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
     info!("Listen address: {}", config.listen_address);
     info!("Database: {}", config.db_path);
 
-    // Ensure component directories exist
-    nession_common::paths::ensure_component_dirs()
-        .context("failed to create nession component directories")?;
-
     // Import and run the server components
     use nession_server::db::Database;
     use nession_server::server::WebSocketServer;
