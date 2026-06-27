@@ -7,6 +7,9 @@ edition.workspace = true
 name = "nession-agent"
 path = "src/main.rs"
 
+[features]
+test-utils = []
+
 [dependencies]
 nession-common = { path = "../nession-common" }
 tokio.workspace = true
@@ -21,3 +24,8 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+portable-pty.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
