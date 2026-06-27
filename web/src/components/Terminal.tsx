@@ -145,6 +145,7 @@ export function Terminal({
     let relayResizeDisposable: IDisposable | null = null;
     let dataDisposable: IDisposable | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let mountTimer: ReturnType<typeof setTimeout> | null = null;
 
     /** Send the current terminal dimensions to the remote end. */
     const sendResize = () => {
@@ -171,12 +172,16 @@ export function Terminal({
     // ---------------------------------------------------------------------------
     // 2. Establish the WebSocket connection
     // ---------------------------------------------------------------------------
+    // React 18 StrictMode in dev mode mounts → unmounts → remounts.
+    // The first mount's cleanup closes the WebSocket before it can connect.
+    // Use a short delay to ensure we're in the "real" mount.
+    mountTimer = setTimeout(() => {
+      if (!active) return; // cleanup already ran, don't connect
+
     if (mode === 'p2p') {
       if (!agentUrl) {
         reportError(new Error('agentUrl is required for P2P mode'));
-        return () => {
-          term.dispose();
-        };
+        return;
       }
       // connectionToken is optional — agent may not require it in dev setups
       // Build the WebSocket URL with the auth token as a query parameter
@@ -318,6 +323,8 @@ export function Terminal({
       sendResize();
     }
 
+    }, 50); // End of mountTimer setTimeout
+
     // ---------------------------------------------------------------------------
     // 3. Forward keyboard input (P2P mode – relay mode handled above)
     // ---------------------------------------------------------------------------
@@ -362,6 +369,7 @@ export function Terminal({
     // ---------------------------------------------------------------------------
     return () => {
       active = false;
+      clearTimeout(mountTimer);
 
       window.removeEventListener('resize', handleWindowResize);
 
