@@ -1,1 +1,4 @@
-// Placeholder for commands module
+//! CLI command implementations.
+
+pub mod agent;
+pub mod server;
