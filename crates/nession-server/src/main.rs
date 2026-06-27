@@ -1,4 +1,5 @@
 use std::path::Path;
+use anyhow::Context;
 use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -22,6 +23,10 @@ async fn main() -> anyhow::Result<()> {
     let config = load_config()?;
     info!("Configuration loaded: listen_address={}, db_path={}",
           config.listen_address, config.db_path);
+
+    // Ensure component directories exist
+    nession_common::paths::ensure_component_dirs()
+        .context("failed to create nession component directories")?;
 
     // Initialize database
     info!("Initializing database at {}", config.db_path);
@@ -57,7 +62,7 @@ fn load_config() -> anyhow::Result<ServerConfig> {
             tls_key_path: String::new(),
             auth_token: String::new(),
             heartbeat_timeout_secs: 30,
-            db_path: "./nession-server.db".to_string(),
+            db_path: nession_common::paths::server_db_path().to_string_lossy().into_owned(),
         })
     }
 }

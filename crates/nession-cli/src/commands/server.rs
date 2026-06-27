@@ -225,7 +225,7 @@ fn load_server_config(path: &str) -> Result<ServerConfig> {
             tls_key_path: String::new(),
             auth_token: String::new(),
             heartbeat_timeout_secs: 30,
-            db_path: "./nession-server.db".to_string(),
+            db_path: nession_common::paths::server_db_path().to_string_lossy().into_owned(),
         })
     }
 }
@@ -243,6 +243,10 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
     info!("nession-server {} starting", env!("CARGO_PKG_VERSION"));
     info!("Listen address: {}", config.listen_address);
     info!("Database: {}", config.db_path);
+
+    // Ensure component directories exist
+    nession_common::paths::ensure_component_dirs()
+        .context("failed to create nession component directories")?;
 
     // Import and run the server components
     use nession_server::db::Database;
