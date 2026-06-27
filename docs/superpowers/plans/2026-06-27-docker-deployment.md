@@ -285,7 +285,7 @@ COPY web/ .
 RUN npm run build
 
 # ---- Stage 2: Build Rust server ----
-FROM rust:1.80-bookworm AS server-builder
+FROM rust:1.87-bookworm AS server-builder
 WORKDIR /build
 # Cache dependency compilation: copy manifests first, then source
 COPY Cargo.toml Cargo.lock ./
@@ -295,7 +295,7 @@ RUN cargo build --release --bin nession-server
 # ---- Stage 3: Runtime ----
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy compiled binary

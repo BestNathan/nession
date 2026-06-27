@@ -74,7 +74,7 @@ Three-stage build:
 
 ### Stage 2: `server-builder`
 
-- **Base**: `rust:1.80-bookworm`
+- **Base**: `rust:1.87-bookworm`
 - **Purpose**: Compile `nession-server`
 - **Steps**:
   1. `WORKDIR /build`
@@ -89,7 +89,7 @@ Three-stage build:
 - **Base**: `debian:bookworm-slim`
 - **Purpose**: Minimal runtime image
 - **Steps**:
-  1. `apt-get update && apt-get install -y --no-install-recommends nginx ca-certificates curl`
+  1. `apt-get update && apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base`
   2. `rm -rf /var/lib/apt/lists/*`
   3. `COPY --from=server-builder /build/target/release/nession-server /usr/local/bin/nession-server`
   4. `COPY --from=web-builder /build/dist /usr/share/nginx/html`
