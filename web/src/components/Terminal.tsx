@@ -187,9 +187,14 @@ export function Terminal({
       const ws = new WebSocket(wsUrl);
       p2pWs = ws;
 
+      console.log('[Terminal] P2P connecting to:', wsUrl);
+      console.log('[Terminal] sessionName:', sessionName);
+      console.log('[Terminal] connectionToken:', connectionToken ? 'present' : 'absent');
+
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
+        console.log('[Terminal] WebSocket connected, sending client.attach');
         if (!active) {
           ws.close();
           return;
@@ -253,11 +258,13 @@ export function Terminal({
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (event) => {
+        console.error('[Terminal] WebSocket error:', event);
         reportError(new Error('P2P WebSocket connection error'));
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('[Terminal] WebSocket closed:', event.code, event.reason);
         if (!active) return;
         onDisconnectRef.current?.();
       };
