@@ -418,3 +418,133 @@
     font-size: 1.1rem;
   }
 }
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 360px;
+  max-width: 480px;
+  color: #cdd6f4;
+}
+
+.modal-title {
+  margin: 0 0 16px;
+  font-size: 18px;
+  color: #cdd6f4;
+}
+
+.modal-field {
+  margin-bottom: 12px;
+}
+
+.modal-field label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #a6adc8;
+}
+
+.modal-field input,
+.modal-field select {
+  width: 100%;
+  padding: 8px 12px;
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  color: #cdd6f4;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+  outline: none;
+  border-color: #89b4fa;
+}
+
+.modal-field input:disabled,
+.modal-field select:disabled {
+  opacity: 0.6;
+}
+
+.modal-error {
+  color: #f38ba8;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.btn-modal-cancel {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  color: #a6adc8;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-modal-cancel:hover {
+  background: #313244;
+}
+
+.btn-modal-confirm {
+  padding: 8px 16px;
+  background: #89b4fa;
+  border: none;
+  border-radius: 4px;
+  color: #1e1e2e;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.btn-modal-confirm:hover {
+  background: #74c7ec;
+}
+
+.btn-modal-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-modal-danger {
+  background: #f38ba8;
+}
+
+.btn-modal-danger:hover {
+  background: #eba0ac;
+}
+
+.modal-description {
+  color: #a6adc8;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.modal-description strong {
+  color: #cdd6f4;
+}
