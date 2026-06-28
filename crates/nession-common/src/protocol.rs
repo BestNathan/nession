@@ -61,3 +61,73 @@ pub struct HeartbeatMetadata {
     pub uptime_seconds: u64,
     pub load_average: [f64; 3],
 }
+
+// --- Server → Agent command payloads ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionCreatePayload {
+    pub request_id: String,
+    pub name: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionKillPayload {
+    pub request_id: String,
+    pub name: String,
+}
+
+fn default_width() -> u16 {
+    80
+}
+
+fn default_height() -> u16 {
+    24
+}
+
+// --- Agent → Server command response payload ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCommandResponsePayload {
+    pub request_id: String,
+    pub command: String,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+}
+
+// --- Client → Server session command payloads ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionCreatePayload {
+    pub agent_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionKillPayload {
+    pub session_id: String,
+}
+
+// --- Server → Client session command response payloads ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionCreateResponsePayload {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionKillResponsePayload {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
