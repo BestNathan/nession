@@ -4,12 +4,14 @@ kind: Kustomization
 namespace: nession
 
 images:
-  - name: ghcr.io/bestnathan/nession
-    newTag: latest  # CI will update this automatically
+- name: ghcr.io/BestNathan/nession
+  newTag: main
+- name: ghcr.io/bestnathan/nession
+  newTag: latest
 
 resources:
-  - namespace.yaml
-  - secret.yaml
-  - deployment.yaml
-  - service.yaml
-  - ingress.yaml
+- namespace.yaml
+- secret.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
