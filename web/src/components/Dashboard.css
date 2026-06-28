@@ -548,3 +548,49 @@
 .modal-description strong {
   color: #cdd6f4;
 }
+
+.panel-header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-create-session {
+  padding: 4px 10px;
+  background: #a6e3a1;
+  border: none;
+  border-radius: 4px;
+  color: #1e1e2e;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn-create-session:hover {
+  background: #94e2d5;
+}
+
+.session-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-kill {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid #f38ba8;
+  border-radius: 4px;
+  color: #f38ba8;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btn-kill:hover:not(:disabled) {
+  background: rgba(243, 139, 168, 0.15);
+}
+
+.btn-kill:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
