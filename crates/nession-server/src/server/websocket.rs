@@ -179,11 +179,8 @@ where
             HandlerAction::Reply(None) => {
                 // No response needed, continue
             }
-            HandlerAction::Relay { agent_ws_url: _ } => {
-                // For relay mode, we need to get the write half back from the relay task
-                // This is complex — for now, break out and let relay handle it
-                // Note: relay mode won't work with the shared sink, but relay is for terminal attach,
-                // not for agent control connections, so this is acceptable.
+            HandlerAction::Relay { agent_ws_url } => {
+                relay_bidirectional_via_channel(&mut read, sender.clone(), &agent_ws_url).await?;
                 break;
             }
             HandlerAction::Close => {
@@ -205,16 +202,14 @@ where
     Ok(())
 }
 
-/// Relay mode: connect to agent WebSocket and forward messages bidirectionally
-/// between client and agent.
-async fn relay_bidirectional<WS, RS>(
-    client_write: &mut WS,
+/// Relay mode using channel-based sender for client writes.
+/// Used when the write sink is managed by a relay task.
+async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
+    sender: crate::server::command_broker::WsMessageSender,
     agent_ws_url: &str,
 ) -> anyhow::Result<()>
 where
-    WS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
-    <WS as futures_util::Sink<tokio_tungstenite::tungstenite::Message>>::Error: std::fmt::Display,
     RS: futures_util::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
 {
     use futures_util::StreamExt;
@@ -222,13 +217,12 @@ where
 
     info!("Entering relay mode, connecting to agent at {}", agent_ws_url);
 
-    // Connect to agent WebSocket
     let (agent_ws, _) = tokio_tungstenite::connect_async(agent_ws_url).await?;
     let (mut agent_write, mut agent_read) = agent_ws.split();
 
     info!("Relay connection established");
 
-    // Spawn task to forward client -> agent
+    // Forward client -> agent
     let client_to_agent = async {
         while let Some(msg) = client_read.next().await {
             match msg {
@@ -246,12 +240,12 @@ where
         }
     };
 
-    // Forward agent -> client in current task
+    // Forward agent -> client (via channel sender)
     let agent_to_client = async {
         while let Some(msg) = agent_read.next().await {
             match msg {
                 Ok(msg) => {
-                    if let Err(e) = client_write.send(msg).await {
+                    if let Err(e) = sender.send(msg) {
                         error!("Failed to forward agent message to client: {}", e);
                         break;
                     }
@@ -264,7 +258,6 @@ where
         }
     };
 
-    // Run both directions concurrently, exit when either completes
     tokio::select! {
         _ = client_to_agent => {
             info!("Client to agent relay ended");
