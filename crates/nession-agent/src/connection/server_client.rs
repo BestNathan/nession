@@ -18,6 +18,8 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
+use crate::tmux::manager::TmuxManager;
+
 /// Type alias for the WebSocket stream.
 type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -87,6 +89,8 @@ pub struct ServerClient {
     shutdown_tx: mpsc::Sender<()>,
     /// Agent metadata.
     metadata: AgentMetadata,
+    /// Tmux manager for handling session commands.
+    tmux: Arc<TmuxManager>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -174,6 +178,7 @@ impl ServerClient {
         ip_address: impl Into<String>,
         port: u16,
         metadata: AgentMetadata,
+        tmux: Arc<TmuxManager>,
     ) -> Self {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         Self {
@@ -187,6 +192,7 @@ impl ServerClient {
             shutdown_rx: Some(shutdown_rx),
             shutdown_tx,
             metadata,
+            tmux,
         }
     }
 
@@ -259,8 +265,9 @@ impl ServerClient {
 
         // Spawn a task to handle incoming messages and shutdown.
         let agent_id = self.agent_id.clone();
+        let tmux = self.tmux.clone();
         tokio::spawn(async move {
-            Self::run_message_loop(ws_stream, sink, shutdown_rx, agent_id).await;
+            Self::run_message_loop(ws_stream, sink, shutdown_rx, agent_id, tmux).await;
         });
 
         Ok(handle)
@@ -297,6 +304,7 @@ impl ServerClient {
         sink: Arc<Mutex<WsSink>>,
         mut shutdown_rx: mpsc::Receiver<()>,
         agent_id: String,
+        tmux: Arc<TmuxManager>,
     ) {
         loop {
             tokio::select! {
@@ -304,7 +312,7 @@ impl ServerClient {
                 msg = ws_stream.next() => {
                     match msg {
                         Some(Ok(WsMessage::Text(text))) => {
-                            if let Err(e) = Self::handle_server_message(&text, &sink, &agent_id).await {
+                            if let Err(e) = Self::handle_server_message(&text, &sink, &agent_id, &tmux).await {
                                 warn!("Error handling server message: {:#}", e);
                             }
                         }
@@ -341,8 +349,9 @@ impl ServerClient {
     /// Handle a message received from the server.
     async fn handle_server_message(
         text: &str,
-        _sink: &Arc<Mutex<WsSink>>,
+        sink: &Arc<Mutex<WsSink>>,
         agent_id: &str,
+        tmux: &TmuxManager,
     ) -> Result<()> {
         let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(text)
             .context("failed to parse server message")?;
@@ -362,6 +371,61 @@ impl ServerClient {
                         agent_id, response.message
                     );
                 }
+            }
+            "server.session.create" => {
+                let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
+                let name = msg.payload["name"].as_str().unwrap_or("").to_string();
+                let width = msg.payload["width"].as_u64().unwrap_or(80) as u16;
+                let height = msg.payload["height"].as_u64().unwrap_or(24) as u16;
+
+                info!("Server requested session create: name={}, width={}, height={}", name, width, height);
+
+                let (success, error, session_name) = match tmux.create_session(&name, width, height).await {
+                    Ok(()) => (true, None, Some(name.clone())),
+                    Err(e) => (false, Some(e.to_string()), None),
+                };
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp() as u64,
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "session.create",
+                        "success": success,
+                        "error": error,
+                        "session_name": session_name,
+                    }
+                });
+
+                let mut sink_lock = sink.lock().await;
+                sink_lock.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.session.kill" => {
+                let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
+                let name = msg.payload["name"].as_str().unwrap_or("").to_string();
+
+                info!("Server requested session kill: name={}", name);
+
+                let (success, error) = match tmux.kill_session(&name).await {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e.to_string())),
+                };
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp() as u64,
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "session.kill",
+                        "success": success,
+                        "error": error,
+                    }
+                });
+
+                let mut sink_lock = sink.lock().await;
+                sink_lock.send(WsMessage::Text(response.to_string())).await?;
             }
             _ => {
                 debug!(
@@ -453,6 +517,7 @@ mod tests {
             "127.0.0.1",
             8080,
             metadata,
+            Arc::new(TmuxManager::new()),
         );
 
         let handle = client.connect_and_run().await.expect("connect failed");
@@ -493,6 +558,7 @@ mod tests {
             "127.0.0.1",
             8080,
             metadata,
+            Arc::new(TmuxManager::new()),
         );
 
         let handle = client.connect_and_run().await.expect("connect failed");
@@ -543,6 +609,7 @@ mod tests {
             "127.0.0.1",
             8080,
             metadata,
+            Arc::new(TmuxManager::new()),
         );
 
         let handle = client.connect_and_run().await.expect("connect failed");
