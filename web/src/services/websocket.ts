@@ -10,6 +10,8 @@ import {
   AuthResponse,
   AgentsListResponse,
   SessionsListResponse,
+  CreateSessionResponse,
+  KillSessionResponse,
 } from '../types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
@@ -189,6 +191,31 @@ export class WebSocketService {
     const response = await this.request<AttachInfo>('client.session.attach', {
       session_id: sessionId,
       preferred_mode: mode,
+    });
+
+    return response;
+  }
+
+  async createSession(agentId: string, name: string): Promise<CreateSessionResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await this.request<CreateSessionResponse>('client.session.create', {
+      agent_id: agentId,
+      name,
+    });
+
+    return response;
+  }
+
+  async killSession(sessionId: string): Promise<KillSessionResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await this.request<KillSessionResponse>('client.session.kill', {
+      session_id: sessionId,
     });
 
     return response;
