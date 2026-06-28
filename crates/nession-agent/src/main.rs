@@ -20,6 +20,7 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::protocol::AgentMetadata;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 
 #[tokio::main]
@@ -79,6 +80,7 @@ async fn main() -> Result<()> {
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
+    let tmux_for_client = Arc::new(TmuxManager::new());
     let server_client = ServerClient::new(
         &config.server_url,
         &config.auth_token,
@@ -87,6 +89,7 @@ async fn main() -> Result<()> {
         &ip_address,
         port,
         metadata,
+        tmux_for_client,
     );
 
     // Attempt to connect with a timeout so the agent can still serve

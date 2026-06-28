@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Agent, Session, AttachInfo, ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal } from './Terminal';
+import { CreateSessionModal } from './CreateSessionModal';
+import { ConfirmKillModal } from './ConfirmKillModal';
 import './Dashboard.css';
 
 export interface DashboardProps {
@@ -29,6 +31,10 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   const [view, setView] = useState<View>('dashboard');
   const [attachedSession, setAttachedSession] = useState<AttachedSession | null>(null);
   const [attachingInProgress, setAttachingInProgress] = useState(false);
+
+  // Modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [sessionToKill, setSessionToKill] = useState<Session | null>(null);
 
   // ── Data fetching ──────────────────────────────────────────────────
 
@@ -146,6 +152,24 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     [handleBackToDashboard],
   );
 
+  // ── Modal handlers ───────────────────────────────────────────────
+
+  const handleCreateSession = useCallback(() => {
+    setShowCreateModal(true);
+  }, []);
+
+  const handleSessionCreated = useCallback(() => {
+    fetchSessions(selectedAgentId ?? undefined);
+  }, [fetchSessions, selectedAgentId]);
+
+  const handleKillClick = useCallback((session: Session) => {
+    setSessionToKill(session);
+  }, []);
+
+  const handleSessionKilled = useCallback(() => {
+    fetchSessions(selectedAgentId ?? undefined);
+  }, [fetchSessions, selectedAgentId]);
+
   // ── Manual refresh ─────────────────────────────────────────────────
 
   const handleRefreshAgents = useCallback(() => {
@@ -234,9 +258,18 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
                 </span>
               )}
             </h2>
-            <button className="btn-refresh" onClick={handleRefreshSessions} disabled={loadingSessions} title="Refresh sessions">
-              {loadingSessions ? '⟳' : '↻'}
-            </button>
+            <div className="panel-header-actions">
+              <button
+                className="btn-create-session"
+                onClick={handleCreateSession}
+                title="Create new session"
+              >
+                + Create
+              </button>
+              <button className="btn-refresh" onClick={handleRefreshSessions} disabled={loadingSessions} title="Refresh sessions">
+                {loadingSessions ? '⟳' : '↻'}
+              </button>
+            </div>
           </div>
           <div className="panel-body">
             {filteredSessions.length === 0 && !loadingSessions ? (
@@ -255,13 +288,22 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
                         {session.attached_clients !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <button
-                      className="btn-attach"
-                      onClick={() => handleAttach(session)}
-                      disabled={attachingInProgress}
-                    >
-                      {attachingInProgress ? '...' : 'Attach'}
-                    </button>
+                    <div className="session-actions">
+                      <button
+                        className="btn-attach"
+                        onClick={() => handleAttach(session)}
+                        disabled={attachingInProgress}
+                      >
+                        {attachingInProgress ? '...' : 'Attach'}
+                      </button>
+                      <button
+                        className="btn-kill"
+                        onClick={() => handleKillClick(session)}
+                        title="Kill session"
+                      >
+                        Kill
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -270,6 +312,23 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
           </div>
         </section>
       </div>
+
+      {/* Modals */}
+      <CreateSessionModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        wsService={wsService}
+        agents={agents}
+        preselectedAgentId={selectedAgentId}
+        onCreated={handleSessionCreated}
+      />
+      <ConfirmKillModal
+        isOpen={sessionToKill !== null}
+        onClose={() => setSessionToKill(null)}
+        wsService={wsService}
+        session={sessionToKill}
+        onKilled={handleSessionKilled}
+      />
     </div>
   );
 }

@@ -1,31 +1,93 @@
+# ================================
 # Rust
+# ================================
 /target/
 **/*.rs.bk
+Cargo.lock.bak
 
-# IDE
+# ================================
+# Node.js / Frontend
+# ================================
+node_modules/
+web/node_modules/
+web/dist/
+web/dist-ssr/
+*.tsbuildinfo
+
+# ================================
+# IDE & Editors
+# ================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
+# ================================
 # OS
+# ================================
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Logs
+# ================================
+# Logs & Debug
+# ================================
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Environment
+# ================================
+# Environment & Secrets
+# ================================
 .env
-.env.local
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
 
-# Build
+# ================================
+# Build Outputs
+# ================================
 dist/
 build/
+out/
 
+# ================================
 # Database
+# ================================
 *.db
 *.sqlite
 *.sqlite3
+*.dump
+
+# ================================
+# Testing & Coverage
+# ================================
+coverage/
+.nyc_output/
+.playwright-mcp/
+test-results/
+
+# ================================
+# Caches & Temp
+# ================================
+.cache/
+.eslintcache
+.stylelintcache
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# ================================
+# Local config (per-developer)
+# ================================
+.claude/
+*.local

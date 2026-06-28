@@ -248,6 +248,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     use nession_agent::sync::session_watcher::SessionWatcher;
     use nession_agent::tmux::manager::TmuxManager;
     use nession_common::protocol::AgentMetadata;
+    use std::sync::Arc;
 
     // Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
@@ -280,6 +281,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         &ip_address,
         port,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     let client_handle = tokio::select! {

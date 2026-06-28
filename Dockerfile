@@ -1,4 +1,25 @@
-# ---- Stage 1: Build web UI ----
+# ---- Stage 1: Prepare cargo-chef recipe ----
+FROM rust:1.88-bookworm AS planner
+WORKDIR /build
+RUN cargo install cargo-chef --locked
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ---- Stage 2: Build dependencies (cached layer) ----
+FROM rust:1.88-bookworm AS cacher
+WORKDIR /build
+
+# Install sccache
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+
+RUN cargo install cargo-chef --locked
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# ---- Stage 3: Build web UI ----
 FROM node:20-alpine AS web-builder
 WORKDIR /build
 COPY web/package.json web/package-lock.json ./
@@ -6,15 +27,30 @@ RUN npm ci
 COPY web/ .
 RUN npm run build
 
-# ---- Stage 2: Build Rust server ----
-FROM rust:1.87-bookworm AS server-builder
+# ---- Stage 4: Build Rust server with cached dependencies ----
+FROM rust:1.88-bookworm AS server-builder
 WORKDIR /build
-# Cache dependency compilation: copy manifests first, then source
+
+# Install sccache for build caching
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+
+# Copy cached dependencies from cacher stage
+COPY --from=cacher /build/target target
+
+# Copy manifests to preserve cache
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+
+# Copy source code (changes frequently, but dependencies are cached)
+COPY . .
+
+# Build the server binary
 RUN cargo build --release --bin nession-server
 
-# ---- Stage 3: Runtime ----
+# ---- Stage 5: Runtime ----
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \

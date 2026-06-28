@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: nession
+    app.kubernetes.io/part-of: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/bestnathan/nession.git
+    targetRevision: main
+    path: k8s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+
+  syncPolicy:
+    automated:
+      prune: true           # Delete resources not in git
+      selfHeal: true        # Revert manual changes
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10

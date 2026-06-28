@@ -3,6 +3,10 @@ kind: Kustomization
 
 namespace: nession
 
+images:
+  - name: ghcr.io/bestnathan/nession
+    newTag: latest  # CI will update this automatically
+
 resources:
   - namespace.yaml
   - secret.yaml

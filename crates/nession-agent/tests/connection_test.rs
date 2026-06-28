@@ -5,7 +5,9 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, msg_types};
+use nession_agent::tmux::manager::TmuxManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -67,6 +69,7 @@ async fn integration_connection_to_mock_server() {
         "127.0.0.1",
         8080,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     let handle = client.connect_and_run().await.expect("connect failed");
@@ -98,6 +101,7 @@ async fn integration_registration_message_format() {
         "192.168.1.100",
         9090,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     let handle = client.connect_and_run().await.expect("connect failed");
@@ -154,6 +158,7 @@ async fn integration_heartbeat_message_format() {
         "127.0.0.1",
         8080,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     let handle = client.connect_and_run().await.expect("connect failed");
@@ -226,6 +231,7 @@ async fn integration_session_update_message_format() {
         "127.0.0.1",
         8080,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     let handle = client.connect_and_run().await.expect("connect failed");
@@ -286,6 +292,7 @@ async fn integration_reconnection_logic() {
         "127.0.0.1",
         8080,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     // Spawn the client connection attempt in the background.

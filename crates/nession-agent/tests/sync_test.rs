@@ -6,6 +6,7 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::protocol::AgentMetadata;
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -72,6 +73,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         "127.0.0.1",
         8080,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     client.connect_and_run().await.expect("connect failed")

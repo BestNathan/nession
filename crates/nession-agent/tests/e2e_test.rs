@@ -20,6 +20,7 @@ use nession_agent::tmux::manager::TmuxManager;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::AgentMetadata;
 use nession_server::server::WebSocketServer;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -93,6 +94,7 @@ async fn register_agent_with_server(
         "127.0.0.1",
         agent_port,
         metadata,
+        Arc::new(TmuxManager::new()),
     );
 
     client.connect_and_run().await.expect("agent registration failed")

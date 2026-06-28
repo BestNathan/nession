@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::time::Duration;
 use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use crate::registry::{AgentRegistry, SessionRegistry, AgentInfo, AgentStatus, SessionStatus};
+use crate::server::command_broker::CommandBroker;
 use nession_common::protocol::{ProtocolMessage, AgentRegisterPayload};
 
 /// Action returned by the connection handler after processing a message.
@@ -20,6 +22,7 @@ pub enum HandlerAction {
 pub struct ConnectionHandler {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
     server_auth_token: String,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
@@ -29,15 +32,21 @@ impl ConnectionHandler {
     pub fn new(
         agent_registry: Arc<AgentRegistry>,
         session_registry: Arc<SessionRegistry>,
+        command_broker: Arc<CommandBroker>,
         server_auth_token: String,
     ) -> Self {
         Self {
             agent_registry,
             session_registry,
+            command_broker,
             server_auth_token,
             authenticated_client: false,
             registered_agent_id: None,
         }
+    }
+
+    pub fn registered_agent_id(&self) -> Option<&String> {
+        self.registered_agent_id.as_ref()
     }
 
     pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
@@ -62,10 +71,13 @@ impl ConnectionHandler {
             "agent.register" => self.handle_agent_register(msg).await,
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
             "agent.session.update" => self.handle_agent_session_update(msg).await,
+            "agent.session.command.response" => self.handle_agent_command_response(msg).await,
             "client.auth" => self.handle_client_auth(msg).await,
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
             "client.session.attach" => self.handle_client_session_attach(msg).await,
+            "client.session.create" => self.handle_client_session_create(msg).await,
+            "client.session.kill" => self.handle_client_session_kill(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
                 Ok(HandlerAction::Reply(None))
@@ -469,6 +481,324 @@ impl ConnectionHandler {
                 }).to_string()
             ))))
         }
+    }
+
+    /// Handle `client.session.create` — create a new session on a target agent.
+    async fn handle_client_session_create(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.create.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Not authenticated"
+                    }
+                }).to_string()
+            ))));
+        }
+
+        let agent_id = msg.payload["agent_id"].as_str().unwrap_or("");
+        let name = msg.payload["name"].as_str().unwrap_or("");
+
+        if agent_id.is_empty() || name.is_empty() {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.create.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "agent_id and name are required"
+                    }
+                }).to_string()
+            ))));
+        }
+
+        // Check agent exists and is online
+        let agent = self.agent_registry.get(agent_id).await;
+        match agent {
+            Some(a) if a.status == AgentStatus::Online => {}
+            Some(_) => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.create.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": format!("Agent '{}' is offline", agent_id)
+                        }
+                    }).to_string()
+                ))));
+            }
+            None => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.create.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": format!("Agent '{}' not found", agent_id)
+                        }
+                    }).to_string()
+                ))));
+            }
+        }
+
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        info!("Client requested session create on agent {}: name={}", agent_id, name);
+
+        let rx = self.command_broker.send_command(
+            agent_id,
+            "server.session.create",
+            &request_id,
+            json!({
+                "request_id": request_id,
+                "name": name,
+                "width": 80,
+                "height": 24
+            }),
+        ).await;
+
+        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+            Ok(Ok(response)) => {
+                let success = response["success"].as_bool().unwrap_or(false);
+                let session_id = if success {
+                    Some(format!("{}:{}", agent_id, name))
+                } else {
+                    None
+                };
+                let error = response["error"].as_str().map(|s| s.to_string());
+
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.create.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": success,
+                            "session_id": session_id,
+                            "error": error,
+                        }
+                    }).to_string()
+                ))))
+            }
+            Ok(Err(_)) => {
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.create.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": "Agent disconnected"
+                        }
+                    }).to_string()
+                ))))
+            }
+            Err(_) => {
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.create.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": "Timeout waiting for agent response"
+                        }
+                    }).to_string()
+                ))))
+            }
+        }
+    }
+
+    /// Handle `client.session.kill` — kill a session on its agent.
+    async fn handle_client_session_kill(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.kill.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Not authenticated"
+                    }
+                }).to_string()
+            ))));
+        }
+
+        let session_id = msg.payload["session_id"].as_str().unwrap_or("");
+
+        let (agent_id, session_name) = match session_id.split_once(':') {
+            Some((aid, sname)) => (aid.to_string(), sname.to_string()),
+            None => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.kill.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": "Invalid session_id format. Expected 'agent_id:session_name'"
+                        }
+                    }).to_string()
+                ))));
+            }
+        };
+
+        // Check session exists in registry
+        let session = self.session_registry.get(session_id).await;
+        if session.is_none() {
+            let agent = self.agent_registry.get(&agent_id).await;
+            match agent {
+                Some(a) if a.status != AgentStatus::Online => {
+                    self.session_registry.remove(session_id).await;
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": "client.session.kill.response",
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "success": true
+                            }
+                        }).to_string()
+                    ))));
+                }
+                Some(_) => {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": "client.session.kill.response",
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "success": false,
+                                "error": format!("Session '{}' not found", session_id)
+                            }
+                        }).to_string()
+                    ))));
+                }
+                None => {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": "client.session.kill.response",
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "success": false,
+                                "error": format!("Agent '{}' not found", agent_id)
+                            }
+                        }).to_string()
+                    ))));
+                }
+            }
+        }
+
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        info!("Client requested session kill: {} (agent: {})", session_name, agent_id);
+
+        let rx = self.command_broker.send_command(
+            &agent_id,
+            "server.session.kill",
+            &request_id,
+            json!({
+                "request_id": request_id,
+                "name": session_name,
+            }),
+        ).await;
+
+        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+            Ok(Ok(response)) => {
+                let success = response["success"].as_bool().unwrap_or(false);
+                let error = response["error"].as_str().map(|s| s.to_string());
+
+                if success {
+                    self.session_registry.remove(session_id).await;
+                }
+
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.kill.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": success,
+                            "error": error,
+                        }
+                    }).to_string()
+                ))))
+            }
+            Ok(Err(_)) => {
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.kill.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": "Agent disconnected"
+                        }
+                    }).to_string()
+                ))))
+            }
+            Err(_) => {
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.kill.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": false,
+                            "error": "Timeout waiting for agent response"
+                        }
+                    }).to_string()
+                ))))
+            }
+        }
+    }
+
+    /// Handle `agent.session.command.response` — resolve a pending command.
+    async fn handle_agent_command_response(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let agent_id = match &self.registered_agent_id {
+            Some(id) => id.clone(),
+            None => {
+                warn!("agent.session.command.response from unregistered connection");
+                return Ok(HandlerAction::Reply(None));
+            }
+        };
+
+        let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
+        if request_id.is_empty() {
+            warn!("agent.session.command.response missing request_id");
+            return Ok(HandlerAction::Reply(None));
+        }
+
+        info!(
+            "Received command response from agent {}: request_id={}, command={}",
+            agent_id,
+            request_id,
+            msg.payload["command"].as_str().unwrap_or("unknown")
+        );
+
+        self.command_broker
+            .resolve_command(&agent_id, &request_id, msg.payload)
+            .await;
+
+        Ok(HandlerAction::Reply(None))
     }
 }
 

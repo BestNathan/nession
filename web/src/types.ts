@@ -56,3 +56,14 @@ export interface AgentsListResponse {
 export interface SessionsListResponse {
   sessions: Session[];
 }
+
+export interface CreateSessionResponse {
+  success: boolean;
+  session_id?: string;
+  error?: string;
+}
+
+export interface KillSessionResponse {
+  success: boolean;
+  error?: string;
+}
