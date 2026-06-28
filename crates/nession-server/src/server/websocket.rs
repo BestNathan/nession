@@ -5,6 +5,7 @@ use tokio_tungstenite::accept_async;
 use tracing::{info, error};
 
 use crate::registry::{AgentRegistry, SessionRegistry};
+use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
 use super::handler::{ConnectionHandler, HandlerAction};
 
@@ -12,6 +13,7 @@ pub struct WebSocketServer {
     config: ServerConfig,
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
     listener: Option<TcpListener>,
 }
 
@@ -20,11 +22,13 @@ impl WebSocketServer {
         let listener = TcpListener::bind(&config.listen_address).await?;
         let agent_registry = Arc::new(AgentRegistry::new(config.heartbeat_timeout_secs));
         let session_registry = Arc::new(SessionRegistry::new());
+        let command_broker = Arc::new(CommandBroker::new());
 
         Ok(Self {
             config,
             agent_registry,
             session_registry,
+            command_broker,
             listener: Some(listener),
         })
     }
@@ -47,6 +51,7 @@ impl WebSocketServer {
 
             let agent_registry = Arc::clone(&self.agent_registry);
             let session_registry = Arc::clone(&self.session_registry);
+            let command_broker = Arc::clone(&self.command_broker);
             let auth_token = self.config.auth_token.clone();
             let tls_acceptor = tls_acceptor.clone();
 
@@ -56,6 +61,7 @@ impl WebSocketServer {
                     tls_acceptor,
                     agent_registry,
                     session_registry,
+                    command_broker,
                     auth_token,
                 ).await {
                     error!("Connection error: {}", e);
@@ -102,13 +108,14 @@ async fn handle_connection(
     tls_acceptor: Option<TlsAcceptor>,
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
     auth_token: String,
 ) -> anyhow::Result<()> {
     if let Some(acceptor) = tls_acceptor {
         let tls_stream = acceptor.accept(tcp_stream).await?;
-        handle_ws_stream(tls_stream, agent_registry, session_registry, auth_token).await
+        handle_ws_stream(tls_stream, agent_registry, session_registry, command_broker, auth_token).await
     } else {
-        handle_ws_stream(tcp_stream, agent_registry, session_registry, auth_token).await
+        handle_ws_stream(tcp_stream, agent_registry, session_registry, command_broker, auth_token).await
     }
 }
 
@@ -116,6 +123,7 @@ async fn handle_ws_stream<S>(
     stream: S,
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
     auth_token: String,
 ) -> anyhow::Result<()>
 where
@@ -123,7 +131,7 @@ where
 {
     let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
-    let mut handler = ConnectionHandler::new(agent_registry, session_registry, auth_token);
+    let mut handler = ConnectionHandler::new(agent_registry, session_registry, command_broker, auth_token);
 
     use futures_util::StreamExt;
     use futures_util::SinkExt;
