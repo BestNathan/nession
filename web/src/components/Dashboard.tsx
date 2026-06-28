@@ -299,12 +299,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
                       <button
                         className="btn-kill"
                         onClick={() => handleKillClick(session)}
-                        disabled={session.status === 'active' && session.attached_clients > 0}
-                        title={
-                          session.status === 'active' && session.attached_clients > 0
-                            ? 'Cannot kill: session has attached clients'
-                            : 'Kill session'
-                        }
+                        title="Kill session"
                       >
                         Kill
                       </button>
