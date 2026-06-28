@@ -1,20 +1,31 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, oneshot};
+use tokio::sync::{RwLock, oneshot};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{warn, debug};
 
-/// Type alias for the WebSocket sink write half.
-pub type WsSinkBox = Arc<Mutex<futures_util::stream::SplitSink<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
-    >,
-    WsMessage,
->>>;
+/// Sender for outgoing WebSocket messages.
+///
+/// Wraps an `mpsc::UnboundedSender` so that the concrete sink type (which differs
+/// between plain-TCP and TLS paths) is hidden behind a transport-agnostic channel.
+/// The WebSocket loop spawns a small relay task that drains the receiver and
+/// forwards each message to the real sink.
+#[derive(Clone)]
+pub struct WsMessageSender(tokio::sync::mpsc::UnboundedSender<WsMessage>);
 
-/// Per-agent control state: the writable sink and pending command receivers.
+impl WsMessageSender {
+    pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<WsMessage>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (Self(tx), rx)
+    }
+
+    pub fn send(&self, msg: WsMessage) -> Result<(), tokio::sync::mpsc::error::SendError<WsMessage>> {
+        self.0.send(msg)
+    }
+}
+
+/// Per-agent control state: the message sender and pending command receivers.
 pub struct AgentControl {
-    pub sink: WsSinkBox,
+    pub sender: WsMessageSender,
     pub pending_commands: HashMap<String, oneshot::Sender<serde_json::Value>>,
 }
 
@@ -34,11 +45,11 @@ impl CommandBroker {
         }
     }
 
-    /// Register an agent's control connection sink.
-    pub async fn register_agent(&self, agent_id: &str, sink: WsSinkBox) {
+    /// Register an agent's control connection sender.
+    pub async fn register_agent(&self, agent_id: &str, sender: WsMessageSender) {
         let mut agents = self.agents.write().await;
         agents.insert(agent_id.to_string(), AgentControl {
-            sink,
+            sender,
             pending_commands: HashMap::new(),
         });
         debug!("CommandBroker: registered agent {}", agent_id);
@@ -95,21 +106,22 @@ impl CommandBroker {
             }
         };
 
-        let sink = agent.sink.clone();
+        let sender = agent.sender.clone();
         drop(agents);
 
         let req_id = request_id.to_string();
         let aid = agent_id.to_string();
         let mt = msg_type.to_string();
-        tokio::spawn(async move {
-            use futures_util::SinkExt;
-            let mut sink_lock = sink.lock().await;
-            if let Err(e) = sink_lock.send(WsMessage::Text(json)).await {
-                warn!("CommandBroker: failed to send command to agent {}: {}", aid, e);
-            } else {
+
+        // Send the command through the channel
+        match sender.send(WsMessage::Text(json)) {
+            Ok(_) => {
                 debug!("CommandBroker: sent {} to agent {} (req: {})", mt, aid, req_id);
             }
-        });
+            Err(e) => {
+                warn!("CommandBroker: failed to send command to agent {}: {}", aid, e);
+            }
+        }
 
         rx
     }

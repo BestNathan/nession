@@ -1,4 +1,4 @@
-use nession_server::server::command_broker::CommandBroker;
+use nession_server::server::command_broker::{CommandBroker, WsMessageSender};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use futures_util::{SinkExt, StreamExt};
@@ -44,10 +44,17 @@ async fn test_register_and_send_command() {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         format!("ws://{}", addr)
     ).await.unwrap();
-    let (sink, _stream) = ws_stream.split();
-    let sink = Arc::new(Mutex::new(sink));
+    let (mut sink, _stream) = ws_stream.split();
 
-    broker.register_agent("agent-1", sink).await;
+    // Create channel-based sender and spawn relay task
+    let (sender, mut ch_rx) = WsMessageSender::new();
+    tokio::spawn(async move {
+        while let Some(msg) = ch_rx.recv().await {
+            let _ = sink.send(msg).await;
+        }
+    });
+
+    broker.register_agent("agent-1", sender).await;
 
     let _rx = broker.send_command(
         "agent-1",
@@ -73,10 +80,17 @@ async fn test_resolve_command() {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         format!("ws://{}", addr)
     ).await.unwrap();
-    let (sink, _stream) = ws_stream.split();
-    let sink = Arc::new(Mutex::new(sink));
+    let (mut sink, _stream) = ws_stream.split();
 
-    broker.register_agent("agent-1", sink).await;
+    // Create channel-based sender and spawn relay task
+    let (sender, mut ch_rx) = WsMessageSender::new();
+    tokio::spawn(async move {
+        while let Some(msg) = ch_rx.recv().await {
+            let _ = sink.send(msg).await;
+        }
+    });
+
+    broker.register_agent("agent-1", sender).await;
 
     let rx = broker.send_command(
         "agent-1",
@@ -107,10 +121,17 @@ async fn test_unregister_agent_resolves_pending() {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         format!("ws://{}", addr)
     ).await.unwrap();
-    let (sink, _stream) = ws_stream.split();
-    let sink = Arc::new(Mutex::new(sink));
+    let (mut sink, _stream) = ws_stream.split();
 
-    broker.register_agent("agent-1", sink).await;
+    // Create channel-based sender and spawn relay task
+    let (sender, mut ch_rx) = WsMessageSender::new();
+    tokio::spawn(async move {
+        while let Some(msg) = ch_rx.recv().await {
+            let _ = sink.send(msg).await;
+        }
+    });
+
+    broker.register_agent("agent-1", sender).await;
 
     let rx = broker.send_command(
         "agent-1",
@@ -148,10 +169,17 @@ async fn test_multiple_concurrent_commands() {
     let (ws_stream, _) = tokio_tungstenite::connect_async(
         format!("ws://{}", addr)
     ).await.unwrap();
-    let (sink, _stream) = ws_stream.split();
-    let sink = Arc::new(Mutex::new(sink));
+    let (mut sink, _stream) = ws_stream.split();
 
-    broker.register_agent("agent-1", sink).await;
+    // Create channel-based sender and spawn relay task
+    let (sender, mut ch_rx) = WsMessageSender::new();
+    tokio::spawn(async move {
+        while let Some(msg) = ch_rx.recv().await {
+            let _ = sink.send(msg).await;
+        }
+    });
+
+    broker.register_agent("agent-1", sender).await;
 
     let rx1 = broker.send_command(
         "agent-1", "server.session.create", "req-1",
