@@ -200,25 +200,27 @@ export function Terminal({
 
       ws.onopen = () => {
         console.log('[Terminal] WebSocket connected, sending client.attach');
+        console.log('[Terminal] active:', active);
         if (!active) {
+          console.log('[Terminal] Not active, closing WebSocket');
           ws.close();
           return;
         }
         // Inform the remote end of our initial terminal size.
         // Agent protocol: first send client.attach, then terminal.input/resize
         // Use base64 for data, session_name (not session_id) for session identifier
-        ws.send(
-          JSON.stringify({
-            msg_type: 'client.attach',
-            id: generateId(),
-            timestamp: Math.floor(Date.now() / 1000),
-            payload: {
-              session_name: sessionName,
-              width: term.cols,
-              height: term.rows,
-            },
-          })
-        );
+        const attachMsg = JSON.stringify({
+          msg_type: 'client.attach',
+          id: generateId(),
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: {
+            session_name: sessionName,
+            width: term.cols,
+            height: term.rows,
+          },
+        });
+        console.log('[Terminal] Sending client.attach:', attachMsg);
+        ws.send(attachMsg);
         // Trigger a prompt redraw from the remote shell.
         const encoder = new TextEncoder();
         const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
