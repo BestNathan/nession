@@ -1,9 +1,10 @@
 /* ── Dashboard ──────────────────────────────────────────────────────── */
 
 .dashboard {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;  /* header auto, panels fill remaining */
+  height: 100%;
+  overflow: hidden;
   background-color: #1a1a2e;
   color: #e0e0e0;
 }
@@ -89,11 +90,13 @@
 /* ── Panels ────────────────────────────────────────────────────────── */
 
 .dashboard-panels {
-  display: flex;
+  display: grid;
+  grid-template-columns: 260px 1fr;  /* agents fixed 260px, sessions fills rest */
   gap: 1rem;
   padding: 1rem 1.5rem;
   flex: 1;
-  min-height: 0;
+  min-height: 0;  /* Required for grid children to shrink */
+  overflow: hidden;  /* Prevent panels from overflowing */
 }
 
 .panel {
@@ -328,9 +331,10 @@
 /* ── Terminal View (full-screen) ───────────────────────────────────── */
 
 .terminal-view {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;  /* header auto, terminal fills remaining */
+  height: 100%;
+  overflow: hidden;
   background-color: #1a1a2e;
   color: #e0e0e0;
 }
@@ -391,7 +395,8 @@
 .terminal-view-body {
   flex: 1;
   min-height: 0;
-  padding: 0.5rem;
+  padding: 0;  /* Remove padding so terminal fills completely */
+  overflow: hidden;
 }
 
 /* ── Responsive: stack panels on narrow screens ────────────────────── */
