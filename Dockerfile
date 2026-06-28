@@ -8,6 +8,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ---- Stage 2: Build dependencies (cached layer) ----
 FROM rust:1.88-bookworm AS cacher
 WORKDIR /build
+
+# Install sccache
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+
 RUN cargo install cargo-chef --locked
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
@@ -24,9 +31,14 @@ RUN npm run build
 FROM rust:1.88-bookworm AS server-builder
 WORKDIR /build
 
+# Install sccache for build caching
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+
 # Copy cached dependencies from cacher stage
 COPY --from=cacher /build/target target
-COPY --from=cacher /build/.cargo .cargo
 
 # Copy manifests to preserve cache
 COPY Cargo.toml Cargo.lock ./
