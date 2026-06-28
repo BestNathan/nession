@@ -221,6 +221,19 @@ export function Terminal({
         });
         console.log('[Terminal] Sending client.attach:', attachMsg);
         ws.send(attachMsg);
+
+        // Refit terminal after connection is established
+        // This ensures the terminal size is correct after the container has fully rendered
+        setTimeout(() => {
+          if (active) {
+            try {
+              fitAddon.fit();
+              console.log('[Terminal] Refit terminal:', term.cols, 'x', term.rows);
+            } catch (e) {
+              console.error('[Terminal] Refit failed:', e);
+            }
+          }
+        }, 100);
         // Trigger a prompt redraw from the remote shell.
         const encoder = new TextEncoder();
         const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
