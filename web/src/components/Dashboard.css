@@ -2,7 +2,7 @@
 
 .dashboard {
   display: grid;
-  grid-template-rows: auto 1fr;  /* header auto, panels fill remaining */
+  grid-template-rows: auto auto 1fr;  /* header auto, error auto, panels fill remaining */
   height: 100%;
   overflow: hidden;
   background-color: #1a1a2e;
@@ -109,12 +109,10 @@
 }
 
 .agents-panel {
-  flex: 0 0 260px;
   min-width: 200px;
 }
 
 .sessions-panel {
-  flex: 1;
   min-width: 0;
 }
 
@@ -393,7 +391,6 @@
 .mode-relay { background-color: #2196f3; color: #fff; }
 
 .terminal-view-body {
-  flex: 1;
   min-height: 0;
   padding: 0;  /* Remove padding so terminal fills completely */
   overflow: hidden;
@@ -403,17 +400,14 @@
 
 @media (max-width: 768px) {
   .dashboard-panels {
-    flex-direction: column;
+    grid-template-columns: 1fr;      /* single column */
+    grid-template-rows: auto 1fr;    /* agents fixed height, sessions fills rest */
     padding: 0.75rem;
   }
 
   .agents-panel {
-    flex: none;
     max-height: 220px;
-  }
-
-  .sessions-panel {
-    flex: 1;
+    overflow-y: auto;                /* allow scrolling if content exceeds max-height */
   }
 
   .dashboard-header {
