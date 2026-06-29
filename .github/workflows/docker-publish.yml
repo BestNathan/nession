@@ -7,18 +7,19 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
   # ── amd64: 原生 x86_64 ──
   build-amd64:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v4
+      - name: Set image refs (lowercase)
+        run: |
+          echo "IMG_SERVER=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-server" >> $GITHUB_ENV
+          echo "IMG_AGENT=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-agent" >> $GITHUB_ENV
+          echo "TAG=${{ github.ref_name }}-amd64" >> $GITHUB_ENV
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
@@ -27,9 +28,7 @@ jobs:
 
       - run: cargo build --release --bin nession-server --bin nession-agent
       - run: cd web && npm ci && npm run build
-
-      - name: Prepare image context
-        run: |
+      - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
           cp target/release/nession-agent /tmp/agent-bin/
@@ -37,31 +36,30 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
 
       - name: Build & push server (amd64)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-amd64
+          push: true
+          tags: ${{ env.IMG_SERVER }}:${{ env.TAG }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
 
       - name: Build & push agent (amd64)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-amd64
+          push: true
+          tags: ${{ env.IMG_AGENT }}:${{ env.TAG }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
@@ -69,11 +67,15 @@ jobs:
   # ── arm64: GitHub 原生 ARM runner ──
   build-arm64:
     runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: read
-      packages: write
+    permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v4
+      - name: Set image refs (lowercase)
+        run: |
+          echo "IMG_SERVER=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-server" >> $GITHUB_ENV
+          echo "IMG_AGENT=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-agent" >> $GITHUB_ENV
+          echo "TAG=${{ github.ref_name }}-arm64" >> $GITHUB_ENV
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
@@ -82,9 +84,7 @@ jobs:
 
       - run: cargo build --release --bin nession-server --bin nession-agent
       - run: cd web && npm ci && npm run build
-
-      - name: Prepare image context
-        run: |
+      - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
           cp target/release/nession-agent /tmp/agent-bin/
@@ -92,31 +92,30 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
 
       - name: Build & push server (arm64)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-arm64
+          push: true
+          tags: ${{ env.IMG_SERVER }}:${{ env.TAG }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
 
       - name: Build & push agent (arm64)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-arm64
+          push: true
+          tags: ${{ env.IMG_AGENT }}:${{ env.TAG }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
@@ -129,24 +128,18 @@ jobs:
     permissions: { packages: write }
     steps:
       - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
 
       - name: Create multi-arch manifests
         run: |
-          REG="${{ env.REGISTRY }}/${{ github.repository_owner }}"
-          REG="${REG,,}"
+          REG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           TAG="${{ github.ref_name }}"
           for img in nession-server nession-agent; do
             docker buildx imagetools create -t ${REG}/${img}:${TAG} \
-              ${REG}/${img}:${TAG}-amd64 \
-              ${REG}/${img}:${TAG}-arm64
+              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
             [ "$TAG" = "main" ] && \
             docker buildx imagetools create -t ${REG}/${img}:latest \
-              ${REG}/${img}:${TAG}-amd64 \
-              ${REG}/${img}:${TAG}-arm64
+              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
           done
 
   # ── 更新 kustomization.yaml ──
@@ -159,9 +152,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           cd k8s
+          REG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           kustomize edit set image \
-            ghcr.io/${{ github.repository_owner }}/nession-server:main \
-            ghcr.io/${{ github.repository_owner }}/nession-agent:main
+            ${REG}/nession-server:main \
+            ${REG}/nession-agent:main
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
