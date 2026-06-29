@@ -9,27 +9,21 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/nession
 
 jobs:
-  build:
+  # ── Server image ──
+  build-server:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # Need write to commit kustomization.yaml
+      contents: write
       packages: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up QEMU (for multi-platform builds)
-        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.8.1
 
@@ -41,46 +35,112 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.server
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=buildx
-          cache-to: type=gha,mode=max,scope=buildx
+          cache-from: type=gha,scope=buildx-server
+          cache-to: type=gha,mode=max,scope=buildx-server
         env:
           SCCACHE_BUCKET: ""
           SCCACHE_S3_USE_SSL: "true"
           RUSTC_WRAPPER: sccache
 
-      - name: Update Kustomize image tag
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+  # ── Agent image ──
+  build-agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.8.1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=buildx-agent
+          cache-to: type=gha,mode=max,scope=buildx-agent
+        env:
+          SCCACHE_BUCKET: ""
+          SCCACHE_S3_USE_SSL: "true"
+          RUSTC_WRAPPER: sccache
+
+  # ── Update kustomization after both images are pushed ──
+  update-kustomize:
+    needs: [build-server, build-agent]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update kustomization image tags
         run: |
           cd k8s
-          IMAGE_TAG=${{ steps.meta.outputs.version }}
-          kustomize edit set image ghcr.io/${{ github.repository_owner }}/nession:${IMAGE_TAG}
+          IMAGE_TAG=${{ github.ref_name }}
+          # On main branch, tag is "main"
+          if [ "$IMAGE_TAG" = "main" ]; then
+            TAG="main"
+          else
+            TAG="$IMAGE_TAG"
+          fi
+          kustomize edit set image \
+            ghcr.io/${{ github.repository_owner }}/nession-server:${TAG} \
+            ghcr.io/${{ github.repository_owner }}/nession-agent:${TAG}
 
       - name: Commit and push kustomization.yaml
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update image tag to ${{ steps.meta.outputs.version }}"
+          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ github.ref_name }}"
           git push
