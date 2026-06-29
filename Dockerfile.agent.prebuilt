@@ -1,0 +1,27 @@
+# Minimal agent image — packages pre-built binary + nginx + web UI + tmux
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base tmux && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /etc/nginx/sites-enabled/default
+
+# Binary from rust build (arch-specific)
+COPY --from=agent-bin /nession-agent /usr/local/bin/nession-agent
+
+# Web UI static files (built once, shared across archs)
+COPY --from=web-dist / /usr/share/nginx/html/
+
+# Deploy scripts
+COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY deploy/entrypoint-agent.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+RUN mkdir -p /etc/nession
+WORKDIR /etc/nession
+
+EXPOSE 10080 19090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:10080/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
