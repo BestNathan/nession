@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: nession-ui
-          image: ghcr.io/bestnathan/nession:ui-main
+          image: ghcr.io/bestnathan/nession-ui:main
           imagePullPolicy: Always
           ports:
             - containerPort: 80
