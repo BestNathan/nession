@@ -185,6 +185,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - run: cd web && npm ci && npm run build
+      - run: mkdir -p /tmp/web-dist && cp -r web/dist/* /tmp/web-dist/
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -202,6 +203,8 @@ jobs:
           file: Dockerfile.ui
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}
+          build-contexts: |
+            web-dist=/tmp/web-dist
 
   # ── 合并 multi-arch manifest ──
   merge:

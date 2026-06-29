@@ -1,8 +1,8 @@
 # UI-only image: just nginx serving static web files
 FROM nginx:1.27-alpine
 
-# Web UI static files
-COPY web/dist /usr/share/nginx/html
+# Web UI static files (passed via build context)
+COPY --from=web-dist / /usr/share/nginx/html
 
 # nginx config for SPA (fallback to index.html)
 RUN cat > /etc/nginx/conf.d/default.conf <<'EOF'
@@ -23,9 +23,7 @@ server {
 }
 EOF
 
-RUN rm -f /etc/nginx/conf.d/default.conf.bak
-
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost/health || exit 1
+    CMD wget -qO- http://localhost/health || exit 1
