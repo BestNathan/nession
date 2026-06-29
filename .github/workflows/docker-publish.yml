@@ -173,6 +173,11 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Set image refs (lowercase)
+        run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "WEB_VER=${{ needs.versions.outputs.web_version }}" >> $GITHUB_ENV
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -196,7 +201,7 @@ jobs:
           context: .
           file: Dockerfile.ui
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/nession:ui-${{ needs.versions.outputs.web_version }}
+          tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}
 
   # ── 合并 multi-arch manifest ──
   merge:
