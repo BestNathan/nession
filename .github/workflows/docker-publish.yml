@@ -137,6 +137,7 @@ jobs:
       - name: Load, push per-arch, create multi-arch manifest
         run: |
           REG="${{ env.REGISTRY }}/${{ github.repository_owner }}"
+          REG="${REG,,}"  # lowercase required for Docker image refs
           TAG="${{ github.ref_name }}"
           # 用临时 ref 推 per-arch，最后合并后删除
           TMP_TAG="__build-${{ github.run_id }}"
@@ -159,12 +160,17 @@ jobs:
 
           # 清理临时 tag（通过 GHCR API 删除）
           echo "Cleaning up temporary tags..."
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
           for img in server agent; do
             for suffix in "${TMP_TAG}-amd64" "${TMP_TAG}-arm64"; do
-              gh api --method DELETE \
-                "repos/${{ github.repository }}/packages/container/nession-${img}/versions" \
-                -f "package_version_ids=$(gh api "repos/${{ github.repository }}/packages/container/nession-${img}/versions" --jq '.[] | select(.metadata.container.tags[] | contains("'${suffix}'")) | .id' 2>/dev/null | head -1)" \
-                2>/dev/null || true
+              VERSION_ID=$(gh api "repos/${OWNER}/${REPO}/packages/container/nession-${img}/versions" \
+                --jq ".[] | select(.metadata.container.tags[] | contains(\"${suffix}\")) | .id" 2>/dev/null | head -1)
+              if [ -n "$VERSION_ID" ]; then
+                gh api --method DELETE \
+                  "repos/${OWNER}/${REPO}/packages/container/nession-${img}/versions/${VERSION_ID}" \
+                  2>/dev/null || true
+              fi
             done
           done
         env:
