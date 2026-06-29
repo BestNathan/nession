@@ -7,9 +7,10 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: read
-  packages: write
+# 所有镜像推到同一个 ghcr.io/bestnathan/nession package，用 tag 前缀区分 server/agent
+# tag 规则：
+#   server-{branch}-amd64 / server-{branch}-arm64 → server-{branch} (multi-arch)
+#   agent-{branch}-amd64  / agent-{branch}-arm64  → agent-{branch}  (multi-arch)
 
 jobs:
   # ── amd64: 原生 x86_64 ──
@@ -22,9 +23,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set image refs (lowercase)
         run: |
-          echo "IMG_SERVER=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-server" >> $GITHUB_ENV
-          echo "IMG_AGENT=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-agent" >> $GITHUB_ENV
-          echo "TAG=${{ github.ref_name }}-amd64" >> $GITHUB_ENV
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -60,7 +60,7 @@ jobs:
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMG_SERVER }}:${{ env.TAG }}
+          tags: ${{ env.IMG }}:server-${{ env.TAG }}-amd64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
@@ -73,7 +73,7 @@ jobs:
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMG_AGENT }}:${{ env.TAG }}
+          tags: ${{ env.IMG }}:agent-${{ env.TAG }}-amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
@@ -88,9 +88,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set image refs (lowercase)
         run: |
-          echo "IMG_SERVER=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-server" >> $GITHUB_ENV
-          echo "IMG_AGENT=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession-agent" >> $GITHUB_ENV
-          echo "TAG=${{ github.ref_name }}-arm64" >> $GITHUB_ENV
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -126,7 +125,7 @@ jobs:
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ env.IMG_SERVER }}:${{ env.TAG }}
+          tags: ${{ env.IMG }}:server-${{ env.TAG }}-arm64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
@@ -139,7 +138,7 @@ jobs:
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ env.IMG_AGENT }}:${{ env.TAG }}
+          tags: ${{ env.IMG }}:agent-${{ env.TAG }}-arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
@@ -160,14 +159,17 @@ jobs:
 
       - name: Create multi-arch manifests
         run: |
-          REG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
           TAG="${{ github.ref_name }}"
-          for img in nession-server nession-agent; do
-            docker buildx imagetools create -t ${REG}/${img}:${TAG} \
-              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
-            [ "$TAG" = "main" ] && \
-            docker buildx imagetools create -t ${REG}/${img}:latest \
-              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
+          for prefix in server agent; do
+            docker buildx imagetools create -t ${IMG}:${prefix}-${TAG} \
+              ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
+            if [ "$TAG" = "main" ]; then
+              docker buildx imagetools create -t ${IMG}:${prefix} \
+                ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
+              docker buildx imagetools create -t ${IMG}:${prefix}-latest \
+                ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
+            fi
           done
 
   # ── 更新 kustomization.yaml ──
@@ -181,10 +183,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           cd k8s
-          REG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
           kustomize edit set image \
-            ${REG}/nession-server:main \
-            ${REG}/nession-agent:main
+            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-main \
+            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-main
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
