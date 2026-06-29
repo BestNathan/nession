@@ -7,12 +7,6 @@ on:
   pull_request:
     branches: [main]
 
-# 所有镜像推到同一个 ghcr.io/bestnathan/nession package，用 tag 前缀 + 版本号区分
-# tag 规则：
-#   server-{rust_version}-{arch} → server-{rust_version} (multi-arch)
-#   agent-{rust_version}-{arch}  → agent-{rust_version}  (multi-arch)
-#   ui-{web_version}             (web 是纯静态，不需要 multi-arch)
-
 jobs:
   # ── 读取版本号 ──
   versions:
@@ -24,23 +18,42 @@ jobs:
       - uses: actions/checkout@v4
       - id: versions
         run: |
-          # Rust workspace version from Cargo.toml
           RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          # Web version from package.json
           WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
           echo "Rust: ${RUST_VER}, Web: ${WEB_VER}"
 
+  # ── Build web UI 一次（架构无关）──
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 1
+
   # ── amd64: 原生 x86_64 ──
   build-amd64:
-    needs: versions
+    needs: [versions, build-web]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: /tmp/web-dist
       - name: Set image refs (lowercase)
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
@@ -48,17 +61,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "."
-          cache-all-crates: "true"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+        with: { workspaces: ".", cache-all-crates: "true" }
 
       - run: cargo build --release --bin nession-server --bin nession-agent
-      - run: cd web && npm ci && npm run build
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
@@ -83,7 +88,7 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64
           build-contexts: |
             server-bin=/tmp/server-bin
-            web-dist=web/dist
+            web-dist=/tmp/web-dist
 
       - name: Build & push agent (amd64)
         if: github.event_name != 'pull_request'
@@ -96,17 +101,33 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
-            web-dist=web/dist
+            web-dist=/tmp/web-dist
+
+      - name: Build & push UI (amd64)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:ui-${{ needs.versions.outputs.web_version }}-amd64
+          build-contexts: |
+            web-dist=/tmp/web-dist
 
   # ── arm64: GitHub 原生 ARM runner ──
   build-arm64:
-    needs: versions
+    needs: [versions, build-web]
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: /tmp/web-dist
       - name: Set image refs (lowercase)
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
@@ -114,17 +135,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "."
-          cache-all-crates: "true"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+        with: { workspaces: ".", cache-all-crates: "true" }
 
       - run: cargo build --release --bin nession-server --bin nession-agent
-      - run: cd web && npm ci && npm run build
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
@@ -149,7 +162,7 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64
           build-contexts: |
             server-bin=/tmp/server-bin
-            web-dist=web/dist
+            web-dist=/tmp/web-dist
 
       - name: Build & push agent (arm64)
         if: github.event_name != 'pull_request'
@@ -162,40 +175,21 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
-            web-dist=web/dist
+            web-dist=/tmp/web-dist
 
-  # ── UI image (纯静态，无需 multi-arch) ──
-  build-ui:
-    needs: versions
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set image refs (lowercase)
-        run: |
-          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
-          echo "WEB_VER=${{ needs.versions.outputs.web_version }}" >> $GITHUB_ENV
-
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push UI
+      - name: Build & push UI (arm64)
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.ui
+          file: Dockerfile.ui.prebuilt
+          platforms: linux/arm64
           push: true
-          tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}
+          tags: ${{ env.IMG }}:ui-${{ needs.versions.outputs.web_version }}-arm64
+          build-contexts: |
+            web-dist=/tmp/web-dist
 
-  # ── 合并 multi-arch manifest ──
+  # ── 合并 multi-arch manifests ──
   merge:
     needs: [versions, build-amd64, build-arm64]
     if: github.event_name != 'pull_request'
@@ -212,15 +206,18 @@ jobs:
       - name: Create multi-arch manifests
         run: |
           IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          VER="${{ needs.versions.outputs.rust_version }}"
+          RUST_VER="${{ needs.versions.outputs.rust_version }}"
+          WEB_VER="${{ needs.versions.outputs.web_version }}"
           for prefix in server agent; do
-            docker buildx imagetools create -t ${IMG}:${prefix}-${VER} \
-              ${IMG}:${prefix}-${VER}-amd64 ${IMG}:${prefix}-${VER}-arm64
+            docker buildx imagetools create -t ${IMG}:${prefix}-${RUST_VER} \
+              ${IMG}:${prefix}-${RUST_VER}-amd64 ${IMG}:${prefix}-${RUST_VER}-arm64
           done
+          docker buildx imagetools create -t ${IMG}:ui-${WEB_VER} \
+            ${IMG}:ui-${WEB_VER}-amd64 ${IMG}:ui-${WEB_VER}-arm64
 
   # ── 更新 kustomization.yaml ──
   update-kustomize:
-    needs: [versions, merge, build-ui]
+    needs: [versions, merge]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -240,5 +237,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ needs.versions.outputs.rust_version }}"
+          git diff --staged --quiet || git commit -m "chore: update image tags (rust=${{ needs.versions.outputs.rust_version }}, web=${{ needs.versions.outputs.web_version }})"
           git push
