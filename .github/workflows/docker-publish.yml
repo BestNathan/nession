@@ -11,12 +11,9 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # ── amd64: 原生 x86_64 编译 ──
+  # ── amd64: 原生 x86_64，导出 tar artifact ──
   build-amd64:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -25,11 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm', cache-dependency-path: web/package-lock.json }
 
-      - name: Build Rust binaries
-        run: cargo build --release --bin nession-server --bin nession-agent
-
-      - name: Build web UI
-        run: cd web && npm ci && npm run build
+      - run: cargo build --release --bin nession-server --bin nession-agent
+      - run: cd web && npm ci && npm run build
 
       - name: Prepare image context
         run: |
@@ -38,43 +32,40 @@ jobs:
           cp target/release/nession-agent /tmp/agent-bin/
 
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push server image (amd64)
+      - name: Build & export server (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-amd64
+          outputs: type=docker,dest=/tmp/server-amd64.tar
+          tags: nession-server:amd64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
 
-      - name: Push agent image (amd64)
+      - name: Build & export agent (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-amd64
+          outputs: type=docker,dest=/tmp/agent-amd64.tar
+          tags: nession-agent:amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
 
-  # ── arm64: GitHub 原生 ARM runner ──
+      - uses: actions/upload-artifact@v4
+        with:
+          name: images-amd64
+          path: /tmp/*-amd64.tar
+          retention-days: 1
+
+  # ── arm64: GitHub 原生 ARM runner，导出 tar artifact ──
   build-arm64:
     runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -83,11 +74,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm', cache-dependency-path: web/package-lock.json }
 
-      - name: Build Rust binaries
-        run: cargo build --release --bin nession-server --bin nession-agent
-
-      - name: Build web UI
-        run: cd web && npm ci && npm run build
+      - run: cargo build --release --bin nession-server --bin nession-agent
+      - run: cd web && npm ci && npm run build
 
       - name: Prepare image context
         run: |
@@ -96,39 +84,39 @@ jobs:
           cp target/release/nession-agent /tmp/agent-bin/
 
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push server image (arm64)
+      - name: Build & export server (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-arm64
+          outputs: type=docker,dest=/tmp/server-arm64.tar
+          tags: nession-server:arm64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
 
-      - name: Push agent image (arm64)
+      - name: Build & export agent (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-arm64
+          outputs: type=docker,dest=/tmp/agent-arm64.tar
+          tags: nession-agent:arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
 
-  # ── 合并为 multi-arch manifest ──
-  merge:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: images-arm64
+          path: /tmp/*-arm64.tar
+          retention-days: 1
+
+  # ── 合并 multi-arch，只推最终 tag ──
+  push:
     needs: [build-amd64, build-arm64]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -140,21 +128,51 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create multi-arch manifests
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: images-*
+          merge-multiple: true
+          path: /tmp/
+
+      - name: Load, push per-arch, create multi-arch manifest
         run: |
           REG="${{ env.REGISTRY }}/${{ github.repository_owner }}"
           TAG="${{ github.ref_name }}"
-          for img in nession-server nession-agent; do
-            docker buildx imagetools create -t ${REG}/${img}:${TAG} \
-              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
+          # 用临时 ref 推 per-arch，最后合并后删除
+          TMP_TAG="__build-${{ github.run_id }}"
+
+          for img in server agent; do
+            for arch in amd64 arm64; do
+              docker load -i /tmp/${img}-${arch}.tar
+              docker tag ${img}:${arch} ${REG}/nession-${img}:${TMP_TAG}-${arch}
+              docker push ${REG}/nession-${img}:${TMP_TAG}-${arch}
+            done
+            # 合并 multi-arch manifest
+            docker buildx imagetools create -t ${REG}/nession-${img}:${TAG} \
+              ${REG}/nession-${img}:${TMP_TAG}-amd64 \
+              ${REG}/nession-${img}:${TMP_TAG}-arm64
             [ "$TAG" = "main" ] && \
-            docker buildx imagetools create -t ${REG}/${img}:latest \
-              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
+            docker buildx imagetools create -t ${REG}/nession-${img}:latest \
+              ${REG}/nession-${img}:${TMP_TAG}-amd64 \
+              ${REG}/nession-${img}:${TMP_TAG}-arm64
           done
+
+          # 清理临时 tag（通过 GHCR API 删除）
+          echo "Cleaning up temporary tags..."
+          for img in server agent; do
+            for suffix in "${TMP_TAG}-amd64" "${TMP_TAG}-arm64"; do
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/nession-${img}/versions" \
+                -f "package_version_ids=$(gh api "repos/${{ github.repository }}/packages/container/nession-${img}/versions" --jq '.[] | select(.metadata.container.tags[] | contains("'${suffix}'")) | .id' 2>/dev/null | head -1)" \
+                2>/dev/null || true
+            done
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── 更新 kustomization.yaml ──
   update-kustomize:
-    needs: merge
+    needs: push
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions: { contents: write }
