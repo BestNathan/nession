@@ -11,211 +11,130 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # ── Build web UI once (shared by both arch images) ──
-  web-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-      - run: cd web && npm ci && npm run build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist/
-          retention-days: 1
-
-  # ── Build amd64 images (native x86_64) ──
+  # ── amd64: 原生 x86_64 编译 ──
   build-amd64:
-    needs: web-build
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm', cache-dependency-path: web/package-lock.json }
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust build cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "."
-          cache-all-crates: "true"
-
-      - name: Build Rust binaries (native amd64)
+      - name: Build Rust binaries
         run: cargo build --release --bin nession-server --bin nession-agent
 
-      - name: Prepare artifacts
+      - name: Build web UI
+        run: cd web && npm ci && npm run build
+
+      - name: Prepare image context
         run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
           cp target/release/nession-agent /tmp/agent-bin/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: /tmp/web-dist/
-
       - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
+      - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Server image (amd64)
-      - name: Meta — server
-        id: meta-server
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server
-          tags: |
-            type=ref,event=branch,suffix=-amd64
-            type=raw,value=latest-amd64,enable={{is_default_branch}}
-
-      - name: Build & push — server (amd64)
+      - name: Push server image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-server.outputs.tags }}
-          labels: ${{ steps.meta-server.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-amd64
           build-contexts: |
             server-bin=/tmp/server-bin
-            web-dist=/tmp/web-dist
+            web-dist=web/dist
 
-      # Agent image (amd64)
-      - name: Meta — agent
-        id: meta-agent
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent
-          tags: |
-            type=ref,event=branch,suffix=-amd64
-            type=raw,value=latest-amd64,enable={{is_default_branch}}
-
-      - name: Build & push — agent (amd64)
+      - name: Push agent image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-agent.outputs.tags }}
-          labels: ${{ steps.meta-agent.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
-            web-dist=/tmp/web-dist
+            web-dist=web/dist
 
-  # ── Build arm64 images (native ARM, no QEMU) ──
+  # ── arm64: GitHub 原生 ARM runner ──
   build-arm64:
-    needs: web-build
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm', cache-dependency-path: web/package-lock.json }
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust build cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "."
-          cache-all-crates: "true"
-
-      - name: Build Rust binaries (native arm64)
+      - name: Build Rust binaries
         run: cargo build --release --bin nession-server --bin nession-agent
 
-      - name: Prepare artifacts
+      - name: Build web UI
+        run: cd web && npm ci && npm run build
+
+      - name: Prepare image context
         run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
           cp target/release/nession-agent /tmp/agent-bin/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: /tmp/web-dist/
-
       - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
+      - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Server image (arm64)
-      - name: Meta — server
-        id: meta-server
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server
-          tags: |
-            type=ref,event=branch,suffix=-arm64
-            type=raw,value=latest-arm64,enable={{is_default_branch}}
-
-      - name: Build & push — server (arm64)
+      - name: Push server image (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-server.outputs.tags }}
-          labels: ${{ steps.meta-server.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-server:${{ github.ref_name }}-arm64
           build-contexts: |
             server-bin=/tmp/server-bin
-            web-dist=/tmp/web-dist
+            web-dist=web/dist
 
-      # Agent image (arm64)
-      - name: Meta — agent
-        id: meta-agent
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent
-          tags: |
-            type=ref,event=branch,suffix=-arm64
-            type=raw,value=latest-arm64,enable={{is_default_branch}}
-
-      - name: Build & push — agent (arm64)
+      - name: Push agent image (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-agent.outputs.tags }}
-          labels: ${{ steps.meta-agent.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}-arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
-            web-dist=/tmp/web-dist
+            web-dist=web/dist
 
-  # ── Merge per-arch images into multi-arch manifests ──
-  merge-manifests:
+  # ── 合并为 multi-arch manifest ──
+  merge:
     needs: [build-amd64, build-arm64]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      packages: write
+    permissions: { packages: write }
     steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -225,39 +144,30 @@ jobs:
         run: |
           REG="${{ env.REGISTRY }}/${{ github.repository_owner }}"
           TAG="${{ github.ref_name }}"
-
           for img in nession-server nession-agent; do
             docker buildx imagetools create -t ${REG}/${img}:${TAG} \
-              ${REG}/${img}:${TAG}-amd64 \
-              ${REG}/${img}:${TAG}-arm64
-            if [ "${{ github.ref_name }}" = "main" ]; then
-              docker buildx imagetools create -t ${REG}/${img}:latest \
-                ${REG}/${img}:${TAG}-amd64 \
-                ${REG}/${img}:${TAG}-arm64
-            fi
+              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
+            [ "$TAG" = "main" ] && \
+            docker buildx imagetools create -t ${REG}/${img}:latest \
+              ${REG}/${img}:${TAG}-amd64 ${REG}/${img}:${TAG}-arm64
           done
 
-  # ── Update kustomization.yaml ──
+  # ── 更新 kustomization.yaml ──
   update-kustomize:
-    needs: merge-manifests
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: merge
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
-
-      - name: Update kustomization image tags
-        run: |
+      - run: |
           cd k8s
           kustomize edit set image \
-            ghcr.io/${{ github.repository_owner }}/nession-server:${{ github.ref_name }} \
-            ghcr.io/${{ github.repository_owner }}/nession-agent:${{ github.ref_name }}
-
-      - name: Commit and push kustomization.yaml
-        run: |
+            ghcr.io/${{ github.repository_owner }}/nession-server:main \
+            ghcr.io/${{ github.repository_owner }}/nession-agent:main
+      - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ github.ref_name }}"
+          git diff --staged --quiet || git commit -m "chore: update image tags to main"
           git push
