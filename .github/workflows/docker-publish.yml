@@ -139,13 +139,12 @@ jobs:
           REG="${{ env.REGISTRY }}/${{ github.repository_owner }}"
           REG="${REG,,}"  # lowercase required for Docker image refs
           TAG="${{ github.ref_name }}"
-          # 用临时 ref 推 per-arch，最后合并后删除
           TMP_TAG="__build-${{ github.run_id }}"
 
           for img in server agent; do
             for arch in amd64 arm64; do
               docker load -i /tmp/${img}-${arch}.tar
-              docker tag ${img}:${arch} ${REG}/nession-${img}:${TMP_TAG}-${arch}
+              docker tag nession-${img}:${arch} ${REG}/nession-${img}:${TMP_TAG}-${arch}
               docker push ${REG}/nession-${img}:${TMP_TAG}-${arch}
             done
             # 合并 multi-arch manifest
