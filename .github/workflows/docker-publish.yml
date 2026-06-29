@@ -7,14 +7,34 @@ on:
   pull_request:
     branches: [main]
 
-# 所有镜像推到同一个 ghcr.io/bestnathan/nession package，用 tag 前缀区分 server/agent
+# 所有镜像推到同一个 ghcr.io/bestnathan/nession package，用 tag 前缀 + 版本号区分
 # tag 规则：
-#   server-{branch}-amd64 / server-{branch}-arm64 → server-{branch} (multi-arch)
-#   agent-{branch}-amd64  / agent-{branch}-arm64  → agent-{branch}  (multi-arch)
+#   server-{rust_version}-{arch} → server-{rust_version} (multi-arch)
+#   agent-{rust_version}-{arch}  → agent-{rust_version}  (multi-arch)
+#   ui-{web_version}             (web 是纯静态，不需要 multi-arch)
 
 jobs:
+  # ── 读取版本号 ──
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_version: ${{ steps.versions.outputs.rust_version }}
+      web_version: ${{ steps.versions.outputs.web_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: versions
+        run: |
+          # Rust workspace version from Cargo.toml
+          RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          # Web version from package.json
+          WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+          echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
+          echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
+          echo "Rust: ${RUST_VER}, Web: ${WEB_VER}"
+
   # ── amd64: 原生 x86_64 ──
   build-amd64:
+    needs: versions
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,7 +44,7 @@ jobs:
       - name: Set image refs (lowercase)
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
-          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.versions.outputs.rust_version }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -60,7 +80,7 @@ jobs:
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMG }}:server-${{ env.TAG }}-amd64
+          tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
@@ -73,13 +93,14 @@ jobs:
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMG }}:agent-${{ env.TAG }}-amd64
+          tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
 
   # ── arm64: GitHub 原生 ARM runner ──
   build-arm64:
+    needs: versions
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -89,7 +110,7 @@ jobs:
       - name: Set image refs (lowercase)
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
-          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.versions.outputs.rust_version }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -125,7 +146,7 @@ jobs:
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ env.IMG }}:server-${{ env.TAG }}-arm64
+          tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=web/dist
@@ -138,14 +159,48 @@ jobs:
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ env.IMG }}:agent-${{ env.TAG }}-arm64
+          tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=web/dist
 
+  # ── UI image (纯静态，无需 multi-arch) ──
+  build-ui:
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - run: cd web && npm ci && npm run build
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push UI
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/nession:ui-${{ needs.versions.outputs.web_version }}
+
   # ── 合并 multi-arch manifest ──
   merge:
-    needs: [build-amd64, build-arm64]
+    needs: [versions, build-amd64, build-arm64]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -160,21 +215,15 @@ jobs:
       - name: Create multi-arch manifests
         run: |
           IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          TAG="${{ github.ref_name }}"
+          VER="${{ needs.versions.outputs.rust_version }}"
           for prefix in server agent; do
-            docker buildx imagetools create -t ${IMG}:${prefix}-${TAG} \
-              ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
-            if [ "$TAG" = "main" ]; then
-              docker buildx imagetools create -t ${IMG}:${prefix} \
-                ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
-              docker buildx imagetools create -t ${IMG}:${prefix}-latest \
-                ${IMG}:${prefix}-${TAG}-amd64 ${IMG}:${prefix}-${TAG}-arm64
-            fi
+            docker buildx imagetools create -t ${IMG}:${prefix}-${VER} \
+              ${IMG}:${prefix}-${VER}-amd64 ${IMG}:${prefix}-${VER}-arm64
           done
 
   # ── 更新 kustomization.yaml ──
   update-kustomize:
-    needs: merge
+    needs: [versions, merge, build-ui]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -184,12 +233,15 @@ jobs:
       - run: |
           cd k8s
           OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          RUST_VER="${{ needs.versions.outputs.rust_version }}"
+          WEB_VER="${{ needs.versions.outputs.web_version }}"
           kustomize edit set image \
-            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-main \
-            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-main
+            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${RUST_VER} \
+            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${RUST_VER} \
+            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${WEB_VER}
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update image tags to main"
+          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ needs.versions.outputs.rust_version }}"
           git push

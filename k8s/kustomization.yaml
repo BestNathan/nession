@@ -4,22 +4,29 @@ kind: Kustomization
 namespace: nession
 
 images:
-- name: ghcr.io/bestnathan/nession-agent
-  newName: ghcr.io/bestnathan/nession
-  newTag: agent-main
-- name: ghcr.io/bestnathan/nession-server
-  newName: ghcr.io/bestnathan/nession
-  newTag: server-main
+  - name: ghcr.io/bestnathan/nession-server
+    newName: ghcr.io/bestnathan/nession
+    newTag: server-main
+  - name: ghcr.io/bestnathan/nession-agent
+    newName: ghcr.io/bestnathan/nession
+    newTag: agent-main
+  - name: ghcr.io/bestnathan/nession-ui
+    newName: ghcr.io/bestnathan/nession
+    newTag: ui-main
 
-  # ── 共用 ──
-  # ── Server 套件 ──
-  # ── Agent 套件 ──
 resources:
-- namespace.yaml
-- secret.yaml
-- deployment-server.yaml
-- service-server.yaml
-- ingress-server.yaml
-- deployment-agent.yaml
-- service-agent.yaml
-- ingress-agent.yaml
+  # ── 共用 ──
+  - namespace.yaml
+  - secret.yaml
+  # ── Server 套件 ──
+  - deployment-server.yaml
+  - service-server.yaml
+  - ingress-server.yaml
+  # ── Agent 套件 ──
+  - deployment-agent.yaml
+  - service-agent.yaml
+  - ingress-agent.yaml
+  # ── UI ──
+  - deployment-ui.yaml
+  - service-ui.yaml
+  - ingress-ui.yaml
