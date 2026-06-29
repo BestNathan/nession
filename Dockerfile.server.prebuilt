@@ -1,5 +1,6 @@
-# Minimal server image — just packages pre-built binary + nginx + web UI
-FROM debian:bookworm-slim
+# Minimal server image — packages pre-built binary + nginx + web UI
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
     rm -rf /var/lib/apt/lists/* && \

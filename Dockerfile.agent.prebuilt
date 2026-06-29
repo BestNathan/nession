@@ -1,5 +1,6 @@
 # Minimal agent image — packages pre-built binary + nginx + web UI + tmux
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base tmux && \
     rm -rf /var/lib/apt/lists/* && \
