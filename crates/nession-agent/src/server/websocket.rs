@@ -104,6 +104,14 @@ pub mod msg_types {
     pub const TERMINAL_INPUT: &str = "terminal.input";
     pub const TERMINAL_RESIZE: &str = "terminal.resize";
 
+    // Web UI → Agent (compatibility layer)
+    pub const CLIENT_AUTH: &str = "client.auth";
+    pub const CLIENT_AGENTS_LIST: &str = "client.agents.list";
+    pub const CLIENT_SESSIONS_LIST: &str = "client.sessions.list";
+    pub const CLIENT_SESSION_ATTACH: &str = "client.session.attach";
+    pub const CLIENT_SESSION_CREATE: &str = "client.session.create";
+    pub const CLIENT_SESSION_KILL: &str = "client.session.kill";
+
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
     pub const OK: &str = "ok";
@@ -171,6 +179,99 @@ fn default_height() -> u16 {
     24
 }
 
+// --- Web UI compatibility payloads ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientAuthPayload {
+    #[serde(default)]
+    pub auth_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthResponsePayload {
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAgentInfo {
+    pub agent_id: String,
+    pub hostname: String,
+    pub ip_address: String,
+    pub port: u16,
+    pub status: String,
+    pub session_count: u32,
+    pub last_heartbeat: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAgentsListResponse {
+    pub agents: Vec<WebAgentInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionInfo {
+    pub session_id: String,
+    pub agent_id: String,
+    pub session_name: String,
+    pub status: String,
+    pub window_count: u32,
+    pub attached_clients: u32,
+    pub last_activity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionsListResponse {
+    pub sessions: Vec<WebSessionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionAttachPayload {
+    pub session_id: String,
+    #[serde(default = "default_p2p")]
+    pub preferred_mode: String,
+}
+
+fn default_p2p() -> String {
+    "p2p".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAttachInfo {
+    pub mode: String,
+    pub session_id: String,
+    pub session_name: String,
+    pub agent_address: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionCreatePayload {
+    pub agent_id: String,
+    pub name: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionCreateResponse {
+    pub success: bool,
+    pub session_id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionKillPayload {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionKillResponse {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 // --- Response payloads (agent → client) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +321,15 @@ pub struct ErrorPayload {
 
 fn now_timestamp() -> u64 {
     chrono::Utc::now().timestamp() as u64
+}
+
+/// Extract the tmux session name from a web UI session_id.
+/// Web UI uses "agent_id:session_name" format; strip the prefix if present.
+fn extract_session_name(session_id: &str) -> String {
+    session_id
+        .split_once(':')
+        .map(|(_, name)| name.to_string())
+        .unwrap_or_else(|| session_id.to_string())
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -722,6 +832,148 @@ impl AgentServer {
                         "not_attached",
                         &format!("not attached to session: {}", payload.session_name),
                     ),
+                }
+            }
+
+            // --- Web UI compatibility handlers ---
+
+            msg_types::CLIENT_AUTH => {
+                let resp = AuthResponsePayload {
+                    status: "success".to_string(),
+                    message: "ok".to_string(),
+                };
+                serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+            }
+
+            msg_types::CLIENT_AGENTS_LIST => match tmux.list_sessions().await {
+                Ok(sessions_list) => {
+                    let hostname = std::env::var("HOSTNAME")
+                        .unwrap_or_else(|_| "localhost".to_string());
+                    let agent = WebAgentInfo {
+                        agent_id: "local-agent".to_string(),
+                        hostname,
+                        ip_address: "127.0.0.1".to_string(),
+                        port: 9090,
+                        status: "online".to_string(),
+                        session_count: sessions_list.len() as u32,
+                        last_heartbeat: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let resp = WebAgentsListResponse { agents: vec![agent] };
+                    serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+                }
+                Err(e) => err("list_failed", &e.to_string()),
+            },
+
+            msg_types::CLIENT_SESSIONS_LIST => match tmux.list_sessions().await {
+                Ok(sessions_list) => {
+                    let sessions: Vec<WebSessionInfo> = sessions_list
+                        .into_iter()
+                        .map(|s| {
+                            let session_id = format!("local-agent:{}", s.name);
+                            WebSessionInfo {
+                                session_id: session_id.clone(),
+                                agent_id: "local-agent".to_string(),
+                                session_name: s.name,
+                                status: if s.attached_clients > 0 {
+                                    "active".to_string()
+                                } else {
+                                    "detached".to_string()
+                                },
+                                window_count: s.window_count,
+                                attached_clients: s.attached_clients,
+                                last_activity: chrono::Utc::now().to_rfc3339(),
+                            }
+                        })
+                        .collect();
+                    let resp = WebSessionsListResponse { sessions };
+                    serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+                }
+                Err(e) => err("list_failed", &e.to_string()),
+            },
+
+            msg_types::CLIENT_SESSION_ATTACH => {
+                let payload: WebSessionAttachPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return err("parse_error", &e.to_string()),
+                    };
+                let session_name = extract_session_name(&payload.session_id);
+                let resp = WebAttachInfo {
+                    mode: "p2p".to_string(),
+                    session_id: payload.session_id,
+                    session_name: session_name.clone(),
+                    agent_address: "127.0.0.1:9090".to_string(),
+                };
+                serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+            }
+
+            msg_types::CLIENT_SESSION_CREATE => {
+                let payload: WebSessionCreatePayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let resp = WebSessionCreateResponse {
+                                success: false,
+                                session_id: None,
+                                error: Some(e.to_string()),
+                            };
+                            return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                                .unwrap_or_default();
+                        }
+                    };
+                match tmux.create_session(&payload.name, payload.width, payload.height).await {
+                    Ok(()) => {
+                        let session_id = format!("local-agent:{}", payload.name);
+                        let resp = WebSessionCreateResponse {
+                            success: true,
+                            session_id: Some(session_id),
+                            error: None,
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        let resp = WebSessionCreateResponse {
+                            success: false,
+                            session_id: None,
+                            error: Some(e.to_string()),
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                }
+            }
+
+            msg_types::CLIENT_SESSION_KILL => {
+                let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let resp = WebSessionKillResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                        };
+                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+                let session_name = extract_session_name(&payload.session_id);
+                match tmux.kill_session(&session_name).await {
+                    Ok(()) => {
+                        let resp = WebSessionKillResponse {
+                            success: true,
+                            error: None,
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        let resp = WebSessionKillResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
                 }
             }
 

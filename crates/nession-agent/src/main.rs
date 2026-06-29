@@ -81,35 +81,42 @@ async fn main() -> Result<()> {
     };
 
     let tmux_for_client = Arc::new(TmuxManager::new());
-    let server_client = ServerClient::new(
-        &config.server_url,
-        &config.auth_token,
-        &config.agent_id,
-        &hostname,
-        &ip_address,
-        port,
-        metadata,
-        tmux_for_client,
-    );
 
-    // Attempt to connect with a timeout so the agent can still serve
-    // local clients even if the central server is unreachable.
-    let client_handle = tokio::select! {
-        result = server_client.connect_and_run() => {
-            match result {
-                Ok(handle) => {
-                    info!("Connected to central server");
-                    Some(handle)
-                }
-                Err(e) => {
-                    error!("Failed to connect to central server: {:#}", e);
-                    None
+    // Skip server connection if server_url is empty (standalone mode)
+    let client_handle = if config.server_url.trim().is_empty() {
+        info!("No server_url configured — running in standalone mode");
+        None
+    } else {
+        let server_client = ServerClient::new(
+            &config.server_url,
+            &config.auth_token,
+            &config.agent_id,
+            &hostname,
+            &ip_address,
+            port,
+            metadata,
+            tmux_for_client,
+        );
+
+        // Attempt to connect with a timeout so the agent can still serve
+        // local clients even if the central server is unreachable.
+        tokio::select! {
+            result = server_client.connect_and_run() => {
+                match result {
+                    Ok(handle) => {
+                        info!("Connected to central server");
+                        Some(handle)
+                    }
+                    Err(e) => {
+                        error!("Failed to connect to central server: {:#}", e);
+                        None
+                    }
                 }
             }
-        }
-        _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
-            warn!("Timed out connecting to central server after 30s, continuing without sync");
-            None
+            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                warn!("Timed out connecting to central server after 30s, continuing without sync");
+                None
+            }
         }
     };
 

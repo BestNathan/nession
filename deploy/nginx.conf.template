@@ -1,4 +1,6 @@
-# Upstream: Rust server (SERVER_BACKEND is set by entrypoint.sh with default)
+# Upstream: SERVER_BACKEND is set by entrypoint.sh
+#   agent mode  → 127.0.0.1:9090 (local agent)
+#   server mode → 127.0.0.1:8080 (local server)
 upstream nession_backend {
     server ${SERVER_BACKEND};
 }

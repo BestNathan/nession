@@ -1,0 +1,67 @@
+# ---- Build stages (shared with agent via Docker build context) ----
+
+# Stage 1: Prepare cargo-chef recipe
+FROM rust:1.88-bookworm AS planner
+WORKDIR /build
+RUN cargo install cargo-chef --locked
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 2: Build dependencies (cached)
+FROM rust:1.88-bookworm AS cacher
+WORKDIR /build
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+RUN cargo install cargo-chef --locked
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 3: Build web UI
+FROM node:20-alpine AS web-builder
+WORKDIR /build
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ .
+RUN npm run build
+
+# Stage 4: Build server binary
+FROM rust:1.88-bookworm AS rust-builder
+WORKDIR /build
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV CARGO_INCREMENTAL=0
+COPY --from=cacher /build/target target
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY . .
+RUN cargo build --release --bin nession-server
+
+# Stage 5: Server runtime (no tmux needed)
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        nginx ca-certificates curl gettext-base && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=rust-builder /build/target/release/nession-server /usr/local/bin/nession-server
+COPY --from=web-builder /build/dist /usr/share/nginx/html
+COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY deploy/entrypoint-server.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+RUN mkdir -p /data /etc/nession && chown www-data:www-data /data
+RUN rm -f /etc/nginx/sites-enabled/default
+
+WORKDIR /etc/nession
+
+# Port 10080: nginx (web UI + proxy)
+# Port 18080: server WebSocket (for agents to connect)
+EXPOSE 10080 18080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:10080/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

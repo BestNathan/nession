@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+# Agent entrypoint — starts nginx + nession-agent (with tmux)
+
+LISTEN_PORT="${LISTEN_PORT:-10080}"
+AGENT_LISTEN="${AGENT_LISTEN:-0.0.0.0:19090}"
+SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:19090}"
+AGENT_ID="${AGENT_ID:-docker-agent}"
+AGENT_SERVER_URL="${AGENT_SERVER_URL:-}"
+AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
+
+export LISTEN_PORT SERVER_BACKEND
+
+# Generate nginx config
+envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
+  < /etc/nginx/templates/default.conf.template \
+  > /etc/nginx/conf.d/default.conf
+
+nginx -t
+nginx -g 'daemon off;' &
+
+# Generate agent config
+cat > /etc/nession/agent-config.toml <<TOML
+agent_id = "${AGENT_ID}"
+listen_address = "${AGENT_LISTEN}"
+server_url = "${AGENT_SERVER_URL}"
+auth_token = "${AGENT_AUTH_TOKEN}"
+heartbeat_interval_secs = 10
+session_poll_interval_secs = 5
+TOML
+
+echo "=== nession-agent ==="
+echo "  Agent ID:    $AGENT_ID"
+echo "  Listen:      $AGENT_LISTEN"
+echo "  Server URL:  ${AGENT_SERVER_URL:-<standalone>}"
+echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
+echo "  tmux:        $(tmux -V 2>/dev/null || echo 'not found')"
+
+exec /usr/local/bin/nession-agent /etc/nession/agent-config.toml

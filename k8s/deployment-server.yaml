@@ -1,48 +1,59 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nession
+  name: nession-server
   namespace: nession
   labels:
     app: nession
+    component: server
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: nession
+      component: server
   template:
     metadata:
       labels:
         app: nession
+        component: server
     spec:
       containers:
-        - name: nession
-          image: ghcr.io/bestnathan/nession:latest
+        - name: nession-server
+          image: ghcr.io/bestnathan/nession-server:main
           imagePullPolicy: Always
           ports:
-            - containerPort: 80
+            - containerPort: 10080
               name: http
-            - containerPort: 443
-              name: https
+            - containerPort: 18080
+              name: server-ws
           env:
-            - name: NESION_AUTH_TOKEN
+            - name: LISTEN_PORT
+              value: "10080"
+            - name: SERVER_LISTEN
+              value: "0.0.0.0:18080"
+            - name: SERVER_BACKEND
+              value: "127.0.0.1:18080"
+            - name: SERVER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: nession-secret
                   key: auth-token
+            - name: SERVER_DB_PATH
+              value: "/data/server.db"
           volumeMounts:
             - name: data
               mountPath: /data
           livenessProbe:
             httpGet:
               path: /health
-              port: http
+              port: 10080
             initialDelaySeconds: 10
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
-              port: http
+              port: 10080
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
@@ -52,6 +63,8 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+      imagePullSecrets:
+        - name: ghcr-bestnathan
       volumes:
         - name: data
           emptyDir: {}

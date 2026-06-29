@@ -1,0 +1,64 @@
+#!/bin/sh
+set -e
+
+# Server entrypoint — starts nginx + nession-server
+
+LISTEN_PORT="${LISTEN_PORT:-10080}"
+SERVER_LISTEN="${SERVER_LISTEN:-0.0.0.0:18080}"
+SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:18080}"
+SERVER_AUTH_TOKEN="${SERVER_AUTH_TOKEN:-}"
+SERVER_DB_PATH="${SERVER_DB_PATH:-/data/server.db}"
+
+export LISTEN_PORT SERVER_BACKEND
+
+# Generate nginx config
+envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
+  < /etc/nginx/templates/default.conf.template \
+  > /etc/nginx/conf.d/default.conf
+
+# Optional TLS
+if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then
+  sed -i 's|server_name _;|server_name _;\n    return 301 https://\$host\$request_uri;|' \
+    /etc/nginx/conf.d/default.conf
+  cat >> /etc/nginx/conf.d/default.conf <<NGINX
+server {
+    listen 443 ssl;
+    server_name _;
+    ssl_certificate     ${TLS_CERT_PATH};
+    ssl_certificate_key ${TLS_KEY_PATH};
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    location /health { return 200 'ok'; add_header Content-Type text/plain; }
+    location /ws {
+        proxy_pass http://${SERVER_BACKEND};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+    location /api { proxy_pass http://${SERVER_BACKEND}; proxy_set_header Host \$host; }
+    location / { root /usr/share/nginx/html; index index.html; try_files \$uri \$uri/ /index.html; }
+}
+NGINX
+fi
+
+nginx -t
+nginx -g 'daemon off;' &
+
+# Generate server config
+cat > /etc/nession/config.toml <<TOML
+listen_address = "${SERVER_LISTEN}"
+auth_token = "${SERVER_AUTH_TOKEN}"
+db_path = "${SERVER_DB_PATH}"
+tls_cert_path = "${TLS_CERT_PATH:-}"
+tls_key_path = "${TLS_KEY_PATH:-}"
+heartbeat_timeout_secs = 30
+TOML
+
+echo "=== nession-server ==="
+echo "  Listen:      $SERVER_LISTEN"
+echo "  DB:          $SERVER_DB_PATH"
+echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
+
+exec /usr/local/bin/nession-server

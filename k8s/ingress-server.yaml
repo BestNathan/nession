@@ -1,14 +1,12 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: nession
+  name: nession-server
   namespace: nession
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "86400"
+    higress.io/domain: "nession.nhome.local"
     higress.io/upstream-read-timeout: "86400"
-    higress.io/upstream-send-timeout: "86400"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: higress
   rules:
@@ -19,6 +17,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: nession
+                name: nession-server
                 port:
-                  number: 80
+                  number: 10080

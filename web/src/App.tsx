@@ -13,7 +13,7 @@ function App() {
     () => params.get('token') || localStorage.getItem('nession_token') || ''
   );
   const [serverUrl, setServerUrl] = useState(
-    () => params.get('server_url') || localStorage.getItem('nession_server_url') || 'ws://localhost:3000/ws'
+    () => params.get('server_url') || localStorage.getItem('nession_server_url') || 'ws://localhost:13000/ws'
   );
   const autoConnect = params.get('token') !== null;
 
@@ -126,7 +126,7 @@ function App() {
             value={serverUrl}
             onChange={(e) => setServerUrl(e.target.value)}
             disabled={connectionStatus !== 'disconnected'}
-            placeholder="ws://localhost:3000/ws"
+            placeholder="ws://localhost:13000/ws"
           />
         </div>
 
