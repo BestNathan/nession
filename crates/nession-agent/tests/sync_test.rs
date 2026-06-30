@@ -76,7 +76,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         Arc::new(TmuxManager::new()),
     );
 
-    client.connect_and_run().await.expect("connect failed")
+    client.connect_and_run().await.expect("connect failed").0
 }
 
 // ---------------------------------------------------------------------------

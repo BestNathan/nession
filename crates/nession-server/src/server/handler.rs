@@ -24,6 +24,8 @@ pub struct ConnectionHandler {
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     server_auth_token: String,
+    /// Heartbeat interval (seconds) advertised to agents on registration.
+    heartbeat_interval_secs: u64,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
 }
@@ -34,12 +36,14 @@ impl ConnectionHandler {
         session_registry: Arc<SessionRegistry>,
         command_broker: Arc<CommandBroker>,
         server_auth_token: String,
+        heartbeat_interval_secs: u64,
     ) -> Self {
         Self {
             agent_registry,
             session_registry,
             command_broker,
             server_auth_token,
+            heartbeat_interval_secs,
             authenticated_client: false,
             registered_agent_id: None,
         }
@@ -134,7 +138,8 @@ impl ConnectionHandler {
                 "timestamp": current_timestamp(),
                 "payload": {
                     "status": "accepted",
-                    "message": "Registration successful"
+                    "message": "Registration successful",
+                    "heartbeat_interval_secs": self.heartbeat_interval_secs
                 }
             }).to_string()
         ))))
@@ -159,7 +164,19 @@ impl ConnectionHandler {
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;
 
-        Ok(HandlerAction::Reply(None))
+        // Acknowledge so the agent can confirm the link is healthy in both
+        // directions and reset its own miss counter.
+        Ok(HandlerAction::Reply(Some(Message::Text(
+            json!({
+                "msg_type": "server.heartbeat.ack",
+                "id": msg.id,
+                "timestamp": current_timestamp(),
+                "payload": {
+                    "agent_id": agent_id,
+                    "server_time": current_timestamp()
+                }
+            }).to_string()
+        ))))
     }
 
     async fn handle_agent_session_update(
@@ -435,7 +452,20 @@ impl ConnectionHandler {
         // Look up the agent
         let agent = self.agent_registry.get(&agent_id).await;
         let agent = match agent {
-            Some(a) => a,
+            Some(a) if a.status == AgentStatus::Online => a,
+            Some(_) => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.attach.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "error",
+                            "message": format!("Agent '{}' is offline", agent_id)
+                        }
+                    }).to_string()
+                ))));
+            }
             None => {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({

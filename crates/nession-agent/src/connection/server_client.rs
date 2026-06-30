@@ -1,7 +1,15 @@
 //! WebSocket client for connecting to the central nession-server.
 //!
-//! The [`ServerClient`] establishes a WebSocket connection to the central server,
-//! registers the agent, and sends periodic heartbeats and session updates.
+//! The [`ServerClient`] runs a supervisor task that connects to the central
+//! server, registers the agent, and then services the connection. If the
+//! connection drops for any reason, the supervisor reconnects with exponential
+//! backoff and re-registers — the loop never exits until shutdown is requested.
+//!
+//! Outgoing messages (heartbeats, session updates) are queued on an unbounded
+//! channel rather than written to the socket directly. The supervisor drains
+//! the queue onto whatever connection is currently live; while disconnected,
+//! queued messages are dropped. This means callers never observe a "broken
+//! pipe" — sending always succeeds locally and delivery resumes after reconnect.
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -12,7 +20,7 @@ use nession_common::protocol::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
 };
@@ -41,6 +49,7 @@ pub mod msg_types {
     pub const AGENT_REGISTER_RESPONSE: &str = "agent.register.response";
     pub const AGENT_HEARTBEAT: &str = "agent.heartbeat";
     pub const AGENT_SESSION_UPDATE: &str = "agent.session.update";
+    pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
 }
 
 /// Payload for session update messages.
@@ -58,16 +67,15 @@ pub struct SessionUpdatePayload {
 pub struct RegisterResponsePayload {
     pub status: String,
     pub message: String,
+    /// Heartbeat interval the server wants this agent to use, in seconds.
+    #[serde(default)]
+    pub heartbeat_interval_secs: Option<u64>,
 }
 
 /// WebSocket client that connects to the central nession-server.
 ///
-/// The client handles:
-/// - Initial connection with TLS support
-/// - Agent registration
-/// - Heartbeat sending
-/// - Session updates
-/// - Automatic reconnection with exponential backoff
+/// The client owns a supervisor task that handles connection, registration,
+/// the message loop, and automatic reconnection with exponential backoff.
 pub struct ServerClient {
     /// Server URL (e.g., "wss://server.example.com:8443").
     server_url: String,
@@ -81,12 +89,6 @@ pub struct ServerClient {
     ip_address: String,
     /// Port where the agent's WebSocket server is listening.
     port: u16,
-    /// WebSocket sink for sending messages.
-    sink: Option<Arc<Mutex<WsSink>>>,
-    /// Shutdown signal receiver.
-    shutdown_rx: Option<mpsc::Receiver<()>>,
-    /// Shutdown signal sender (cloneable handle).
-    shutdown_tx: mpsc::Sender<()>,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -94,15 +96,18 @@ pub struct ServerClient {
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
+///
+/// Messages are queued on a channel and delivered by the supervisor task to
+/// the live connection. Sends never fail due to a dropped connection.
 #[derive(Clone)]
 pub struct ServerClientHandle {
-    sink: Arc<Mutex<WsSink>>,
+    outbox: mpsc::UnboundedSender<WsMessage>,
     shutdown_tx: mpsc::Sender<()>,
     agent_id: String,
 }
 
 impl ServerClientHandle {
-    /// Send a heartbeat message to the server.
+    /// Queue a heartbeat message for delivery to the server.
     pub async fn send_heartbeat(
         &self,
         status: AgentStatus,
@@ -122,13 +127,10 @@ impl ServerClientHandle {
             },
         };
         let msg = new_message(msg_types::AGENT_HEARTBEAT, payload);
-        let json = serde_json::to_string(&msg)?;
-        let mut sink = self.sink.lock().await;
-        sink.send(WsMessage::Text(json)).await?;
-        Ok(())
+        self.enqueue(&msg)
     }
 
-    /// Send a session update message to the server.
+    /// Queue a session update message for delivery to the server.
     pub async fn send_session_update(
         &self,
         session_name: &str,
@@ -144,10 +146,16 @@ impl ServerClientHandle {
             attached_clients,
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
-        let json = serde_json::to_string(&msg)?;
-        let mut sink = self.sink.lock().await;
-        sink.send(WsMessage::Text(json)).await?;
-        Ok(())
+        self.enqueue(&msg)
+    }
+
+    /// Serialize and enqueue a protocol message. A closed outbox (supervisor
+    /// gone) is the only failure; a merely-disconnected socket is not.
+    fn enqueue<P: Serialize>(&self, msg: &ProtocolMessage<P>) -> Result<()> {
+        let json = serde_json::to_string(msg)?;
+        self.outbox
+            .send(WsMessage::Text(json))
+            .map_err(|_| anyhow::anyhow!("server client supervisor has stopped"))
     }
 
     /// Request the client to shut down.
@@ -180,7 +188,6 @@ impl ServerClient {
         metadata: AgentMetadata,
         tmux: Arc<TmuxManager>,
     ) -> Self {
-        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         Self {
             server_url: server_url.into(),
             auth_token: auth_token.into(),
@@ -188,93 +195,123 @@ impl ServerClient {
             hostname: hostname.into(),
             ip_address: ip_address.into(),
             port,
-            sink: None,
-            shutdown_rx: Some(shutdown_rx),
-            shutdown_tx,
             metadata,
             tmux,
         }
     }
 
-    /// Connect to the server and start the message loop.
+    /// Start the supervisor task and return a handle plus the heartbeat
+    /// interval the server requested on first registration.
     ///
-    /// This method will attempt to connect to the server, register the agent,
-    /// and then enter a message loop to handle server responses. If the connection
-    /// is lost, it will automatically reconnect with exponential backoff.
-    ///
-    /// Returns a [`ServerClientHandle`] that can be used to send messages and
-    /// trigger shutdown.
-    pub async fn connect_and_run(mut self) -> Result<ServerClientHandle> {
+    /// The supervisor connects, registers, services the connection, and
+    /// reconnects with exponential backoff whenever the link drops — it runs
+    /// until [`ServerClientHandle::shutdown`] is called. This call waits for
+    /// the first successful connect+register so the returned interval reflects
+    /// the server's configured cadence; on the (unlikely) event the supervisor
+    /// stops before the first registration it falls back to `None`.
+    pub async fn connect_and_run(self) -> Result<(ServerClientHandle, Option<u64>)> {
+        let (outbox_tx, outbox_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+        // One-shot-ish channel to learn the heartbeat interval from the first
+        // registration. Using a bounded channel of 1 keeps it simple.
+        let (interval_tx, mut interval_rx) = mpsc::channel::<Option<u64>>(1);
+
+        let handle = ServerClientHandle {
+            outbox: outbox_tx,
+            shutdown_tx,
+            agent_id: self.agent_id.clone(),
+        };
+
+        // Spawn the supervisor; it owns the reconnect loop and never returns
+        // until shutdown.
+        tokio::spawn(async move {
+            self.supervise(outbox_rx, shutdown_rx, interval_tx).await;
+        });
+
+        // Wait (briefly) for the first registration to report the interval.
+        let interval = interval_rx.recv().await.flatten();
+        Ok((handle, interval))
+    }
+
+    /// Supervisor loop: connect → register → service → reconnect, forever.
+    async fn supervise(
+        self,
+        mut outbox_rx: mpsc::UnboundedReceiver<WsMessage>,
+        mut shutdown_rx: mpsc::Receiver<()>,
+        interval_tx: mpsc::Sender<Option<u64>>,
+    ) {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY;
+        let mut reported_interval = false;
 
         loop {
-            match self.try_connect().await {
-                Ok(handle) => {
+            // Bail out immediately if shutdown was requested between attempts.
+            if shutdown_rx.try_recv().is_ok() {
+                info!("Server client shutting down before reconnect");
+                return;
+            }
+
+            match self.connect_once().await {
+                Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
-                    // Reset reconnect delay on successful connection (for next time).
-                    // Note: This assignment is intentional for future reconnection attempts,
-                    // even though the value isn't read before returning.
-                    #[allow(unused_assignments)]
-                    {
-                        reconnect_delay = INITIAL_RECONNECT_DELAY;
+                    reconnect_delay = INITIAL_RECONNECT_DELAY;
+
+                    // Report the heartbeat interval from the first connection so
+                    // connect_and_run can unblock.
+                    if !reported_interval {
+                        let _ = interval_tx.try_send(interval);
+                        reported_interval = true;
                     }
-                    return Ok(handle);
+
+                    // Service the live connection until it drops or shutdown.
+                    let outcome = self
+                        .run_connection(sink, stream, &mut outbox_rx, &mut shutdown_rx)
+                        .await;
+                    match outcome {
+                        ConnectionOutcome::Shutdown => {
+                            info!("Server client shut down");
+                            return;
+                        }
+                        ConnectionOutcome::Disconnected => {
+                            warn!("Disconnected from server; will reconnect");
+                        }
+                    }
                 }
                 Err(e) => {
+                    // Make sure connect_and_run doesn't block forever if the
+                    // very first connection fails.
+                    if !reported_interval {
+                        let _ = interval_tx.try_send(None);
+                        reported_interval = true;
+                    }
                     warn!(
                         "Failed to connect to server: {:#}. Reconnecting in {:?}",
                         e, reconnect_delay
                     );
-                    tokio::time::sleep(reconnect_delay).await;
-                    // Exponential backoff: double the delay, but cap at MAX_RECONNECT_DELAY.
+                    tokio::select! {
+                        _ = tokio::time::sleep(reconnect_delay) => {}
+                        _ = shutdown_rx.recv() => {
+                            info!("Server client shutting down during backoff");
+                            return;
+                        }
+                    }
                     reconnect_delay = std::cmp::min(reconnect_delay * 2, MAX_RECONNECT_DELAY);
                 }
             }
         }
     }
 
-    /// Attempt to connect to the server once.
-    async fn try_connect(&mut self) -> Result<ServerClientHandle> {
+    /// Establish one connection and register. Returns the split sink/stream and
+    /// the heartbeat interval the server advertised (if any).
+    async fn connect_once(&self) -> Result<(WsSink, WsStreamHalf, Option<u64>)> {
         info!("Connecting to server at {}", self.server_url);
 
-        // Connect to WebSocket server.
         let (ws_stream, _) = connect_async(&self.server_url)
             .await
             .context("failed to connect to server")?;
 
-        let (ws_sink, ws_stream) = ws_stream.split();
-        let sink = Arc::new(Mutex::new(ws_sink));
+        let (mut sink, mut stream) = ws_stream.split();
 
-        // Register the agent.
-        self.register(&sink).await?;
-
-        // Store the sink for later use.
-        self.sink = Some(sink.clone());
-
-        // Take the shutdown receiver (only once).
-        let shutdown_rx = self
-            .shutdown_rx
-            .take()
-            .context("shutdown_rx already taken")?;
-
-        let handle = ServerClientHandle {
-            sink: sink.clone(),
-            shutdown_tx: self.shutdown_tx.clone(),
-            agent_id: self.agent_id.clone(),
-        };
-
-        // Spawn a task to handle incoming messages and shutdown.
-        let agent_id = self.agent_id.clone();
-        let tmux = self.tmux.clone();
-        tokio::spawn(async move {
-            Self::run_message_loop(ws_stream, sink, shutdown_rx, agent_id, tmux).await;
-        });
-
-        Ok(handle)
-    }
-
-    /// Send registration message to the server.
-    async fn register(&self, sink: &Arc<Mutex<WsSink>>) -> Result<()> {
+        // Send registration.
         let payload = AgentRegisterPayload {
             agent_id: self.agent_id.clone(),
             hostname: self.hostname.clone(),
@@ -284,93 +321,128 @@ impl ServerClient {
             metadata: self.metadata.clone(),
             protocol_version: "1.0".to_string(),
         };
-
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;
-
-        let mut sink_lock = sink.lock().await;
-        sink_lock
-            .send(WsMessage::Text(json))
+        sink.send(WsMessage::Text(json))
             .await
             .context("failed to send registration message")?;
-
         info!("Sent registration message for agent {}", self.agent_id);
-        Ok(())
+
+        // Wait for the registration response so we can learn the heartbeat
+        // interval and confirm acceptance before reporting "connected".
+        let interval;
+        loop {
+            match stream.next().await {
+                Some(Ok(WsMessage::Text(text))) => {
+                    let resp: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)
+                        .context("failed to parse registration response")?;
+                    if resp.msg_type == msg_types::AGENT_REGISTER_RESPONSE {
+                        let payload: RegisterResponsePayload =
+                            serde_json::from_value(resp.payload)?;
+                        if payload.status == "accepted" {
+                            info!(
+                                "Agent {} registration accepted: {}",
+                                self.agent_id, payload.message
+                            );
+                            interval = payload.heartbeat_interval_secs;
+                            break;
+                        } else {
+                            anyhow::bail!(
+                                "registration rejected by server: {}",
+                                payload.message
+                            );
+                        }
+                    }
+                    // Ignore any other message arriving before the response.
+                }
+                Some(Ok(WsMessage::Ping(data))) => {
+                    sink.send(WsMessage::Pong(data)).await.ok();
+                }
+                Some(Ok(_)) => {}
+                Some(Err(e)) => return Err(anyhow::Error::from(e).context("error awaiting registration response")),
+                None => anyhow::bail!("connection closed before registration response"),
+            }
+        }
+
+        Ok((sink, stream, interval))
     }
 
-    /// Run the message loop to handle incoming messages and shutdown signals.
-    async fn run_message_loop(
-        mut ws_stream: WsStreamHalf,
-        sink: Arc<Mutex<WsSink>>,
-        mut shutdown_rx: mpsc::Receiver<()>,
-        agent_id: String,
-        tmux: Arc<TmuxManager>,
-    ) {
+    /// Service a live connection: forward queued outgoing messages, handle
+    /// incoming server messages, respond to pings, and watch for shutdown.
+    /// Returns whether the loop ended due to shutdown or a dropped connection.
+    async fn run_connection(
+        &self,
+        mut sink: WsSink,
+        mut stream: WsStreamHalf,
+        outbox_rx: &mut mpsc::UnboundedReceiver<WsMessage>,
+        shutdown_rx: &mut mpsc::Receiver<()>,
+    ) -> ConnectionOutcome {
         loop {
             tokio::select! {
-                // Handle incoming WebSocket messages.
-                msg = ws_stream.next() => {
-                    match msg {
+                // Outgoing: drain the outbox onto the live socket.
+                outgoing = outbox_rx.recv() => {
+                    match outgoing {
+                        Some(msg) => {
+                            if let Err(e) = sink.send(msg).await {
+                                warn!("Failed to send to server: {:#}", e);
+                                return ConnectionOutcome::Disconnected;
+                            }
+                        }
+                        None => {
+                            // Outbox closed: handle dropped, treat as shutdown.
+                            return ConnectionOutcome::Shutdown;
+                        }
+                    }
+                }
+                // Incoming: server messages, pings, close.
+                incoming = stream.next() => {
+                    match incoming {
                         Some(Ok(WsMessage::Text(text))) => {
-                            if let Err(e) = Self::handle_server_message(&text, &sink, &agent_id, &tmux).await {
+                            if let Err(e) = self.handle_server_message(&text, &mut sink).await {
                                 warn!("Error handling server message: {:#}", e);
                             }
                         }
+                        Some(Ok(WsMessage::Ping(data))) => {
+                            let _ = sink.send(WsMessage::Pong(data)).await;
+                        }
                         Some(Ok(WsMessage::Close(_))) => {
                             info!("Server closed connection");
-                            break;
+                            return ConnectionOutcome::Disconnected;
                         }
-                        Some(Ok(WsMessage::Ping(data))) => {
-                            let mut sink_lock = sink.lock().await;
-                            let _ = sink_lock.send(WsMessage::Pong(data)).await;
-                        }
+                        Some(Ok(_)) => {}
                         Some(Err(e)) => {
                             error!("WebSocket error: {:#}", e);
-                            break;
+                            return ConnectionOutcome::Disconnected;
                         }
                         None => {
                             info!("WebSocket stream ended");
-                            break;
+                            return ConnectionOutcome::Disconnected;
                         }
-                        _ => {}
                     }
                 }
-                // Handle shutdown signal.
+                // Shutdown: close the socket and stop the supervisor.
                 _ = shutdown_rx.recv() => {
                     info!("Shutdown signal received");
-                    let mut sink_lock = sink.lock().await;
-                    let _ = sink_lock.send(WsMessage::Close(None)).await;
-                    break;
+                    let _ = sink.send(WsMessage::Close(None)).await;
+                    return ConnectionOutcome::Shutdown;
                 }
             }
         }
     }
 
-    /// Handle a message received from the server.
-    async fn handle_server_message(
-        text: &str,
-        sink: &Arc<Mutex<WsSink>>,
-        agent_id: &str,
-        tmux: &TmuxManager,
-    ) -> Result<()> {
+    /// Handle a message received from the server, writing any response directly
+    /// to the connection's sink.
+    async fn handle_server_message(&self, text: &str, sink: &mut WsSink) -> Result<()> {
         let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(text)
             .context("failed to parse server message")?;
 
         match msg.msg_type.as_str() {
             msg_types::AGENT_REGISTER_RESPONSE => {
-                let response: RegisterResponsePayload =
-                    serde_json::from_value(msg.payload)?;
-                if response.status == "accepted" {
-                    info!(
-                        "Agent {} registration accepted: {}",
-                        agent_id, response.message
-                    );
-                } else {
-                    error!(
-                        "Agent {} registration rejected: {}",
-                        agent_id, response.message
-                    );
-                }
+                // Already handled during connect; log late/duplicate responses.
+                debug!("Late registration response ignored");
+            }
+            msg_types::SERVER_HEARTBEAT_ACK => {
+                debug!("Heartbeat acknowledged by server");
             }
             "server.session.create" => {
                 let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
@@ -380,7 +452,7 @@ impl ServerClient {
 
                 info!("Server requested session create: name={}, width={}, height={}", name, width, height);
 
-                let (success, error, session_name) = match tmux.create_session(&name, width, height).await {
+                let (success, error, session_name) = match self.tmux.create_session(&name, width, height).await {
                     Ok(()) => (true, None, Some(name.clone())),
                     Err(e) => (false, Some(e.to_string()), None),
                 };
@@ -397,9 +469,7 @@ impl ServerClient {
                         "session_name": session_name,
                     }
                 });
-
-                let mut sink_lock = sink.lock().await;
-                sink_lock.send(WsMessage::Text(response.to_string())).await?;
+                sink.send(WsMessage::Text(response.to_string())).await?;
             }
             "server.session.kill" => {
                 let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
@@ -407,7 +477,7 @@ impl ServerClient {
 
                 info!("Server requested session kill: name={}", name);
 
-                let (success, error) = match tmux.kill_session(&name).await {
+                let (success, error) = match self.tmux.kill_session(&name).await {
                     Ok(()) => (true, None),
                     Err(e) => (false, Some(e.to_string())),
                 };
@@ -423,9 +493,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-
-                let mut sink_lock = sink.lock().await;
-                sink_lock.send(WsMessage::Text(response.to_string())).await?;
+                sink.send(WsMessage::Text(response.to_string())).await?;
             }
             _ => {
                 debug!(
@@ -437,6 +505,14 @@ impl ServerClient {
 
         Ok(())
     }
+}
+
+/// Why [`ServerClient::run_connection`] returned.
+enum ConnectionOutcome {
+    /// Shutdown was requested (or the handle was dropped).
+    Shutdown,
+    /// The connection dropped; the supervisor should reconnect.
+    Disconnected,
 }
 
 /// Helper function to create a new message with a unique ID and timestamp.
@@ -520,7 +596,7 @@ mod tests {
             Arc::new(TmuxManager::new()),
         );
 
-        let handle = client.connect_and_run().await.expect("connect failed");
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Wait for registration message.
         let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -561,7 +637,7 @@ mod tests {
             Arc::new(TmuxManager::new()),
         );
 
-        let handle = client.connect_and_run().await.expect("connect failed");
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Skip registration message.
         let _ = msg_rx.recv().await;
@@ -612,7 +688,7 @@ mod tests {
             Arc::new(TmuxManager::new()),
         );
 
-        let handle = client.connect_and_run().await.expect("connect failed");
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Skip registration message.
         let _ = msg_rx.recv().await;
@@ -635,6 +711,146 @@ mod tests {
         assert_eq!(parsed["payload"]["status"], "active");
         assert_eq!(parsed["payload"]["window_count"], 3);
         assert_eq!(parsed["payload"]["attached_clients"], 1);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that advertises a heartbeat interval in its register
+    /// response, then (after `accepts` connections) stays idle.
+    async fn start_mock_server_with_interval(
+        port: u16,
+        interval_secs: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": {
+                        "status": "accepted",
+                        "message": "ok",
+                        "heartbeat_interval_secs": interval_secs
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                while let Some(Ok(_)) = stream.next().await {}
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn test_register_response_conveys_heartbeat_interval() {
+        let port = 28084;
+        let server_handle = start_mock_server_with_interval(port, 42).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-iv",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            metadata,
+            Arc::new(TmuxManager::new()),
+        );
+
+        let (handle, interval) = client.connect_and_run().await.expect("connect failed");
+        assert_eq!(interval, Some(42));
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_supervisor_reconnects_after_drop() {
+        let port = 28085;
+
+        // Server that accepts a first connection, registers, then drops it;
+        // accepts a second connection and forwards the agent_id of whatever it
+        // receives so the test can confirm a re-registration happened.
+        let (re_tx, mut re_rx) = mpsc::channel::<String>(4);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("bind");
+        let server_handle = tokio::spawn(async move {
+            for round in 0..2u32 {
+                if let Ok((stream, _)) = listener.accept().await {
+                    let ws = accept_async(stream).await.expect("accept ws");
+                    let (mut sink, mut stream) = ws.split();
+                    let response = serde_json::json!({
+                        "msg_type": "agent.register.response",
+                        "id": "test-id",
+                        "timestamp": 1,
+                        "payload": { "status": "accepted", "message": "ok" }
+                    });
+                    let _ = sink.send(WsMessage::Text(response.to_string())).await;
+
+                    // Read the register message and report it.
+                    if let Some(Ok(WsMessage::Text(text))) = stream.next().await {
+                        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+                        if parsed["msg_type"] == "agent.register" {
+                            let _ = re_tx
+                                .send(parsed["payload"]["agent_id"].as_str().unwrap_or("").to_string())
+                                .await;
+                        }
+                    }
+
+                    // On the first round, drop the connection to force a reconnect.
+                    if round == 0 {
+                        drop(sink);
+                        drop(stream);
+                    } else {
+                        while let Some(Ok(_)) = stream.next().await {}
+                    }
+                }
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "reconnect-agent",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            metadata,
+            Arc::new(TmuxManager::new()),
+        );
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // First registration.
+        let first = tokio::time::timeout(Duration::from_secs(2), re_rx.recv())
+            .await
+            .expect("timeout on first register")
+            .expect("no first register");
+        assert_eq!(first, "reconnect-agent");
+
+        // After the server drops the connection, the supervisor should
+        // reconnect and re-register within the backoff window.
+        let second = tokio::time::timeout(Duration::from_secs(5), re_rx.recv())
+            .await
+            .expect("timeout on re-register (supervisor did not reconnect)")
+            .expect("no second register");
+        assert_eq!(second, "reconnect-agent");
 
         handle.shutdown().await.ok();
         server_handle.abort();

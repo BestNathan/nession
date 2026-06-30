@@ -284,22 +284,23 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         Arc::new(TmuxManager::new()),
     );
 
-    let client_handle = tokio::select! {
+    let (client_handle, heartbeat_interval_secs) = tokio::select! {
         result = server_client.connect_and_run() => {
             match result {
-                Ok(handle) => {
-                    info!("Connected to central server");
-                    Some(handle)
+                Ok((handle, server_interval)) => {
+                    let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
+                    info!("Connected to central server (heartbeat interval: {}s)", interval);
+                    (Some(handle), interval)
                 }
                 Err(e) => {
                     error!("Failed to connect to central server: {:#}", e);
-                    None
+                    (None, config.heartbeat_interval_secs)
                 }
             }
         }
         _ = tokio::time::sleep(Duration::from_secs(30)) => {
             info!("Timed out connecting to central server after 30s, continuing without sync");
-            None
+            (None, config.heartbeat_interval_secs)
         }
     };
 
@@ -308,7 +309,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         let heartbeat = HeartbeatLoop::new(
             handle.clone(),
             TmuxManager::new(),
-            config.heartbeat_interval_secs,
+            heartbeat_interval_secs,
         );
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {

@@ -4,6 +4,11 @@ import { ConnectionStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import './App.css';
 
+// Default server URL: same origin as the page (ws/wss + current host).
+// Works out of the box when the UI is served from the server's domain;
+// connect to a different host by editing the Server URL field.
+const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
+
 function App() {
   // Read initial values from URL params, then localStorage, then defaults
   const params = new URLSearchParams(window.location.search);
@@ -13,7 +18,7 @@ function App() {
     () => params.get('token') || localStorage.getItem('nession_token') || ''
   );
   const [serverUrl, setServerUrl] = useState(
-    () => params.get('server_url') || localStorage.getItem('nession_server_url') || 'ws://localhost:13000/ws'
+    () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL
   );
   const autoConnect = params.get('token') !== null;
 
@@ -126,7 +131,7 @@ function App() {
             value={serverUrl}
             onChange={(e) => setServerUrl(e.target.value)}
             disabled={connectionStatus !== 'disconnected'}
-            placeholder="ws://localhost:13000/ws"
+            placeholder={DEFAULT_SERVER_URL}
           />
         </div>
 

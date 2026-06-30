@@ -72,7 +72,7 @@ async fn integration_connection_to_mock_server() {
         Arc::new(TmuxManager::new()),
     );
 
-    let handle = client.connect_and_run().await.expect("connect failed");
+    let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
     // Give it a moment to register.
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -104,7 +104,7 @@ async fn integration_registration_message_format() {
         Arc::new(TmuxManager::new()),
     );
 
-    let handle = client.connect_and_run().await.expect("connect failed");
+    let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
     // Wait for registration message.
     let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -161,7 +161,7 @@ async fn integration_heartbeat_message_format() {
         Arc::new(TmuxManager::new()),
     );
 
-    let handle = client.connect_and_run().await.expect("connect failed");
+    let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
     // Skip registration message.
     let _ = msg_rx.recv().await;
@@ -234,7 +234,7 @@ async fn integration_session_update_message_format() {
         Arc::new(TmuxManager::new()),
     );
 
-    let handle = client.connect_and_run().await.expect("connect failed");
+    let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
     // Skip registration message.
     let _ = msg_rx.recv().await;
@@ -297,7 +297,7 @@ async fn integration_reconnection_logic() {
 
     // Spawn the client connection attempt in the background.
     let client_handle = tokio::spawn(async move {
-        client.connect_and_run().await.expect("connect failed")
+        client.connect_and_run().await.expect("connect failed").0
     });
 
     // Give it time to fail a few times (exponential backoff: 1s, 2s, 4s...).

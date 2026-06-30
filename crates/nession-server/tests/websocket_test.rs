@@ -17,6 +17,7 @@ async fn test_server_accepts_connection() {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: "./test_ws_accept.db".to_string(),
     };
@@ -45,6 +46,7 @@ async fn test_agent_registration() {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: "./test_ws_register.db".to_string(),
     };
@@ -102,6 +104,7 @@ async fn test_invalid_auth_token() {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "correct_token".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: "./test_ws_auth.db".to_string(),
     };
@@ -152,6 +155,7 @@ async fn test_heartbeat_without_registration() {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: "./test_ws_heartbeat.db".to_string(),
     };

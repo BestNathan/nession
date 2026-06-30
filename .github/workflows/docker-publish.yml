@@ -3,29 +3,47 @@ name: Docker
 on:
   push:
     branches: [main]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
 
 jobs:
-  # ── 读取版本号 ──
+  # ── 读取版本号 + 检测是否变化 ──
   versions:
     runs-on: ubuntu-latest
     outputs:
       rust_version: ${{ steps.versions.outputs.rust_version }}
       web_version: ${{ steps.versions.outputs.web_version }}
+      should_deploy: ${{ steps.versions.outputs.should_deploy }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: versions
         run: |
           RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
+
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "No comparable previous commit — deploying."
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            PREV_RUST=$(git show ${BEFORE}:Cargo.toml 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
+            PREV_WEB=$(git show ${BEFORE}:web/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+            if [ "$RUST_VER" != "$PREV_RUST" ] || [ "$WEB_VER" != "$PREV_WEB" ]; then
+              echo "Version changed (rust: ${PREV_RUST} -> ${RUST_VER}, web: ${PREV_WEB} -> ${WEB_VER}) — deploying."
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version unchanged (rust: ${RUST_VER}, web: ${WEB_VER}) — skipping deploy."
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+            fi
+          fi
           echo "Rust: ${RUST_VER}, Web: ${WEB_VER}"
 
   # ── Build web UI 一次（架构无关）──
   build-web:
+    needs: versions
+    if: needs.versions.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,14 +89,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push server (amd64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -91,7 +107,6 @@ jobs:
             web-dist=/tmp/web-dist
 
       - name: Build & push agent (amd64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,7 +119,6 @@ jobs:
             web-dist=/tmp/web-dist
 
       - name: Build & push UI (amd64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -145,14 +159,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push server (arm64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -165,7 +177,6 @@ jobs:
             web-dist=/tmp/web-dist
 
       - name: Build & push agent (arm64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -178,7 +189,6 @@ jobs:
             web-dist=/tmp/web-dist
 
       - name: Build & push UI (arm64)
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -192,7 +202,7 @@ jobs:
   # ── 合并 multi-arch manifests ──
   merge:
     needs: [versions, build-amd64, build-arm64]
-    if: github.event_name != 'pull_request'
+    if: needs.versions.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -218,7 +228,7 @@ jobs:
   # ── 更新 kustomization.yaml ──
   update-kustomize:
     needs: [versions, merge]
-    if: github.ref == 'refs/heads/main'
+    if: needs.versions.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
