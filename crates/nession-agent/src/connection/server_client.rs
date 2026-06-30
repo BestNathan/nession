@@ -18,6 +18,7 @@ use nession_common::protocol::{
     Message, ProtocolMessage,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -104,9 +105,23 @@ pub struct ServerClientHandle {
     outbox: mpsc::UnboundedSender<WsMessage>,
     shutdown_tx: mpsc::Sender<()>,
     agent_id: String,
+    /// Set by the supervisor after a reconnection so that the
+    /// SessionWatcher can force a full session re-sync to the server.
+    sync_needed: Arc<AtomicBool>,
 }
 
 impl ServerClientHandle {
+    /// Mark that a full session sync is needed (called by supervisor on reconnect).
+    pub fn mark_sync_needed(&self) {
+        self.sync_needed.store(true, Ordering::SeqCst);
+    }
+
+    /// Check and clear the sync-needed flag. Returns `true` if a full
+    /// session re-sync is required (server-side registry may be stale).
+    pub fn take_sync_needed(&self) -> bool {
+        self.sync_needed.swap(false, Ordering::SeqCst)
+    }
+
     /// Queue a heartbeat message for delivery to the server.
     pub async fn send_heartbeat(
         &self,
@@ -215,17 +230,19 @@ impl ServerClient {
         // One-shot-ish channel to learn the heartbeat interval from the first
         // registration. Using a bounded channel of 1 keeps it simple.
         let (interval_tx, mut interval_rx) = mpsc::channel::<Option<u64>>(1);
+        let sync_needed = Arc::new(AtomicBool::new(false));
 
         let handle = ServerClientHandle {
             outbox: outbox_tx,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
+            sync_needed: sync_needed.clone(),
         };
 
         // Spawn the supervisor; it owns the reconnect loop and never returns
         // until shutdown.
         tokio::spawn(async move {
-            self.supervise(outbox_rx, shutdown_rx, interval_tx).await;
+            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed).await;
         });
 
         // Wait (briefly) for the first registration to report the interval.
@@ -239,6 +256,7 @@ impl ServerClient {
         mut outbox_rx: mpsc::UnboundedReceiver<WsMessage>,
         mut shutdown_rx: mpsc::Receiver<()>,
         interval_tx: mpsc::Sender<Option<u64>>,
+        sync_needed: Arc<AtomicBool>,
     ) {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY;
         let mut reported_interval = false;
@@ -254,6 +272,10 @@ impl ServerClient {
                 Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
                     reconnect_delay = INITIAL_RECONNECT_DELAY;
+
+                    // Notify the SessionWatcher that a full re-sync is needed
+                    // because the server-side session registry may be stale.
+                    sync_needed.store(true, Ordering::SeqCst);
 
                     // Report the heartbeat interval from the first connection so
                     // connect_and_run can unblock.

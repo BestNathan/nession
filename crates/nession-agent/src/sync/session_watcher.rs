@@ -95,6 +95,13 @@ impl SessionWatcher {
 
     /// Poll tmux for the current session list and send updates for any changes.
     async fn poll_and_sync(&mut self) -> Result<()> {
+        // If the supervisor reconnected, the server-side session registry was
+        // wiped. Reset our previous state so every session is re-synced.
+        if self.handle.take_sync_needed() {
+            debug!("Full session re-sync triggered after reconnection");
+            self.prev_sessions.clear();
+        }
+
         let current_sessions = self.tmux.list_sessions().await.unwrap_or_default();
 
         // Build a map of current sessions for easy lookup.
