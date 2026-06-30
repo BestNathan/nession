@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { IDisposable } from '@xterm/xterm';
@@ -28,6 +28,15 @@ function decodeB64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+/** Imperative methods exposed by the Terminal component via ref. */
+export interface TerminalHandle {
+  /**
+   * Send text to the attached session as if typed. Works in both P2P and
+   * relay modes. No-op if the underlying connection is not open.
+   */
+  sendText: (text: string) => void;
+}
+
 export interface TerminalProps {
   /** The tmux session ID (agent_id:session_name) for relay mode */
   sessionId: string;
@@ -54,17 +63,34 @@ export interface TerminalProps {
  * as a relay (relay mode), and bridges keyboard input / display output
  * between xterm.js and the remote tmux session over WebSocket.
  */
-export function Terminal({
-  sessionId,
-  sessionName,
-  mode,
-  agentUrl,
-  connectionToken,
-  serverConnection,
-  onDisconnect,
-  onError,
-}: TerminalProps) {
+export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
+  {
+    sessionId,
+    sessionName,
+    mode,
+    agentUrl,
+    connectionToken,
+    serverConnection,
+    onDisconnect,
+    onError,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Holds the live "send text to remote" closure, assigned inside the connection
+  // effect once the transport is established. Lets the imperative handle (and the
+  // keystroke path) reuse one mode-aware sender. Null when not connected.
+  const sendDataRef = useRef<((data: string) => void) | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      sendText: (text: string) => {
+        sendDataRef.current?.(text);
+      },
+    }),
+    [],
+  );
   // Refs to callback props avoid re-running the effect when the caller
   // passes a new inline arrow function on every render.
   const onDisconnectRef = useRef(onDisconnect);
@@ -168,6 +194,37 @@ export function Terminal({
         reportError(err instanceof Error ? err : new Error(String(err)));
       }
     };
+
+    /**
+     * Send raw text to the remote session using whichever transport is active.
+     * P2P: terminal.input with base64 data + session_name.
+     * Relay: serverConnection.sendTerminalInput(sessionId, data).
+     * No-op if the connection is not open.
+     */
+    const sendData = (data: string) => {
+      if (!active) return;
+      try {
+        if (mode === 'p2p') {
+          if (p2pWs?.readyState === WebSocket.OPEN) {
+            p2pWs.send(
+              JSON.stringify({
+                msg_type: 'terminal.input',
+                id: generateId(),
+                timestamp: Math.floor(Date.now() / 1000),
+                payload: { session_name: sessionName, data: encodeB64(data) },
+              }),
+            );
+          }
+        } else if (serverConnection?.isConnected()) {
+          serverConnection.sendTerminalInput(sessionId, data);
+        }
+      } catch (err) {
+        reportError(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    // Expose the sender to the imperative handle for the lifetime of this effect.
+    sendDataRef.current = sendData;
 
     // ---------------------------------------------------------------------------
     // 2. Establish the WebSocket connection
@@ -308,14 +365,7 @@ export function Terminal({
 
       // Forward keyboard input from xterm to the server.
       relayInputDisposable = term.onData((data) => {
-        if (!active) return;
-        try {
-          if (serverConnection?.isConnected()) {
-            serverConnection.sendTerminalInput(sessionId, data);
-          }
-        } catch (err) {
-          reportError(err instanceof Error ? err : new Error(String(err)));
-        }
+        sendData(data);
       });
 
       // Forward terminal resize events, debounced to 150ms to avoid flooding
@@ -344,18 +394,10 @@ export function Terminal({
     // 3. Forward keyboard input (P2P mode – relay mode handled above)
     // ---------------------------------------------------------------------------
     dataDisposable = term.onData((data) => {
-      if (!active) return;
-      if (mode === 'p2p' && p2pWs?.readyState === WebSocket.OPEN) {
-        p2pWs.send(
-          JSON.stringify({
-            msg_type: 'terminal.input',
-            id: generateId(),
-            timestamp: Math.floor(Date.now() / 1000),
-            payload: { session_name: sessionName, data: encodeB64(data) },
-          })
-        );
+      // Relay mode is wired separately above; only forward P2P keystrokes here.
+      if (mode === 'p2p') {
+        sendData(data);
       }
-      // Relay mode onData is already wired up separately above.
     });
 
     // ---------------------------------------------------------------------------
@@ -384,6 +426,7 @@ export function Terminal({
     // ---------------------------------------------------------------------------
     return () => {
       active = false;
+      sendDataRef.current = null;
       clearTimeout(mountTimer);
 
       window.removeEventListener('resize', handleWindowResize);
@@ -420,4 +463,4 @@ export function Terminal({
       <div ref={containerRef} className="nession-terminal-container" />
     </div>
   );
-}
+});

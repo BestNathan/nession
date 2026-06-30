@@ -394,6 +394,21 @@
   min-height: 0;
   padding: 0;  /* Remove padding so terminal fills completely */
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
+}
+
+/* The Terminal wrapper fills the space left of the control panel. */
+.terminal-view-body .nession-terminal {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Responsive: stack the control panel below the terminal on narrow screens. */
+@media (max-width: 768px) {
+  .terminal-view-body {
+    flex-direction: column;
+  }
 }
 
 /* ── Responsive: stack panels on narrow screens ────────────────────── */
