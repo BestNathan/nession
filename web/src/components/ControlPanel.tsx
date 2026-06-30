@@ -38,9 +38,19 @@ export function ControlPanel({ sendText }: ControlPanelProps) {
     const label = newLabel.trim();
     const command = newCommand.trim();
     if (!label || !command) return;
-    const next = [...userCommands, { id: `user-${Date.now()}`, label, command }];
+    // Suffix a random segment so two commands added in the same millisecond
+    // still get distinct ids — deleteUserCommand filters by id.
+    const id = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const next = [...userCommands, { id, label, command }];
     setUserCommands(next);
     saveUserCommands(next);
+    setNewLabel('');
+    setNewCommand('');
+    setShowAddForm(false);
+  };
+
+  const cancelAddForm = () => {
+    // Discard any in-progress draft so the form opens clean next time.
     setNewLabel('');
     setNewCommand('');
     setShowAddForm(false);
@@ -102,7 +112,7 @@ export function ControlPanel({ sendText }: ControlPanelProps) {
               onChange={(e) => setNewCommand(e.target.value)}
             />
             <div className="control-panel-add-form-actions">
-              <button onClick={() => setShowAddForm(false)}>Cancel</button>
+              <button onClick={cancelAddForm}>Cancel</button>
               <button className="primary" onClick={addUserCommand}>
                 Add
               </button>
