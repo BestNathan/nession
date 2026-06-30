@@ -10,6 +10,9 @@ pub struct AgentInfo {
     pub hostname: String,
     pub ip_address: String,
     pub port: u16,
+    /// Public WebSocket URL clients use to connect to this agent.
+    /// When `None`, the server constructs `ws://{ip_address}:{port}`.
+    pub connect_url: Option<String>,
     pub registered_at: DateTime<Utc>,
     pub last_heartbeat: DateTime<Utc>,
     pub status: AgentStatus,

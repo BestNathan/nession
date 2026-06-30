@@ -45,6 +45,12 @@ pub struct AgentConfig {
     /// If not set, the agent auto-detects its IP. Useful for NAT/VPN setups.
     #[serde(default)]
     pub advertise_address: Option<String>,
+    /// Public WebSocket URL that clients use to connect to this agent
+    /// (e.g. "wss://agent.nession.nhome.local/ws").
+    /// When set, the server returns this URL to clients during session attach
+    /// instead of constructing one from the agent's IP and port.
+    #[serde(default)]
+    pub connect_url: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -59,6 +65,7 @@ impl Default for AgentConfig {
             heartbeat_interval_secs: default_heartbeat_interval(),
             session_poll_interval_secs: default_session_poll_interval(),
             advertise_address: None,
+            connect_url: None,
         }
     }
 }

@@ -96,6 +96,7 @@ async fn main() -> Result<()> {
             &hostname,
             &ip_address,
             port,
+            config.connect_url.clone(),
             metadata,
             tmux_for_client,
         );

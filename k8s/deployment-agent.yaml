@@ -41,6 +41,8 @@ spec:
                 secretKeyRef:
                   name: nession-secret
                   key: auth-token
+            - name: AGENT_CONNECT_URL
+              value: "ws://agent.nession.nhome.local/ws"
             - name: SERVER_BACKEND
               value: "127.0.0.1:19090"
           livenessProbe:
