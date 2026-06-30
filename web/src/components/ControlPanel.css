@@ -34,16 +34,17 @@
 }
 
 .control-panel-command-row {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  position: relative; /* positioning context for the overlaid delete button */
   margin-bottom: 0.3rem;
 }
 
 .control-panel-command-btn {
-  flex: 1;
+  display: block;
+  width: 100%; /* every command button is the same width (preset + user) */
   text-align: left;
-  padding: 0.4rem 0.55rem;
+  /* uniform right padding leaves room for the × on user commands, so all
+     buttons share the same text area and look identical */
+  padding: 0.4rem 1.8rem 0.4rem 0.55rem;
   font-size: 0.82rem;
   font-family: 'JetBrains Mono', Menlo, Monaco, monospace;
   background-color: #1e1e2e;
@@ -62,12 +63,20 @@
   border-color: rgba(255, 255, 255, 0.25);
 }
 
+/* Delete control overlaid at the right end of the command row, on the same
+   line as the command — does not affect the button's width. */
 .control-panel-delete-btn {
-  flex: none;
-  width: 1.4rem;
-  height: 1.4rem;
+  position: absolute;
+  top: 50%;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  width: 1.3rem;
+  height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   background: transparent;
   color: #6c7086;
   border: none;
@@ -77,7 +86,7 @@
 
 .control-panel-delete-btn:hover {
   color: #f38ba8;
-  background-color: rgba(243, 139, 168, 0.12);
+  background-color: rgba(243, 139, 168, 0.18);
 }
 
 /* ── Add-command form ────────────────────────────────────────────── */
@@ -178,9 +187,27 @@
 @media (max-width: 768px) {
   .control-panel {
     width: 100%;
+    /* taller panel overall so the bigger input has room; the command list
+       inside still scrolls rather than pushing the input off-screen */
     height: auto;
-    max-height: 45%;
+    max-height: 55%;
     border-left: none;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* Commands take a smaller share and scroll within it. */
+  .control-panel-commands {
+    flex: 1 1 auto;
+    max-height: 38vh;
+    overflow-y: auto;
+  }
+
+  /* Input area gets more room and a taller textarea on mobile. */
+  .control-panel-input-area {
+    flex: none;
+  }
+
+  .control-panel-input-area textarea {
+    min-height: 4.5rem;
   }
 }
