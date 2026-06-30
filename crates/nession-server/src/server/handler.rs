@@ -122,6 +122,7 @@ impl ConnectionHandler {
             hostname: payload.hostname,
             ip_address: payload.ip_address,
             port: payload.port,
+            connect_url: payload.connect_url.clone(),
             registered_at: chrono::Utc::now(),
             last_heartbeat: chrono::Utc::now(),
             status: AgentStatus::Online,
@@ -487,21 +488,28 @@ impl ConnectionHandler {
             }
         };
 
-        let agent_address = format!("{}:{}", agent.ip_address, agent.port);
+        // Prefer the agent's declared connect_url (k8s ingress / public hostname),
+        // falling back to the IP:port pair for bare-metal / direct-access deployments.
+        let agent_ws_url = agent
+            .connect_url
+            .clone()
+            .unwrap_or_else(|| format!("ws://{}:{}", agent.ip_address, agent.port));
+        let agent_address = agent_ws_url.clone();
         let connection_token = uuid::Uuid::new_v4().to_string();
 
         info!(
             "Client requested attach to session {} (mode: {}), agent at {}",
-            session_id, preferred_mode, agent_address
+            session_id, preferred_mode, agent_ws_url
         );
 
         if preferred_mode == "relay" {
             // For relay mode, the server will proxy I/O between client and agent.
             // The handler loop must transition into relay mode.
-            let agent_ws_url = format!("ws://{}", agent_address);
             Ok(HandlerAction::Relay { agent_ws_url })
         } else {
-            // P2P mode: return agent address so the client can connect directly.
+            // P2P mode: return the agent's public WebSocket URL so the client
+            // can connect directly. Uses connect_url when configured (k8s),
+            // or the raw IP:port otherwise.
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.session.attach.response",

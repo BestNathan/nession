@@ -90,6 +90,9 @@ pub struct ServerClient {
     ip_address: String,
     /// Port where the agent's WebSocket server is listening.
     port: u16,
+    /// Public WebSocket URL for clients (e.g. "wss://agent.example.com/ws").
+    /// When set, the server returns this to clients on session attach.
+    connect_url: Option<String>,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -200,6 +203,7 @@ impl ServerClient {
         hostname: impl Into<String>,
         ip_address: impl Into<String>,
         port: u16,
+        connect_url: Option<String>,
         metadata: AgentMetadata,
         tmux: Arc<TmuxManager>,
     ) -> Self {
@@ -210,6 +214,7 @@ impl ServerClient {
             hostname: hostname.into(),
             ip_address: ip_address.into(),
             port,
+            connect_url,
             metadata,
             tmux,
         }
@@ -342,6 +347,7 @@ impl ServerClient {
             auth_token: self.auth_token.clone(),
             metadata: self.metadata.clone(),
             protocol_version: "1.0".to_string(),
+            connect_url: self.connect_url.clone(),
         };
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;

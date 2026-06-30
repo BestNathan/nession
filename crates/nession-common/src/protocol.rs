@@ -30,6 +30,10 @@ pub struct AgentRegisterPayload {
     pub auth_token: String,
     pub metadata: AgentMetadata,
     pub protocol_version: String,
+    /// Public WebSocket URL clients use to connect (e.g. "wss://agent.example.com/ws").
+    /// When empty, the server constructs a URL from ip_address:port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
