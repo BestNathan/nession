@@ -82,10 +82,12 @@ async fn main() -> Result<()> {
 
     let tmux_for_client = Arc::new(TmuxManager::new());
 
-    // Skip server connection if server_url is empty (standalone mode)
-    let client_handle = if config.server_url.trim().is_empty() {
+    // Skip server connection if server_url is empty (standalone mode).
+    // The supervisor reconnects on its own, so we capture the handle and the
+    // server-advertised heartbeat interval (falling back to the local config).
+    let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
         info!("No server_url configured — running in standalone mode");
-        None
+        (None, config.heartbeat_interval_secs)
     } else {
         let server_client = ServerClient::new(
             &config.server_url,
@@ -99,23 +101,25 @@ async fn main() -> Result<()> {
         );
 
         // Attempt to connect with a timeout so the agent can still serve
-        // local clients even if the central server is unreachable.
+        // local clients even if the central server is unreachable. The
+        // supervisor keeps retrying in the background regardless.
         tokio::select! {
             result = server_client.connect_and_run() => {
                 match result {
-                    Ok(handle) => {
-                        info!("Connected to central server");
-                        Some(handle)
+                    Ok((handle, server_interval)) => {
+                        let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
+                        info!("Connected to central server (heartbeat interval: {}s)", interval);
+                        (Some(handle), interval)
                     }
                     Err(e) => {
                         error!("Failed to connect to central server: {:#}", e);
-                        None
+                        (None, config.heartbeat_interval_secs)
                     }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
                 warn!("Timed out connecting to central server after 30s, continuing without sync");
-                None
+                (None, config.heartbeat_interval_secs)
             }
         }
     };
@@ -125,7 +129,7 @@ async fn main() -> Result<()> {
         let heartbeat = HeartbeatLoop::new(
             handle.clone(),
             TmuxManager::new(),
-            config.heartbeat_interval_secs,
+            heartbeat_interval_secs,
         );
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {
@@ -135,7 +139,7 @@ async fn main() -> Result<()> {
         });
         info!(
             "Heartbeat loop started (interval: {}s)",
-            config.heartbeat_interval_secs
+            heartbeat_interval_secs
         );
         Some(shutdown_handle)
     } else {

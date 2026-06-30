@@ -41,6 +41,7 @@ async fn start_test_server(auth_token: &str) -> (std::net::SocketAddr, tokio::ta
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: auth_token.to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: db_path.clone(),
     };
@@ -97,7 +98,7 @@ async fn register_agent_with_server(
         Arc::new(TmuxManager::new()),
     );
 
-    client.connect_and_run().await.expect("agent registration failed")
+    client.connect_and_run().await.expect("agent registration failed").0
 }
 
 // ---------------------------------------------------------------------------

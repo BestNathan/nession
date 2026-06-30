@@ -45,6 +45,30 @@ impl WebSocketServer {
             None
         };
 
+        let heartbeat_interval_secs = self.config.heartbeat_interval_secs;
+
+        // Background sweeper: periodically mark agents that have missed their
+        // heartbeat window as offline so clients stop targeting dead agents.
+        {
+            let agent_registry = Arc::clone(&self.agent_registry);
+            let command_broker = Arc::clone(&self.command_broker);
+            // Sweep at the heartbeat cadence (min 1s) so detection latency stays
+            // close to the configured timeout.
+            let sweep_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(sweep_period);
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    let offline = agent_registry.check_offline_agents().await;
+                    for agent_id in offline {
+                        info!("Agent {} marked offline (heartbeat timeout)", agent_id);
+                        command_broker.unregister_agent(&agent_id).await;
+                    }
+                }
+            });
+        }
+
         loop {
             let (tcp_stream, addr) = listener.accept().await?;
             info!("New connection from: {}", addr);
@@ -63,6 +87,7 @@ impl WebSocketServer {
                     session_registry,
                     command_broker,
                     auth_token,
+                    heartbeat_interval_secs,
                 ).await {
                     error!("Connection error: {}", e);
                 }
@@ -110,12 +135,13 @@ async fn handle_connection(
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     auth_token: String,
+    heartbeat_interval_secs: u64,
 ) -> anyhow::Result<()> {
     if let Some(acceptor) = tls_acceptor {
         let tls_stream = acceptor.accept(tcp_stream).await?;
-        handle_ws_stream(tls_stream, agent_registry, session_registry, command_broker, auth_token).await
+        handle_ws_stream(tls_stream, agent_registry, session_registry, command_broker, auth_token, heartbeat_interval_secs).await
     } else {
-        handle_ws_stream(tcp_stream, agent_registry, session_registry, command_broker, auth_token).await
+        handle_ws_stream(tcp_stream, agent_registry, session_registry, command_broker, auth_token, heartbeat_interval_secs).await
     }
 }
 
@@ -125,6 +151,7 @@ async fn handle_ws_stream<S>(
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     auth_token: String,
+    heartbeat_interval_secs: u64,
 ) -> anyhow::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -140,17 +167,38 @@ where
         session_registry,
         command_broker.clone(),
         auth_token,
+        heartbeat_interval_secs,
     );
 
     // Create a channel-based sender for CommandBroker to send commands
     let (sender, mut rx) = WsMessageSender::new();
 
-    // Spawn a relay task that drains the receiver and forwards to the actual write sink
+    // Spawn a relay task that drains the receiver and forwards to the actual
+    // write sink. A periodic WebSocket Ping keeps the TCP path alive through
+    // intermediaries and lets us detect a dead peer quickly.
+    let ping_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
     let relay_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = write.send(msg).await {
-                error!("Failed to send WebSocket message: {}", e);
-                break;
+        let mut ping_ticker = tokio::time::interval(ping_period);
+        ping_ticker.tick().await; // consume the immediate first tick
+        loop {
+            tokio::select! {
+                maybe_msg = rx.recv() => {
+                    match maybe_msg {
+                        Some(msg) => {
+                            if let Err(e) = write.send(msg).await {
+                                error!("Failed to send WebSocket message: {}", e);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping_ticker.tick() => {
+                    if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new())).await {
+                        error!("Failed to send WebSocket ping: {}", e);
+                        break;
+                    }
+                }
             }
         }
     });

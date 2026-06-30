@@ -61,6 +61,7 @@ fn load_config() -> anyhow::Result<ServerConfig> {
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
             auth_token: String::new(),
+            heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
             db_path: nession_common::paths::server_db_path().to_string_lossy().into_owned(),
         })

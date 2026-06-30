@@ -39,6 +39,30 @@ pub struct AgentMetadata {
     pub nession_version: String,
 }
 
+/// Server → Agent response to `agent.register`.
+///
+/// On acceptance the server tells the agent which heartbeat interval to use,
+/// so the cadence is configured centrally rather than per-agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRegisterResponsePayload {
+    /// "accepted" or "rejected".
+    pub status: String,
+    /// Human-readable detail.
+    pub message: String,
+    /// Heartbeat interval the agent should use, in seconds. Absent on rejection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_interval_secs: Option<u64>,
+}
+
+/// Server → Agent acknowledgement of a received `agent.heartbeat`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerHeartbeatAckPayload {
+    /// Echoes the agent id the heartbeat was for.
+    pub agent_id: String,
+    /// Server timestamp (unix seconds) when the heartbeat was processed.
+    pub server_time: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHeartbeatPayload {
     pub agent_id: String,

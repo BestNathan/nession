@@ -8,6 +8,8 @@ SERVER_LISTEN="${SERVER_LISTEN:-0.0.0.0:18080}"
 SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:18080}"
 SERVER_AUTH_TOKEN="${SERVER_AUTH_TOKEN:-}"
 SERVER_DB_PATH="${SERVER_DB_PATH:-/data/server.db}"
+SERVER_HEARTBEAT_INTERVAL="${SERVER_HEARTBEAT_INTERVAL:-10}"
+SERVER_HEARTBEAT_TIMEOUT="${SERVER_HEARTBEAT_TIMEOUT:-30}"
 
 export LISTEN_PORT SERVER_BACKEND
 
@@ -53,7 +55,8 @@ auth_token = "${SERVER_AUTH_TOKEN}"
 db_path = "${SERVER_DB_PATH}"
 tls_cert_path = "${TLS_CERT_PATH:-}"
 tls_key_path = "${TLS_KEY_PATH:-}"
-heartbeat_timeout_secs = 30
+heartbeat_interval_secs = ${SERVER_HEARTBEAT_INTERVAL}
+heartbeat_timeout_secs = ${SERVER_HEARTBEAT_TIMEOUT}
 TOML
 
 echo "=== nession-server ==="

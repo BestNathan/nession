@@ -37,6 +37,7 @@ impl TestServer {
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
             auth_token: auth_token.to_string(),
+            heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
             db_path: db_path.clone(),
         };
@@ -251,7 +252,7 @@ async fn test_multiple_agents_register_independently() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_heartbeat_after_registration_is_silent() {
+async fn test_heartbeat_after_registration_is_acked() {
     let server = TestServer::start("tok").await;
     let mut ws = server.connect().await;
 
@@ -295,9 +296,12 @@ async fn test_heartbeat_after_registration_is_silent() {
     });
     send_text(&mut ws, hb.to_string()).await;
 
-    // The server should NOT respond to heartbeats.
+    // The server acknowledges heartbeats so the agent can confirm the link.
     let result = try_recv_text(&mut ws, 500).await;
-    assert!(result.is_none(), "Server should not respond to heartbeat");
+    let ack = result.expect("Server should ack heartbeat");
+    let parsed: serde_json::Value = serde_json::from_str(&ack).unwrap();
+    assert_eq!(parsed["msg_type"], "server.heartbeat.ack");
+    assert_eq!(parsed["payload"]["agent_id"], "hb-agent");
 }
 
 #[tokio::test]
@@ -368,9 +372,12 @@ async fn test_multiple_heartbeats_accepted() {
         send_text(&mut ws, hb.to_string()).await;
     }
 
-    // None of them should produce a response.
-    let result = try_recv_text(&mut ws, 500).await;
-    assert!(result.is_none(), "No heartbeat should produce a response");
+    // Each heartbeat should be acknowledged.
+    for _ in 0..5 {
+        let ack = try_recv_text(&mut ws, 500).await.expect("expected heartbeat ack");
+        let parsed: serde_json::Value = serde_json::from_str(&ack).unwrap();
+        assert_eq!(parsed["msg_type"], "server.heartbeat.ack");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -498,9 +505,11 @@ async fn test_full_workflow_agent_and_client() {
         }
     });
     send_text(&mut agent_ws, hb.to_string()).await;
-    // Heartbeats are silent — no response expected.
+    // Heartbeats are acknowledged.
     let hb_result = try_recv_text(&mut agent_ws, 300).await;
-    assert!(hb_result.is_none(), "Heartbeat should not produce a response");
+    let ack: serde_json::Value =
+        serde_json::from_str(&hb_result.expect("expected heartbeat ack")).unwrap();
+    assert_eq!(ack["msg_type"], "server.heartbeat.ack");
 
     // --- Step 3: Client authenticates ---
     let mut client_ws = server.connect().await;
@@ -531,7 +540,9 @@ async fn test_full_workflow_agent_and_client() {
     });
     send_text(&mut agent_ws, hb2.to_string()).await;
     let hb2_result = try_recv_text(&mut agent_ws, 300).await;
-    assert!(hb2_result.is_none(), "Second heartbeat should also be silent");
+    let ack2: serde_json::Value =
+        serde_json::from_str(&hb2_result.expect("expected second heartbeat ack")).unwrap();
+    assert_eq!(ack2["msg_type"], "server.heartbeat.ack");
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ fn create_test_config(port: u16) -> ServerConfig {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: format!("/tmp/nession_test_{}.db", port),
     }

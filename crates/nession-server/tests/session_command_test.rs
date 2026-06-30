@@ -11,6 +11,7 @@ async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: "test".to_string(),
+        heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 60,
         tls_cert_path: String::new(),
         tls_key_path: String::new(),

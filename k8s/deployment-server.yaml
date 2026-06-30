@@ -34,6 +34,10 @@ spec:
               value: "0.0.0.0:18080"
             - name: SERVER_BACKEND
               value: "127.0.0.1:18080"
+            - name: SERVER_HEARTBEAT_INTERVAL
+              value: "10"
+            - name: SERVER_HEARTBEAT_TIMEOUT
+              value: "30"
             - name: SERVER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
