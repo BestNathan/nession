@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Agent, Session, AttachInfo, ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
-import { Terminal } from './Terminal';
+import { Terminal, type TerminalHandle } from './Terminal';
+import { ControlPanel } from './ControlPanel';
 import { CreateSessionModal } from './CreateSessionModal';
 import { ConfirmKillModal } from './ConfirmKillModal';
 import './Dashboard.css';
@@ -361,6 +362,7 @@ interface TerminalViewProps {
 function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
   const { attachInfo, sessionId, sessionName } = session;
   const isP2P = attachInfo.mode === 'p2p';
+  const terminalRef = useRef<TerminalHandle>(null);
 
   return (
     <div className="terminal-view">
@@ -375,6 +377,7 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
       </header>
       <div className="terminal-view-body">
         <Terminal
+          ref={terminalRef}
           sessionId={sessionId}
           sessionName={sessionName}
           mode={attachInfo.mode}
@@ -384,6 +387,7 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
           onDisconnect={onDisconnect}
           onError={onError}
         />
+        <ControlPanel sendText={(text) => terminalRef.current?.sendText(text)} />
       </div>
     </div>
   );
