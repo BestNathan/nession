@@ -1,0 +1,186 @@
+/* Control panel sidebar for the terminal view.
+ * Fixed-width column to the right of the terminal: a scrollable quick-command
+ * list on top, a free-text input pinned at the bottom. Catppuccin-ish palette
+ * to match the terminal theme. */
+
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex: none;
+  height: 100%;
+  background-color: #181825;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cdd6f4;
+  overflow: hidden;
+}
+
+.control-panel-section-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9399b2;
+  padding: 0.6rem 0.75rem 0.3rem;
+  margin: 0;
+}
+
+/* ── Quick commands ──────────────────────────────────────────────── */
+
+.control-panel-commands {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.5rem;
+}
+
+.control-panel-command-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+
+.control-panel-command-btn {
+  flex: 1;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', Menlo, Monaco, monospace;
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.control-panel-command-btn:hover {
+  background-color: #313244;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.control-panel-delete-btn {
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  line-height: 1;
+  font-size: 0.9rem;
+  background: transparent;
+  color: #6c7086;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.control-panel-delete-btn:hover {
+  color: #f38ba8;
+  background-color: rgba(243, 139, 168, 0.12);
+}
+
+/* ── Add-command form ────────────────────────────────────────────── */
+
+.control-panel-add-btn {
+  width: 100%;
+  padding: 0.4rem;
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.8rem;
+  background-color: transparent;
+  color: #89b4fa;
+  border: 1px dashed rgba(137, 180, 250, 0.4);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.control-panel-add-btn:hover {
+  background-color: rgba(137, 180, 250, 0.1);
+}
+
+.control-panel-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem 0;
+}
+
+.control-panel-add-form input {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.control-panel-add-form-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.control-panel-add-form-actions button {
+  flex: 1;
+  padding: 0.35rem;
+  font-size: 0.78rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  background-color: #313244;
+  color: #cdd6f4;
+}
+
+.control-panel-add-form-actions button.primary {
+  background-color: #89b4fa;
+  color: #11111b;
+  border-color: #89b4fa;
+}
+
+/* ── Free input ──────────────────────────────────────────────────── */
+
+.control-panel-input-area {
+  flex: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.control-panel-input-area textarea {
+  resize: none;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', Menlo, Monaco, monospace;
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+}
+
+.control-panel-send-btn {
+  padding: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background-color: #a6e3a1;
+  color: #11111b;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.control-panel-send-btn:hover {
+  background-color: #94d68f;
+}
+
+/* ── Responsive: drop below the terminal on narrow screens ───────── */
+
+@media (max-width: 768px) {
+  .control-panel {
+    width: 100%;
+    height: auto;
+    max-height: 45%;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
