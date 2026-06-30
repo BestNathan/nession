@@ -71,6 +71,10 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // Log all agent-originated messages at info for diagnostics
+        if msg.msg_type.starts_with("agent.") {
+            info!("Received agent message: type={}, id={}", msg.msg_type, msg.id);
+        }
         match msg.msg_type.as_str() {
             "agent.register" => self.handle_agent_register(msg).await,
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
@@ -159,6 +163,8 @@ impl ConnectionHandler {
 
         let session_count = payload["session_count"].as_u64().unwrap_or(0) as u32;
         let active_sessions = payload["active_sessions"].as_u64().unwrap_or(0) as u32;
+
+        info!("Heartbeat from {}: sessions={}, active={}", agent_id, session_count, active_sessions);
 
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
@@ -601,7 +607,21 @@ impl ConnectionHandler {
             Ok(Ok(response)) => {
                 let success = response["success"].as_bool().unwrap_or(false);
                 let session_id = if success {
-                    Some(format!("{}:{}", agent_id, name))
+                    let sid = format!("{}:{}", agent_id, name);
+                    // Immediately register the session so it shows up in list
+                    // and attach requests without waiting for the agent's
+                    // SessionWatcher poll cycle.
+                    let session_info = crate::registry::session::SessionInfo {
+                        session_id: sid.clone(),
+                        agent_id: agent_id.to_string(),
+                        session_name: name.to_string(),
+                        status: crate::registry::session::SessionStatus::Detached,
+                        window_count: 1,
+                        attached_clients: 0,
+                        last_activity: chrono::Utc::now(),
+                    };
+                    self.session_registry.update_session(session_info).await;
+                    Some(sid)
                 } else {
                     None
                 };
