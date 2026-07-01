@@ -115,16 +115,16 @@ which rtk
 
 | Plugin | Purpose | GitHub |
 |--------|---------|--------|
-| superpowers | Brainstorming, TDD, planning, code review, worktree, debugging | `anthropic/claude-plugins/superpowers` |
-| superpowersexy | Requirements clarification, architecture writing | `anthropic/claude-plugins/superpowersexy` |
+| superpowers | Brainstorming, TDD, planning, code review, worktree, debugging | `obra/superpowers` |
+| superpowersexy | Requirements clarification, architecture writing | `BestNathan/superpowersexy` |
 
 **Install from GitHub:**
 ```bash
 # superpowers
-claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowers
+claude plugins install https://github.com/obra/superpowers
 
 # superpowersexy
-claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowersexy
+claude plugins install https://github.com/BestNathan/superpowersexy
 ```
 
 Or use `/plugin` in Claude Code, search for "superpowers" and "superpowersexy".
@@ -168,8 +168,8 @@ cargo build
 cd web && npm install && npm run build
 
 # 6. Claude plugins — install from GitHub:
-claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowers
-claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowersexy
+claude plugins install https://github.com/obra/superpowers
+claude plugins install https://github.com/BestNathan/superpowersexy
 
 # 7. Verify
 rustc --version && cargo --version
