@@ -89,6 +89,6 @@ test-results/
 # ================================
 # Local config (per-developer)
 # ================================
-.claude/
+.claude/settings.local.json
 *.local
 agent-config.toml
