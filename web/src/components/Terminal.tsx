@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { IDisposable } from '@xterm/xterm';
+import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import type { WebSocketService } from '../services/websocket';
@@ -196,13 +197,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     };
 
     /**
-     * Send raw text to the remote session using whichever transport is active.
+     * Actually send raw text to the remote session.
      * P2P: terminal.input with base64 data + session_name.
      * Relay: serverConnection.sendTerminalInput(sessionId, data).
      * No-op if the connection is not open.
      */
-    const sendData = (data: string) => {
-      if (!active) return;
+    const doSendData = (data: string) => {
       try {
         if (mode === 'p2p') {
           if (p2pWs?.readyState === WebSocket.OPEN) {
@@ -220,6 +220,45 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
       } catch (err) {
         reportError(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    /**
+     * True when `data` is an ANSI mouse-tracking escape sequence.
+     *
+     * SGR extended mode  →  \\x1b[< … M/m  (modern terminals, generates floods)
+     * Normal tracking    →  \\x1b[M …       (legacy, 3-byte payload)
+     *
+     * Keyboard and other control sequences pass through without throttling.
+     */
+    const isMouseEvent = (data: string): boolean =>
+      data.startsWith('\x1b[<') || data.startsWith('\x1b[M');
+
+    /** Mouse tracking throttle: ~60 fps — smooth motion, 17× reduction from
+     *  1000+ Hz floods. Keyboard events bypass this entirely. */
+    const MOUSE_THROTTLE_MS = 16;
+
+    const sendMouseData = throttle(
+      (data: string) => {
+        if (active) doSendData(data);
+      },
+      MOUSE_THROTTLE_MS,
+      { leading: true, trailing: true },
+    );
+
+    /**
+     * Send raw text to the remote session.
+     *
+     * Mouse-tracking events (SGR \\x1b[<… / normal \\x1b[M…) are
+     * throttled to 60 fps to prevent floods.  Keypresses and all other
+     * escape sequences are sent immediately with zero added latency.
+     */
+    const sendData = (data: string) => {
+      if (!active) return;
+      if (isMouseEvent(data)) {
+        sendMouseData(data);
+      } else {
+        doSendData(data);
       }
     };
 
@@ -435,6 +474,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         clearTimeout(resizeTimer);
         resizeTimer = null;
       }
+
+      sendMouseData.cancel();
 
       // Dispose xterm event listeners (IDisposable objects)
       dataDisposable?.dispose();
