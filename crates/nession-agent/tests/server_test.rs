@@ -223,3 +223,164 @@ async fn integration_terminal_io_flow() {
 
     assert!(got_hello, "expected terminal output containing 'hello'");
 }
+
+// ---------------------------------------------------------------------------
+// Web UI compatibility handlers
+// ---------------------------------------------------------------------------
+
+use nession_agent::server::websocket::{
+    WebAgentInfo, WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload,
+    WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
+    WebSessionsListResponse,
+};
+
+#[tokio::test]
+async fn integration_web_ui_client_auth() {
+    let (addr, handle) = start_server(19086).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let req = new_message(
+        msg_types::CLIENT_AUTH,
+        serde_json::json!({"auth_token":"tok"}),
+    );
+    let resp: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(resp.payload["status"], "success");
+
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_web_ui_agents_list() {
+    let (addr, handle) = start_server(19087).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let req = new_message(msg_types::CLIENT_AGENTS_LIST, serde_json::json!({}));
+    let resp: nession_agent::server::websocket::Message<WebAgentsListResponse> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert!(!resp.payload.agents.is_empty());
+    assert_eq!(resp.payload.agents[0].agent_id, "local-agent");
+
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_web_ui_sessions_list() {
+    let (addr, handle) = start_server(19088).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let req = new_message(msg_types::CLIENT_SESSIONS_LIST, serde_json::json!({}));
+    let resp: nession_agent::server::websocket::Message<WebSessionsListResponse> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_web_ui_session_create() {
+    let (addr, handle) = start_server(19089).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let payload = WebSessionCreatePayload {
+        agent_id: "local-agent".to_string(),
+        name: "webui_test_create".to_string(),
+        width: 80,
+        height: 24,
+    };
+    let req = new_message(msg_types::CLIENT_SESSION_CREATE, payload);
+    let resp: nession_agent::server::websocket::Message<WebSessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert!(resp.payload.success);
+
+    // Clean up.
+    let tmux = TmuxManager::new();
+    tmux.kill_session("webui_test_create").await.ok();
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_web_ui_session_kill() {
+    let (addr, handle) = start_server(19090).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    // Create a session first.
+    let tmux = TmuxManager::new();
+    tmux.create_session("webui_test_kill", 80, 24)
+        .await
+        .unwrap();
+
+    let payload = WebSessionKillPayload {
+        session_id: "local-agent:webui_test_kill".to_string(),
+    };
+    let req = new_message(msg_types::CLIENT_SESSION_KILL, payload);
+    let resp: nession_agent::server::websocket::Message<WebSessionKillResponse> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert!(resp.payload.success);
+
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_web_ui_session_attach() {
+    let (addr, handle) = start_server(19091).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let payload = serde_json::json!({
+        "session_id": "local-agent:webui_attach",
+        "preferred_mode": "p2p"
+    });
+    let req = new_message(msg_types::CLIENT_SESSION_ATTACH, payload);
+    let resp: nession_agent::server::websocket::Message<WebAttachInfo> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(resp.payload.mode, "p2p");
+    assert_eq!(resp.payload.session_name, "webui_attach");
+
+    handle.shutdown().await.ok();
+}
+
+// ---------------------------------------------------------------------------
+// Detach when not attached, resize when not attached
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn integration_detach_not_attached() {
+    let (addr, handle) = start_server(19092).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    let detach = ClientDetachPayload {
+        session_name: "nonexistent".to_string(),
+    };
+    let req = new_message(msg_types::CLIENT_DETACH, detach);
+    let resp: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::ERROR);
+    assert_eq!(resp.payload["code"], "not_attached");
+
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_terminal_input_not_attached() {
+    let (addr, handle) = start_server(19093).await;
+    let (mut sink, mut stream) = connect(addr).await;
+
+    use base64::Engine;
+    let input = base64::engine::general_purpose::STANDARD.encode(b"test");
+    let payload = nession_agent::server::websocket::TerminalInputPayload {
+        session_name: "ghost".to_string(),
+        data: input,
+    };
+    let req = new_message(msg_types::TERMINAL_INPUT, payload);
+    let resp: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await;
+    assert_eq!(resp.msg_type, msg_types::ERROR);
+    assert_eq!(resp.payload["code"], "not_attached");
+
+    handle.shutdown().await.ok();
+}

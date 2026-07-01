@@ -776,3 +776,736 @@ async fn test_connection_disconnect_does_not_affect_others() {
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["status"], "success");
 }
+
+// ---------------------------------------------------------------------------
+// 9. Agent session updates
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_agent_session_update_active() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    // Register agent.
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type": "agent.register",
+            "id": "r1", "timestamp": current_timestamp(),
+            "payload": {
+                "agent_id": "a1", "hostname": "h", "ip_address": "10.0.0.1",
+                "port": 8080, "auth_token": "tok",
+                "metadata": {"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+                "protocol_version": "1.0"
+            }
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    // Send session update.
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type": "agent.session.update",
+            "id": "su1", "timestamp": current_timestamp(),
+            "payload": {
+                "agent_id": "a1", "session_name": "dev", "status": "active",
+                "window_count": 3, "attached_clients": 1
+            }
+        })
+        .to_string(),
+    )
+    .await;
+
+    // Session updates are not acknowledged via response (optimistic).
+    // Verify silence (no error response).
+    let result = try_recv_text(&mut ws, 300).await;
+    assert!(
+        result.is_none(),
+        "Session update should not produce a response"
+    );
+}
+
+#[tokio::test]
+async fn test_agent_session_update_detached() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type": "agent.register","id": "r2","timestamp": current_timestamp(),
+            "payload": {"agent_id":"a2","hostname":"h","ip_address":"10.0.0.2",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type": "agent.session.update","id": "su2","timestamp": current_timestamp(),
+            "payload": {"agent_id":"a2","session_name":"stale","status":"detached",
+            "window_count":1,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let result = try_recv_text(&mut ws, 300).await;
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_agent_session_update_gone_removes_session() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type": "agent.register","id":"r3","timestamp":current_timestamp(),
+            "payload":{"agent_id":"a3","hostname":"h","ip_address":"10.0.0.3",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    // Create a session first.
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"su3","timestamp":current_timestamp(),
+            "payload":{"agent_id":"a3","session_name":"temp","status":"active",
+            "window_count":1,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    // Now remove it.
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"su4","timestamp":current_timestamp(),
+            "payload":{"agent_id":"a3","session_name":"temp","status":"gone",
+            "window_count":0,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let result = try_recv_text(&mut ws, 300).await;
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_session_update_from_unregistered_agent_is_silent() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"su-ghost","timestamp":current_timestamp(),
+            "payload":{"agent_id":"ghost","session_name":"s","status":"active",
+            "window_count":0,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let result = try_recv_text(&mut ws, 300).await;
+    assert!(result.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// 10. Client agents list
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_client_agents_list_requires_auth() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.agents.list","id":"al1","timestamp":current_timestamp(),
+            "payload":{}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["message"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_client_agents_list_returns_registered_agents() {
+    let server = TestServer::start("tok").await;
+
+    // Register an agent first.
+    let mut agent_ws = server.connect().await;
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"agent.register","id":"r-al","timestamp":current_timestamp(),
+            "payload":{"agent_id":"list-agent","hostname":"list-host","ip_address":"10.0.0.50",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut agent_ws).await;
+
+    // Client authenticates and lists agents.
+    let mut client_ws = server.connect().await;
+    send_text(
+        &mut client_ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth-al","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut client_ws).await;
+
+    send_text(
+        &mut client_ws,
+        serde_json::json!({
+            "msg_type":"client.agents.list","id":"list-req","timestamp":current_timestamp(),
+            "payload":{}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
+    assert_eq!(resp["msg_type"], "client.agents.list.response");
+    let agents = resp["payload"]["agents"].as_array().unwrap();
+    assert!(!agents.is_empty());
+    assert_eq!(agents[0]["agent_id"], "list-agent");
+    assert_eq!(agents[0]["status"], "online");
+}
+
+// ---------------------------------------------------------------------------
+// 11. Client sessions list
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_client_sessions_list_requires_auth() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.sessions.list","id":"sl1","timestamp":current_timestamp(),
+            "payload":{}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["message"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_client_sessions_list_returns_sessions() {
+    let server = TestServer::start("tok").await;
+
+    // Register agent and push a session update.
+    let mut agent_ws = server.connect().await;
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"agent.register","id":"r-sl","timestamp":current_timestamp(),
+            "payload":{"agent_id":"sess-agent","hostname":"h","ip_address":"10.0.0.60",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut agent_ws).await;
+
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"su-sl","timestamp":current_timestamp(),
+            "payload":{"agent_id":"sess-agent","session_name":"my-sess","status":"active",
+            "window_count":2,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    // Client lists sessions.
+    let mut client_ws = server.connect().await;
+    send_text(
+        &mut client_ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth-sl","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut client_ws).await;
+
+    send_text(
+        &mut client_ws,
+        serde_json::json!({
+            "msg_type":"client.sessions.list","id":"sl-req","timestamp":current_timestamp(),
+            "payload":{}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
+    let sessions = resp["payload"]["sessions"].as_array().unwrap();
+    assert!(!sessions.is_empty());
+    assert_eq!(sessions[0]["session_id"], "sess-agent:my-sess");
+    assert_eq!(sessions[0]["status"], "active");
+}
+
+#[tokio::test]
+async fn test_client_sessions_list_filtered_by_agent() {
+    let server = TestServer::start("tok").await;
+
+    // Register two agents with sessions.
+    let mut agent1 = server.connect().await;
+    send_text(
+        &mut agent1,
+        serde_json::json!({
+            "msg_type":"agent.register","id":"r1","timestamp":current_timestamp(),
+            "payload":{"agent_id":"agent-x","hostname":"h","ip_address":"10.0.0.70",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut agent1).await;
+    send_text(
+        &mut agent1,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"sx","timestamp":current_timestamp(),
+            "payload":{"agent_id":"agent-x","session_name":"sess-x","status":"active",
+            "window_count":1,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let mut agent2 = server.connect().await;
+    send_text(
+        &mut agent2,
+        serde_json::json!({
+            "msg_type":"agent.register","id":"r2","timestamp":current_timestamp(),
+            "payload":{"agent_id":"agent-y","hostname":"h","ip_address":"10.0.0.71",
+            "port":8080,"auth_token":"tok",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut agent2).await;
+    send_text(
+        &mut agent2,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"sy","timestamp":current_timestamp(),
+            "payload":{"agent_id":"agent-y","session_name":"sess-y","status":"detached",
+            "window_count":2,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    // Client lists sessions filtered by agent-x.
+    let mut client = server.connect().await;
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth-filt","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut client).await;
+
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"client.sessions.list","id":"filt-req","timestamp":current_timestamp(),
+            "payload":{"agent_id":"agent-x"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client).await).unwrap();
+    let sessions = resp["payload"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["agent_id"], "agent-x");
+}
+
+// ---------------------------------------------------------------------------
+// 12. Client session attach
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_client_session_attach_requires_auth() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.attach","id":"att1","timestamp":current_timestamp(),
+            "payload":{"session_id":"a:sess","preferred_mode":"p2p"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["message"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_client_session_attach_invalid_format() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.attach","id":"att-bad","timestamp":current_timestamp(),
+            "payload":{"session_id":"bad_format_no_colon"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert!(resp["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid session_id"));
+}
+
+#[tokio::test]
+async fn test_client_session_attach_session_not_found() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.attach","id":"att-nf","timestamp":current_timestamp(),
+            "payload":{"session_id":"ghost:nonexistent","preferred_mode":"p2p"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert!(resp["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
+}
+
+#[tokio::test]
+async fn test_client_session_attach_p2p_mode() {
+    let server = TestServer::start("tok").await;
+
+    // Register agent with a connect_url.
+    let mut agent_ws = server.connect().await;
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"agent.register","id":"r","timestamp":current_timestamp(),
+            "payload":{"agent_id":"p2p-agent","hostname":"h","ip_address":"10.0.0.80",
+            "port":9090,"auth_token":"tok",
+            "connect_url":"ws://agent.example.com/ws",
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"},
+            "protocol_version":"1.0"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut agent_ws).await;
+
+    // Push session.
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"agent.session.update","id":"su","timestamp":current_timestamp(),
+            "payload":{"agent_id":"p2p-agent","session_name":"p2p-sess","status":"active",
+            "window_count":1,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await;
+
+    // Client attaches.
+    let mut client = server.connect().await;
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut client).await;
+
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"client.session.attach","id":"att-p2p","timestamp":current_timestamp(),
+            "payload":{"session_id":"p2p-agent:p2p-sess","preferred_mode":"p2p"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client).await).unwrap();
+    assert_eq!(resp["payload"]["status"], "success");
+    assert_eq!(resp["payload"]["mode"], "p2p");
+    assert_eq!(
+        resp["payload"]["agent_address"],
+        "ws://agent.example.com/ws"
+    );
+    assert!(resp["payload"]["connection_token"].as_str().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// 13. Session create / kill via handler
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_client_session_create_requires_auth() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.create","id":"c1","timestamp":current_timestamp(),
+            "payload":{"agent_id":"a","name":"s"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["error"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_client_session_create_missing_fields() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.create","id":"c-empty","timestamp":current_timestamp(),
+            "payload":{"agent_id":"","name":""}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert!(!resp["payload"]["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn test_client_session_kill_requires_auth() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.kill","id":"k1","timestamp":current_timestamp(),
+            "payload":{"session_id":"a:s"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["error"], "Not authenticated");
+}
+
+#[tokio::test]
+async fn test_client_session_kill_invalid_format() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.kill","id":"k-bad","timestamp":current_timestamp(),
+            "payload":{"session_id":"badformat"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert!(resp["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid session_id"));
+}
+
+#[tokio::test]
+async fn test_client_session_kill_agent_not_found() {
+    let server = TestServer::start("tok").await;
+    let mut ws = server.connect().await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await;
+    let _ = recv_text(&mut ws).await;
+
+    send_text(
+        &mut ws,
+        serde_json::json!({
+            "msg_type":"client.session.kill","id":"k-ghost","timestamp":current_timestamp(),
+            "payload":{"session_id":"ghost:session"}
+        })
+        .to_string(),
+    )
+    .await;
+
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert!(resp["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
+}
+
+// ---------------------------------------------------------------------------
+// 14. No-auth mode (empty server token)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_no_auth_mode_accepts_any_agent() {
+    let server = TestServer::start("").await; // empty token = no-auth mode
+
+    let mut ws = server.connect().await;
+    let reg = serde_json::json!({
+        "msg_type": "agent.register",
+        "id": "reg-noauth",
+        "timestamp": current_timestamp(),
+        "payload": {
+            "agent_id": "noauth-agent",
+            "hostname": "any",
+            "ip_address": "10.0.0.1",
+            "port": 8080,
+            "auth_token": "anything_works",
+            "metadata": {
+                "tmux_version": "3.3", "os_version": "Linux", "nession_version": "0.1"
+            },
+            "protocol_version": "1.0"
+        }
+    });
+    send_text(&mut ws, reg.to_string()).await;
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["status"], "accepted");
+}
+
+#[tokio::test]
+async fn test_no_auth_mode_accepts_any_client() {
+    let server = TestServer::start("").await;
+    let mut ws = server.connect().await;
+
+    let auth = serde_json::json!({
+        "msg_type": "client.auth",
+        "id": "auth-noauth",
+        "timestamp": current_timestamp(),
+        "payload": { "auth_token": "random" }
+    });
+    send_text(&mut ws, auth.to_string()).await;
+    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
+    assert_eq!(resp["payload"]["status"], "success");
+}
