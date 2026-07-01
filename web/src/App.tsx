@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { createWebSocketService, destroyWebSocketService, WebSocketService } from './services/websocket';
 import { ConnectionStatus } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -17,9 +18,11 @@ function App() {
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL
   );
   const autoConnect = params.get('token') !== null;
+  const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     return () => {
+      unsubRef.current?.();
       if (wsService) {
         destroyWebSocketService();
       }
@@ -40,13 +43,14 @@ function App() {
       const service = createWebSocketService(serverUrl, authToken);
       setWsService(service);
 
-      service.onConnectionChange((status) => {
+      unsubRef.current?.(); // clean up previous subscription
+      unsubRef.current = service.onConnectionChange((status) => {
         setConnectionStatus(status);
       });
 
       await service.connect();
     } catch (error) {
-      console.error('Connection failed:', error);
+      toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setConnectionStatus('disconnected');
     }
   };

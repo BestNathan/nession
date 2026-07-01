@@ -40,7 +40,7 @@ function getHelperText(status: ConnectionStatus): string {
     case 'disconnected':  return 'Enter your auth token and click Connect to establish a WebSocket connection to the server.';
     case 'connecting':    return 'Establishing connection to the server...';
     case 'connected':     return 'Connected! Authenticating...';
-    case 'authenticated': return 'Connected and authenticated.';
+    default:              return '';
   }
 }
 
