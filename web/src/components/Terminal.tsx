@@ -172,6 +172,31 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let dataDisposable: IDisposable | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let mountTimer: ReturnType<typeof setTimeout> | null = null;
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+    let wheelCleanup: (() => void) | null = null;
+
+    // -------------------------------------------------------------------------
+    // Scroll-wheel → viewport scrollback (not terminal escape sequences)
+    //
+    // tmux enables mouse tracking which causes xterm.js to forward scroll
+    // events as ANSI escape sequences to the PTY.  Shells interpret those as
+    // ↑/↓ keys, navigating command history instead of scrolling the viewport.
+    // We intercept the wheel event on the xterm element and scroll the
+    // terminal's own scrollback buffer instead.
+    // -------------------------------------------------------------------------
+    const handleWheel = (e: WheelEvent) => {
+      const buffer = term.buffer.active;
+      // Only intercept when there is scrollback content available.
+      if (buffer.length <= term.rows) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+      if (delta !== 0) term.scrollLines(delta);
+    };
+    // xterm.js attaches its own wheel listener to the textarea inside the
+    // terminal element, so we need useCapture to intercept before xterm.
+    term.element?.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    wheelCleanup = () => term.element?.removeEventListener('wheel', handleWheel, { capture: true });
 
     /** Send the current terminal dimensions to the remote end. */
     const sendResize = () => {
@@ -329,6 +354,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             }
           }
         }, 100);
+
+        // Keepalive: send WebSocket ping every 30 s to prevent idle
+        // timeouts on intermediate proxies / load balancers / NAT.
+        pingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({
+                msg_type: 'keepalive.ping',
+                id: `ka-${Date.now()}`,
+                timestamp: Math.floor(Date.now() / 1000),
+                payload: {},
+              }));
+            } catch {
+              // Socket error — cleanup will handle it.
+            }
+          }
+        }, 30_000);
+
         // Trigger a prompt redraw from the remote shell.
         const encoder = new TextEncoder();
         const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
@@ -358,7 +401,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
                 // Response to client.attach — ignore
                 break;
               case 'error':
+                // Ignore errors from keepalive pings (agent doesn't
+                // recognise the msg_type and sends back an error).
+                if (msg.id?.startsWith('ka-')) break;
                 reportError(new Error(msg.payload?.message || 'Remote error'));
+                break;
+              case 'keepalive.pong':
+                // Server acknowledged our keepalive — connection is healthy.
                 break;
               default:
                 // Other message types (keep-alive, etc.) – ignored.
@@ -475,6 +524,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
 
       sendMouseData.cancel();
+
+      if (pingTimer) {
+        clearInterval(pingTimer);
+        pingTimer = null;
+      }
+
+      wheelCleanup?.();
 
       // Dispose xterm event listeners (IDisposable objects)
       dataDisposable?.dispose();
