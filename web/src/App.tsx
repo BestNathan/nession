@@ -20,14 +20,22 @@ function App() {
   const autoConnect = params.get('token') !== null;
   const unsubRef = useRef<(() => void) | null>(null);
 
+  // Clean up WebSocket service when wsService changes (e.g. reconnect)
   useEffect(() => {
     return () => {
-      unsubRef.current?.();
       if (wsService) {
         destroyWebSocketService();
       }
     };
   }, [wsService]);
+
+  // Clean up subscription only on unmount (not during wsService transitions —
+  // otherwise the callback is unsubscribed before WebSocket events fire)
+  useEffect(() => {
+    return () => {
+      unsubRef.current?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (autoConnect && authToken && connectionStatus === 'disconnected') {
