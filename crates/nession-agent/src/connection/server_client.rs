@@ -620,6 +620,7 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
+            None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
         );
@@ -661,6 +662,7 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
+            None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
         );
@@ -712,6 +714,7 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
+            None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
         );
@@ -791,6 +794,7 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
+            None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
         );
@@ -860,6 +864,7 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
+            None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
         );

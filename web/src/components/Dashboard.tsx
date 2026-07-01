@@ -381,7 +381,7 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
           sessionId={sessionId}
           sessionName={sessionName}
           mode={attachInfo.mode}
-          agentUrl={isP2P ? `ws://${attachInfo.agent_address}/ws` : undefined}
+          agentUrl={isP2P ? attachInfo.agent_address : undefined}
           connectionToken={isP2P ? attachInfo.connection_token : undefined}
           serverConnection={!isP2P ? wsService : undefined}
           onDisconnect={onDisconnect}

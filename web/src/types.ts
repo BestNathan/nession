@@ -31,7 +31,7 @@ export interface AttachInfo {
   session_id: string;
   session_name?: string;
   // For P2P mode:
-  agent_address?: string; // Format: "ip:port"
+  agent_address?: string; // Complete WebSocket URL (e.g. "ws://agent.example.com/ws")
   connection_token?: string;
 }
 
