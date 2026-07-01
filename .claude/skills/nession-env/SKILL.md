@@ -111,65 +111,37 @@ which rtk
 
 ## 3. Claude Code Plugins
 
-Install via Claude Code's plugin system (`/plugin` command or settings).
+### Required
 
-### Required Plugins
+| Plugin | Purpose | GitHub |
+|--------|---------|--------|
+| superpowers | Brainstorming, TDD, planning, code review, worktree, debugging | `anthropic/claude-plugins/superpowers` |
+| superpowersexy | Requirements clarification, architecture writing | `anthropic/claude-plugins/superpowersexy` |
 
-| Plugin | Purpose |
-|--------|---------|
-| superpowers | Brainstorming, TDD, planning, code review, worktree, debugging |
-| superpowersexy | Requirements clarification, architecture writing |
+**Install from GitHub:**
+```bash
+# superpowers
+claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowers
 
-**Check installed plugins:**
+# superpowersexy
+claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowersexy
+```
+
+Or use `/plugin` in Claude Code, search for "superpowers" and "superpowersexy".
+
+**Check installed:**
 ```bash
 ls ~/.claude/plugins/cache/
 ```
 
-**Install if missing:**
-In Claude Code, use `/plugin` to browse and install from the marketplace. Search for "superpowers" and "superpowersexy".
+## 4. Project Skills
 
-### Optional Plugins
+Skills bundled in this repository, loaded when working on Nession:
 
-| Plugin | Purpose |
-|--------|---------|
-| cc-yes | Auto-confirm safe operations |
-| claude-code-warp | Faster terminal interaction |
-| claude-hud | Heads-up display overlay |
-| claude-plugins-official | Official plugin collection |
-| bbc-plugins | Additional utility plugins |
-
-## 4. Skills
-
-### Project Skills (bundled in repo)
-
-| Skill | Location | Purpose |
-|-------|----------|---------|
-| nession-cicd | `.claude/skills/nession-cicd/` | Version bumps, PR creation, CI/CD troubleshooting |
-| nession-env | `.claude/skills/nession-env/` | This skill — environment setup |
-
-### User Skills (installed globally)
-
-Core workflow skills (come with superpowers plugin):
-- `superpowers:brainstorming` — Design before coding
-- `superpowers:writing-plans` — Implementation plans from specs
-- `superpowers:subagent-driven-development` — Execute plans via subagents
-- `superpowers:executing-plans` — Execute plans in parallel sessions
-- `superpowers:test-driven-development` — RED-GREEN-REFACTOR
-- `superpowers:systematic-debugging` — Root cause analysis
-- `superpowers:requesting-code-review` — Code review workflow
-- `superpowers:receiving-code-review` — Handle review feedback
-- `superpowers:verification-before-completion` — Verify before claiming done
-- `superpowers:finishing-a-development-branch` — Merge/PR/cleanup
-- `superpowers:using-git-worktrees` — Isolated feature workspaces
-- `superpowers:using-superpowers` — Skill discovery and usage
-
-**Check available skills:**
-In Claude Code, type `/` to see available slash commands. Or check:
-```bash
-ls ~/.claude/skills/
-```
-
-**If a skill is missing:** Install its parent plugin via `/plugin` in Claude Code.
+| Skill | Path | Purpose |
+|-------|------|---------|
+| nession-cicd | `.claude/skills/nession-cicd/SKILL.md` | Version bumps, PR creation, CI/CD troubleshooting |
+| nession-env | `.claude/skills/nession-env/SKILL.md` | This skill — environment setup |
 
 ## 5. One-Shot Environment Setup
 
@@ -195,9 +167,9 @@ cd nession
 cargo build
 cd web && npm install && npm run build
 
-# 6. Claude plugins — use /plugin in Claude Code to install:
-#    - superpowers
-#    - superpowersexy
+# 6. Claude plugins — install from GitHub:
+claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowers
+claude plugins install https://github.com/anthropic/claude-plugins/tree/main/superpowersexy
 
 # 7. Verify
 rustc --version && cargo --version
