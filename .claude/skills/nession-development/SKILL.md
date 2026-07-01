@@ -1,17 +1,15 @@
 ---
 name: nession-development
-description: Use when developing Nession features, writing or running unit tests, setting up integration tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow
+description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow
 ---
 
 # Nession Development
 
 ## Overview
 
-Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`/`tsc`, version bump with the nession-cicd skill, and submit changes via PR. Never build Docker images locally — CI handles that.
+Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`, version bump in `Cargo.toml` + `web/package.json`, submit changes via PR. Never build Docker images locally — CI handles that.
 
 ## 1. Local Development
-
-### Start the stack
 
 Three terminals, from repo root:
 
@@ -26,204 +24,129 @@ cargo run -p nession-agent
 cd web && npm run dev
 ```
 
-The UI is at `http://localhost:13000`. Vite proxies WebSocket connections to the server.
-
-### Build everything
+The UI is at `http://localhost:13000`.
 
 ```bash
 cargo build                    # All Rust crates
 cd web && npm run build        # Production web build → web/dist/
-```
-
-### Useful commands
-
-```bash
-cargo check                    # Fast compile check (no codegen)
 cargo fmt -- --check           # Check formatting
 cargo clippy -- -D warnings    # Lint
 cd web && npx tsc --noEmit     # TypeScript check
 cd web && npm run lint         # ESLint
 ```
 
-## 2. Unit Tests
+## 2. Tests
 
-### Rust
-
-Unit tests use `#[cfg(test)]` modules inside `src/` or standalone `tests/` files. All async tests use `#[tokio::test]`.
-
-**Run all tests:**
-```bash
-cargo test                     # Entire workspace
-```
-
-**Run a single crate:**
-```bash
-cargo test -p nession-server
-cargo test -p nession-agent
-cargo test -p nession-common
-cargo test -p nession-cli
-```
-
-**Run a single test:**
-```bash
-cargo test -p nession-server test_generate_connection_token
-cargo test -p nession-server broker_test
-```
-
-**Write a unit test** (inline `#[cfg(test)]` module):
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_my_function() {
-        let result = my_function("input");
-        assert_eq!(result, expected);
-    }
-}
-```
-
-**Write an integration test** (in `tests/` directory, tests the public API):
-```rust
-// crates/nession-server/tests/my_test.rs
-use nession_server::some_module::SomeType;
-
-#[tokio::test]
-async fn test_end_to_end_flow() {
-    let server = start_test_server().await;
-    let client = connect_client(server.addr).await;
-    // ... test the full flow ...
-}
-```
-
-### Web (React)
-
-No test runner configured. Use TypeScript + ESLint + build as quality gates:
+Rust unit tests go in `#[cfg(test)]` modules inside `src/` or standalone files under `crates/*/tests/`. All async, using `#[tokio::test]`. Web uses `tsc --noEmit` + `eslint` as quality gates (no test runner).
 
 ```bash
-cd web
-npx tsc --noEmit              # Type errors = test failure
-npm run lint                  # Lint errors = test failure
-npm run build                 # Build errors = test failure
+cargo test                  # All tests (unit + integration)
+cargo test -p nession-server  # Single crate
+cargo test --test '*'       # Integration tests only
 ```
 
-## 3. Integration Testing
+### Testing Gates
 
-Integration tests live in `crates/*/tests/`. They spin up real servers, connect real WebSocket clients, and exercise full flows.
+Before merging any PR, these MUST pass:
 
-### Server integration tests
+| Gate | Command | Threshold |
+|------|---------|-----------|
+| Unit + integration tests | `cargo test` | 100% pass |
+| Coverage (Rust) | `cargo tarpaulin --out Html` | **≥ 90%** line coverage |
+| TypeScript | `cd web && npx tsc --noEmit` | 0 errors |
+| ESLint | `cd web && npm run lint` | 0 warnings |
+| Build | `cd web && npm run build` | success |
+| Formatting | `cargo fmt -- --check` | clean |
+| Clippy | `cargo clippy -- -D warnings` | 0 warnings |
 
-`crates/nession-server/tests/integration_test.rs` — starts a server on a random port, connects via WebSocket, tests auth/agent-registration/session-lifecycle.
+Coverage is enforced per-crate. New code must maintain or improve coverage — PRs that drop coverage below 90% are rejected.
 
 ```bash
-cargo test -p nession-server --test integration_test
+# Install tarpaulin (once)
+cargo install cargo-tarpaulin
+
+# Run coverage
+cargo tarpaulin --out Html --output-dir target/tarpaulin
 ```
 
-### WebSocket tests
+### Test Database
 
-`crates/nession-server/tests/websocket_test.rs` — tests WebSocket connection lifecycle, message serialization, error handling.
-
-```bash
-cargo test -p nession-server --test websocket_test
-```
-
-### Agent E2E tests
-
-`crates/nession-agent/tests/e2e_test.rs` — full agent flow (needs tmux on the host).
-
-```bash
-# Requires tmux installed
-cargo test -p nession-agent --test e2e_test
-```
-
-### Running all integration tests
-
-```bash
-# All crates, all tests (unit + integration)
-cargo test
-
-# Integration tests only (skip unit tests)
-cargo test --test '*'
-```
-
-### Test database
-
-Integration tests use SQLite with temporary databases. Each test creates its own DB file:
+Integration tests use SQLite with unique temporary databases. Each test MUST clean up its own DB file:
 
 ```rust
 let db_path = format!("./test_{}.db", uuid::Uuid::new_v4());
 // ... run test ...
-std::fs::remove_file(&db_path).ok(); // cleanup
+std::fs::remove_file(&db_path).ok();
 ```
 
-## 4. Version Bumping
+## 3. Version Bumping
 
-Single version across all components: `Cargo.toml` + `web/package.json` must match.
+Single version across all components. `Cargo.toml` and `web/package.json` must always agree.
 
 | Change | Bump | Example |
 |--------|------|---------|
 | New feature, behavior change | Minor | `0.3.1` → `0.4.0` |
 | Bug fix, small tweak | Patch | `0.3.1` → `0.3.2` |
 
-**When in doubt, choose patch.** Files to update:
+**When in doubt, choose patch.** Both files must be updated:
 
-```bash
-# Edit Cargo.toml
+```toml
+# Cargo.toml
 version = "0.4.0"
+```
 
-# Edit web/package.json
+```json
+// web/package.json
 "version": "0.4.0"
 ```
 
-For the full version bump workflow (including CI image tagging implications), use the nession-cicd skill: `.claude/skills/nession-cicd/SKILL.md`.
+On merge to main, CI reads the version from these files and creates version-tagged Docker images automatically.
 
-## 5. Creating a Pull Request
+## 4. Creating a Pull Request
+
+**Never push directly to main.**
 
 ```bash
-# 1. Create feature branch
 git checkout -b feat/my-feature
-
-# 2. Make changes, commit
 git add -A
-git commit -m "feat: description of change"
-
-# 3. Verify before pushing
-cargo test && cargo clippy -- -D warnings
-cd web && npx tsc --noEmit && npm run lint && npm run build && cd ..
-
-# 4. Push
+git commit -m "feat: description"
 git push origin feat/my-feature
-
-# 5. Create PR
-gh pr create \
-  --title "feat: description" \
-  --body "## Summary
-- Change 1
-- Change 2
-
-## Test Plan
-- [ ] cargo test passes
-- [ ] web build passes
-- [ ] Manual verification on dev server"
+gh pr create --title "feat: description" --body "..."
 ```
 
-**Never push directly to main.** All changes go through PRs. CI triggers on merge — no manual Docker builds or k8s deploys needed.
+### PR Body Template
+
+Every PR must include these three sections:
+
+```markdown
+## 变更内容
+- [简述改了什么]
+
+## 测试报告
+- `cargo test`: <N> passed, 0 failed
+- `cargo tarpaulin`: <X>% coverage (threshold: 90%)
+- `npx tsc --noEmit`: 0 errors
+- `npm run lint`: 0 warnings
+- `npm run build`: success
+
+## 核心功能截图
+<!-- 贴截图，证明功能正常 -->
+```
+
+CI triggers on merge to main — builds multi-arch Docker images, pushes tags, updates k8s manifests. No manual steps after merge.
 
 ## Quick Reference
 
 | Task | Command |
 |------|---------|
 | Run all tests | `cargo test` |
-| Run one crate | `cargo test -p nession-server` |
-| Run one test | `cargo test -p nession-server test_name` |
-| Integration tests | `cargo test --test '*'` |
-| TypeScript check | `cd web && npx tsc --noEmit` |
+| Coverage | `cargo tarpaulin --out Html` |
+| TypeScript | `cd web && npx tsc --noEmit` |
 | Web build | `cd web && npm run build` |
 | Start server | `cargo run -p nession-server` |
 | Start UI dev | `cd web && npm run dev` |
-| Create PR | `gh pr create --title "feat: ..." --body "..."` |
 | Version bump | Edit `Cargo.toml` + `web/package.json` |
+| Create PR | `gh pr create --title "feat: ..." --body "..."` |
 
 ## Common Mistakes
 
@@ -231,7 +154,7 @@ gh pr create \
 |---------|---------|
 | `docker build` for Nession | **Forbidden.** CI does that. |
 | Pushing to main directly | Always use a feature branch + PR. |
-| Bumping only Cargo.toml or only package.json | Both files must agree on version. |
-| Running `cargo test` with wrong working directory | Always run from repo root. |
-| Forgetting to run `cargo fmt` / `cargo clippy` before push | CI may reject the PR. |
-| Writing integration tests that don't clean up temp DBs | Use unique names, clean up in the test. |
+| Bumping only one version file | Both `Cargo.toml` and `web/package.json` must match. |
+| Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
+| Integration tests leaving temp DB files | Each test must clean up its own DB. |
+| PR missing test report or screenshots | All three sections are required. |

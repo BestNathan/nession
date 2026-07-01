@@ -1,6 +1,6 @@
 ---
 name: nession-cicd
-description: Use when deploying nession to k8s, deciding version bumps (minor vs patch), creating PRs for nession changes, troubleshooting CI/CD pipeline failures, or modifying the GitHub Actions workflow for nession
+description: Use when troubleshooting CI/CD pipeline failures for nession, modifying the GitHub Actions workflow, investigating failed Docker builds or k8s deployments, or understanding the CI → ArgoCD deploy chain
 ---
 
 # Nession CI/CD
@@ -48,23 +48,9 @@ cd web && npm run dev
 
 Verify business logic and flows against the running local services. Do NOT deploy to k8s to test.
 
-### 2. Version bump
+### 2. Version bump → see nession-development
 
-Nession uses a single version across all components: `MAJOR.MINOR.PATCH` (currently `0.x.y`).
-
-| Change type | Bump | Example | Files to update |
-|-------------|------|---------|-----------------|
-| **Minor** — new features, significant changes | `0.X+1.0` | `0.2.0` → `0.3.0` | `Cargo.toml`, `web/package.json` |
-| **Patch** — bug fixes, small tweaks | `0.X.Y+1` | `0.2.0` → `0.2.1` | `Cargo.toml`, `web/package.json` |
-
-**Both files must agree:**
-```bash
-# Cargo.toml
-version = "0.2.1"
-
-# web/package.json
-"version": "0.2.1"
-```
+Version bumping (minor vs patch, which files to update) is covered in the nession-development skill. Use that skill for all version decisions. CI automatically reads versions from `Cargo.toml` and `web/package.json` on merge.
 
 ### 3. Push and create PR
 
@@ -90,16 +76,6 @@ When the PR is merged to main, GitHub Actions automatically:
 7. ArgoCD detects the kustomize change and syncs to k8s
 
 **No manual steps after merge.** CI → ArgoCD is fully automatic.
-
-## Version Decision Flow
-
-```
-Did you add a feature or change behavior?
-  └─ Yes → Minor bump (0.X+1.0)
-  └─ No, it's a bug fix or minor tweak → Patch bump (0.X.Y+1)
-```
-
-When in doubt between minor and patch: **choose patch**. It's safer to understate the change than to overstate it.
 
 ## Quick Reference
 
@@ -161,8 +137,6 @@ git push to main
 | Mistake | Reality |
 |---------|---------|
 | `docker build` for nession | **Forbidden.** CI builds images. |
-| Pushing directly to main | Always use PRs. |
-| Bumping only Cargo.toml or only package.json | Both must match. |
 | "I'll just patch the k8s image tag" | k8s is read-only for you. Fix the CI or roll back via GHCR tags. |
 | Building locally to "test the Docker image" | Test locally with `cargo run`. |
 | Major version bumps (1.x) | Nession is pre-1.0. Only minor and patch exist. |
