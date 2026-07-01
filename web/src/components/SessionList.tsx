@@ -48,7 +48,9 @@ export function SessionList({
             <span
               className={cn(
                 'w-2 h-2 rounded-full flex-shrink-0',
-                session.status === 'active' ? 'bg-green-500' : 'bg-gray-400',
+                session.status === 'active' ? 'bg-green-500' :
+                session.status === 'detached' ? 'bg-emerald-500/60' :
+                'bg-gray-400',
               )}
             />
             <div className="flex-1 min-w-0">
@@ -56,6 +58,8 @@ export function SessionList({
               <p className="text-xs text-muted-foreground">
                 {session.agent_id} · {session.window_count} win · {session.attached_clients} client
                 {session.attached_clients !== 1 ? 's' : ''}
+                {session.status === 'detached' && ' · detached'}
+                {session.status === 'zombie' && ' · zombie'}
               </p>
             </div>
             <div className="flex gap-1.5 flex-shrink-0">
