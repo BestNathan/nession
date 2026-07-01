@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, RefreshCw, X, ArrowLeft } from 'lucide-react';
+import { toast } from 'sonner';
 import type { Agent, Session, AttachInfo, ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
-import { ControlPanel } from './ControlPanel';
-import { CreateSessionModal } from './CreateSessionModal';
-import { ConfirmKillModal } from './ConfirmKillModal';
-import './Dashboard.css';
+import { TerminalToolbar } from './TerminalToolbar';
+import { CreateSessionDialog } from './CreateSessionDialog';
+import { KillConfirmDialog } from './KillConfirmDialog';
+import { AgentCard } from './AgentCard';
+import { SessionList } from './SessionList';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Skeleton } from './ui/skeleton';
+import { cn } from '@/lib/utils';
 
 export interface DashboardProps {
   wsService: WebSocketService;
@@ -28,16 +35,12 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Terminal view state
   const [view, setView] = useState<View>('dashboard');
   const [attachedSession, setAttachedSession] = useState<AttachedSession | null>(null);
   const [attachingInProgress, setAttachingInProgress] = useState(false);
 
-  // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [sessionToKill, setSessionToKill] = useState<Session | null>(null);
-
-  // ── Data fetching ──────────────────────────────────────────────────
 
   const fetchAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -48,6 +51,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch agents';
       setError(msg);
+      toast.error(msg);
     } finally {
       setLoadingAgents(false);
     }
@@ -62,12 +66,11 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
       setError(msg);
+      toast.error(msg);
     } finally {
       setLoadingSessions(false);
     }
   }, [wsService]);
-
-  // ── Subscribe to live events from the server ───────────────────────
 
   useEffect(() => {
     const unsubAgents = wsService.onAgentsChanged((newAgents) => {
@@ -82,36 +85,28 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     };
   }, [wsService]);
 
-  // Initial load
   useEffect(() => {
     fetchAgents();
     fetchSessions();
   }, [fetchAgents, fetchSessions]);
 
-  // ── Agent click → filter sessions ──────────────────────────────────
-
   const handleAgentClick = useCallback((agentId: string) => {
     setSelectedAgentId((prev) => (prev === agentId ? null : agentId));
   }, []);
 
-  // Filtered sessions list
   const filteredSessions = selectedAgentId
     ? sessions.filter((s) => s.agent_id === selectedAgentId)
     : sessions;
-
-  // ── Attach to session ──────────────────────────────────────────────
 
   const handleAttach = useCallback(
     async (session: Session) => {
       setAttachingInProgress(true);
       setError(null);
       try {
-        // Request attach, prefer P2P, fallback to relay
         let attachInfo: AttachInfo;
         try {
           attachInfo = await wsService.requestAttach(session.session_id, 'p2p');
         } catch {
-          // Fallback to relay if P2P fails
           attachInfo = await wsService.requestAttach(session.session_id, 'relay');
         }
 
@@ -124,6 +119,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to attach to session';
         setError(msg);
+        toast.error(msg);
       } finally {
         setAttachingInProgress(false);
       }
@@ -131,29 +127,24 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     [wsService],
   );
 
-  // ── Detach / back to dashboard ─────────────────────────────────────
-
   const handleBackToDashboard = useCallback(() => {
     setAttachedSession(null);
     setView('dashboard');
-    // Refresh sessions list (attach counts may have changed)
     fetchSessions(selectedAgentId ?? undefined);
   }, [fetchSessions, selectedAgentId]);
 
   const handleTerminalDisconnect = useCallback(() => {
-    setError('Terminal connection lost');
+    toast.error('Terminal connection lost');
     handleBackToDashboard();
   }, [handleBackToDashboard]);
 
   const handleTerminalError = useCallback(
     (err: Error) => {
-      setError(`Terminal error: ${err.message}`);
+      toast.error(`Terminal error: ${err.message}`);
       handleBackToDashboard();
     },
     [handleBackToDashboard],
   );
-
-  // ── Modal handlers ───────────────────────────────────────────────
 
   const handleCreateSession = useCallback(() => {
     setShowCreateModal(true);
@@ -171,8 +162,6 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     fetchSessions(selectedAgentId ?? undefined);
   }, [fetchSessions, selectedAgentId]);
 
-  // ── Manual refresh ─────────────────────────────────────────────────
-
   const handleRefreshAgents = useCallback(() => {
     fetchAgents();
   }, [fetchAgents]);
@@ -181,141 +170,135 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     fetchSessions(selectedAgentId ?? undefined);
   }, [fetchSessions, selectedAgentId]);
 
-  // ── Render ─────────────────────────────────────────────────────────
+  // ── Terminal View ───────────────────────────────────────────────────
 
   if (view === 'terminal' && attachedSession) {
-    return <TerminalView session={attachedSession} wsService={wsService} onBack={handleBackToDashboard} onDisconnect={handleTerminalDisconnect} onError={handleTerminalError} />;
+    return (
+      <TerminalView
+        session={attachedSession}
+        wsService={wsService}
+        onBack={handleBackToDashboard}
+        onDisconnect={handleTerminalDisconnect}
+        onError={handleTerminalError}
+      />
+    );
   }
 
+  // ── Dashboard View ─────────────────────────────────────────────────
+
+  const connectionLabels: Record<ConnectionStatus, string> = {
+    disconnected: 'Disconnected',
+    connecting: 'Connecting...',
+    connected: 'Connected',
+    authenticated: 'Authenticated',
+  };
+
+  const connectionDotColor: Record<ConnectionStatus, string> = {
+    disconnected: 'bg-red-500',
+    connecting: 'bg-amber-500 animate-pulse',
+    connected: 'bg-green-500',
+    authenticated: 'bg-blue-500',
+  };
+
   return (
-    <div className="dashboard">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="dashboard-header">
-        <div className="dashboard-header-left">
-          <h1 className="dashboard-title">Nession</h1>
-        </div>
-        <div className="dashboard-header-right">
-          <ConnectionStatusBadge status={connectionStatus} />
+      <header className="border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
+        <h1 className="text-xl font-bold">Nession</h1>
+        <div className="flex items-center gap-2">
+          {error ? <span className="hidden">{error}</span> : null}
+          <Badge variant="outline" className="gap-1.5 py-1.5">
+            <span className={`w-2 h-2 rounded-full ${connectionDotColor[connectionStatus]}`} />
+            {connectionLabels[connectionStatus]}
+          </Badge>
         </div>
       </header>
 
-      {/* Error banner */}
-      {error && (
-        <div className="dashboard-error">
-          <span>{error}</span>
-          <button className="error-dismiss" onClick={() => setError(null)}>
-            &times;
-          </button>
+      <main className="flex-1 overflow-y-auto p-6">
+        {/* Agents section bar */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Agents</h2>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={handleCreateSession}>
+              <Plus className="w-4 h-4 mr-1" /> Create
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefreshAgents}
+              disabled={loadingAgents}
+              title="Refresh agents"
+            >
+              <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
+            </Button>
+          </div>
         </div>
-      )}
 
-      {/* Two-panel layout */}
-      <div className="dashboard-panels">
-        {/* Agents Panel */}
-        <section className="panel agents-panel">
-          <div className="panel-header">
-            <h2>Agents</h2>
-            <button className="btn-refresh" onClick={handleRefreshAgents} disabled={loadingAgents} title="Refresh agents">
-              {loadingAgents ? '⟳' : '↻'}
-            </button>
+        {/* Agent cards grid */}
+        {loadingAgents ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-28 rounded-xl" />
+            ))}
           </div>
-          <div className="panel-body">
-            {agents.length === 0 && !loadingAgents ? (
-              <p className="empty-message">No agents found</p>
-            ) : (
-              <ul className="item-list">
-                {agents.map((agent) => (
-                  <li
-                    key={agent.agent_id}
-                    className={`agent-item ${selectedAgentId === agent.agent_id ? 'selected' : ''}`}
-                    onClick={() => handleAgentClick(agent.agent_id)}
-                  >
-                    <span className={`status-dot status-${agent.status}`} />
-                    <div className="agent-info">
-                      <span className="agent-hostname">{agent.hostname}</span>
-                      <span className="agent-meta">
-                        {agent.status} &middot; {agent.session_count} sess
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {loadingAgents && <p className="loading-message">Loading agents...</p>}
+        ) : agents.length === 0 ? (
+          <p className="text-muted-foreground text-center py-16">
+            No agents connected
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {agents.map((agent) => (
+              <AgentCard
+                key={agent.agent_id}
+                agent={agent}
+                selected={selectedAgentId === agent.agent_id}
+                onClick={() => handleAgentClick(agent.agent_id)}
+              />
+            ))}
           </div>
-        </section>
+        )}
 
-        {/* Sessions Panel */}
-        <section className="panel sessions-panel">
-          <div className="panel-header">
-            <h2>
-              Sessions
-              {selectedAgentId && (
-                <span className="filter-badge">
-                  {agents.find((a) => a.agent_id === selectedAgentId)?.hostname ?? selectedAgentId}
-                  <button className="filter-clear" onClick={() => setSelectedAgentId(null)} title="Clear filter">
-                    &times;
-                  </button>
-                </span>
-              )}
-            </h2>
-            <div className="panel-header-actions">
-              <button
-                className="btn-create-session"
-                onClick={handleCreateSession}
-                title="Create new session"
+        {/* Sessions panel */}
+        {selectedAgentId && (
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="font-semibold text-sm">
+                Sessions ·{' '}
+                {agents.find((a) => a.agent_id === selectedAgentId)?.hostname ?? selectedAgentId}
+              </h3>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setSelectedAgentId(null)}
+                title="Clear filter"
               >
-                + Create
-              </button>
-              <button className="btn-refresh" onClick={handleRefreshSessions} disabled={loadingSessions} title="Refresh sessions">
-                {loadingSessions ? '⟳' : '↻'}
-              </button>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={handleRefreshSessions}
+                disabled={loadingSessions}
+                title="Refresh sessions"
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
+              </Button>
             </div>
+            <SessionList
+              sessions={filteredSessions}
+              loading={loadingSessions}
+              onAttach={handleAttach}
+              onKill={handleKillClick}
+              attachingInProgress={attachingInProgress}
+            />
           </div>
-          <div className="panel-body">
-            {filteredSessions.length === 0 && !loadingSessions ? (
-              <p className="empty-message">
-                {selectedAgentId ? 'No sessions for this agent' : 'No sessions found'}
-              </p>
-            ) : (
-              <ul className="item-list">
-                {filteredSessions.map((session) => (
-                  <li key={session.session_id} className="session-item">
-                    <span className={`status-dot status-${session.status === 'active' ? 'active' : 'detached'}`} />
-                    <div className="session-info">
-                      <span className="session-name">{session.session_name}</span>
-                      <span className="session-meta">
-                        {session.agent_id} &middot; {session.window_count} win &middot; {session.attached_clients} client
-                        {session.attached_clients !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    <div className="session-actions">
-                      <button
-                        className="btn-attach"
-                        onClick={() => handleAttach(session)}
-                        disabled={attachingInProgress}
-                      >
-                        {attachingInProgress ? '...' : 'Attach'}
-                      </button>
-                      <button
-                        className="btn-kill"
-                        onClick={() => handleKillClick(session)}
-                        title="Kill session"
-                      >
-                        Kill
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {loadingSessions && <p className="loading-message">Loading sessions...</p>}
-          </div>
-        </section>
-      </div>
+        )}
+      </main>
 
-      {/* Modals */}
-      <CreateSessionModal
+      {/* Modals (will cause TS errors until Tasks 5 creates them — expected) */}
+      <CreateSessionDialog
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         wsService={wsService}
@@ -323,7 +306,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
         preselectedAgentId={selectedAgentId}
         onCreated={handleSessionCreated}
       />
-      <ConfirmKillModal
+      <KillConfirmDialog
         isOpen={sessionToKill !== null}
         onClose={() => setSessionToKill(null)}
         wsService={wsService}
@@ -334,22 +317,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   );
 }
 
-// ── Sub-components ──────────────────────────────────────────────────────
-
-function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
-  const labels: Record<ConnectionStatus, string> = {
-    disconnected: 'Disconnected',
-    connecting: 'Connecting...',
-    connected: 'Connected',
-    authenticated: 'Authenticated',
-  };
-  return (
-    <div className={`connection-badge connection-${status}`}>
-      <span className="connection-dot" />
-      <span className="connection-label">{labels[status]}</span>
-    </div>
-  );
-}
+// ── TerminalView ──────────────────────────────────────────────────────
 
 interface TerminalViewProps {
   session: AttachedSession;
@@ -365,29 +333,33 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
   const terminalRef = useRef<TerminalHandle>(null);
 
   return (
-    <div className="terminal-view">
-      <header className="terminal-view-header">
-        <button className="btn-back" onClick={onBack}>
-          &larr; Back to Dashboard
-        </button>
-        <span className="terminal-view-title">
-          Session: <strong>{sessionName}</strong>
-          <span className={`mode-badge mode-${attachInfo.mode}`}>{attachInfo.mode.toUpperCase()}</span>
+    <div className="h-screen flex flex-col bg-background">
+      <header className="border-b px-4 py-2 flex items-center gap-4 flex-shrink-0">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft className="w-4 h-4 mr-1" /> Back
+        </Button>
+        <span className="text-sm text-muted-foreground">
+          Session: <strong className="text-foreground">{sessionName}</strong>
         </span>
+        <Badge variant={attachInfo.mode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
+          {attachInfo.mode.toUpperCase()}
+        </Badge>
       </header>
-      <div className="terminal-view-body">
-        <Terminal
-          ref={terminalRef}
-          sessionId={sessionId}
-          sessionName={sessionName}
-          mode={attachInfo.mode}
-          agentUrl={isP2P ? attachInfo.agent_address : undefined}
-          connectionToken={isP2P ? attachInfo.connection_token : undefined}
-          serverConnection={!isP2P ? wsService : undefined}
-          onDisconnect={onDisconnect}
-          onError={onError}
-        />
-        <ControlPanel sendText={(text) => terminalRef.current?.sendText(text)} />
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0">
+          <Terminal
+            ref={terminalRef}
+            sessionId={sessionId}
+            sessionName={sessionName}
+            mode={attachInfo.mode}
+            agentUrl={isP2P ? attachInfo.agent_address : undefined}
+            connectionToken={isP2P ? attachInfo.connection_token : undefined}
+            serverConnection={!isP2P ? wsService : undefined}
+            onDisconnect={onDisconnect}
+            onError={onError}
+          />
+        </div>
+        <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
       </div>
     </div>
   );
