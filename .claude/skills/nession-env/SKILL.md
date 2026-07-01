@@ -134,16 +134,7 @@ Or use `/plugin` in Claude Code, search for "superpowers" and "superpowersexy".
 ls ~/.claude/plugins/cache/
 ```
 
-## 4. Project Skills
-
-Skills bundled in this repository, loaded when working on Nession:
-
-| Skill | Path | Purpose |
-|-------|------|---------|
-| nession-cicd | `.claude/skills/nession-cicd/SKILL.md` | Version bumps, PR creation, CI/CD troubleshooting |
-| nession-env | `.claude/skills/nession-env/SKILL.md` | This skill — environment setup |
-
-## 5. One-Shot Environment Setup
+## 4. One-Shot Environment Setup
 
 For a new machine, run these in order:
 
