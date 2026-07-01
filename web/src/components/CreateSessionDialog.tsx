@@ -1,8 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from './ui/dialog';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 import type { Agent } from '../types';
 import type { WebSocketService } from '../services/websocket';
 
-interface CreateSessionModalProps {
+interface CreateSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
   wsService: WebSocketService;
@@ -11,14 +28,14 @@ interface CreateSessionModalProps {
   onCreated: () => void;
 }
 
-export function CreateSessionModal({
+export function CreateSessionDialog({
   isOpen,
   onClose,
   wsService,
   agents,
   preselectedAgentId,
   onCreated,
-}: CreateSessionModalProps) {
+}: CreateSessionDialogProps) {
   const [agentId, setAgentId] = useState('');
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -36,17 +53,6 @@ export function CreateSessionModal({
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
   }, [isOpen, preselectedAgentId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   const validateName = (name: string): string | null => {
     if (!name.trim()) return 'Session name is required';
@@ -86,30 +92,32 @@ export function CreateSessionModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Create Session</h3>
-        <form onSubmit={handleSubmit}>
-          <div className="modal-field">
-            <label htmlFor="agent-select">Agent</label>
-            <select
-              id="agent-select"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              disabled={loading}
-            >
-              {onlineAgents.map((agent) => (
-                <option key={agent.agent_id} value={agent.agent_id}>
-                  {agent.hostname} ({agent.agent_id})
-                </option>
-              ))}
-            </select>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create Session</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="agent">Agent</Label>
+            <Select value={agentId} onValueChange={(value) => value && setAgentId(value)} disabled={loading}>
+              <SelectTrigger id="agent">
+                <SelectValue placeholder="Select an agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {onlineAgents.map((agent) => (
+                  <SelectItem key={agent.agent_id} value={agent.agent_id}>
+                    {agent.hostname} ({agent.agent_id})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="modal-field">
-            <label htmlFor="session-name">Session Name</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="name">Session Name</Label>
+            <Input
               ref={nameInputRef}
-              id="session-name"
+              id="name"
               type="text"
               value={sessionName}
               onChange={(e) => setSessionName(e.target.value)}
@@ -118,17 +126,17 @@ export function CreateSessionModal({
               autoComplete="off"
             />
           </div>
-          {error && <p className="modal-error">{error}</p>}
-          <div className="modal-actions">
-            <button type="button" className="btn-modal-cancel" onClick={onClose} disabled={loading}>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Cancel
-            </button>
-            <button type="submit" className="btn-modal-confirm" disabled={loading || !agentId}>
+            </Button>
+            <Button type="submit" disabled={loading || !agentId}>
               {loading ? 'Creating...' : 'Create'}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
