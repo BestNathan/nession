@@ -44,7 +44,7 @@ export interface TerminalProps {
   sessionName: string;
   /** Connection mode: 'p2p' for direct agent connection, 'relay' via server */
   mode: 'p2p' | 'relay';
-  /** Agent WebSocket URL for P2P mode (e.g. ws://192.168.1.10:8080/ws) */
+  /** Complete agent WebSocket URL for P2P mode (e.g. ws://agent.nession.nhome.local/ws) */
   agentUrl?: string;
   /** Authentication token for P2P agent connection */
   connectionToken?: string;

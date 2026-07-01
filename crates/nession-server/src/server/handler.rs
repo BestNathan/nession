@@ -489,11 +489,13 @@ impl ConnectionHandler {
         };
 
         // Prefer the agent's declared connect_url (k8s ingress / public hostname),
-        // falling back to the IP:port pair for bare-metal / direct-access deployments.
+        // falling back to a constructed URL for bare-metal / direct-access deployments.
+        // Both produce a complete URL (e.g. "ws://agent.example.com/ws" or "ws://10.0.0.1:19090/ws")
+        // so the frontend can use agent_address as-is without further splicing.
         let agent_ws_url = agent
             .connect_url
             .clone()
-            .unwrap_or_else(|| format!("ws://{}:{}", agent.ip_address, agent.port));
+            .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
         let agent_address = agent_ws_url.clone();
         let connection_token = uuid::Uuid::new_v4().to_string();
 

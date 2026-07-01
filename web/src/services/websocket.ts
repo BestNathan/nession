@@ -334,8 +334,8 @@ export class WebSocketService {
       return null;
     }
 
-    // Convert agent_address (ip:port) to WebSocket URL
-    const wsUrl = `ws://${attachInfo.agent_address}/ws`;
+    // agent_address is already a complete WebSocket URL (e.g. "ws://agent.example.com/ws")
+    const wsUrl = attachInfo.agent_address;
 
     return {
       url: wsUrl,

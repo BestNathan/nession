@@ -308,14 +308,14 @@ impl ClientConnection {
 }
 
 /// Connect to an agent's WebSocket server for P2P terminal I/O.
+/// `agent_address` is a complete WebSocket URL (e.g. "ws://agent.example.com/ws").
 /// Returns the WebSocketStream for use as a TerminalTransport.
 pub async fn connect_to_agent(agent_address: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-    let url = format!("ws://{}", agent_address);
-    info!("Connecting to agent at: {}", url);
+    info!("Connecting to agent at: {}", agent_address);
 
-    let (ws_stream, _) = connect_async(&url)
+    let (ws_stream, _) = connect_async(agent_address)
         .await
-        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+        .with_context(|| format!("Failed to connect to agent at {}", agent_address))?;
 
     info!("Agent WebSocket connection established");
     Ok(ws_stream)

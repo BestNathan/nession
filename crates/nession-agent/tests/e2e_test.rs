@@ -94,6 +94,7 @@ async fn register_agent_with_server(
         "test-host",
         "127.0.0.1",
         agent_port,
+        None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
     );

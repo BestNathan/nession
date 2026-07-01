@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "nession-agent"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "nession-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "nession-common"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "nession-server"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
