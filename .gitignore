@@ -91,3 +91,4 @@ test-results/
 # ================================
 .claude/
 *.local
+agent-config.toml

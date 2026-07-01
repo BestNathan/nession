@@ -270,18 +270,96 @@ where
 
     info!("Relay connection established");
 
-    // Forward client -> agent
+    // Helper: detect terminal.input JSON messages.
+    fn is_terminal_input(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+        msg.to_text()
+            .ok()
+            .map(|t| t.contains("\"terminal.input\""))
+            .unwrap_or(false)
+    }
+
+    // Forward client -> agent, with trailing-edge rate limiting on
+    // terminal.input to protect against mouse-tracking floods.  Keyboard
+    // input (also carried as terminal.input) is naturally slow enough
+    // (< 20 Hz) that it always passes on the leading edge.
+    const INPUT_THROTTLE_MS: u64 = 16;
+    let mut last_terminal_input = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(60))
+        .unwrap_or(std::time::Instant::now());
+
     let client_to_agent = async {
         while let Some(msg) = client_read.next().await {
-            match msg {
-                Ok(msg) => {
-                    if let Err(e) = agent_write.send(msg).await {
-                        error!("Failed to forward client message to agent: {}", e);
-                        break;
-                    }
-                }
+            let mut msg = match msg {
+                Ok(m) => m,
                 Err(e) => {
                     error!("Error reading from client: {}", e);
+                    break;
+                }
+            };
+
+            // Non-terminal.input passes through immediately.
+            if !is_terminal_input(&msg) {
+                if let Err(e) = agent_write.send(msg).await {
+                    error!("Failed to forward client message to agent: {}", e);
+                    break;
+                }
+                continue;
+            }
+
+            // Terminal.input: trailing-edge throttle.  If within the window
+            // from the last send, drain additional mouse events and keep
+            // only the latest position.  Non-mouse messages that arrive
+            // during the drain are forwarded immediately.
+            let elapsed = last_terminal_input.elapsed();
+            if elapsed < std::time::Duration::from_millis(INPUT_THROTTLE_MS) {
+                let drain_deadline = last_terminal_input
+                    + std::time::Duration::from_millis(INPUT_THROTTLE_MS);
+                let mut latest = msg;
+
+                loop {
+                    let remaining = drain_deadline
+                        .saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    match tokio::time::timeout(remaining, client_read.next()).await
+                    {
+                        Ok(Some(Ok(m))) if is_terminal_input(&m) => {
+                            latest = m; // keep only latest mouse event
+                        }
+                        Ok(Some(Ok(m))) => {
+                            // Non-terminal.input message during drain:
+                            // forward it now, then break to send latest.
+                            let _ = agent_write.send(m).await;
+                            break;
+                        }
+                        Ok(Some(Err(e))) => {
+                            error!("Error reading from client: {}", e);
+                            break;
+                        }
+                        Ok(None) | Err(tokio::time::error::Elapsed { .. }) => {
+                            break; // stream ended or timeout
+                        }
+                    }
+                }
+
+                // Send the latest buffered terminal.input.
+                if let Err(e) = agent_write.send(latest).await {
+                    error!(
+                        "Failed to forward client message to agent: {}",
+                        e
+                    );
+                    break;
+                }
+                last_terminal_input = std::time::Instant::now();
+            } else {
+                // Outside throttle window — send immediately (leading edge).
+                last_terminal_input = std::time::Instant::now();
+                if let Err(e) = agent_write.send(msg).await {
+                    error!(
+                        "Failed to forward client message to agent: {}",
+                        e
+                    );
                     break;
                 }
             }
