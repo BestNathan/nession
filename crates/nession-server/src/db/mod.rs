@@ -52,7 +52,7 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-            CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);"
+            CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);",
         )?;
 
         Ok(Self {
@@ -87,19 +87,21 @@ impl Database {
             "SELECT agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata FROM agents"
         )?;
 
-        let agents = stmt.query_map([], |row| {
-            Ok(AgentRow {
-                agent_id: row.get(0)?,
-                hostname: row.get(1)?,
-                ip_address: row.get(2)?,
-                port: row.get(3)?,
-                registered_at: row.get(4)?,
-                last_heartbeat: row.get(5)?,
-                status: row.get(6)?,
-                auth_token_hash: row.get(7)?,
-                metadata: row.get(8)?,
-            })
-        })?.collect::<Result<Vec<_>>>()?;
+        let agents = stmt
+            .query_map([], |row| {
+                Ok(AgentRow {
+                    agent_id: row.get(0)?,
+                    hostname: row.get(1)?,
+                    ip_address: row.get(2)?,
+                    port: row.get(3)?,
+                    registered_at: row.get(4)?,
+                    last_heartbeat: row.get(5)?,
+                    status: row.get(6)?,
+                    auth_token_hash: row.get(7)?,
+                    metadata: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(agents)
     }

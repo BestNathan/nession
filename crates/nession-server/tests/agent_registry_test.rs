@@ -1,6 +1,6 @@
-use nession_server::registry::agent::{AgentInfo, AgentRegistry, AgentStatus};
-use nession_common::protocol::AgentMetadata;
 use chrono::Utc;
+use nession_common::protocol::AgentMetadata;
+use nession_server::registry::agent::{AgentInfo, AgentRegistry, AgentStatus};
 
 #[tokio::test]
 async fn test_agent_registration() {

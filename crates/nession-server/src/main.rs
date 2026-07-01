@@ -1,19 +1,20 @@
-use std::path::Path;
 use anyhow::Context;
-use tracing::{info, error};
+use std::path::Path;
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use nession_common::config::ServerConfig;
-use nession_server::server::WebSocketServer;
 use nession_server::db::Database;
+use nession_server::server::WebSocketServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing/logging
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            "nession_server=info,tower_http=info".into()
-        }))
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "nession_server=info,tower_http=info".into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -21,8 +22,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = load_config()?;
-    info!("Configuration loaded: listen_address={}, db_path={}",
-          config.listen_address, config.db_path);
+    info!(
+        "Configuration loaded: listen_address={}, db_path={}",
+        config.listen_address, config.db_path
+    );
 
     // Ensure component directories exist
     nession_common::paths::ensure_component_dirs()
@@ -63,7 +66,9 @@ fn load_config() -> anyhow::Result<ServerConfig> {
             auth_token: String::new(),
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
-            db_path: nession_common::paths::server_db_path().to_string_lossy().into_owned(),
+            db_path: nession_common::paths::server_db_path()
+                .to_string_lossy()
+                .into_owned(),
         })
     }
 }

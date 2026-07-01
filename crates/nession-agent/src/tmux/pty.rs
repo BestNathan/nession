@@ -166,7 +166,7 @@ impl PtySession {
     /// is retained here for read/write/resize operations.
     pub async fn attach(session_name: &str, width: u16, height: u16) -> Result<Self> {
         let mut cmd = CommandBuilder::new("tmux");
-        cmd.args(&["attach-session", "-t", session_name]);
+        cmd.args(["attach-session", "-t", session_name]);
         // tmux requires TERM to be set when attaching via PTY
         cmd.env("TERM", "xterm-256color");
         Self::spawn_inner(cmd, session_name.to_string(), width, height).await
@@ -208,8 +208,7 @@ impl PtySession {
             let mut guard = lock.lock().expect("read_buf poisoned");
 
             // Wait for data or EOF, bounded by timeout.
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
             while guard.data.is_empty() && !guard.eof {
                 let now = std::time::Instant::now();
                 if now >= deadline {
@@ -243,8 +242,8 @@ impl PtySession {
             if to_copy > 0 {
                 let ptr = ptr_addr as *mut u8;
                 let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-                for i in 0..to_copy {
-                    slice[i] = guard.data.pop_front().unwrap();
+                for slot in slice.iter_mut().take(to_copy) {
+                    *slot = guard.data.pop_front().unwrap();
                 }
             }
             Ok(to_copy)
@@ -313,9 +312,7 @@ impl PtySession {
             drop(child_guard);
 
             // Join the reader thread (it should exit soon after the child dies).
-            let mut handle_guard = reader_handle
-                .lock()
-                .expect("reader_handle lock poisoned");
+            let mut handle_guard = reader_handle.lock().expect("reader_handle lock poisoned");
             if let Some(h) = handle_guard.take() {
                 let _ = h.join();
             }

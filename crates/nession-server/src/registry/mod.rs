@@ -1,5 +1,5 @@
 pub mod agent;
 pub mod session;
 
-pub use agent::{AgentRegistry, AgentInfo, AgentStatus};
-pub use session::{SessionRegistry, SessionInfo, SessionStatus};
+pub use agent::{AgentInfo, AgentRegistry, AgentStatus};
+pub use session::{SessionInfo, SessionRegistry, SessionStatus};

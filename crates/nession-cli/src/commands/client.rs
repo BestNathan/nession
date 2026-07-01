@@ -35,11 +35,7 @@ pub async fn list_agents(server_url: &str, auth_token: &str) -> Result<()> {
         let heartbeat_ago = format_time_ago(&agent.last_heartbeat);
         println!(
             "{:<16}{:<18}{:<10}{:<12}{:<15}",
-            agent.agent_id,
-            agent.hostname,
-            agent.status,
-            agent.session_count,
-            heartbeat_ago,
+            agent.agent_id, agent.hostname, agent.status, agent.session_count, heartbeat_ago,
         );
     }
     println!();
@@ -78,8 +74,8 @@ pub async fn list_sessions(
     println!();
     println!("Sessions:");
     println!(
-        "{:<34}{:<16}{:<14}{:<12}{:<10}{}",
-        "SESSION ID", "AGENT", "NAME", "STATUS", "WINDOWS", "ATTACHED"
+        "{:<34}{:<16}{:<14}{:<12}{:<10}ATTACHED",
+        "SESSION ID", "AGENT", "NAME", "STATUS", "WINDOWS"
     );
 
     for session in &sessions {
@@ -132,27 +128,37 @@ pub async fn attach_session(
         }
     };
 
-    println!("Requesting to attach to session '{}' (mode: {})...", session_id, preferred_mode);
+    println!(
+        "Requesting to attach to session '{}' (mode: {})...",
+        session_id, preferred_mode
+    );
 
     // Request attach
-    let attach_resp = conn.request_attach(session_id, preferred_mode).await
+    let attach_resp = conn
+        .request_attach(session_id, preferred_mode)
+        .await
         .with_context(|| "Failed to attach to session")?;
 
     match attach_resp {
         crate::client::connection::AttachResponse::P2P(p2p_info) => {
-            println!("Connecting to agent at {} (P2P mode)...", p2p_info.agent_address);
+            println!(
+                "Connecting to agent at {} (P2P mode)...",
+                p2p_info.agent_address
+            );
 
             // Connect directly to agent
             let agent_ws = crate::client::connection::connect_to_agent(&p2p_info.agent_address)
                 .await
-                .with_context(|| format!("Failed to connect to agent at {}", p2p_info.agent_address))?;
+                .with_context(|| {
+                    format!("Failed to connect to agent at {}", p2p_info.agent_address)
+                })?;
 
             // Create WebSocket transport
             let transport = crate::terminal::raw::WebSocketTransport::new(agent_ws);
 
             // Send client.attach to agent with session name
             use nession_agent::server::websocket::{
-                ClientAttachPayload, Message as AgentMessage, msg_types as agent_msg_types,
+                msg_types as agent_msg_types, ClientAttachPayload, Message as AgentMessage,
             };
             let (cols, rows) = crate::terminal::raw::RawTerminal::size()?;
             let attach_msg = AgentMessage {
@@ -173,7 +179,10 @@ pub async fn attach_session(
             let mut transport = transport;
             transport.send_text(attach_json).await?;
 
-            println!("Attached to session '{}'. Press Ctrl+B then D to detach.", p2p_info.session_name);
+            println!(
+                "Attached to session '{}'. Press Ctrl+B then D to detach.",
+                p2p_info.session_name
+            );
 
             // Create cancellation channel
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
@@ -186,11 +195,8 @@ pub async fn attach_session(
             });
 
             // Create and run terminal session
-            let session = crate::terminal::TerminalSession::new(
-                p2p_info.session_name,
-                transport,
-                cancel_rx,
-            );
+            let session =
+                crate::terminal::TerminalSession::new(p2p_info.session_name, transport, cancel_rx);
 
             // Detach key: Ctrl+B followed by 'd'
             let detach_key = crossterm::event::KeyEvent::new(
@@ -212,7 +218,7 @@ pub async fn attach_session(
             // For relay mode, the server expects us to send terminal protocol messages
             // The server will forward them to the agent
             use nession_agent::server::websocket::{
-                ClientAttachPayload, Message as AgentMessage, msg_types as agent_msg_types,
+                msg_types as agent_msg_types, ClientAttachPayload, Message as AgentMessage,
             };
             let (cols, rows) = crate::terminal::raw::RawTerminal::size()?;
 
@@ -320,10 +326,19 @@ pub async fn create_session(
         session_name, agent_id, width, height
     );
 
-    let created_name =
-        crate::client::connection::create_session_on_agent(&agent_address, session_name, width, height)
-            .await
-            .with_context(|| format!("Failed to create session '{}' on agent '{}'", session_name, agent_id))?;
+    let created_name = crate::client::connection::create_session_on_agent(
+        &agent_address,
+        session_name,
+        width,
+        height,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to create session '{}' on agent '{}'",
+            session_name, agent_id
+        )
+    })?;
 
     println!("Session '{}' created successfully.", created_name);
 
@@ -341,20 +356,14 @@ pub async fn create_session(
 /// * `server_url` - URL of the nession server
 /// * `auth_token` - Authentication token
 /// * `session_id` - Session ID in format "agent_id:session_name"
-pub async fn kill_session(
-    server_url: &str,
-    auth_token: &str,
-    session_id: &str,
-) -> Result<()> {
+pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) -> Result<()> {
     // Parse session_id (format: agent_id:session_name)
-    let (agent_id, session_name) = session_id
-        .split_once(':')
-        .with_context(|| {
-            format!(
-                "Invalid session ID '{}'. Expected format: agent_id:session_name",
-                session_id
-            )
-        })?;
+    let (agent_id, session_name) = session_id.split_once(':').with_context(|| {
+        format!(
+            "Invalid session ID '{}'. Expected format: agent_id:session_name",
+            session_id
+        )
+    })?;
 
     // Connect to server to look up agent address
     let mut conn = ClientConnection::connect(server_url, auth_token)
@@ -371,7 +380,10 @@ pub async fn kill_session(
         .with_context(|| format!("Agent '{}' not found. Is it registered?", agent_id))?;
 
     let agent_address = format!("{}:{}", agent.ip_address, agent.port);
-    println!("Killing session '{}' on agent '{}'...", session_name, agent_id);
+    println!(
+        "Killing session '{}' on agent '{}'...",
+        session_name, agent_id
+    );
 
     let killed_name =
         crate::client::connection::kill_session_on_agent(&agent_address, session_name)

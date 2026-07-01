@@ -1,7 +1,7 @@
+use futures_util::{SinkExt, StreamExt};
 use nession_server::server::WebSocketServer;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::connect_async;
-use futures_util::{SinkExt, StreamExt};
 
 fn current_timestamp() -> u64 {
     SystemTime::now()
@@ -82,7 +82,12 @@ async fn test_agent_registration() {
         }
     });
 
-    ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(register_msg.to_string())).await.unwrap();
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            register_msg.to_string(),
+        ))
+        .await
+        .unwrap();
 
     let response = ws_stream.next().await.unwrap().unwrap();
     let response_text = match response {
@@ -130,7 +135,12 @@ async fn test_invalid_auth_token() {
         }
     });
 
-    ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(auth_msg.to_string())).await.unwrap();
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await
+        .unwrap();
 
     let response = ws_stream.next().await.unwrap().unwrap();
     let response_text = match response {
@@ -188,14 +198,20 @@ async fn test_heartbeat_without_registration() {
         }
     });
 
-    ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(heartbeat_msg.to_string())).await.unwrap();
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            heartbeat_msg.to_string(),
+        ))
+        .await
+        .unwrap();
 
-    let result = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        ws_stream.next()
-    ).await;
+    let result =
+        tokio::time::timeout(tokio::time::Duration::from_millis(500), ws_stream.next()).await;
 
-    assert!(result.is_err(), "Server should not respond to heartbeat from unregistered agent");
+    assert!(
+        result.is_err(),
+        "Server should not respond to heartbeat from unregistered agent"
+    );
 
     tokio::fs::remove_file("./test_ws_heartbeat.db").await.ok();
 }

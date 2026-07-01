@@ -291,7 +291,10 @@ async fn main() -> Result<()> {
             SessionsAction::Kill { session_id, force } => {
                 // Prompt for confirmation unless --force is set
                 if !force {
-                    print!("Are you sure you want to kill session '{}'? [y/N] ", session_id);
+                    print!(
+                        "Are you sure you want to kill session '{}'? [y/N] ",
+                        session_id
+                    );
                     use std::io::Write;
                     std::io::stdout().flush()?;
                     let mut input = String::new();
@@ -305,8 +308,7 @@ async fn main() -> Result<()> {
 
                 let server_url = resolve_server_url(cli.server_url);
                 let auth_token = resolve_auth_token(cli.auth_token);
-                commands::client::kill_session(&server_url, &auth_token, &session_id)
-                    .await?;
+                commands::client::kill_session(&server_url, &auth_token, &session_id).await?;
             }
         },
     }

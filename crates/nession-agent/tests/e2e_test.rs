@@ -11,7 +11,7 @@
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::{
-    new_message, msg_types as agent_msg_types, AgentServer, ClientAttachPayload,
+    msg_types as agent_msg_types, new_message, AgentServer, ClientAttachPayload,
     ClientDetachPayload, SessionCreatePayload, SessionKillPayload,
 };
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -30,11 +30,20 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 // ---------------------------------------------------------------------------
 
 /// Start a real nession-server on a random port and return its address.
-async fn start_test_server(auth_token: &str) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>, String) {
+async fn start_test_server(
+    auth_token: &str,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>, String) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let db_path = format!("./test_e2e_{}_{}.db", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(), id);
+    let db_path = format!(
+        "./test_e2e_{}_{}.db",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        id
+    );
 
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
@@ -99,7 +108,11 @@ async fn register_agent_with_server(
         Arc::new(TmuxManager::new()),
     );
 
-    client.connect_and_run().await.expect("agent registration failed").0
+    client
+        .connect_and_run()
+        .await
+        .expect("agent registration failed")
+        .0
 }
 
 // ---------------------------------------------------------------------------
@@ -115,13 +128,9 @@ async fn test_full_agent_server_integration() {
     let (agent_addr, agent_server_handle) = start_test_agent_server().await;
 
     // Register agent with central server.
-    let client_handle = register_agent_with_server(
-        server_addr,
-        "e2e-agent-1",
-        "test-token",
-        agent_addr.port(),
-    )
-    .await;
+    let client_handle =
+        register_agent_with_server(server_addr, "e2e-agent-1", "test-token", agent_addr.port())
+            .await;
 
     // Give it time to register.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -487,22 +496,14 @@ async fn test_graceful_shutdown() {
     .await;
 
     // Start heartbeat.
-    let heartbeat = HeartbeatLoop::new(
-        client_handle.clone(),
-        TmuxManager::new(),
-        10,
-    );
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), TmuxManager::new(), 10);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
     // Start session watcher.
-    let watcher = SessionWatcher::new(
-        client_handle.clone(),
-        TmuxManager::new(),
-        5,
-    );
+    let watcher = SessionWatcher::new(client_handle.clone(), TmuxManager::new(), 5);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;

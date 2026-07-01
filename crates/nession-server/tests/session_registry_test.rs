@@ -1,5 +1,5 @@
-use nession_server::registry::session::{SessionRegistry, SessionInfo, SessionStatus};
 use chrono::Utc;
+use nession_server::registry::session::{SessionInfo, SessionRegistry, SessionStatus};
 
 #[tokio::test]
 async fn test_session_update() {

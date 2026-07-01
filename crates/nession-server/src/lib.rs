@@ -1,4 +1,4 @@
-pub mod server;
-pub mod registry;
-pub mod db;
 pub mod broker;
+pub mod db;
+pub mod registry;
+pub mod server;

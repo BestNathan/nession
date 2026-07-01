@@ -196,6 +196,7 @@ impl ServerClient {
     /// * `ip_address` - IP address of the agent
     /// * `port` - Port where the agent's WebSocket server is listening
     /// * `metadata` - Agent metadata (tmux version, OS version, etc.)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_url: impl Into<String>,
         auth_token: impl Into<String>,
@@ -247,7 +248,8 @@ impl ServerClient {
         // Spawn the supervisor; it owns the reconnect loop and never returns
         // until shutdown.
         tokio::spawn(async move {
-            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed).await;
+            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed)
+                .await;
         });
 
         // Wait (briefly) for the first registration to report the interval.
@@ -375,10 +377,7 @@ impl ServerClient {
                             interval = payload.heartbeat_interval_secs;
                             break;
                         } else {
-                            anyhow::bail!(
-                                "registration rejected by server: {}",
-                                payload.message
-                            );
+                            anyhow::bail!("registration rejected by server: {}", payload.message);
                         }
                     }
                     // Ignore any other message arriving before the response.
@@ -387,7 +386,11 @@ impl ServerClient {
                     sink.send(WsMessage::Pong(data)).await.ok();
                 }
                 Some(Ok(_)) => {}
-                Some(Err(e)) => return Err(anyhow::Error::from(e).context("error awaiting registration response")),
+                Some(Err(e)) => {
+                    return Err(
+                        anyhow::Error::from(e).context("error awaiting registration response")
+                    )
+                }
                 None => anyhow::bail!("connection closed before registration response"),
             }
         }
@@ -461,8 +464,8 @@ impl ServerClient {
     /// Handle a message received from the server, writing any response directly
     /// to the connection's sink.
     async fn handle_server_message(&self, text: &str, sink: &mut WsSink) -> Result<()> {
-        let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(text)
-            .context("failed to parse server message")?;
+        let msg: ProtocolMessage<serde_json::Value> =
+            serde_json::from_str(text).context("failed to parse server message")?;
 
         match msg.msg_type.as_str() {
             msg_types::AGENT_REGISTER_RESPONSE => {
@@ -478,12 +481,16 @@ impl ServerClient {
                 let width = msg.payload["width"].as_u64().unwrap_or(80) as u16;
                 let height = msg.payload["height"].as_u64().unwrap_or(24) as u16;
 
-                info!("Server requested session create: name={}, width={}, height={}", name, width, height);
+                info!(
+                    "Server requested session create: name={}, width={}, height={}",
+                    name, width, height
+                );
 
-                let (success, error, session_name) = match self.tmux.create_session(&name, width, height).await {
-                    Ok(()) => (true, None, Some(name.clone())),
-                    Err(e) => (false, Some(e.to_string()), None),
-                };
+                let (success, error, session_name) =
+                    match self.tmux.create_session(&name, width, height).await {
+                        Ok(()) => (true, None, Some(name.clone())),
+                        Err(e) => (false, Some(e.to_string()), None),
+                    };
 
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
@@ -835,7 +842,12 @@ mod tests {
                         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
                         if parsed["msg_type"] == "agent.register" {
                             let _ = re_tx
-                                .send(parsed["payload"]["agent_id"].as_str().unwrap_or("").to_string())
+                                .send(
+                                    parsed["payload"]["agent_id"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_string(),
+                                )
                                 .await;
                         }
                     }

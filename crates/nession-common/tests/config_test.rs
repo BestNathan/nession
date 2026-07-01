@@ -28,5 +28,10 @@ fn test_server_config_defaults() {
 
     let config: ServerConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(config.heartbeat_timeout_secs, 30); // default
-    assert_eq!(config.db_path, nession_common::paths::server_db_path().to_string_lossy().as_ref()); // default
+    assert_eq!(
+        config.db_path,
+        nession_common::paths::server_db_path()
+            .to_string_lossy()
+            .as_ref()
+    ); // default
 }

@@ -1,7 +1,7 @@
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
@@ -23,6 +23,12 @@ pub enum SessionStatus {
 
 pub struct SessionRegistry {
     sessions: Arc<RwLock<HashMap<String, SessionInfo>>>,
+}
+
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionRegistry {
@@ -49,7 +55,8 @@ impl SessionRegistry {
 
     pub async fn list_by_agent(&self, agent_id: &str) -> Vec<SessionInfo> {
         let sessions = self.sessions.read().await;
-        sessions.values()
+        sessions
+            .values()
             .filter(|s| s.agent_id == agent_id)
             .cloned()
             .collect()

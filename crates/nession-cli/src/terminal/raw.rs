@@ -25,11 +25,13 @@ use crossterm::{
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::protocol::Message as WsMessage};
+use tokio_tungstenite::{
+    tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
+};
 use tracing::{debug, trace, warn};
 
 use nession_agent::server::websocket::{
-    Message, TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload, msg_types,
+    msg_types, Message, TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
 };
 
 // ---------------------------------------------------------------------------
@@ -73,16 +75,19 @@ impl RawTerminal {
     /// Poll for an input event with a timeout. Returns `Ok(None)` on timeout.
     /// This is a thin wrapper around `crossterm::event::poll` that converts
     /// the `io::Error` to `anyhow`.
+    #[allow(dead_code)]
     pub fn poll_input(timeout: std::time::Duration) -> Result<bool> {
         term_poll(timeout).context("crossterm poll failed")
     }
 
     /// Read a single input event (blocking).
+    #[allow(dead_code)]
     pub fn read_input() -> Result<Event> {
         term_read().context("crossterm read failed")
     }
 
     /// Write raw bytes to stdout. Used for forwarding agent output.
+    #[allow(dead_code)]
     pub fn write_output(data: &[u8]) -> Result<()> {
         let mut stdout = io::stdout();
         stdout.write_all(data).context("stdout write_all failed")?;
@@ -150,7 +155,7 @@ pub fn key_event_to_bytes(ev: &KeyEvent) -> Option<Vec<u8>> {
             if ctrl {
                 // Ctrl+A → 0x01 … Ctrl+Z → 0x1A
                 let c_lower = c.to_ascii_lowercase();
-                if ('a'..='z').contains(&c_lower) {
+                if c_lower.is_ascii_lowercase() {
                     out.push(c_lower as u8 - b'a' + 1);
                 } else {
                     // Pass other Ctrl combos through as UTF-8; the remote side
@@ -359,7 +364,11 @@ impl<T: TerminalTransport> TerminalSession<T> {
         // Announce initial size.
         if let Err(e) = self
             .transport
-            .send_text(build_terminal_resize_message(&self.session_name, cols, rows))
+            .send_text(build_terminal_resize_message(
+                &self.session_name,
+                cols,
+                rows,
+            ))
             .await
         {
             raw.deactivate();
@@ -369,7 +378,7 @@ impl<T: TerminalTransport> TerminalSession<T> {
         // Buffer for partial multi-byte detach key matches.
         let detach_buf: Vec<u8> = detach_key
             .as_ref()
-            .and_then(|k| key_event_to_bytes(k))
+            .and_then(key_event_to_bytes)
             .unwrap_or_default();
 
         // Per-byte cursor into detach_buf: if the user types the prefix of

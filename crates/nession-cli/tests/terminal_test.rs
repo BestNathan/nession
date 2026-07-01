@@ -3,13 +3,13 @@
 //! These tests verify the message routing logic of [`TerminalSession`] using a
 //! mock transport that simulates the agent side.
 
+use anyhow::Result;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nession_cli::terminal::raw::{
     build_terminal_input_message, build_terminal_resize_message, extract_terminal_output,
     key_event_to_bytes,
 };
 use nession_cli::terminal::{TerminalSession, TerminalTransport};
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::{mpsc, watch};
 
 /// A mock transport that captures sent messages and allows injecting received
@@ -22,7 +22,9 @@ struct MockTransport {
 #[async_trait::async_trait]
 impl TerminalTransport for MockTransport {
     async fn send_text(&mut self, text: String) -> Result<()> {
-        self.sent_tx.send(text).map_err(|_| anyhow::anyhow!("send channel closed"))
+        self.sent_tx
+            .send(text)
+            .map_err(|_| anyhow::anyhow!("send channel closed"))
     }
 
     async fn recv_text(&mut self) -> Result<Option<String>> {

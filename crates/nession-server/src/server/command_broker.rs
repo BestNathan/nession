@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{warn, debug};
+use tracing::{debug, warn};
 
 /// Sender for outgoing WebSocket messages.
 ///
@@ -18,7 +18,10 @@ impl WsMessageSender {
         (Self(tx), rx)
     }
 
-    pub fn send(&self, msg: WsMessage) -> Result<(), tokio::sync::mpsc::error::SendError<WsMessage>> {
+    pub fn send(
+        &self,
+        msg: WsMessage,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<WsMessage>> {
         self.0.send(msg)
     }
 }
@@ -38,6 +41,12 @@ pub struct CommandBroker {
     agents: RwLock<HashMap<String, AgentControl>>,
 }
 
+impl Default for CommandBroker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandBroker {
     pub fn new() -> Self {
         Self {
@@ -48,10 +57,13 @@ impl CommandBroker {
     /// Register an agent's control connection sender.
     pub async fn register_agent(&self, agent_id: &str, sender: WsMessageSender) {
         let mut agents = self.agents.write().await;
-        agents.insert(agent_id.to_string(), AgentControl {
-            sender,
-            pending_commands: HashMap::new(),
-        });
+        agents.insert(
+            agent_id.to_string(),
+            AgentControl {
+                sender,
+                pending_commands: HashMap::new(),
+            },
+        );
         debug!("CommandBroker: registered agent {}", agent_id);
     }
 
@@ -116,10 +128,16 @@ impl CommandBroker {
         // Send the command through the channel
         match sender.send(WsMessage::Text(json)) {
             Ok(_) => {
-                debug!("CommandBroker: sent {} to agent {} (req: {})", mt, aid, req_id);
+                debug!(
+                    "CommandBroker: sent {} to agent {} (req: {})",
+                    mt, aid, req_id
+                );
             }
             Err(e) => {
-                warn!("CommandBroker: failed to send command to agent {}: {}", aid, e);
+                warn!(
+                    "CommandBroker: failed to send command to agent {}: {}",
+                    aid, e
+                );
             }
         }
 

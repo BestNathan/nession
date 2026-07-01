@@ -65,7 +65,10 @@ impl TestServer {
     }
 
     /// Connect a raw WebSocket client.
-    async fn connect(&self) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    async fn connect(
+        &self,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         let (stream, _) = connect_async(self.ws_url()).await.unwrap();
         stream
     }
@@ -82,7 +85,9 @@ impl Drop for TestServer {
 
 /// Send a text message over a WebSocket stream.
 async fn send_text(
-    ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     text: String,
 ) {
     ws.send(WsMessage::Text(text)).await.unwrap();
@@ -90,7 +95,9 @@ async fn send_text(
 
 /// Receive the next text message, panicking if the connection closes or a non-text frame arrives.
 async fn recv_text(
-    ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
 ) -> String {
     match ws.next().await {
         Some(Ok(WsMessage::Text(t))) => t,
@@ -102,15 +109,12 @@ async fn recv_text(
 
 /// Try to receive a message within `timeout_ms`. Returns `None` on timeout.
 async fn try_recv_text(
-    ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     timeout_ms: u64,
 ) -> Option<String> {
-    match tokio::time::timeout(
-        tokio::time::Duration::from_millis(timeout_ms),
-        ws.next(),
-    )
-    .await
-    {
+    match tokio::time::timeout(tokio::time::Duration::from_millis(timeout_ms), ws.next()).await {
         Ok(Some(Ok(WsMessage::Text(t)))) => Some(t),
         Ok(Some(Ok(_))) => None,
         Ok(Some(Err(_))) => None,
@@ -374,7 +378,9 @@ async fn test_multiple_heartbeats_accepted() {
 
     // Each heartbeat should be acknowledged.
     for _ in 0..5 {
-        let ack = try_recv_text(&mut ws, 500).await.expect("expected heartbeat ack");
+        let ack = try_recv_text(&mut ws, 500)
+            .await
+            .expect("expected heartbeat ack");
         let parsed: serde_json::Value = serde_json::from_str(&ack).unwrap();
         assert_eq!(parsed["msg_type"], "server.heartbeat.ack");
     }
@@ -686,11 +692,15 @@ async fn test_response_includes_timestamp() {
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
     let after = current_timestamp();
-    let ts = resp["timestamp"].as_u64().expect("response must include timestamp");
+    let ts = resp["timestamp"]
+        .as_u64()
+        .expect("response must include timestamp");
     assert!(
         ts >= before && ts <= after,
         "Timestamp {} should be between {} and {}",
-        ts, before, after
+        ts,
+        before,
+        after
     );
 }
 

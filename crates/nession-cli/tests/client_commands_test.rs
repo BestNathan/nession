@@ -28,13 +28,7 @@ fn test_agents_list_help() {
 fn test_sessions_list_help() {
     let output = Command::new("cargo")
         .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "sessions",
-            "list",
-            "--help",
+            "run", "--bin", "nession", "--", "sessions", "list", "--help",
         ])
         .output()
         .expect("Failed to execute command");

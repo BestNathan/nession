@@ -1,13 +1,13 @@
 //! Client WebSocket connection to central server.
 
 use anyhow::{Context, Result};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
-use futures_util::{SinkExt, StreamExt};
 use tracing::{debug, info};
 
 /// Client connection to the central server.
@@ -44,6 +44,7 @@ pub struct SessionInfo {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct P2PAttachInfo {
     pub agent_address: String,
+    #[allow(dead_code)]
     pub connection_token: String,
     pub session_name: String,
 }
@@ -81,12 +82,11 @@ impl ClientConnection {
 
     /// Authenticate with the server.
     async fn authenticate(&mut self, auth_token: &str) -> Result<()> {
-        let msg_id = format!("auth_{}", SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis());
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+        let msg_id = format!(
+            "auth_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+        );
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let auth_msg = json!({
             "msg_type": "client.auth",
@@ -98,7 +98,9 @@ impl ClientConnection {
         });
 
         debug!("Sending auth message: {}", auth_msg);
-        self.ws_stream.send(Message::Text(auth_msg.to_string())).await?;
+        self.ws_stream
+            .send(Message::Text(auth_msg.to_string()))
+            .await?;
 
         // Wait for auth response
         if let Some(msg) = self.ws_stream.next().await {
@@ -119,7 +121,10 @@ impl ClientConnection {
                             anyhow::bail!("Authentication failed: {}", message)
                         }
                     } else {
-                        anyhow::bail!("Unexpected response: expected client.auth.response, got {}", msg_type)
+                        anyhow::bail!(
+                            "Unexpected response: expected client.auth.response, got {}",
+                            msg_type
+                        )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
@@ -136,12 +141,11 @@ impl ClientConnection {
             anyhow::bail!("Not authenticated");
         }
 
-        let msg_id = format!("agents_{}", SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis());
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+        let msg_id = format!(
+            "agents_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+        );
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let request = json!({
             "msg_type": "client.agents.list",
@@ -151,7 +155,9 @@ impl ClientConnection {
         });
 
         debug!("Sending agents list request: {}", request);
-        self.ws_stream.send(Message::Text(request.to_string())).await?;
+        self.ws_stream
+            .send(Message::Text(request.to_string()))
+            .await?;
 
         // Wait for response
         if let Some(msg) = self.ws_stream.next().await {
@@ -161,10 +167,14 @@ impl ClientConnection {
                     let msg_type = response["msg_type"].as_str().unwrap_or("");
 
                     if msg_type == "client.agents.list.response" {
-                        let agents: Vec<AgentInfo> = serde_json::from_value(response["payload"]["agents"].clone())?;
+                        let agents: Vec<AgentInfo> =
+                            serde_json::from_value(response["payload"]["agents"].clone())?;
                         Ok(agents)
                     } else {
-                        anyhow::bail!("Unexpected response: expected client.agents.list.response, got {}", msg_type)
+                        anyhow::bail!(
+                            "Unexpected response: expected client.agents.list.response, got {}",
+                            msg_type
+                        )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
@@ -181,12 +191,11 @@ impl ClientConnection {
             anyhow::bail!("Not authenticated");
         }
 
-        let msg_id = format!("sessions_{}", SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis());
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+        let msg_id = format!(
+            "sessions_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+        );
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let mut payload = json!({});
         if let Some(agent) = agent_id {
@@ -201,7 +210,9 @@ impl ClientConnection {
         });
 
         debug!("Sending sessions list request: {}", request);
-        self.ws_stream.send(Message::Text(request.to_string())).await?;
+        self.ws_stream
+            .send(Message::Text(request.to_string()))
+            .await?;
 
         // Wait for response
         if let Some(msg) = self.ws_stream.next().await {
@@ -211,10 +222,14 @@ impl ClientConnection {
                     let msg_type = response["msg_type"].as_str().unwrap_or("");
 
                     if msg_type == "client.sessions.list.response" {
-                        let sessions: Vec<SessionInfo> = serde_json::from_value(response["payload"]["sessions"].clone())?;
+                        let sessions: Vec<SessionInfo> =
+                            serde_json::from_value(response["payload"]["sessions"].clone())?;
                         Ok(sessions)
                     } else {
-                        anyhow::bail!("Unexpected response: expected client.sessions.list.response, got {}", msg_type)
+                        anyhow::bail!(
+                            "Unexpected response: expected client.sessions.list.response, got {}",
+                            msg_type
+                        )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
@@ -237,12 +252,11 @@ impl ClientConnection {
             anyhow::bail!("Not authenticated");
         }
 
-        let msg_id = format!("attach_{}", SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis());
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+        let msg_id = format!(
+            "attach_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
+        );
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let request = json!({
             "msg_type": "client.session.attach",
@@ -255,7 +269,9 @@ impl ClientConnection {
         });
 
         debug!("Sending session attach request: {}", request);
-        self.ws_stream.send(Message::Text(request.to_string())).await?;
+        self.ws_stream
+            .send(Message::Text(request.to_string()))
+            .await?;
 
         // Wait for response
         if let Some(msg) = self.ws_stream.next().await {
@@ -273,7 +289,9 @@ impl ClientConnection {
 
                     let status = response["payload"]["status"].as_str().unwrap_or("");
                     if status != "success" {
-                        let message = response["payload"]["message"].as_str().unwrap_or("unknown error");
+                        let message = response["payload"]["message"]
+                            .as_str()
+                            .unwrap_or("unknown error");
                         anyhow::bail!("Attach request failed: {}", message);
                     }
 
@@ -281,7 +299,8 @@ impl ClientConnection {
                     if mode == "relay" {
                         Ok(AttachResponse::Relay)
                     } else {
-                        let p2p: P2PAttachInfo = serde_json::from_value(response["payload"].clone())?;
+                        let p2p: P2PAttachInfo =
+                            serde_json::from_value(response["payload"].clone())?;
                         Ok(AttachResponse::P2P(p2p))
                     }
                 }
@@ -310,7 +329,9 @@ impl ClientConnection {
 /// Connect to an agent's WebSocket server for P2P terminal I/O.
 /// `agent_address` is a complete WebSocket URL (e.g. "ws://agent.example.com/ws").
 /// Returns the WebSocketStream for use as a TerminalTransport.
-pub async fn connect_to_agent(agent_address: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+pub async fn connect_to_agent(
+    agent_address: &str,
+) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
     info!("Connecting to agent at: {}", agent_address);
 
     let (ws_stream, _) = connect_async(agent_address)
@@ -345,13 +366,9 @@ pub async fn create_session_on_agent(
 
     let msg_id = format!(
         "create_{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis()
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
     );
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     let request = json!({
         "msg_type": "session.create",
@@ -411,10 +428,7 @@ pub async fn create_session_on_agent(
 /// `session.kill` message, and waits for the response.
 ///
 /// Returns the name of the killed session on success.
-pub async fn kill_session_on_agent(
-    agent_address: &str,
-    session_name: &str,
-) -> Result<String> {
+pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> Result<String> {
     use futures_util::StreamExt;
 
     let url = format!("ws://{}", agent_address);
@@ -426,13 +440,9 @@ pub async fn kill_session_on_agent(
 
     let msg_id = format!(
         "kill_{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis()
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
     );
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     let request = json!({
         "msg_type": "session.kill",

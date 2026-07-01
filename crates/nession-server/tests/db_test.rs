@@ -27,8 +27,10 @@ async fn test_agent_persistence() {
         "192.168.1.10",
         8080,
         "hashed_token",
-        r#"{"tmux_version": "3.3a"}"#
-    ).await.unwrap();
+        r#"{"tmux_version": "3.3a"}"#,
+    )
+    .await
+    .unwrap();
 
     // Retrieve agent
     let agents = db.list_agents().await.unwrap();

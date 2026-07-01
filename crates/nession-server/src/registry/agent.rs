@@ -1,8 +1,8 @@
+use chrono::{DateTime, Utc};
+use nession_common::protocol::AgentMetadata;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use nession_common::protocol::AgentMetadata;
 
 #[derive(Debug, Clone)]
 pub struct AgentInfo {

@@ -26,5 +26,7 @@ fn default_heartbeat_timeout() -> u64 {
 }
 
 fn default_db_path() -> String {
-    crate::paths::server_db_path().to_string_lossy().into_owned()
+    crate::paths::server_db_path()
+        .to_string_lossy()
+        .into_owned()
 }
