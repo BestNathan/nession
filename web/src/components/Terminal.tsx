@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { IDisposable } from '@xterm/xterm';
 import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
-import './Terminal.css';
 import type { WebSocketService } from '../services/websocket';
 
 // Simple unique ID generator for agent protocol messages
@@ -500,8 +499,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [sessionId, sessionName, mode, agentUrl, connectionToken, serverConnection]);
 
   return (
-    <div className="nession-terminal">
-      <div ref={containerRef} className="nession-terminal-container" />
+    <div className="flex-1 min-w-0 h-full">
+      <div ref={containerRef} className="h-full w-full" />
     </div>
   );
 });
