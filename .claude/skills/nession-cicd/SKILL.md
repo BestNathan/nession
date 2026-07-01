@@ -1,0 +1,191 @@
+---
+name: nession-cicd
+description: Use when deploying nession to k8s, deciding version bumps (minor vs patch), creating PRs for nession changes, troubleshooting CI/CD pipeline failures, or modifying the GitHub Actions workflow for nession
+---
+
+# Nession CI/CD
+
+## Overview
+
+**CI builds images. You don't.** Development happens locally. CI triggers on merge to main. ArgoCD deploys to k8s.
+
+```
+Local dev → cargo run / npm run dev → verify locally
+  → version bump (minor 0.x.0 or patch 0.x.y)
+  → push branch → create PR → merge to main
+  → CI builds multi-arch images → ArgoCD syncs to k8s
+```
+
+## ⛔ Iron Law
+
+```
+NEVER BUILD DOCKER IMAGES LOCALLY
+```
+
+**No exceptions:**
+- Don't `docker build` for nession
+- Don't `docker push` to GHCR
+- Don't manually update k8s manifests for image tags
+- Don't manually create multi-arch manifests
+- If k8s is broken, fix CI or roll back via GHCR — don't patch images by hand
+
+CI is the single source of truth for all container images.
+
+## Development Flow
+
+### 1. Develop and verify locally
+
+```bash
+# Start server (auto-reload on change)
+cargo run -p nession-server
+
+# Start agent (in another terminal)
+cargo run -p nession-agent
+
+# Start web UI (in another terminal)
+cd web && npm run dev
+```
+
+Verify business logic and flows against the running local services. Do NOT deploy to k8s to test.
+
+### 2. Version bump
+
+Nession uses a single version across all components: `MAJOR.MINOR.PATCH` (currently `0.x.y`).
+
+| Change type | Bump | Example | Files to update |
+|-------------|------|---------|-----------------|
+| **Minor** — new features, significant changes | `0.X+1.0` | `0.2.0` → `0.3.0` | `Cargo.toml`, `web/package.json` |
+| **Patch** — bug fixes, small tweaks | `0.X.Y+1` | `0.2.0` → `0.2.1` | `Cargo.toml`, `web/package.json` |
+
+**Both files must agree:**
+```bash
+# Cargo.toml
+version = "0.2.1"
+
+# web/package.json
+"version": "0.2.1"
+```
+
+### 3. Push and create PR
+
+```bash
+git checkout -b feat/description
+git add -A
+git commit -m "feat: description"
+git push origin feat/description
+gh pr create --title "feat: description" --body "..."
+```
+
+**Do NOT push directly to main.** All changes go through PRs.
+
+### 4. Merge triggers CI
+
+When the PR is merged to main, GitHub Actions automatically:
+1. Reads versions from `Cargo.toml` + `package.json` and computes the short git hash
+2. Builds web UI (`npm ci && npm run build`)
+3. Builds Rust binaries natively for amd64 AND arm64
+4. Creates multi-arch Docker images tagged with **hash** (`server-{sha}`, `agent-{sha}`, `ui-{sha}`)
+5. If version changed, also creates **version alias** tags (`server-{version}`, `agent-{version}`, `ui-{version}`)
+6. Updates `k8s/kustomization.yaml` with hash-based image tags
+7. ArgoCD detects the kustomize change and syncs to k8s
+
+**No manual steps after merge.** CI → ArgoCD is fully automatic.
+
+## Version Decision Flow
+
+```
+Did you add a feature or change behavior?
+  └─ Yes → Minor bump (0.X+1.0)
+  └─ No, it's a bug fix or minor tweak → Patch bump (0.X.Y+1)
+```
+
+When in doubt between minor and patch: **choose patch**. It's safer to understate the change than to overstate it.
+
+## Quick Reference
+
+### Image Tags (managed by CI, not you)
+
+| Image | Primary Tag (always) | Version Alias (on version change) | Source |
+|-------|---------------------|-----------------------------------|--------|
+| server | `server-{sha}` | `server-{version}` | Git hash / `Cargo.toml` |
+| agent | `agent-{sha}` | `agent-{version}` | Git hash / `Cargo.toml` |
+| ui | `ui-{sha}` | `ui-{version}` | Git hash / `web/package.json` |
+
+**Every push to main builds images with hash tags.** Version tags are additional aliases
+pointing to the same image, created only when `Cargo.toml` or `package.json` version changes.
+**K8s always deploys hash-based tags** for immutable, traceable deployments.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `Cargo.toml` | Workspace version (Rust binaries) |
+| `web/package.json` | Web UI version |
+| `.github/workflows/docker-publish.yml` | CI pipeline |
+| `k8s/kustomization.yaml` | Image tag mapping (auto-updated by CI) |
+
+### Observing Deployments
+
+```bash
+# Check CI run status
+gh run list --limit 3
+
+# Watch pods after deploy
+kubectl get pods -n nession -w
+
+# Check deployed image versions
+kubectl get pods -n nession -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.containers[*].image}{"\n"}{end}'
+
+# Force rollout (only if ArgoCD didn't auto-sync)
+kubectl rollout restart deployment -n nession
+```
+
+## CI Pipeline Architecture
+
+```
+git push to main
+  → versions job: read Cargo.toml + package.json + short SHA
+  → build-web: npm ci && npm run build (arch-independent, always)
+  → build-amd64 + build-arm64 (parallel): cargo build --release, Docker build
+      → Push hash tag (always): server-{sha}-{arch}
+      → Push version tag (if version changed): server-{version}-{arch}
+  → merge: docker buildx imagetools create (multi-arch manifests)
+      → Create hash manifest (always): server-{sha}
+      → Create version alias (if version changed): server-{version}
+  → update-kustomize: kustomize edit set image → commit (hash-based tags)
+  → ArgoCD: auto-sync to k8s
+```
+
+## Common Mistakes
+
+| Mistake | Reality |
+|---------|---------|
+| `docker build` for nession | **Forbidden.** CI builds images. |
+| Pushing directly to main | Always use PRs. |
+| Bumping only Cargo.toml or only package.json | Both must match. |
+| "I'll just patch the k8s image tag" | k8s is read-only for you. Fix the CI or roll back via GHCR tags. |
+| Building locally to "test the Docker image" | Test locally with `cargo run`. |
+| Major version bumps (1.x) | Nession is pre-1.0. Only minor and patch exist. |
+
+## Troubleshooting
+
+### CI Job Fails
+
+```bash
+gh run view <run_id> --log-failed 2>&1 | tail -30
+gh run rerun <run_id> --failed
+```
+
+### Pods Not Starting After Deploy
+
+```bash
+kubectl describe pod <pod-name> -n nession | grep -A10 "Events:"
+```
+
+### Stale Pods Stuck on Old Images
+
+```bash
+kubectl delete pod <pod-name> -n nession
+# If old ReplicaSet keeps creating pods:
+kubectl scale rs <old-rs-name> -n nession --replicas=0
+```
