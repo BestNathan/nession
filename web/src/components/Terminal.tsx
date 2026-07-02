@@ -5,6 +5,7 @@ import type { IDisposable } from '@xterm/xterm';
 import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
 import type { WebSocketService } from '../services/websocket';
+import type { P2PConnection } from '../hooks/useP2PConnection';
 
 // Simple unique ID generator for agent protocol messages
 let _msgCounter = 0;
@@ -44,10 +45,8 @@ export interface TerminalProps {
   sessionName: string;
   /** Connection mode: 'p2p' for direct agent connection, 'relay' via server */
   mode: 'p2p' | 'relay';
-  /** Complete agent WebSocket URL for P2P mode (e.g. ws://agent.nession.nhome.local/ws) */
-  agentUrl?: string;
-  /** Authentication token for P2P agent connection */
-  connectionToken?: string;
+  /** P2P connection managed externally via useP2PConnection hook. Present in P2P mode, absent in relay mode. */
+  p2pConnection?: P2PConnection | null;
   /** Pre-authenticated server connection for relay mode */
   serverConnection?: WebSocketService;
   /** Called when the WebSocket disconnects unexpectedly */
@@ -68,8 +67,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     sessionId,
     sessionName,
     mode,
-    agentUrl,
-    connectionToken,
+    p2pConnection,
     serverConnection,
     onDisconnect,
     onError,
@@ -81,6 +79,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // effect once the transport is established. Lets the imperative handle (and the
   // keystroke path) reuse one mode-aware sender. Null when not connected.
   const sendDataRef = useRef<((data: string) => void) | null>(null);
+
+  // Ref to latest p2pConnection so the main effect closure always accesses the
+  // current value without re-running on every connectionState change.
+  const p2pConnRef = useRef<P2PConnection | null>(null);
+  p2pConnRef.current = p2pConnection ?? null;
+
+  // Store xterm instances in refs so the connection-state effect (separate from
+  // the main terminal-setup effect) can access them without coupling.
+  const termRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+
+  // Tracks whether we have sent client.attach — prevents duplicate sends on
+  // repeated connectionState == 'connected' observations.
+  const attachSentRef = useRef(false);
 
   useImperativeHandle(
     ref,
@@ -109,6 +121,70 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     console.error('Terminal error:', err);
     onErrorRef.current?.(err);
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // P2P connection-state watcher
+  //
+  // Runs separately from the main terminal effect because connectionState
+  // changes trigger re-renders but should *not* rebuild the xterm instance.
+  //
+  // Responsibilities:
+  //   1. Send client.attach when the P2P WebSocket becomes connected.
+  //   2. Trigger onDisconnect when the connection drops after being attached.
+  //   3. Report an error when the connection fails before ever attaching.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!p2pConnection || mode !== 'p2p') return;
+
+    // Send client.attach when we become connected.
+    if (p2pConnection.connectionState === 'connected' && !attachSentRef.current) {
+      attachSentRef.current = true;
+
+      const term = termRef.current;
+      if (!term) return;
+
+      console.log('[Terminal] P2P connected, sending client.attach');
+      p2pConnection.sendMessage({
+        msg_type: 'client.attach',
+        id: generateId(),
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: {
+          session_name: sessionName,
+          width: term.cols,
+          height: term.rows,
+        },
+      });
+
+      // Refit terminal after connection is established.
+      setTimeout(() => {
+        if (fitAddonRef.current && termRef.current) {
+          try {
+            fitAddonRef.current.fit();
+            console.log('[Terminal] Refit terminal:', termRef.current.cols, 'x', termRef.current.rows);
+          } catch {
+            // Container may still be zero-sized in edge cases – ignore.
+          }
+        }
+      }, 100);
+
+      // Trigger a prompt redraw from the remote shell.
+      const encoder = new TextEncoder();
+      const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
+      p2pConnection.sendMessage({
+        msg_type: 'terminal.input',
+        id: generateId(),
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { session_name: sessionName, data: b64 },
+      });
+    }
+
+    // Call onDisconnect when the connection drops after having been attached.
+    if (p2pConnection.connectionState === 'disconnected' && attachSentRef.current) {
+      console.log('[Terminal] P2P connection lost');
+      onDisconnectRef.current?.();
+      attachSentRef.current = false;
+    }
+  }, [p2pConnection?.connectionState, mode, sessionName]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -150,6 +226,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
+    termRef.current = term;
+    fitAddonRef.current = fitAddon;
 
     // Let the browser paint once so the container has its final size,
     // then fit the terminal to the available space.
@@ -165,7 +243,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // React 18 StrictMode mounts twice in dev; only the second mount
     // should stay active. The earlier mount's cleanup sets this to false.
     let active = true;
-    let p2pWs: WebSocket | null = null;
     let relayUnsubOutput: (() => void) | null = null;
     let relayInputDisposable: IDisposable | null = null;
     let relayResizeDisposable: IDisposable | null = null;
@@ -203,15 +280,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (!active) return;
       const { cols, rows } = term;
       try {
-        if (mode === 'p2p' && p2pWs?.readyState === WebSocket.OPEN) {
-          p2pWs.send(
-            JSON.stringify({
+        if (mode === 'p2p') {
+          const conn = p2pConnRef.current;
+          if (conn) {
+            conn.sendMessage({
               msg_type: 'terminal.resize',
               id: generateId(),
               timestamp: Math.floor(Date.now() / 1000),
               payload: { session_name: sessionName, width: cols, height: rows },
-            })
-          );
+            });
+          }
         } else if (mode === 'relay' && serverConnection?.isConnected()) {
           serverConnection.sendTerminalResize(sessionId, cols, rows);
         }
@@ -229,15 +307,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const doSendData = (data: string) => {
       try {
         if (mode === 'p2p') {
-          if (p2pWs?.readyState === WebSocket.OPEN) {
-            p2pWs.send(
-              JSON.stringify({
-                msg_type: 'terminal.input',
-                id: generateId(),
-                timestamp: Math.floor(Date.now() / 1000),
-                payload: { session_name: sessionName, data: encodeB64(data) },
-              }),
-            );
+          const conn = p2pConnRef.current;
+          if (conn) {
+            conn.sendMessage({
+              msg_type: 'terminal.input',
+              id: generateId(),
+              timestamp: Math.floor(Date.now() / 1000),
+              payload: { session_name: sessionName, data: encodeB64(data) },
+            });
           }
         } else if (serverConnection?.isConnected()) {
           serverConnection.sendTerminalInput(sessionId, data);
@@ -299,139 +376,59 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (!active) return; // cleanup already ran, don't connect
 
     if (mode === 'p2p') {
-      if (!agentUrl) {
-        reportError(new Error('agentUrl is required for P2P mode'));
+      const conn = p2pConnRef.current;
+      if (!conn) {
+        reportError(new Error('p2pConnection is required for P2P mode'));
         return;
       }
-      // connectionToken is optional — agent may not require it in dev setups
-      // Build the WebSocket URL with the auth token as a query parameter
-      const wsUrl = connectionToken
-        ? `${agentUrl}${agentUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(connectionToken)}`
-        : agentUrl;
 
-      const ws = new WebSocket(wsUrl);
-      p2pWs = ws;
+      // Subscribe to messages from the hook-managed P2P connection.
+      const unsubMessage = conn.onMessage((msg) => {
+        if (!active) return;
 
-      console.log('[Terminal] P2P connecting to:', wsUrl);
-      console.log('[Terminal] sessionName:', sessionName);
-      console.log('[Terminal] connectionToken:', connectionToken ? 'present' : 'absent');
-
-      ws.binaryType = 'arraybuffer';
-
-      ws.onopen = () => {
-        console.log('[Terminal] WebSocket connected, sending client.attach');
-        console.log('[Terminal] active:', active);
-        if (!active) {
-          console.log('[Terminal] Not active, closing WebSocket');
-          ws.close();
+        // Binary data (synthetic __binary__ message from the hook)
+        if (msg.msg_type === '__binary__') {
+          term.write(new Uint8Array(msg.payload));
           return;
         }
-        // Inform the remote end of our initial terminal size.
-        // Agent protocol: first send client.attach, then terminal.input/resize
-        // Use base64 for data, session_name (not session_id) for session identifier
-        const attachMsg = JSON.stringify({
-          msg_type: 'client.attach',
-          id: generateId(),
-          timestamp: Math.floor(Date.now() / 1000),
-          payload: {
-            session_name: sessionName,
-            width: term.cols,
-            height: term.rows,
-          },
-        });
-        console.log('[Terminal] Sending client.attach:', attachMsg);
-        ws.send(attachMsg);
 
-        // Refit terminal after connection is established
-        // This ensures the terminal size is correct after the container has fully rendered
-        setTimeout(() => {
-          if (active) {
-            try {
-              fitAddon.fit();
-              console.log('[Terminal] Refit terminal:', term.cols, 'x', term.rows);
-            } catch (e) {
-              console.error('[Terminal] Refit failed:', e);
+        switch (msg.msg_type) {
+          case 'terminal.output':
+            if (msg.payload?.data) {
+              // Agent sends base64-encoded binary data
+              term.write(decodeB64(msg.payload.data));
             }
-          }
-        }, 100);
-
-        // Keepalive: send WebSocket ping every 30 s to prevent idle
-        // timeouts on intermediate proxies / load balancers / NAT.
-        pingTimer = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            try {
-              ws.send(JSON.stringify({
-                msg_type: 'keepalive.ping',
-                id: `ka-${Date.now()}`,
-                timestamp: Math.floor(Date.now() / 1000),
-                payload: {},
-              }));
-            } catch {
-              // Socket error — cleanup will handle it.
-            }
-          }
-        }, 30_000);
-
-        // Trigger a prompt redraw from the remote shell.
-        const encoder = new TextEncoder();
-        const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
-        ws.send(
-          JSON.stringify({
-            msg_type: 'terminal.input',
-            id: generateId(),
-            timestamp: Math.floor(Date.now() / 1000),
-            payload: { session_name: sessionName, data: b64 },
-          })
-        );
-      };
-
-      ws.onmessage = (event) => {
-        if (!active) return;
-        try {
-          if (typeof event.data === 'string') {
-            const msg = JSON.parse(event.data);
-            switch (msg.msg_type) {
-              case 'terminal.output':
-                if (msg.payload?.data) {
-                  // Agent sends base64-encoded binary data
-                  term.write(decodeB64(msg.payload.data));
-                }
-                break;
-              case 'ok':
-                // Response to client.attach — ignore
-                break;
-              case 'error':
-                // Ignore errors from keepalive pings (agent doesn't
-                // recognise the msg_type and sends back an error).
-                if (msg.id?.startsWith('ka-')) break;
-                reportError(new Error(msg.payload?.message || 'Remote error'));
-                break;
-              case 'keepalive.pong':
-                // Server acknowledged our keepalive — connection is healthy.
-                break;
-              default:
-                // Other message types (keep-alive, etc.) – ignored.
-                break;
-            }
-          } else {
-            // Binary payloads – write raw bytes directly to the terminal.
-            term.write(new Uint8Array(event.data));
-          }
-        } catch (err) {
-          console.error('P2P message parse error:', err);
+            break;
+          case 'ok':
+            // Response to client.attach — ignore
+            break;
+          case 'error':
+            // Ignore errors from keepalive pings (agent doesn't
+            // recognise the msg_type and sends back an error).
+            if (msg.id?.startsWith('ka-')) break;
+            reportError(new Error(msg.payload?.message || 'Remote error'));
+            break;
+          case 'keepalive.pong':
+            // Server acknowledged our keepalive — connection is healthy.
+            break;
+          default:
+            // Other message types – ignored.
+            break;
         }
-      };
+      });
+      relayUnsubOutput = unsubMessage; // clean up with relayUnsubOutput?.()
 
-      ws.onerror = (event) => {
-        console.error('[Terminal] WebSocket error:', event);
-        reportError(new Error('P2P WebSocket connection error'));
-      };
-
-      ws.onclose = (event) => {
-        console.log('[Terminal] WebSocket closed:', event.code, event.reason);
-        if (!active) return;
-        onDisconnectRef.current?.();
-      };
+      // Keepalive: send WebSocket ping every 30 s to prevent idle
+      // timeouts on intermediate proxies / load balancers / NAT.
+      // Uses the hook's sendMessage which internally checks readyState.
+      pingTimer = setInterval(() => {
+        conn.sendMessage({
+          msg_type: 'keepalive.ping',
+          id: `ka-${Date.now()}`,
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: {},
+        });
+      }, 30_000);
     } else {
       // ------------------------------------------------------------------
       // Relay mode – piggy-back on the existing server WebSocket connection
@@ -537,22 +534,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       relayInputDisposable?.dispose();
       relayResizeDisposable?.dispose();
 
-      // Unsubscribe relay-mode output listener (function returned by service)
+      // Unsubscribe relay-mode output listener or P2P message handler
       relayUnsubOutput?.();
 
-      // Close the P2P WebSocket (relay mode reuses the shared connection).
-      if (p2pWs) {
-        p2pWs.onclose = null; // prevent onDisconnect firing during cleanup
-        p2pWs.close();
-        p2pWs = null;
-      }
+      // P2P WebSocket is owned by the useP2PConnection hook — do not close it here.
 
+      termRef.current = null;
+      fitAddonRef.current = null;
       term.dispose();
     };
     // serverConnection is intentionally included: if the caller swaps the
     // underlying connection the terminal must reconnect through the new one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionName, mode, agentUrl, connectionToken, serverConnection]);
+  }, [sessionId, sessionName, mode, serverConnection]);
 
   return (
     <div className="flex-1 min-w-0 h-full">
