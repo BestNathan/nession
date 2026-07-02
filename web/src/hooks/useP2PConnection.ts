@@ -4,7 +4,7 @@ export interface P2PMessage {
   msg_type: string;
   id: string;
   timestamp: number;
-  payload: any;
+  payload: unknown;
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
@@ -39,13 +39,17 @@ export function useP2PConnection(
   const activeRef = useRef(true);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
+  const agentUrl = options?.agentUrl;
+  const connectionToken = options?.connectionToken;
+  const onError = options?.onError;
+
   useEffect(() => {
-    if (!options) return;
+    if (!agentUrl) return;
     activeRef.current = true;
 
-    const wsUrl = options.connectionToken
-      ? `${options.agentUrl}${options.agentUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(options.connectionToken)}`
-      : options.agentUrl;
+    const wsUrl = connectionToken
+      ? `${agentUrl}${agentUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(connectionToken)}`
+      : agentUrl;
 
     console.log('[P2P] Connecting to:', wsUrl);
 
@@ -100,7 +104,7 @@ export function useP2PConnection(
     ws.onerror = (event) => {
       console.error('[P2P] WebSocket error:', event);
       if (activeRef.current) {
-        options.onError?.(new Error('P2P WebSocket connection error'));
+        onError?.(new Error('P2P WebSocket connection error'));
       }
     };
 
@@ -111,15 +115,17 @@ export function useP2PConnection(
       }
     };
 
+    // Snapshot before returning cleanup — the ref may mutate before the
+    // cleanup fires, but this closure captures the set for this effect.
+    const cleanupHandlers = handlersRef.current;
     return () => {
       activeRef.current = false;
       ws.onclose = null;
       ws.close();
       wsRef.current = null;
-      // Clear handler set so any stale handlers aren't kept in memory.
-      handlersRef.current.clear();
+      cleanupHandlers.clear();
     };
-  }, [options?.agentUrl, options?.connectionToken, options?.sessionName]);
+  }, [agentUrl, connectionToken, onError]);
 
   const sendMessage = useCallback((msg: Record<string, unknown>) => {
     try {

@@ -20,8 +20,8 @@ type SessionsChangeCallback = (sessions: Session[]) => void;
 type TerminalOutputCallback = (data: string) => void;
 
 interface PendingRequest {
-  resolve: (value: any) => void;
-  reject: (reason: any) => void;
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
 
@@ -221,7 +221,7 @@ export class WebSocketService {
     return response;
   }
 
-  async request<T>(type: string, payload: any): Promise<T> {
+  async request<T>(type: string, payload: unknown): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
@@ -231,7 +231,7 @@ export class WebSocketService {
       msg_type: type,
       id,
       timestamp: Date.now(),
-      payload,
+      payload: payload as Record<string, unknown>,
     };
 
     return new Promise<T>((resolve, reject) => {
@@ -240,7 +240,11 @@ export class WebSocketService {
         reject(new Error(`Request timeout: ${type}`));
       }, this.requestTimeout);
 
-      this.pendingRequests.set(id, { resolve, reject, timeout });
+      this.pendingRequests.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject: reject as (reason: unknown) => void,
+        timeout,
+      });
 
       this.ws!.send(JSON.stringify(message));
     });
@@ -363,14 +367,14 @@ export class WebSocketService {
         case 'client.agents.list.response':
           // This shouldn't happen (should be caught by pending request), but handle it anyway
           if (message.payload.agents) {
-            this.notifyAgentsChange(message.payload.agents);
+            this.notifyAgentsChange(message.payload.agents as Agent[]);
           }
           break;
 
         case 'client.sessions.list.response':
           // This shouldn't happen (should be caught by pending request), but handle it anyway
           if (message.payload.sessions) {
-            this.notifySessionsChange(message.payload.sessions);
+            this.notifySessionsChange(message.payload.sessions as Session[]);
           }
           break;
 
@@ -380,13 +384,13 @@ export class WebSocketService {
 
         case 'agents.changed':
           if (message.payload.agents) {
-            this.notifyAgentsChange(message.payload.agents);
+            this.notifyAgentsChange(message.payload.agents as Agent[]);
           }
           break;
 
         case 'sessions.changed':
           if (message.payload.sessions) {
-            this.notifySessionsChange(message.payload.sessions);
+            this.notifySessionsChange(message.payload.sessions as Session[]);
           }
           break;
 
@@ -398,9 +402,9 @@ export class WebSocketService {
     }
   }
 
-  private handleTerminalOutput(payload: any): void {
-    const sessionId = payload.session_id;
-    const data = payload.data;
+  private handleTerminalOutput(payload: Record<string, unknown>): void {
+    const sessionId = payload.session_id as string;
+    const data = payload.data as string;
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
     if (callbacks) {

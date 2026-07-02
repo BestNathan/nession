@@ -52,11 +52,12 @@ export function CreateSessionDialog({
       setError(null);
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
-  }, [isOpen, preselectedAgentId]);
+    // onlineAgents derived from agents — stable across renders when agents unchanged
+  }, [isOpen, preselectedAgentId, onlineAgents]);
 
   const validateName = (name: string): string | null => {
     if (!name.trim()) return 'Session name is required';
-    if (!/^[a-zA-Z0-9_\-\.]+$/.test(name.trim())) {
+    if (!/^[a-zA-Z0-9_\-.]+$/.test(name.trim())) {
       return 'Only letters, digits, underscores, hyphens, and dots allowed';
     }
     return null;

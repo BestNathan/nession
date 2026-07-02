@@ -139,15 +139,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Binary data (synthetic __binary__ message from the hook)
       if (msg.msg_type === '__binary__') {
-        term.write(new Uint8Array(msg.payload));
+        term.write(new Uint8Array(msg.payload as ArrayBuffer));
         return;
       }
 
       switch (msg.msg_type) {
         case 'terminal.output':
-          if (msg.payload?.data) {
+          if ((msg.payload as Record<string, unknown>)?.data) {
             // Agent sends base64-encoded binary data
-            term.write(decodeB64(msg.payload.data));
+            term.write(decodeB64((msg.payload as Record<string, unknown>).data as string));
           }
           break;
         case 'ok':
@@ -157,7 +157,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Ignore errors from keepalive pings (agent doesn't
           // recognise the msg_type and sends back an error).
           if (msg.id?.startsWith('ka-')) break;
-          reportError(new Error(msg.payload?.message || 'Remote error'));
+          reportError(new Error(((msg.payload as Record<string, unknown>)?.message as string) || 'Remote error'));
           break;
         case 'keepalive.pong':
           // Server acknowledged our keepalive — connection is healthy.
@@ -182,18 +182,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   //   2. Trigger onDisconnect when the connection drops after being attached.
   //   3. Report an error when the connection fails before ever attaching.
   // ---------------------------------------------------------------------------
+  // Snapshot connection state — depends on the primitive, not the object reference.
+  const p2pState = p2pConnection?.connectionState;
+
   useEffect(() => {
-    if (!p2pConnection || mode !== 'p2p') return;
+    const conn = p2pConnRef.current;
+    if (!conn || mode !== 'p2p') return;
 
     // Send client.attach when we become connected.
-    if (p2pConnection.connectionState === 'connected' && !attachSentRef.current) {
+    if (p2pState === 'connected' && !attachSentRef.current) {
       attachSentRef.current = true;
 
       const term = termRef.current;
       if (!term) return;
 
       console.log('[Terminal] P2P connected, sending client.attach');
-      p2pConnection.sendMessage({
+      conn.sendMessage({
         msg_type: 'client.attach',
         id: generateId(),
         timestamp: Math.floor(Date.now() / 1000),
@@ -219,7 +223,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Trigger a prompt redraw from the remote shell.
       const encoder = new TextEncoder();
       const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
-      p2pConnection.sendMessage({
+      conn.sendMessage({
         msg_type: 'terminal.input',
         id: generateId(),
         timestamp: Math.floor(Date.now() / 1000),
@@ -228,12 +232,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
 
     // Call onDisconnect when the connection drops after having been attached.
-    if (p2pConnection.connectionState === 'disconnected' && attachSentRef.current) {
+    if (p2pState === 'disconnected' && attachSentRef.current) {
       console.log('[Terminal] P2P connection lost');
       onDisconnectRef.current?.();
       attachSentRef.current = false;
     }
-  }, [p2pConnection?.connectionState, mode, sessionName]);
+  }, [p2pState, mode, sessionName]);
 
   useEffect(() => {
     const container = containerRef.current;

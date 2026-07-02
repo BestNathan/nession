@@ -107,6 +107,7 @@ tmux sessions (per-node)
 - **WebSocket singleton:** `WebSocketService` is a global singleton for the browser session — request/response correlation, event pub/sub, auto-reconnect.
 - **CSS:** Tailwind v4 via `@tailwindcss/vite`. Only one CSS file (`index.css`). All component styles are Tailwind utilities.
 - **shadcn components:** Individual primitives in `components/ui/`, added via CLI, version-controlled.
+- **ESLint:** `eslint-disable` comments are forbidden. All lint violations must be fixed properly (type narrowing, destructuring deps, extracting non-component exports). `--max-warnings 0` is enforced.
 
 ---
 
