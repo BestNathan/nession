@@ -53,10 +53,12 @@ async fn main() -> Result<()> {
 
     // 4. Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
+    let file_root = config.file_root.as_deref().unwrap_or(&config.default_working_dir);
     let agent_server = AgentServer::new(
         &config.listen_address,
         tls_option,
         config.default_working_dir.clone(),
+        file_root,
     )
     .context("failed to create agent server")?;
     let server_handle = agent_server

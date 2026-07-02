@@ -19,8 +19,14 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 /// Start a test server on a specific port and return the address + handle.
 async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let addr_str = format!("127.0.0.1:{}", port);
-    let server = AgentServer::new(&addr_str, None, "/tmp".to_string())
-        .expect("server creation should succeed");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let server = AgentServer::new(
+        &addr_str,
+        None,
+        "/tmp".to_string(),
+        tmp.path().to_string_lossy().as_ref(),
+    )
+    .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     (addr_str.parse().unwrap(), handle)
