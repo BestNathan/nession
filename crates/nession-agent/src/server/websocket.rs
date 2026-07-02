@@ -121,7 +121,6 @@ pub mod msg_types {
     pub const FILE_DELETE: &str = "file.delete";
     pub const FILE_CREATE_DIR: &str = "file.create_dir";
     pub const FILE_RENAME: &str = "file.rename";
-    pub const FILE_UPLOAD: &str = "file.upload";
 
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
@@ -359,41 +358,14 @@ pub struct FileDeletePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDeleteResponse {
-    pub path: String,
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCreateDirPayload {
     pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileCreateDirResponse {
-    pub path: String,
-    pub success: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRenamePayload {
     pub from: String,
     pub to: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileRenameResponse {
-    pub from: String,
-    pub to: String,
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileUploadPayload {
-    pub path: String,
-    /// Base64-encoded content.
-    pub content: String,
-    pub size: u64,
 }
 
 // --- Protocol helpers ---
@@ -1142,15 +1114,11 @@ impl AgentServer {
                 let path = payload.path.clone();
                 match file_ops.delete(&payload.path).await {
                     Ok(()) => {
-                        let resp = FileDeleteResponse { path, success: true };
+                        let resp = serde_json::json!({ "path": path, "success": true });
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(_e) => {
-                        let resp = FileDeleteResponse { path, success: false };
-                        serde_json::to_string(&make_response(&id, msg_types::ERROR, resp))
-                            .unwrap_or_default()
-                    }
+                    Err(e) => err("delete_failed", &e.to_string()),
                 }
             }
 
@@ -1162,15 +1130,11 @@ impl AgentServer {
                 let path = payload.path.clone();
                 match file_ops.create_dir(&payload.path).await {
                     Ok(()) => {
-                        let resp = FileCreateDirResponse { path, success: true };
+                        let resp = serde_json::json!({ "path": path, "success": true });
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(_e) => {
-                        let resp = FileCreateDirResponse { path, success: false };
-                        serde_json::to_string(&make_response(&id, msg_types::ERROR, resp))
-                            .unwrap_or_default()
-                    }
+                    Err(e) => err("create_dir_failed", &e.to_string()),
                 }
             }
 
@@ -1183,39 +1147,11 @@ impl AgentServer {
                 let to = payload.to.clone();
                 match file_ops.rename(&payload.from, &payload.to).await {
                     Ok(()) => {
-                        let resp = FileRenameResponse {
-                            from,
-                            to,
-                            success: true,
-                        };
+                        let resp = serde_json::json!({ "from": from, "to": to, "success": true });
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(_e) => {
-                        let resp = FileRenameResponse {
-                            from,
-                            to,
-                            success: false,
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::ERROR, resp))
-                            .unwrap_or_default()
-                    }
-                }
-            }
-
-            msg_types::FILE_UPLOAD => {
-                let payload: FileUploadPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let path = payload.path.clone();
-                match file_ops.write_file(&payload.path, &payload.content).await {
-                    Ok(written) => {
-                        let resp = FileWriteResponse { path, written };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("upload_error", &e.to_string()),
+                    Err(e) => err("rename_failed", &e.to_string()),
                 }
             }
 
@@ -1662,10 +1598,10 @@ mod tests {
         let del_req = new_message(msg_types::FILE_DELETE, FileDeletePayload {
             path: "to_delete.txt".to_string(),
         });
-        let del_resp: Message<FileDeleteResponse> =
+        let del_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &del_req).await;
         assert_eq!(del_resp.msg_type, msg_types::OK);
-        assert!(del_resp.payload.success);
+        assert!(del_resp.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
 
         let read_req = new_message(msg_types::FILE_READ, FileReadPayload {
             path: "to_delete.txt".to_string(),

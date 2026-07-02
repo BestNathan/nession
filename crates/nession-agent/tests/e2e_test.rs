@@ -75,7 +75,7 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
     let port = PORT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let addr_str = format!("127.0.0.1:{}", port);
 
-    let tmp = tempfile::tempdir().expect("tempdir");
+    let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let server = AgentServer::new(
         &addr_str,
         None,
