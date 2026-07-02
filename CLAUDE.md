@@ -192,8 +192,8 @@ Service ports:
 
 1. Develop on feature branch (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
-3. Push, create PR → CI runs docker-publish
-4. Merge to main → CI publishes `main`-tagged images
+3. Push, create PR (include `Closes #<ISSUE>` in body) → CI runs docker-publish
+4. Merge to main → auto-closes issue + CI publishes `main`-tagged images
 5. Update image tags in k8s manifests: `k8s/kustomization.yaml`
 6. `kubectl apply -k k8s/`
 
