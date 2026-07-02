@@ -104,13 +104,27 @@ On merge to main, CI reads the version from these files and creates version-tagg
 
 ## 4. Creating a Pull Request
 
-**Never push directly to main.**
+**Never push directly to main.** Always use a feature branch + PR.
+
+### PR Workflow
+
+Before creating a PR, **always check** whether the current branch already has an open PR:
 
 ```bash
-git checkout -b feat/my-feature
-git add -A
-git commit -m "feat: description"
-git push origin feat/my-feature
+# List open PRs for the current branch
+gh pr list --head "$(git branch --show-current)" --state open --json number,title,url
+```
+
+**If an open PR already exists** for the current branch → update it with `gh pr edit`:
+
+```bash
+gh pr edit <PR-NUMBER> --title "..." --body "..."
+```
+
+**If no open PR exists** → create a new one:
+
+```bash
+git push origin <branch-name>
 gh pr create --title "feat: description" --body "..."
 ```
 
@@ -125,6 +139,8 @@ Every PR must include these three sections:
 ## 测试报告
 - `cargo test`: <N> passed, 0 failed
 - `cargo tarpaulin`: <X>% coverage (threshold: 90%)
+- `cargo fmt --all -- --check`: OK
+- `cargo clippy -- -D warnings`: 0 errors
 - `npx tsc --noEmit`: 0 errors
 - `npm run lint`: 0 warnings
 - `npm run build`: success
