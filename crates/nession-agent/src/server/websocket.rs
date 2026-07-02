@@ -383,6 +383,22 @@ fn extract_session_name(session_id: &str) -> String {
         .unwrap_or_else(|| session_id.to_string())
 }
 
+/// Parse a `host:port` listen address into an (ip, port) tuple.
+/// Supports both IPv4 (`0.0.0.0:9090`) and IPv6 (`[::1]:9090`) formats.
+/// Falls back to `("127.0.0.1", 9090)` on parse failure.
+fn parse_listen_address(addr: &str) -> (String, u16) {
+    match addr.parse::<std::net::SocketAddr>() {
+        Ok(sa) => (sa.ip().to_string(), sa.port()),
+        Err(_) => {
+            warn!(
+                "failed to parse listen_address '{}', falling back to 127.0.0.1:9090",
+                addr
+            );
+            ("127.0.0.1".to_string(), 9090)
+        }
+    }
+}
+
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
     Message {
         msg_type: msg_type.to_string(),
@@ -438,6 +454,7 @@ pub struct AgentServer {
     shutdown_rx: Option<mpsc::Receiver<()>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     listen_address: String,
+    agent_id: String,
     /// Default working directory for new tmux sessions created via P2P.
     default_working_dir: String,
 }
@@ -465,11 +482,13 @@ impl AgentServer {
     /// Create a new agent server.
     ///
     /// `listen_address` is a `host:port` string (e.g. `"0.0.0.0:8080"`).
+    /// `agent_id` is the unique identifier for this agent.
     /// Pass `None` for `tls` to run without TLS (plain WebSocket).
     /// `default_working_dir` is the working directory for new tmux sessions.
     /// `file_root` is the sandbox root for file operations.
     pub fn new(
         listen_address: impl Into<String>,
+        agent_id: impl Into<String>,
         tls: Option<(
             Vec<rustls::pki_types::CertificateDer<'static>>,
             rustls::pki_types::PrivateKeyDer<'static>,
@@ -501,6 +520,7 @@ impl AgentServer {
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
             listen_address: listen_address.into(),
+            agent_id: agent_id.into(),
             default_working_dir,
         })
     }
@@ -522,7 +542,8 @@ impl AgentServer {
         let file_ops = Arc::clone(&self.file_ops);
         let tls_acceptor = self.tls_acceptor;
         let default_working_dir = self.default_working_dir.clone();
-        let listen_address = self.listen_address;
+        let listen_address = self.listen_address.clone();
+        let agent_id = self.agent_id.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -541,9 +562,11 @@ impl AgentServer {
                                 let fops = Arc::clone(&file_ops);
                                 let tls = tls_acceptor.clone();
                                 let wd = default_working_dir.clone();
+                                let la = listen_address.clone();
+                                let aid = agent_id.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops).await
+                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid).await
                                     {
                                         warn!("connection error from {}: {:#}", addr, e);
                                     }
@@ -568,6 +591,7 @@ impl AgentServer {
     /// Handle a single incoming TCP connection. Performs optional TLS
     /// handshake, upgrades to WebSocket, then enters the per-client
     /// message loop.
+    #[allow(clippy::too_many_arguments)]
     async fn handle_connection(
         stream: tokio::net::TcpStream,
         addr: SocketAddr,
@@ -575,6 +599,8 @@ impl AgentServer {
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
+        listen_address: &str,
+        agent_id: &str,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -612,11 +638,14 @@ impl AgentServer {
             addr,
             default_working_dir,
             file_ops,
+            listen_address,
+            agent_id,
         )
         .await
     }
 
     /// Drain incoming WebSocket frames and dispatch them.
+    #[allow(clippy::too_many_arguments)]
     async fn run_message_loop(
         mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
@@ -625,6 +654,8 @@ impl AgentServer {
         addr: SocketAddr,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
+        listen_address: &str,
+        agent_id: &str,
     ) -> Result<()> {
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -644,6 +675,8 @@ impl AgentServer {
                         sink.clone(),
                         &default_working_dir,
                         file_ops.clone(),
+                        listen_address,
+                        agent_id,
                     )
                     .await;
                     let mut s = sink.lock().await;
@@ -680,6 +713,7 @@ impl AgentServer {
     }
 
     /// Route a single text request to the appropriate handler.
+    #[allow(clippy::too_many_arguments)]
     async fn handle_request(
         text: &str,
         tmux: Arc<TmuxManager>,
@@ -687,6 +721,8 @@ impl AgentServer {
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
         default_working_dir: &str,
         file_ops: Arc<FileOps>,
+        listen_address: &str,
+        agent_id: &str,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
@@ -929,11 +965,12 @@ impl AgentServer {
                 Ok(sessions_list) => {
                     let hostname =
                         std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                    let (ip, port) = parse_listen_address(listen_address);
                     let agent = WebAgentInfo {
-                        agent_id: "local-agent".to_string(),
+                        agent_id: agent_id.to_string(),
                         hostname,
-                        ip_address: "127.0.0.1".to_string(),
-                        port: 9090,
+                        ip_address: ip,
+                        port,
                         status: "online".to_string(),
                         session_count: sessions_list.len() as u32,
                         last_heartbeat: chrono::Utc::now().to_rfc3339(),
@@ -952,10 +989,10 @@ impl AgentServer {
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
                         .map(|s| {
-                            let session_id = format!("local-agent:{}", s.name);
+                            let session_id = format!("{}:{}", agent_id, s.name);
                             WebSessionInfo {
                                 session_id: session_id.clone(),
-                                agent_id: "local-agent".to_string(),
+                                agent_id: agent_id.to_string(),
                                 session_name: s.name,
                                 status: if s.attached_clients > 0 {
                                     "active".to_string()
@@ -985,7 +1022,7 @@ impl AgentServer {
                     mode: "p2p".to_string(),
                     session_id: payload.session_id,
                     session_name: session_name.clone(),
-                    agent_address: "127.0.0.1:9090".to_string(),
+                    agent_address: listen_address.to_string(),
                 };
                 serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
             }
@@ -1013,7 +1050,7 @@ impl AgentServer {
                     .await
                 {
                     Ok(()) => {
-                        let session_id = format!("local-agent:{}", payload.name);
+                        let session_id = format!("{}:{}", agent_id, payload.name);
                         let resp = WebSessionCreateResponse {
                             success: true,
                             session_id: Some(session_id),
@@ -1242,6 +1279,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let server = AgentServer::new(
             "127.0.0.1:0",
+            "test-agent",
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
@@ -1270,6 +1308,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let server = AgentServer::new(
             &addr_str,
+            "test-agent",
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
@@ -1351,6 +1390,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let server = AgentServer::new(
             "127.0.0.1:0",
+            "test-agent",
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
