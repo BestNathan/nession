@@ -22,6 +22,7 @@ async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHa
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let server = AgentServer::new(
         &addr_str,
+        "test-agent",
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
@@ -240,8 +241,8 @@ async fn integration_terminal_io_flow() {
 // ---------------------------------------------------------------------------
 
 use nession_agent::server::websocket::{
-    WebAgentInfo, WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload,
-    WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
+    WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload,
+    WebSessionCreateResponse, WebSessionKillPayload, WebSessionKillResponse,
     WebSessionsListResponse,
 };
 
@@ -272,7 +273,7 @@ async fn integration_web_ui_agents_list() {
         round_trip(&mut sink, &mut stream, &req).await;
     assert_eq!(resp.msg_type, msg_types::OK);
     assert!(!resp.payload.agents.is_empty());
-    assert_eq!(resp.payload.agents[0].agent_id, "local-agent");
+    assert_eq!(resp.payload.agents[0].agent_id, "test-agent");
 
     handle.shutdown().await.ok();
 }

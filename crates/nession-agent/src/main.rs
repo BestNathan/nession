@@ -57,8 +57,14 @@ async fn main() -> Result<()> {
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
+    let agent_id = if config.agent_id.is_empty() {
+        get_hostname()
+    } else {
+        config.agent_id.clone()
+    };
     let agent_server = AgentServer::new(
         &config.listen_address,
+        &agent_id,
         tls_option,
         config.default_working_dir.clone(),
         file_root,
