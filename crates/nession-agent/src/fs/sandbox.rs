@@ -25,38 +25,39 @@ impl PathSandbox {
 
     /// Resolve a user-supplied path relative to the sandbox root.
     ///
-    /// Returns the canonical absolute path, or an error with code
-    /// `permission_denied` if the resolved path lies outside the root.
+    /// Returns the resolved path; existing components are canonicalized.
+    /// Returns an error with code `permission_denied` if the resolved
+    /// path lies outside the root.
     pub fn resolve(&self, path: &str) -> Result<PathBuf> {
         // Normalize: strip leading '/' to make it relative to root
         let relative = path.trim_start_matches('/');
         let combined = self.root.join(relative);
 
-        // Early detection of `..` escapes via logical path normalization.
-        // This catches escapes even when intermediate paths don't exist
-        // on the filesystem (which would otherwise fail at canonicalization
-        // before reaching the permission check).
+        // Early-detection heuristic for `..` traversal attempts.
+        // This catches obvious escapes before touching the filesystem,
+        // but the real security guarantee is the canonicalize +
+        // starts_with check below.
         let normalized = normalize_path(&combined);
         if !normalized.starts_with(&self.root) {
             anyhow::bail!("permission_denied: path outside sandbox root");
         }
 
-        // Canonicalize if it exists, otherwise canonicalize the parent
-        // and append the filename for non-existent paths (create, rename).
-        let resolved = if combined.exists() {
-            std::fs::canonicalize(&combined)
-                .with_context(|| format!("path not found: {}", path))?
-        } else {
-            // For paths that don't exist yet, resolve the parent.
-            let parent = combined
-                .parent()
-                .unwrap_or(&self.root);
-            let canonical_parent = std::fs::canonicalize(parent)
-                .with_context(|| format!("parent not found for: {}", path))?;
-            let filename = combined
-                .file_name()
-                .context("path has no filename")?;
-            canonical_parent.join(filename)
+        // Canonicalize unconditionally — avoids a TOCTOU race between
+        // an explicit exists() check and the actual canonicalization.
+        let resolved = match std::fs::canonicalize(&combined) {
+            Ok(p) => p,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let parent = combined
+                    .parent()
+                    .unwrap_or(&self.root);
+                let canonical_parent = std::fs::canonicalize(parent)
+                    .with_context(|| format!("parent not found for: {}", path))?;
+                let filename = combined
+                    .file_name()
+                    .context("path has no filename")?;
+                canonical_parent.join(filename)
+            }
+            Err(e) => return Err(anyhow::Error::from(e)).context("failed to resolve path"),
         };
 
         // Verify the resolved path is within the root.
@@ -73,11 +74,13 @@ impl PathSandbox {
     }
 }
 
-/// Resolve `.` and `..` path components without touching the filesystem.
+/// Early-detection heuristic: resolve `.` and `..` components without
+/// touching the filesystem.
 ///
-/// This provides a logical (not canonical) normalization useful for
-/// detecting directory traversal escape attempts before filesystem
-/// operations are attempted.
+/// This provides a **logical** (not canonical) normalization useful for
+/// detecting obvious directory traversal attempts before filesystem
+/// operations are attempted.  It is NOT a security boundary — the real
+/// guarantee comes from `canonicalize` + `starts_with` after resolution.
 fn normalize_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
