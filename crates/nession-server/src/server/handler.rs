@@ -1,12 +1,12 @@
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
-use crate::registry::{AgentRegistry, SessionRegistry, AgentInfo, AgentStatus, SessionStatus};
+use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::command_broker::CommandBroker;
-use nession_common::protocol::{ProtocolMessage, AgentRegisterPayload};
+use nession_common::protocol::{AgentRegisterPayload, ProtocolMessage};
 
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
@@ -73,7 +73,10 @@ impl ConnectionHandler {
     ) -> anyhow::Result<HandlerAction> {
         // Log all agent-originated messages at info for diagnostics
         if msg.msg_type.starts_with("agent.") {
-            info!("Received agent message: type={}, id={}", msg.msg_type, msg.id);
+            info!(
+                "Received agent message: type={}, id={}",
+                msg.msg_type, msg.id
+            );
         }
         match msg.msg_type.as_str() {
             "agent.register" => self.handle_agent_register(msg).await,
@@ -100,7 +103,8 @@ impl ConnectionHandler {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
 
         // Empty server auth_token means no-auth mode: accept any agent
-        let auth_ok = self.server_auth_token.is_empty() || payload.auth_token == self.server_auth_token;
+        let auth_ok =
+            self.server_auth_token.is_empty() || payload.auth_token == self.server_auth_token;
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
@@ -113,7 +117,8 @@ impl ConnectionHandler {
                         "status": "rejected",
                         "message": "Invalid auth token"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -146,7 +151,8 @@ impl ConnectionHandler {
                     "message": "Registration successful",
                     "heartbeat_interval_secs": self.heartbeat_interval_secs
                 }
-            }).to_string()
+            })
+            .to_string(),
         ))))
     }
 
@@ -165,7 +171,10 @@ impl ConnectionHandler {
         let session_count = payload["session_count"].as_u64().unwrap_or(0) as u32;
         let active_sessions = payload["active_sessions"].as_u64().unwrap_or(0) as u32;
 
-        info!("Heartbeat from {}: sessions={}, active={}", agent_id, session_count, active_sessions);
+        info!(
+            "Heartbeat from {}: sessions={}, active={}",
+            agent_id, session_count, active_sessions
+        );
 
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
@@ -182,7 +191,8 @@ impl ConnectionHandler {
                     "agent_id": agent_id,
                     "server_time": current_timestamp()
                 }
-            }).to_string()
+            })
+            .to_string(),
         ))))
     }
 
@@ -231,8 +241,10 @@ impl ConnectionHandler {
             last_activity: chrono::Utc::now(),
         };
 
-        info!("Session {} updated (agent: {}, status: {:?}, windows: {}, clients: {})",
-              session_name, agent_id, session_info.status, window_count, attached_clients);
+        info!(
+            "Session {} updated (agent: {}, status: {:?}, windows: {}, clients: {})",
+            session_name, agent_id, session_info.status, window_count, attached_clients
+        );
         self.session_registry.update_session(session_info).await;
 
         Ok(HandlerAction::Reply(None))
@@ -261,7 +273,8 @@ impl ConnectionHandler {
                         "status": "success",
                         "message": "Authentication successful"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))))
         } else {
             info!("Client authentication failed");
@@ -275,7 +288,8 @@ impl ConnectionHandler {
                         "status": "failed",
                         "message": "Invalid auth token"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))))
         }
     }
@@ -296,7 +310,8 @@ impl ConnectionHandler {
                         "status": "error",
                         "message": "Not authenticated"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -321,7 +336,10 @@ impl ConnectionHandler {
             })
             .collect();
 
-        info!("Client requested agents list, returning {} agents", agents_json.len());
+        info!(
+            "Client requested agents list, returning {} agents",
+            agents_json.len()
+        );
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
@@ -331,7 +349,8 @@ impl ConnectionHandler {
                 "payload": {
                     "agents": agents_json
                 }
-            }).to_string()
+            })
+            .to_string(),
         ))))
     }
 
@@ -351,7 +370,8 @@ impl ConnectionHandler {
                         "status": "error",
                         "message": "Not authenticated"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -382,7 +402,10 @@ impl ConnectionHandler {
             })
             .collect();
 
-        info!("Client requested sessions list, returning {} sessions", sessions_json.len());
+        info!(
+            "Client requested sessions list, returning {} sessions",
+            sessions_json.len()
+        );
 
         Ok(HandlerAction::Reply(Some(Message::Text(
             json!({
@@ -392,7 +415,8 @@ impl ConnectionHandler {
                 "payload": {
                     "sessions": sessions_json
                 }
-            }).to_string()
+            })
+            .to_string(),
         ))))
     }
 
@@ -415,7 +439,8 @@ impl ConnectionHandler {
                         "status": "error",
                         "message": "Not authenticated"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -435,7 +460,8 @@ impl ConnectionHandler {
                             "status": "error",
                             "message": "Invalid session_id format. Expected 'agent_id:session_name'"
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
         };
@@ -452,7 +478,8 @@ impl ConnectionHandler {
                         "status": "error",
                         "message": format!("Session '{}' not found", session_id)
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -470,7 +497,8 @@ impl ConnectionHandler {
                             "status": "error",
                             "message": format!("Agent '{}' is offline", agent_id)
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
             None => {
@@ -483,7 +511,8 @@ impl ConnectionHandler {
                             "status": "error",
                             "message": format!("Agent '{}' not found or offline", agent_id)
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
         };
@@ -524,7 +553,8 @@ impl ConnectionHandler {
                         "connection_token": connection_token,
                         "session_name": session_name
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))))
         }
     }
@@ -544,7 +574,8 @@ impl ConnectionHandler {
                         "success": false,
                         "error": "Not authenticated"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -561,7 +592,8 @@ impl ConnectionHandler {
                         "success": false,
                         "error": "agent_id and name are required"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -579,7 +611,8 @@ impl ConnectionHandler {
                             "success": false,
                             "error": format!("Agent '{}' is offline", agent_id)
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
             None => {
@@ -592,26 +625,33 @@ impl ConnectionHandler {
                             "success": false,
                             "error": format!("Agent '{}' not found", agent_id)
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
         }
 
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        info!("Client requested session create on agent {}: name={}", agent_id, name);
+        info!(
+            "Client requested session create on agent {}: name={}",
+            agent_id, name
+        );
 
-        let rx = self.command_broker.send_command(
-            agent_id,
-            "server.session.create",
-            &request_id,
-            json!({
-                "request_id": request_id,
-                "name": name,
-                "width": 80,
-                "height": 24
-            }),
-        ).await;
+        let rx = self
+            .command_broker
+            .send_command(
+                agent_id,
+                "server.session.create",
+                &request_id,
+                json!({
+                    "request_id": request_id,
+                    "name": name,
+                    "width": 80,
+                    "height": 24
+                }),
+            )
+            .await;
 
         match tokio::time::timeout(Duration::from_secs(10), rx).await {
             Ok(Ok(response)) => {
@@ -647,35 +687,34 @@ impl ConnectionHandler {
                             "session_id": session_id,
                             "error": error,
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))))
             }
-            Ok(Err(_)) => {
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "client.session.create.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Agent disconnected"
-                        }
-                    }).to_string()
-                ))))
-            }
-            Err(_) => {
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "client.session.create.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Timeout waiting for agent response"
-                        }
-                    }).to_string()
-                ))))
-            }
+            Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.create.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Agent disconnected"
+                    }
+                })
+                .to_string(),
+            )))),
+            Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.create.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Timeout waiting for agent response"
+                    }
+                })
+                .to_string(),
+            )))),
         }
     }
 
@@ -694,7 +733,8 @@ impl ConnectionHandler {
                         "success": false,
                         "error": "Not authenticated"
                     }
-                }).to_string()
+                })
+                .to_string(),
             ))));
         }
 
@@ -712,7 +752,8 @@ impl ConnectionHandler {
                             "success": false,
                             "error": "Invalid session_id format. Expected 'agent_id:session_name'"
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))));
             }
         };
@@ -732,7 +773,8 @@ impl ConnectionHandler {
                             "payload": {
                                 "success": true
                             }
-                        }).to_string()
+                        })
+                        .to_string(),
                     ))));
                 }
                 Some(_) => {
@@ -745,7 +787,8 @@ impl ConnectionHandler {
                                 "success": false,
                                 "error": format!("Session '{}' not found", session_id)
                             }
-                        }).to_string()
+                        })
+                        .to_string(),
                     ))));
                 }
                 None => {
@@ -758,7 +801,8 @@ impl ConnectionHandler {
                                 "success": false,
                                 "error": format!("Agent '{}' not found", agent_id)
                             }
-                        }).to_string()
+                        })
+                        .to_string(),
                     ))));
                 }
             }
@@ -766,17 +810,23 @@ impl ConnectionHandler {
 
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        info!("Client requested session kill: {} (agent: {})", session_name, agent_id);
+        info!(
+            "Client requested session kill: {} (agent: {})",
+            session_name, agent_id
+        );
 
-        let rx = self.command_broker.send_command(
-            &agent_id,
-            "server.session.kill",
-            &request_id,
-            json!({
-                "request_id": request_id,
-                "name": session_name,
-            }),
-        ).await;
+        let rx = self
+            .command_broker
+            .send_command(
+                &agent_id,
+                "server.session.kill",
+                &request_id,
+                json!({
+                    "request_id": request_id,
+                    "name": session_name,
+                }),
+            )
+            .await;
 
         match tokio::time::timeout(Duration::from_secs(10), rx).await {
             Ok(Ok(response)) => {
@@ -796,35 +846,34 @@ impl ConnectionHandler {
                             "success": success,
                             "error": error,
                         }
-                    }).to_string()
+                    })
+                    .to_string(),
                 ))))
             }
-            Ok(Err(_)) => {
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "client.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Agent disconnected"
-                        }
-                    }).to_string()
-                ))))
-            }
-            Err(_) => {
-                Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "client.session.kill.response",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "success": false,
-                            "error": "Timeout waiting for agent response"
-                        }
-                    }).to_string()
-                ))))
-            }
+            Ok(Err(_)) => Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.kill.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Agent disconnected"
+                    }
+                })
+                .to_string(),
+            )))),
+            Err(_) => Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.kill.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Timeout waiting for agent response"
+                    }
+                })
+                .to_string(),
+            )))),
         }
     }
 

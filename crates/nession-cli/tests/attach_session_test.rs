@@ -1,8 +1,8 @@
 //! Integration tests for session attach command
 
 use nession_cli::commands::client::attach_session;
-use nession_server::server::WebSocketServer;
 use nession_common::config::ServerConfig;
+use nession_server::server::WebSocketServer;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -42,7 +42,8 @@ async fn test_attach_session_p2p_mode() {
         "test_token",
         "agent1:session1",
         Some("p2p"),
-    ).await;
+    )
+    .await;
 
     // Should fail with "session not found" or similar
     assert!(result.is_err());
@@ -68,7 +69,8 @@ async fn test_attach_session_relay_mode() {
         "test_token",
         "agent1:session1",
         Some("relay"),
-    ).await;
+    )
+    .await;
 
     // Should fail gracefully
     assert!(result.is_err());
@@ -93,7 +95,8 @@ async fn test_attach_session_auto_fallback() {
         "test_token",
         "agent1:session1",
         None, // Auto mode
-    ).await;
+    )
+    .await;
 
     // Should fail gracefully
     assert!(result.is_err());
@@ -117,7 +120,8 @@ async fn test_attach_session_invalid_mode() {
         "test_token",
         "agent1:session1",
         Some("invalid_mode"),
-    ).await;
+    )
+    .await;
 
     // Should fail with invalid mode error
     assert!(result.is_err());
@@ -143,7 +147,8 @@ async fn test_attach_session_bad_credentials() {
         "wrong_token",
         "agent1:session1",
         None,
-    ).await;
+    )
+    .await;
 
     // Should fail with authentication error
     assert!(result.is_err());

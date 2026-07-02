@@ -1,5 +1,5 @@
-mod websocket;
-mod handler;
 pub mod command_broker;
+mod handler;
+mod websocket;
 
 pub use websocket::WebSocketServer;

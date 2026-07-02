@@ -11,10 +11,7 @@ async fn drain_output(session: &PtySession, quiet_ms: u64, max_total_ms: u64) ->
         if tokio::time::Instant::now() >= deadline {
             break;
         }
-        let n = session
-            .read_output(&mut buf, quiet_ms)
-            .await
-            .unwrap_or(0);
+        let n = session.read_output(&mut buf, quiet_ms).await.unwrap_or(0);
         if n == 0 {
             break;
         }

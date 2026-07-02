@@ -1,11 +1,11 @@
 //! Integration tests for the sync module (heartbeat loop and session watcher).
 
+use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::protocol::AgentMetadata;
-use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -15,12 +15,7 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
 /// Start a mock WebSocket server that collects incoming messages.
 /// Returns a receiver that yields each text message the client sends.
-async fn start_mock_server(
-    port: u16,
-) -> (
-    tokio::task::JoinHandle<()>,
-    mpsc::Receiver<String>,
-) {
+async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
     let (msg_tx, msg_rx) = mpsc::channel(200);
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
@@ -173,8 +168,7 @@ async fn test_heartbeat_loop_shutdown() {
     let handle = get_handle(port).await;
 
     // Skip registration.
-    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
-        .await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     // Use a long interval so we can verify shutdown stops the loop promptly.
     let tmux = TmuxManager::new();
@@ -189,8 +183,7 @@ async fn test_heartbeat_loop_shutdown() {
     shutdown.shutdown().await.ok();
 
     // The task should finish within 2 seconds.
-    let result = tokio::time::timeout(Duration::from_secs(2), task)
-        .await;
+    let result = tokio::time::timeout(Duration::from_secs(2), task).await;
     assert!(result.is_ok(), "heartbeat task did not exit after shutdown");
 
     handle.shutdown().await.ok();
@@ -210,8 +203,7 @@ async fn test_session_watcher_detects_new_session() {
     let handle = get_handle(port).await;
 
     // Skip registration.
-    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
-        .await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = TmuxManager::new();
     let session_name = "sync_test_new_session";
@@ -272,8 +264,7 @@ async fn test_session_watcher_detects_removed_session() {
     let handle = get_handle(port).await;
 
     // Skip registration.
-    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
-        .await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = TmuxManager::new();
     let session_name = "sync_test_removed_session";

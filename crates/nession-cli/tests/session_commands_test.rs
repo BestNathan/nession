@@ -6,13 +6,7 @@ use std::process::Command;
 fn test_sessions_create_help() {
     let output = Command::new("cargo")
         .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "sessions",
-            "create",
-            "--help",
+            "run", "--bin", "nession", "--", "sessions", "create", "--help",
         ])
         .output()
         .expect("Failed to execute command");
@@ -29,13 +23,7 @@ fn test_sessions_create_help() {
 fn test_sessions_kill_help() {
     let output = Command::new("cargo")
         .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "sessions",
-            "kill",
-            "--help",
+            "run", "--bin", "nession", "--", "sessions", "kill", "--help",
         ])
         .output()
         .expect("Failed to execute command");

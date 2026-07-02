@@ -2,12 +2,12 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
-use tracing::{info, error};
+use tracing::{error, info};
 
+use super::handler::{ConnectionHandler, HandlerAction};
 use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
-use super::handler::{ConnectionHandler, HandlerAction};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -34,13 +34,18 @@ impl WebSocketServer {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let listener = self.listener.take()
+        let listener = self
+            .listener
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Server already running or not initialized"))?;
 
         info!("WebSocket server listening on {}", listener.local_addr()?);
 
         let tls_acceptor = if !self.config.tls_cert_path.is_empty() {
-            Some(build_tls_acceptor(&self.config.tls_cert_path, &self.config.tls_key_path)?)
+            Some(build_tls_acceptor(
+                &self.config.tls_cert_path,
+                &self.config.tls_key_path,
+            )?)
         } else {
             None
         };
@@ -88,7 +93,9 @@ impl WebSocketServer {
                     command_broker,
                     auth_token,
                     heartbeat_interval_secs,
-                ).await {
+                )
+                .await
+                {
                     error!("Connection error: {}", e);
                 }
             });
@@ -105,21 +112,21 @@ impl WebSocketServer {
 }
 
 fn build_tls_acceptor(cert_path: &str, key_path: &str) -> anyhow::Result<TlsAcceptor> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use rustls::ServerConfig;
+    use rustls_pemfile::{certs, private_key};
     use std::fs::File;
     use std::io::BufReader;
-    use rustls_pemfile::{certs, private_key};
-    use rustls::ServerConfig;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
     let cert_file = File::open(cert_path)?;
     let mut cert_reader = BufReader::new(cert_file);
-    let cert_chain: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
-        .collect::<Result<Vec<_>, _>>()?;
+    let cert_chain: Vec<CertificateDer<'static>> =
+        certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
 
     let key_file = File::open(key_path)?;
     let mut key_reader = BufReader::new(key_file);
-    let key: PrivateKeyDer<'static> = private_key(&mut key_reader)?
-        .ok_or_else(|| anyhow::anyhow!("No private key found"))?;
+    let key: PrivateKeyDer<'static> =
+        private_key(&mut key_reader)?.ok_or_else(|| anyhow::anyhow!("No private key found"))?;
 
     let config = ServerConfig::builder()
         .with_no_client_auth()
@@ -139,9 +146,25 @@ async fn handle_connection(
 ) -> anyhow::Result<()> {
     if let Some(acceptor) = tls_acceptor {
         let tls_stream = acceptor.accept(tcp_stream).await?;
-        handle_ws_stream(tls_stream, agent_registry, session_registry, command_broker, auth_token, heartbeat_interval_secs).await
+        handle_ws_stream(
+            tls_stream,
+            agent_registry,
+            session_registry,
+            command_broker,
+            auth_token,
+            heartbeat_interval_secs,
+        )
+        .await
     } else {
-        handle_ws_stream(tcp_stream, agent_registry, session_registry, command_broker, auth_token, heartbeat_interval_secs).await
+        handle_ws_stream(
+            tcp_stream,
+            agent_registry,
+            session_registry,
+            command_broker,
+            auth_token,
+            heartbeat_interval_secs,
+        )
+        .await
     }
 }
 
@@ -157,8 +180,8 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     use crate::server::command_broker::WsMessageSender;
-    use futures_util::StreamExt;
     use futures_util::SinkExt;
+    use futures_util::StreamExt;
 
     let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -213,11 +236,12 @@ where
 
         // If a new agent just registered, register its sender with CommandBroker
         let new_agent_id = handler.registered_agent_id().cloned();
-        if new_agent_id.is_some() && new_agent_id != prev_agent_id {
-            command_broker.register_agent(
-                new_agent_id.as_ref().unwrap(),
-                sender.clone(),
-            ).await;
+        if let Some(ref agent_id) = new_agent_id {
+            if prev_agent_id.as_ref() != Some(agent_id) {
+                command_broker
+                    .register_agent(agent_id, sender.clone())
+                    .await;
+            }
         }
 
         match action {
@@ -258,12 +282,20 @@ async fn relay_bidirectional_via_channel<RS>(
     agent_ws_url: &str,
 ) -> anyhow::Result<()>
 where
-    RS: futures_util::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    RS: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
 {
-    use futures_util::StreamExt;
     use futures_util::SinkExt;
+    use futures_util::StreamExt;
 
-    info!("Entering relay mode, connecting to agent at {}", agent_ws_url);
+    info!(
+        "Entering relay mode, connecting to agent at {}",
+        agent_ws_url
+    );
 
     let (agent_ws, _) = tokio_tungstenite::connect_async(agent_ws_url).await?;
     let (mut agent_write, mut agent_read) = agent_ws.split();
@@ -289,7 +321,7 @@ where
 
     let client_to_agent = async {
         while let Some(msg) = client_read.next().await {
-            let mut msg = match msg {
+            let msg = match msg {
                 Ok(m) => m,
                 Err(e) => {
                     error!("Error reading from client: {}", e);
@@ -312,18 +344,17 @@ where
             // during the drain are forwarded immediately.
             let elapsed = last_terminal_input.elapsed();
             if elapsed < std::time::Duration::from_millis(INPUT_THROTTLE_MS) {
-                let drain_deadline = last_terminal_input
-                    + std::time::Duration::from_millis(INPUT_THROTTLE_MS);
+                let drain_deadline =
+                    last_terminal_input + std::time::Duration::from_millis(INPUT_THROTTLE_MS);
                 let mut latest = msg;
 
                 loop {
-                    let remaining = drain_deadline
-                        .saturating_duration_since(std::time::Instant::now());
+                    let remaining =
+                        drain_deadline.saturating_duration_since(std::time::Instant::now());
                     if remaining.is_zero() {
                         break;
                     }
-                    match tokio::time::timeout(remaining, client_read.next()).await
-                    {
+                    match tokio::time::timeout(remaining, client_read.next()).await {
                         Ok(Some(Ok(m))) if is_terminal_input(&m) => {
                             latest = m; // keep only latest mouse event
                         }
@@ -345,10 +376,7 @@ where
 
                 // Send the latest buffered terminal.input.
                 if let Err(e) = agent_write.send(latest).await {
-                    error!(
-                        "Failed to forward client message to agent: {}",
-                        e
-                    );
+                    error!("Failed to forward client message to agent: {}", e);
                     break;
                 }
                 last_terminal_input = std::time::Instant::now();
@@ -356,10 +384,7 @@ where
                 // Outside throttle window — send immediately (leading edge).
                 last_terminal_input = std::time::Instant::now();
                 if let Err(e) = agent_write.send(msg).await {
-                    error!(
-                        "Failed to forward client message to agent: {}",
-                        e
-                    );
+                    error!("Failed to forward client message to agent: {}", e);
                     break;
                 }
             }

@@ -38,6 +38,7 @@ use tokio_tungstenite::WebSocketStream;
 use tracing::{error, info, warn};
 
 /// A stream that can be either plain TCP or TLS-wrapped.
+#[allow(clippy::large_enum_variant)]
 enum TcpOrTls {
     Plain(tokio::net::TcpStream),
     Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
@@ -556,7 +557,9 @@ impl AgentServer {
 
             match msg {
                 WsMessage::Text(text) => {
-                    let response = Self::handle_request(&text, tmux.clone(), sessions.clone(), sink.clone()).await;
+                    let response =
+                        Self::handle_request(&text, tmux.clone(), sessions.clone(), sink.clone())
+                            .await;
                     let mut s = sink.lock().await;
                     if let Err(e) = s.send(WsMessage::Text(response)).await {
                         warn!("WebSocket write error to {}: {:#}", addr, e);
@@ -594,9 +597,7 @@ impl AgentServer {
     async fn handle_request(
         text: &str,
         tmux: Arc<TmuxManager>,
-        sessions: Arc<
-            Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>,
-        >,
+        sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
@@ -642,7 +643,8 @@ impl AgentServer {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
                     };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, payload)).unwrap_or_default()
+                    serde_json::to_string(&make_response(&id, msg_types::OK, payload))
+                        .unwrap_or_default()
                 }
                 Err(e) => err("list_failed", &e.to_string()),
             },
@@ -694,10 +696,7 @@ impl AgentServer {
                 {
                     Ok(session) => {
                         let session_name = payload.session_name.clone();
-                        sessions
-                            .lock()
-                            .await
-                            .insert(session_name.clone(), session);
+                        sessions.lock().await.insert(session_name.clone(), session);
 
                         // Spawn a background task that continuously reads
                         // PTY output and pushes it to the client as
@@ -714,9 +713,7 @@ impl AgentServer {
                                 let read_result = {
                                     let map = sessions_for_output.lock().await;
                                     match map.get(&session_name_clone) {
-                                        Some(session) => {
-                                            session.read_output(&mut buf, 100).await
-                                        }
+                                        Some(session) => session.read_output(&mut buf, 100).await,
                                         None => break,
                                     }
                                 };
@@ -726,15 +723,13 @@ impl AgentServer {
                                     }
                                     Ok(n) => {
                                         use base64::Engine;
-                                        let encoded =
-                                            base64::engine::general_purpose::STANDARD
-                                                .encode(&buf[..n]);
+                                        let encoded = base64::engine::general_purpose::STANDARD
+                                            .encode(&buf[..n]);
                                         let output = TerminalOutputPayload {
                                             session_name: session_name_clone.clone(),
                                             data: encoded,
                                         };
-                                        let msg =
-                                            new_message(msg_types::TERMINAL_OUTPUT, output);
+                                        let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                         if let Ok(json) = serde_json::to_string(&msg) {
                                             let mut s = sink_clone.lock().await;
                                             if s.send(WsMessage::Text(json)).await.is_err() {
@@ -772,10 +767,7 @@ impl AgentServer {
                 match removed {
                     Some(session) => {
                         if let Err(e) = session.close().await {
-                            warn!(
-                                "Error closing PTY for {}: {:#}",
-                                payload.session_name, e
-                            );
+                            warn!("Error closing PTY for {}: {:#}", payload.session_name, e);
                         }
                         let resp = ClientDetachResponse {
                             session_name: payload.session_name,
@@ -803,9 +795,7 @@ impl AgentServer {
                 let sessions_guard = sessions.lock().await;
                 match sessions_guard.get(&payload.session_name) {
                     Some(session) => match session.write_input(&data).await {
-                        Ok(_) => {
-                            serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default()
-                        }
+                        Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("write_error", &e.to_string()),
                     },
                     None => err(
@@ -823,9 +813,7 @@ impl AgentServer {
                 let sessions_guard = sessions.lock().await;
                 match sessions_guard.get(&payload.session_name) {
                     Some(session) => match session.resize(payload.width, payload.height).await {
-                        Ok(_) => {
-                            serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default()
-                        }
+                        Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("resize_error", &e.to_string()),
                     },
                     None => err(
@@ -836,7 +824,6 @@ impl AgentServer {
             }
 
             // --- Web UI compatibility handlers ---
-
             msg_types::CLIENT_AUTH => {
                 let resp = AuthResponsePayload {
                     status: "success".to_string(),
@@ -847,8 +834,8 @@ impl AgentServer {
 
             msg_types::CLIENT_AGENTS_LIST => match tmux.list_sessions().await {
                 Ok(sessions_list) => {
-                    let hostname = std::env::var("HOSTNAME")
-                        .unwrap_or_else(|_| "localhost".to_string());
+                    let hostname =
+                        std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
                     let agent = WebAgentInfo {
                         agent_id: "local-agent".to_string(),
                         hostname,
@@ -858,8 +845,11 @@ impl AgentServer {
                         session_count: sessions_list.len() as u32,
                         last_heartbeat: chrono::Utc::now().to_rfc3339(),
                     };
-                    let resp = WebAgentsListResponse { agents: vec![agent] };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+                    let resp = WebAgentsListResponse {
+                        agents: vec![agent],
+                    };
+                    serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                        .unwrap_or_default()
                 }
                 Err(e) => err("list_failed", &e.to_string()),
             },
@@ -886,17 +876,17 @@ impl AgentServer {
                         })
                         .collect();
                     let resp = WebSessionsListResponse { sessions };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
+                    serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                        .unwrap_or_default()
                 }
                 Err(e) => err("list_failed", &e.to_string()),
             },
 
             msg_types::CLIENT_SESSION_ATTACH => {
-                let payload: WebSessionAttachPayload =
-                    match serde_json::from_value(payload_value) {
-                        Ok(p) => p,
-                        Err(e) => return err("parse_error", &e.to_string()),
-                    };
+                let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
                 let session_name = extract_session_name(&payload.session_id);
                 let resp = WebAttachInfo {
                     mode: "p2p".to_string(),
@@ -908,20 +898,22 @@ impl AgentServer {
             }
 
             msg_types::CLIENT_SESSION_CREATE => {
-                let payload: WebSessionCreatePayload =
-                    match serde_json::from_value(payload_value) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            let resp = WebSessionCreateResponse {
-                                success: false,
-                                session_id: None,
-                                error: Some(e.to_string()),
-                            };
-                            return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                                .unwrap_or_default();
-                        }
-                    };
-                match tmux.create_session(&payload.name, payload.width, payload.height).await {
+                let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let resp = WebSessionCreateResponse {
+                            success: false,
+                            session_id: None,
+                            error: Some(e.to_string()),
+                        };
+                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+                match tmux
+                    .create_session(&payload.name, payload.width, payload.height)
+                    .await
+                {
                     Ok(()) => {
                         let session_id = format!("local-agent:{}", payload.name);
                         let resp = WebSessionCreateResponse {
@@ -1043,8 +1035,7 @@ mod tests {
     /// server construction and shutdown).
     #[allow(dead_code)]
     async fn start_test_server() -> (SocketAddr, ServerHandle) {
-        let server =
-            AgentServer::new("127.0.0.1:0", None).expect("server creation should succeed");
+        let server = AgentServer::new("127.0.0.1:0", None).expect("server creation should succeed");
         let handle = server.start().await.expect("start should succeed");
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1063,8 +1054,7 @@ mod tests {
     /// need to actually connect.
     async fn start_test_server_on(port: u16) -> (SocketAddr, ServerHandle) {
         let addr_str = format!("127.0.0.1:{}", port);
-        let server = AgentServer::new(&addr_str, None)
-            .expect("server creation should succeed");
+        let server = AgentServer::new(&addr_str, None).expect("server creation should succeed");
         let handle = server.start().await.expect("start should succeed");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         (addr_str.parse().unwrap(), handle)
@@ -1075,16 +1065,19 @@ mod tests {
         addr: SocketAddr,
     ) -> (
         futures_util::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
             WsMessage,
         >,
         futures_util::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
         >,
     ) {
         let url = format!("ws://{}", addr);
-        let (ws_stream, _response) =
-            connect_async(&url).await.expect("connect should succeed");
+        let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
         ws_stream.split()
     }
 
@@ -1093,11 +1086,15 @@ mod tests {
     /// arrive from background tasks.
     async fn send_and_receive<S, R>(
         sink: &mut futures_util::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
             WsMessage,
         >,
         stream: &mut futures_util::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
         >,
         request: &Message<S>,
     ) -> Message<R>
@@ -1147,8 +1144,7 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let req = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
-        let resp: Message<serde_json::Value> =
-            send_and_receive(&mut sink, &mut stream, &req).await;
+        let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
 
         assert_eq!(resp.msg_type, msg_types::OK);
         assert_eq!(resp.id, req.id);
@@ -1269,18 +1265,11 @@ mod tests {
 
         // Read a terminal output message from the stream.
         let mut got_output = false;
-        let deadline =
-            tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                stream.next(),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), stream.next()).await {
                 Ok(Some(Ok(WsMessage::Text(text)))) => {
-                    let msg: Message<serde_json::Value> =
-                        serde_json::from_str(&text).unwrap();
+                    let msg: Message<serde_json::Value> = serde_json::from_str(&text).unwrap();
                     if msg.msg_type == msg_types::TERMINAL_OUTPUT {
                         let data_b64 = msg.payload.get("data").unwrap().as_str().unwrap();
                         let decoded = base64::engine::general_purpose::STANDARD
@@ -1325,8 +1314,7 @@ mod tests {
             timestamp: now_timestamp(),
             payload: serde_json::json!({}),
         };
-        let resp: Message<ErrorPayload> =
-            send_and_receive(&mut sink, &mut stream, &req).await;
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
 
         assert_eq!(resp.msg_type, msg_types::ERROR);
         assert_eq!(resp.id, "test-unknown");

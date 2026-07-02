@@ -1,6 +1,6 @@
-use tokio::process::Command;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
@@ -21,7 +21,7 @@ impl TmuxManager {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         let output = Command::new("tmux")
-            .args(&[
+            .args([
                 "list-sessions",
                 "-F",
                 "#{session_name}\t#{session_created}\t#{session_windows}\t#{session_attached}\t#{window_width}\t#{window_height}",
@@ -59,12 +59,15 @@ impl TmuxManager {
 
     pub async fn create_session(&self, name: &str, width: u16, height: u16) -> Result<()> {
         let status = Command::new("tmux")
-            .args(&[
+            .args([
                 "new-session",
                 "-d",
-                "-s", name,
-                "-x", &width.to_string(),
-                "-y", &height.to_string(),
+                "-s",
+                name,
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
             ])
             .status()
             .await?;
@@ -78,7 +81,7 @@ impl TmuxManager {
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args(&["kill-session", "-t", name])
+            .args(["kill-session", "-t", name])
             .status()
             .await?;
 
@@ -91,7 +94,7 @@ impl TmuxManager {
 
     pub async fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args(&["send-keys", "-t", session_name, keys])
+            .args(["send-keys", "-t", session_name, keys])
             .status()
             .await?;
 
@@ -103,10 +106,7 @@ impl TmuxManager {
     }
 
     pub async fn check_tmux_available(&self) -> Result<bool> {
-        let status = Command::new("tmux")
-            .arg("-V")
-            .status()
-            .await?;
+        let status = Command::new("tmux").arg("-V").status().await?;
 
         Ok(status.success())
     }

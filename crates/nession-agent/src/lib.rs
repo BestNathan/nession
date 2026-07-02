@@ -7,7 +7,7 @@
 //! - Watches for tmux session changes and syncs them to the server
 
 pub mod config;
-pub mod tmux;
-pub mod server;
 pub mod connection;
+pub mod server;
 pub mod sync;
+pub mod tmux;

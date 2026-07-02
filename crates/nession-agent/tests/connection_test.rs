@@ -4,7 +4,7 @@
 //! send registration/heartbeat/session update messages, and handle responses.
 
 use futures_util::{SinkExt, StreamExt};
-use nession_agent::connection::{ServerClient, msg_types};
+use nession_agent::connection::{msg_types, ServerClient};
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
 use std::sync::Arc;
@@ -171,13 +171,7 @@ async fn integration_heartbeat_message_format() {
 
     // Send heartbeat.
     handle
-        .send_heartbeat(
-            AgentStatus::Online,
-            10,
-            3,
-            7200,
-            [0.5, 1.0, 1.5],
-        )
+        .send_heartbeat(AgentStatus::Online, 10, 3, 7200, [0.5, 1.0, 1.5])
         .await
         .expect("heartbeat failed");
 
@@ -301,9 +295,8 @@ async fn integration_reconnection_logic() {
     );
 
     // Spawn the client connection attempt in the background.
-    let client_handle = tokio::spawn(async move {
-        client.connect_and_run().await.expect("connect failed").0
-    });
+    let client_handle =
+        tokio::spawn(async move { client.connect_and_run().await.expect("connect failed").0 });
 
     // Give it time to fail a few times (exponential backoff: 1s, 2s, 4s...).
     tokio::time::sleep(Duration::from_millis(500)).await;

@@ -72,9 +72,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
             }
         }
 
-        let _child = cmd
-            .spawn()
-            .context("failed to spawn agent process")?;
+        let _child = cmd.spawn().context("failed to spawn agent process")?;
 
         // Give the child a moment to write its PID file
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -258,7 +256,10 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         .start()
         .await
         .context("failed to start agent server")?;
-    info!("Agent WebSocket server started on {}", config.listen_address);
+    info!(
+        "Agent WebSocket server started on {}",
+        config.listen_address
+    );
 
     // Connect to central server
     let hostname = get_hostname();
@@ -307,11 +308,8 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
 
     // Start HeartbeatLoop
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
-        let heartbeat = HeartbeatLoop::new(
-            handle.clone(),
-            TmuxManager::new(),
-            heartbeat_interval_secs,
-        );
+        let heartbeat =
+            HeartbeatLoop::new(handle.clone(), TmuxManager::new(), heartbeat_interval_secs);
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = heartbeat.run().await {
@@ -374,9 +372,11 @@ fn write_pid_file(path: &str, pid: u32) -> Result<()> {
 
 /// Read PID from file.
 fn read_pid_file(path: &str) -> Result<u32> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read PID file: {}", path))?;
-    let pid: u32 = content.trim().parse()
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {}", path))?;
+    let pid: u32 = content
+        .trim()
+        .parse()
         .with_context(|| "failed to parse PID from file")?;
     Ok(pid)
 }
@@ -385,9 +385,9 @@ fn read_pid_file(path: &str) -> Result<u32> {
 fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
+        use nix::errno::Errno;
         use nix::sys::signal::kill;
         use nix::unistd::Pid;
-        use nix::errno::Errno;
 
         let nix_pid = Pid::from_raw(pid as i32);
         match kill(nix_pid, None) {
@@ -415,12 +415,10 @@ fn get_process_uptime(pid: u32) -> Option<String> {
             if fields.len() > 21 {
                 if let Ok(start_ticks) = fields[21].parse::<u64>() {
                     // Get system boot time and clock ticks per second
-                    if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks()) {
+                    if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks())
+                    {
                         let start_time = boot_time + (start_ticks / clock_ticks);
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .ok()?
-                            .as_secs();
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
                         let uptime_secs = now.saturating_sub(start_time);
                         return Some(format_duration(uptime_secs));
                     }
@@ -482,10 +480,14 @@ fn format_duration(seconds: u64) -> String {
 }
 
 /// Load TLS certificates from config.
-fn load_tls(config: &AgentConfig) -> Result<Option<(
-    Vec<rustls::pki_types::CertificateDer<'static>>,
-    rustls::pki_types::PrivateKeyDer<'static>,
-)>> {
+fn load_tls(
+    config: &AgentConfig,
+) -> Result<
+    Option<(
+        Vec<rustls::pki_types::CertificateDer<'static>>,
+        rustls::pki_types::PrivateKeyDer<'static>,
+    )>,
+> {
     match (&config.tls_cert_path, &config.tls_key_path) {
         (Some(cert), Some(key)) => {
             use nession_agent::server::AgentServer;
@@ -501,8 +503,10 @@ async fn wait_for_shutdown() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigint = signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
-        let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+        let mut sigint =
+            signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
         tokio::select! {
             _ = sigint.recv() => {
                 info!("Received SIGINT");

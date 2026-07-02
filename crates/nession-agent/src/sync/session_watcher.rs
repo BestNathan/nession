@@ -47,11 +47,7 @@ impl SessionWatcher {
     /// * `handle` - Server client handle for sending session updates
     /// * `tmux` - Tmux manager for querying sessions
     /// * `poll_interval_secs` - Poll interval in seconds (default 5)
-    pub fn new(
-        handle: ServerClientHandle,
-        tmux: TmuxManager,
-        poll_interval_secs: u64,
-    ) -> Self {
+    pub fn new(handle: ServerClientHandle, tmux: TmuxManager, poll_interval_secs: u64) -> Self {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         Self {
             handle,
@@ -129,13 +125,11 @@ impl SessionWatcher {
         }
 
         // Detect removed sessions.
-        for (name, _prev) in &self.prev_sessions {
+        for name in self.prev_sessions.keys() {
             if !current_map.contains_key(name) {
                 debug!("Session removed: {}", name);
                 // Send a "removed" update with status "gone".
-                self.handle
-                    .send_session_update(name, "gone", 0, 0)
-                    .await?;
+                self.handle.send_session_update(name, "gone", 0, 0).await?;
             }
         }
 

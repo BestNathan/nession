@@ -22,17 +22,26 @@ fn test_agent_dir() {
 
 #[test]
 fn test_server_db_path() {
-    assert_eq!(paths::server_db_path(), expected_home().join("server").join("server.db"));
+    assert_eq!(
+        paths::server_db_path(),
+        expected_home().join("server").join("server.db")
+    );
 }
 
 #[test]
 fn test_server_pid_path() {
-    assert_eq!(paths::server_pid_path(), expected_home().join("server").join("server.pid"));
+    assert_eq!(
+        paths::server_pid_path(),
+        expected_home().join("server").join("server.pid")
+    );
 }
 
 #[test]
 fn test_agent_pid_path() {
-    assert_eq!(paths::agent_pid_path(), expected_home().join("agent").join("agent.pid"));
+    assert_eq!(
+        paths::agent_pid_path(),
+        expected_home().join("agent").join("agent.pid")
+    );
 }
 
 #[test]

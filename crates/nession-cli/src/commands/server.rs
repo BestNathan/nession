@@ -73,9 +73,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
             }
         }
 
-        let _child = cmd
-            .spawn()
-            .context("failed to spawn server process")?;
+        let _child = cmd.spawn().context("failed to spawn server process")?;
 
         // Give the child a moment to write its PID file
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -230,7 +228,9 @@ fn load_server_config(path: &str) -> Result<ServerConfig> {
             auth_token: String::new(),
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
-            db_path: nession_common::paths::server_db_path().to_string_lossy().into_owned(),
+            db_path: nession_common::paths::server_db_path()
+                .to_string_lossy()
+                .into_owned(),
         })
     }
 }
@@ -278,9 +278,11 @@ fn write_pid_file(path: &str, pid: u32) -> Result<()> {
 
 /// Read PID from file.
 fn read_pid_file(path: &str) -> Result<u32> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read PID file: {}", path))?;
-    let pid: u32 = content.trim().parse()
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {}", path))?;
+    let pid: u32 = content
+        .trim()
+        .parse()
         .with_context(|| "failed to parse PID from file")?;
     Ok(pid)
 }
@@ -289,9 +291,9 @@ fn read_pid_file(path: &str) -> Result<u32> {
 fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
+        use nix::errno::Errno;
         use nix::sys::signal::kill;
         use nix::unistd::Pid;
-        use nix::errno::Errno;
 
         let nix_pid = Pid::from_raw(pid as i32);
         match kill(nix_pid, None) {
@@ -319,12 +321,10 @@ fn get_process_uptime(pid: u32) -> Option<String> {
             if fields.len() > 21 {
                 if let Ok(start_ticks) = fields[21].parse::<u64>() {
                     // Get system boot time and clock ticks per second
-                    if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks()) {
+                    if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks())
+                    {
                         let start_time = boot_time + (start_ticks / clock_ticks);
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .ok()?
-                            .as_secs();
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
                         let uptime_secs = now.saturating_sub(start_time);
                         return Some(format_duration(uptime_secs));
                     }

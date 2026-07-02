@@ -90,10 +90,7 @@ impl HeartbeatLoop {
     async fn send_heartbeat(&self) -> Result<()> {
         let sessions = self.tmux.list_sessions().await.unwrap_or_default();
         let session_count = sessions.len() as u32;
-        let active_sessions = sessions
-            .iter()
-            .filter(|s| s.attached_clients > 0)
-            .count() as u32;
+        let active_sessions = sessions.iter().filter(|s| s.attached_clients > 0).count() as u32;
 
         let uptime_seconds = get_uptime_seconds();
         let load_average = get_load_average();

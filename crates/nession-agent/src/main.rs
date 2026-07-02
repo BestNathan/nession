@@ -59,7 +59,10 @@ async fn main() -> Result<()> {
         .start()
         .await
         .context("failed to start agent server")?;
-    info!("Agent WebSocket server started on {}", config.listen_address);
+    info!(
+        "Agent WebSocket server started on {}",
+        config.listen_address
+    );
 
     // 5. Connect to central server
     let hostname = get_hostname();
@@ -68,11 +71,7 @@ async fn main() -> Result<()> {
     let port = extract_port(&config.listen_address);
 
     let tmux_version = get_tmux_version().await;
-    let os_version = format!(
-        "{} {}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    );
+    let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
 
     let metadata = AgentMetadata {
         tmux_version,
@@ -127,11 +126,8 @@ async fn main() -> Result<()> {
 
     // 6. Start HeartbeatLoop
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
-        let heartbeat = HeartbeatLoop::new(
-            handle.clone(),
-            TmuxManager::new(),
-            heartbeat_interval_secs,
-        );
+        let heartbeat =
+            HeartbeatLoop::new(handle.clone(), TmuxManager::new(), heartbeat_interval_secs);
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = heartbeat.run().await {
@@ -213,10 +209,14 @@ fn load_config() -> Result<AgentConfig> {
 
 /// Load TLS certificates from the paths specified in the config.
 /// Returns `None` if no TLS paths are configured (plain WebSocket).
-fn load_tls(config: &AgentConfig) -> Result<Option<(
-    Vec<rustls::pki_types::CertificateDer<'static>>,
-    rustls::pki_types::PrivateKeyDer<'static>,
-)>> {
+fn load_tls(
+    config: &AgentConfig,
+) -> Result<
+    Option<(
+        Vec<rustls::pki_types::CertificateDer<'static>>,
+        rustls::pki_types::PrivateKeyDer<'static>,
+    )>,
+> {
     match (&config.tls_cert_path, &config.tls_key_path) {
         (Some(cert), Some(key)) => AgentServer::load_tls(Some(cert), Some(key)),
         (None, None) => Ok(None),
@@ -291,11 +291,7 @@ async fn get_tmux_version() -> String {
         .ok()
         .and_then(|output| {
             if output.status.success() {
-                Some(
-                    String::from_utf8_lossy(&output.stdout)
-                        .trim()
-                        .to_string(),
-                )
+                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
             } else {
                 None
             }

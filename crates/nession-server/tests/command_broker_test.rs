@@ -1,7 +1,7 @@
+use futures_util::{SinkExt, StreamExt};
 use nession_server::server::command_broker::{CommandBroker, WsMessageSender};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a mock agent WebSocket server and return (addr, captured messages).
@@ -19,12 +19,17 @@ async fn start_mock_agent() -> (
         if let Ok((stream, _)) = listener.accept().await {
             let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
             let (mut sink, mut stream) = ws.split();
-            let _ = sink.send(WsMessage::Text(serde_json::json!({
-                "msg_type": "agent.register.response",
-                "id": "test",
-                "timestamp": 0,
-                "payload": {"status": "accepted", "message": "ok"}
-            }).to_string())).await;
+            let _ = sink
+                .send(WsMessage::Text(
+                    serde_json::json!({
+                        "msg_type": "agent.register.response",
+                        "id": "test",
+                        "timestamp": 0,
+                        "payload": {"status": "accepted", "message": "ok"}
+                    })
+                    .to_string(),
+                ))
+                .await;
 
             while let Some(Ok(WsMessage::Text(text))) = stream.next().await {
                 captured_clone.lock().await.push(text);
@@ -41,9 +46,9 @@ async fn test_register_and_send_command() {
     let (addr, captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(
-        format!("ws://{}", addr)
-    ).await.unwrap();
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut sink, _stream) = ws_stream.split();
 
     // Create channel-based sender and spawn relay task
@@ -56,12 +61,14 @@ async fn test_register_and_send_command() {
 
     broker.register_agent("agent-1", sender).await;
 
-    let _rx = broker.send_command(
-        "agent-1",
-        "server.session.create",
-        "req-1",
-        serde_json::json!({"request_id": "req-1", "name": "test", "width": 80, "height": 24}),
-    ).await;
+    let _rx = broker
+        .send_command(
+            "agent-1",
+            "server.session.create",
+            "req-1",
+            serde_json::json!({"request_id": "req-1", "name": "test", "width": 80, "height": 24}),
+        )
+        .await;
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let msgs = captured.lock().await;
@@ -77,9 +84,9 @@ async fn test_resolve_command() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(
-        format!("ws://{}", addr)
-    ).await.unwrap();
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut sink, _stream) = ws_stream.split();
 
     // Create channel-based sender and spawn relay task
@@ -92,12 +99,14 @@ async fn test_resolve_command() {
 
     broker.register_agent("agent-1", sender).await;
 
-    let rx = broker.send_command(
-        "agent-1",
-        "server.session.create",
-        "req-1",
-        serde_json::json!({"request_id": "req-1", "name": "test"}),
-    ).await;
+    let rx = broker
+        .send_command(
+            "agent-1",
+            "server.session.create",
+            "req-1",
+            serde_json::json!({"request_id": "req-1", "name": "test"}),
+        )
+        .await;
 
     let response = serde_json::json!({
         "request_id": "req-1",
@@ -106,7 +115,10 @@ async fn test_resolve_command() {
         "session_name": "test"
     });
     let resolved = broker.resolve_command("agent-1", "req-1", response).await;
-    assert!(resolved, "should have found and resolved the pending command");
+    assert!(
+        resolved,
+        "should have found and resolved the pending command"
+    );
 
     let result = rx.await.unwrap();
     assert_eq!(result["success"], true);
@@ -118,9 +130,9 @@ async fn test_unregister_agent_resolves_pending() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(
-        format!("ws://{}", addr)
-    ).await.unwrap();
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut sink, _stream) = ws_stream.split();
 
     // Create channel-based sender and spawn relay task
@@ -133,12 +145,14 @@ async fn test_unregister_agent_resolves_pending() {
 
     broker.register_agent("agent-1", sender).await;
 
-    let rx = broker.send_command(
-        "agent-1",
-        "server.session.create",
-        "req-1",
-        serde_json::json!({"request_id": "req-1", "name": "test"}),
-    ).await;
+    let rx = broker
+        .send_command(
+            "agent-1",
+            "server.session.create",
+            "req-1",
+            serde_json::json!({"request_id": "req-1", "name": "test"}),
+        )
+        .await;
 
     broker.unregister_agent("agent-1").await;
 
@@ -150,12 +164,14 @@ async fn test_unregister_agent_resolves_pending() {
 async fn test_send_command_unknown_agent() {
     let broker = CommandBroker::new();
 
-    let rx = broker.send_command(
-        "unknown-agent",
-        "server.session.create",
-        "req-1",
-        serde_json::json!({}),
-    ).await;
+    let rx = broker
+        .send_command(
+            "unknown-agent",
+            "server.session.create",
+            "req-1",
+            serde_json::json!({}),
+        )
+        .await;
 
     let result = rx.await;
     assert!(result.is_err());
@@ -166,9 +182,9 @@ async fn test_multiple_concurrent_commands() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(
-        format!("ws://{}", addr)
-    ).await.unwrap();
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut sink, _stream) = ws_stream.split();
 
     // Create channel-based sender and spawn relay task
@@ -181,15 +197,23 @@ async fn test_multiple_concurrent_commands() {
 
     broker.register_agent("agent-1", sender).await;
 
-    let rx1 = broker.send_command(
-        "agent-1", "server.session.create", "req-1",
-        serde_json::json!({"request_id": "req-1", "name": "s1"}),
-    ).await;
+    let rx1 = broker
+        .send_command(
+            "agent-1",
+            "server.session.create",
+            "req-1",
+            serde_json::json!({"request_id": "req-1", "name": "s1"}),
+        )
+        .await;
 
-    let rx2 = broker.send_command(
-        "agent-1", "server.session.create", "req-2",
-        serde_json::json!({"request_id": "req-2", "name": "s2"}),
-    ).await;
+    let rx2 = broker
+        .send_command(
+            "agent-1",
+            "server.session.create",
+            "req-2",
+            serde_json::json!({"request_id": "req-2", "name": "s2"}),
+        )
+        .await;
 
     broker.resolve_command("agent-1", "req-2", serde_json::json!({
         "request_id": "req-2", "command": "session.create", "success": true, "session_name": "s2"

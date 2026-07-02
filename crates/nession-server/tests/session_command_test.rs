@@ -1,10 +1,10 @@
 //! Integration test: client → server → mock agent session create/kill flow.
 
-use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use nession_server::server::WebSocketServer;
 use nession_common::config::ServerConfig;
+use nession_server::server::WebSocketServer;
+use std::time::Duration;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a real server on a random port.
 async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
@@ -34,7 +34,9 @@ async fn test_session_create_flow() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect mock agent
-    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr)).await.unwrap();
+    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut agent_sink, mut agent_stream) = agent_ws.split();
 
     // Register agent
@@ -52,11 +54,16 @@ async fn test_session_create_flow() {
             "protocol_version": "1.0"
         }
     });
-    agent_sink.send(WsMessage::Text(reg.to_string())).await.unwrap();
+    agent_sink
+        .send(WsMessage::Text(reg.to_string()))
+        .await
+        .unwrap();
     let _ = agent_stream.next().await; // register response
 
     // Connect client
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr)).await.unwrap();
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
 
     // Authenticate
@@ -66,7 +73,10 @@ async fn test_session_create_flow() {
         "timestamp": 0,
         "payload": {"auth_token": "test"}
     });
-    client_sink.send(WsMessage::Text(auth.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(auth.to_string()))
+        .await
+        .unwrap();
     let _ = client_stream.next().await; // auth response
 
     // Send session create
@@ -76,7 +86,10 @@ async fn test_session_create_flow() {
         "timestamp": 0,
         "payload": {"agent_id": "agent-1", "name": "my-session"}
     });
-    client_sink.send(WsMessage::Text(create.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(create.to_string()))
+        .await
+        .unwrap();
 
     // Agent receives the command
     let agent_msg = agent_stream.next().await.unwrap().unwrap();
@@ -101,7 +114,10 @@ async fn test_session_create_flow() {
             "session_name": "my-session"
         }
     });
-    agent_sink.send(WsMessage::Text(response.to_string())).await.unwrap();
+    agent_sink
+        .send(WsMessage::Text(response.to_string()))
+        .await
+        .unwrap();
 
     // Client receives the response
     let client_msg = client_stream.next().await.unwrap().unwrap();
@@ -120,7 +136,9 @@ async fn test_session_kill_flow() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect mock agent
-    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr)).await.unwrap();
+    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut agent_sink, mut agent_stream) = agent_ws.split();
 
     // Register agent
@@ -138,11 +156,16 @@ async fn test_session_kill_flow() {
             "protocol_version": "1.0"
         }
     });
-    agent_sink.send(WsMessage::Text(reg.to_string())).await.unwrap();
+    agent_sink
+        .send(WsMessage::Text(reg.to_string()))
+        .await
+        .unwrap();
     let _ = agent_stream.next().await;
 
     // Connect & auth client
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr)).await.unwrap();
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
     let auth = serde_json::json!({
         "msg_type": "client.auth",
@@ -150,7 +173,10 @@ async fn test_session_kill_flow() {
         "timestamp": 0,
         "payload": {"auth_token": "test"}
     });
-    client_sink.send(WsMessage::Text(auth.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(auth.to_string()))
+        .await
+        .unwrap();
     let _ = client_stream.next().await;
 
     // Register a session in the server's registry via agent.session.update
@@ -166,7 +192,10 @@ async fn test_session_kill_flow() {
             "attached_clients": 0
         }
     });
-    agent_sink.send(WsMessage::Text(update.to_string())).await.unwrap();
+    agent_sink
+        .send(WsMessage::Text(update.to_string()))
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Send session kill
@@ -176,7 +205,10 @@ async fn test_session_kill_flow() {
         "timestamp": 0,
         "payload": {"session_id": "agent-1:my-session"}
     });
-    client_sink.send(WsMessage::Text(kill.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(kill.to_string()))
+        .await
+        .unwrap();
 
     // Agent receives kill command
     let agent_msg = agent_stream.next().await.unwrap().unwrap();
@@ -200,7 +232,10 @@ async fn test_session_kill_flow() {
             "success": true
         }
     });
-    agent_sink.send(WsMessage::Text(response.to_string())).await.unwrap();
+    agent_sink
+        .send(WsMessage::Text(response.to_string()))
+        .await
+        .unwrap();
 
     // Client receives response
     let client_msg = client_stream.next().await.unwrap().unwrap();
@@ -218,7 +253,9 @@ async fn test_create_with_offline_agent_returns_error() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect & auth client (no agent registered)
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr)).await.unwrap();
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+        .await
+        .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
     let auth = serde_json::json!({
         "msg_type": "client.auth",
@@ -226,7 +263,10 @@ async fn test_create_with_offline_agent_returns_error() {
         "timestamp": 0,
         "payload": {"auth_token": "test"}
     });
-    client_sink.send(WsMessage::Text(auth.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(auth.to_string()))
+        .await
+        .unwrap();
     let _ = client_stream.next().await;
 
     // Try to create session on non-existent agent
@@ -236,7 +276,10 @@ async fn test_create_with_offline_agent_returns_error() {
         "timestamp": 0,
         "payload": {"agent_id": "nonexistent", "name": "test"}
     });
-    client_sink.send(WsMessage::Text(create.to_string())).await.unwrap();
+    client_sink
+        .send(WsMessage::Text(create.to_string()))
+        .await
+        .unwrap();
 
     // Should get immediate error
     let resp = client_stream.next().await.unwrap().unwrap();
@@ -247,5 +290,8 @@ async fn test_create_with_offline_agent_returns_error() {
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["msg_type"], "client.session.create.response");
     assert_eq!(parsed["payload"]["success"], false);
-    assert!(parsed["payload"]["error"].as_str().unwrap().contains("not found"));
+    assert!(parsed["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
 }
