@@ -123,6 +123,55 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, []);
 
   // ---------------------------------------------------------------------------
+  // P2P message subscription
+  //
+  // Must run synchronously (not inside the mountTimer's 50ms delay) so the
+  // handler is registered before connectionState transitions to 'connected',
+  // which triggers client.attach.  If the agent replies immediately there
+  // would be no handler to receive the message.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (mode !== 'p2p' || !p2pConnection) return;
+
+    const unsub = p2pConnection.onMessage((msg) => {
+      const term = termRef.current;
+      if (!term) return;
+
+      // Binary data (synthetic __binary__ message from the hook)
+      if (msg.msg_type === '__binary__') {
+        term.write(new Uint8Array(msg.payload));
+        return;
+      }
+
+      switch (msg.msg_type) {
+        case 'terminal.output':
+          if (msg.payload?.data) {
+            // Agent sends base64-encoded binary data
+            term.write(decodeB64(msg.payload.data));
+          }
+          break;
+        case 'ok':
+          // Response to client.attach — ignore
+          break;
+        case 'error':
+          // Ignore errors from keepalive pings (agent doesn't
+          // recognise the msg_type and sends back an error).
+          if (msg.id?.startsWith('ka-')) break;
+          reportError(new Error(msg.payload?.message || 'Remote error'));
+          break;
+        case 'keepalive.pong':
+          // Server acknowledged our keepalive — connection is healthy.
+          break;
+        default:
+          // Other message types – ignored.
+          break;
+      }
+    });
+
+    return unsub;
+  }, [mode, p2pConnection, reportError]);
+
+  // ---------------------------------------------------------------------------
   // P2P connection-state watcher
   //
   // Runs separately from the main terminal effect because connectionState
@@ -382,41 +431,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         return;
       }
 
-      // Subscribe to messages from the hook-managed P2P connection.
-      const unsubMessage = conn.onMessage((msg) => {
-        if (!active) return;
-
-        // Binary data (synthetic __binary__ message from the hook)
-        if (msg.msg_type === '__binary__') {
-          term.write(new Uint8Array(msg.payload));
-          return;
-        }
-
-        switch (msg.msg_type) {
-          case 'terminal.output':
-            if (msg.payload?.data) {
-              // Agent sends base64-encoded binary data
-              term.write(decodeB64(msg.payload.data));
-            }
-            break;
-          case 'ok':
-            // Response to client.attach — ignore
-            break;
-          case 'error':
-            // Ignore errors from keepalive pings (agent doesn't
-            // recognise the msg_type and sends back an error).
-            if (msg.id?.startsWith('ka-')) break;
-            reportError(new Error(msg.payload?.message || 'Remote error'));
-            break;
-          case 'keepalive.pong':
-            // Server acknowledged our keepalive — connection is healthy.
-            break;
-          default:
-            // Other message types – ignored.
-            break;
-        }
-      });
-      relayUnsubOutput = unsubMessage; // clean up with relayUnsubOutput?.()
+      // Keepalive: send WebSocket ping every 30 s to prevent idle
+      // timeouts on intermediate proxies / load balancers / NAT.
+      // Uses the hook's sendMessage which internally checks readyState.
+      // Note: the message subscription lives in a separate useEffect
+      // (above) to avoid a race with connectionState changes.
 
       // Keepalive: send WebSocket ping every 30 s to prevent idle
       // timeouts on intermediate proxies / load balancers / NAT.
@@ -512,6 +531,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       active = false;
       sendDataRef.current = null;
       clearTimeout(mountTimer);
+      attachSentRef.current = false;
 
       window.removeEventListener('resize', handleWindowResize);
 

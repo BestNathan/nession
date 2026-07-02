@@ -22,6 +22,8 @@ interface UseP2PConnectionOptions {
   agentUrl: string;
   connectionToken?: string;
   sessionName: string;
+  /** Called when a WebSocket error occurs before connection is established. */
+  onError?: (error: Error) => void;
 }
 
 /**
@@ -97,6 +99,9 @@ export function useP2PConnection(
 
     ws.onerror = (event) => {
       console.error('[P2P] WebSocket error:', event);
+      if (activeRef.current) {
+        options.onError?.(new Error('P2P WebSocket connection error'));
+      }
     };
 
     ws.onclose = () => {
@@ -139,6 +144,7 @@ export function useP2PConnection(
       wsRef.current.close();
       wsRef.current = null;
     }
+    setConnectionState('disconnected');
   }, []);
 
   if (!options) return null;
