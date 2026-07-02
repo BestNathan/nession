@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod connection;
+pub mod fs;
 pub mod server;
 pub mod sync;
 pub mod tmux;

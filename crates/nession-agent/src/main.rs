@@ -53,8 +53,17 @@ async fn main() -> Result<()> {
 
     // 4. Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
-    let agent_server = AgentServer::new(&config.listen_address, tls_option)
-        .context("failed to create agent server")?;
+    let file_root = config
+        .file_root
+        .as_deref()
+        .unwrap_or(&config.default_working_dir);
+    let agent_server = AgentServer::new(
+        &config.listen_address,
+        tls_option,
+        config.default_working_dir.clone(),
+        file_root,
+    )
+    .context("failed to create agent server")?;
     let server_handle = agent_server
         .start()
         .await
@@ -98,6 +107,7 @@ async fn main() -> Result<()> {
             config.connect_url.clone(),
             metadata,
             tmux_for_client,
+            config.default_working_dir.clone(),
         );
 
         // Attempt to connect with a timeout so the agent can still serve

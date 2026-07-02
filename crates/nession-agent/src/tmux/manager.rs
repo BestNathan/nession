@@ -57,7 +57,13 @@ impl TmuxManager {
         Ok(sessions)
     }
 
-    pub async fn create_session(&self, name: &str, width: u16, height: u16) -> Result<()> {
+    pub async fn create_session(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        working_dir: &str,
+    ) -> Result<()> {
         let status = Command::new("tmux")
             .args([
                 "new-session",
@@ -68,6 +74,8 @@ impl TmuxManager {
                 &width.to_string(),
                 "-y",
                 &height.to_string(),
+                "-c",
+                working_dir,
             ])
             .status()
             .await?;

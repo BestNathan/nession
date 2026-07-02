@@ -17,6 +17,12 @@ fn default_session_poll_interval() -> u64 {
     5
 }
 
+/// Default working directory for new tmux sessions.
+/// When not set, defaults to $HOME.
+fn default_working_dir() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+}
+
 /// Agent configuration loaded from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -52,6 +58,17 @@ pub struct AgentConfig {
     /// attach instead of constructing one from the agent's IP and port.
     #[serde(default)]
     pub connect_url: Option<String>,
+
+    /// Default working directory for new tmux sessions.
+    /// When not set, defaults to $HOME.
+    #[serde(default = "default_working_dir")]
+    pub default_working_dir: String,
+
+    /// Root directory for file operations via the P2P WebSocket.
+    /// When not set, defaults to `default_working_dir`.
+    /// File operations are restricted to paths within this directory.
+    #[serde(default)]
+    pub file_root: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -67,6 +84,8 @@ impl Default for AgentConfig {
             session_poll_interval_secs: default_session_poll_interval(),
             advertise_address: None,
             connect_url: None,
+            default_working_dir: default_working_dir(),
+            file_root: None,
         }
     }
 }

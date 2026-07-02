@@ -13,6 +13,9 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useP2PConnection } from '../hooks/useP2PConnection';
+import { createFileOps } from '../services/fileOps';
+import { FileTabs } from './FileTabs';
 
 export interface DashboardProps {
   wsService: WebSocketService;
@@ -332,6 +335,31 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
   const isP2P = attachInfo.mode === 'p2p';
   const terminalRef = useRef<TerminalHandle>(null);
 
+  const p2pConnection = useP2PConnection(
+    isP2P && attachInfo.agent_address
+      ? {
+          agentUrl: attachInfo.agent_address,
+          connectionToken: attachInfo.connection_token,
+          sessionName,
+        }
+      : null,
+  );
+
+  const fileOps = p2pConnection ? createFileOps(p2pConnection) : null;
+
+  const terminalElement = (
+    <Terminal
+      ref={terminalRef}
+      sessionId={sessionId}
+      sessionName={sessionName}
+      mode={attachInfo.mode}
+      p2pConnection={isP2P ? p2pConnection : undefined}
+      serverConnection={!isP2P ? wsService : undefined}
+      onDisconnect={onDisconnect}
+      onError={onError}
+    />
+  );
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="border-b px-4 py-2 flex items-center gap-4 flex-shrink-0">
@@ -345,21 +373,24 @@ function TerminalView({ session, wsService, onBack, onDisconnect, onError }: Ter
           {attachInfo.mode.toUpperCase()}
         </Badge>
       </header>
+
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="flex-1 min-h-0">
-          <Terminal
-            ref={terminalRef}
-            sessionId={sessionId}
-            sessionName={sessionName}
-            mode={attachInfo.mode}
-            agentUrl={isP2P ? attachInfo.agent_address : undefined}
-            connectionToken={isP2P ? attachInfo.connection_token : undefined}
-            serverConnection={!isP2P ? wsService : undefined}
-            onDisconnect={onDisconnect}
-            onError={onError}
+        {fileOps ? (
+          <FileTabs
+            fileOps={fileOps}
+            terminalElement={
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0">{terminalElement}</div>
+                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+              </div>
+            }
           />
-        </div>
-        <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+        ) : (
+          <>
+            <div className="flex-1 min-h-0">{terminalElement}</div>
+            <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+          </>
+        )}
       </div>
     </div>
   );

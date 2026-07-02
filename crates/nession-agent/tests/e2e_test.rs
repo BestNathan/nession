@@ -75,7 +75,14 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
     let port = PORT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let addr_str = format!("127.0.0.1:{}", port);
 
-    let server = AgentServer::new(&addr_str, None).expect("server creation should succeed");
+    let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+    let server = AgentServer::new(
+        &addr_str,
+        None,
+        "/tmp".to_string(),
+        tmp.path().to_string_lossy().as_ref(),
+    )
+    .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -106,6 +113,7 @@ async fn register_agent_with_server(
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     client
@@ -206,7 +214,9 @@ async fn test_terminal_io_through_full_chain() {
     let session_name = "e2e_terminal_io";
 
     // Create a tmux session.
-    tmux.create_session(session_name, 80, 24).await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Start agent server.
     let (agent_addr, agent_handle) = start_test_agent_server().await;

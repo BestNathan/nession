@@ -24,6 +24,7 @@
 //! | agent → client  | `error`          | Error response                   |
 //! | agent → client  | `ok`             | Success response (with payload)  |
 
+use crate::fs::ops::FileOps;
 use crate::tmux::manager::{SessionInfo, TmuxManager};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -112,6 +113,14 @@ pub mod msg_types {
     pub const CLIENT_SESSION_ATTACH: &str = "client.session.attach";
     pub const CLIENT_SESSION_CREATE: &str = "client.session.create";
     pub const CLIENT_SESSION_KILL: &str = "client.session.kill";
+
+    // File operations
+    pub const FILE_LIST: &str = "file.list";
+    pub const FILE_READ: &str = "file.read";
+    pub const FILE_WRITE: &str = "file.write";
+    pub const FILE_DELETE: &str = "file.delete";
+    pub const FILE_CREATE_DIR: &str = "file.create_dir";
+    pub const FILE_RENAME: &str = "file.rename";
 
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
@@ -318,6 +327,47 @@ pub struct ErrorPayload {
     pub message: String,
 }
 
+// --- File operation payloads ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileListPayload {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileReadPayload {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWritePayload {
+    pub path: String,
+    /// Base64-encoded content.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWriteResponse {
+    pub path: String,
+    pub written: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileDeletePayload {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCreateDirPayload {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRenamePayload {
+    pub from: String,
+    pub to: String,
+}
+
 // --- Protocol helpers ---
 
 fn now_timestamp() -> u64 {
@@ -383,10 +433,13 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 /// terminal I/O to/from per-client PTY sessions.
 pub struct AgentServer {
     tmux_manager: TmuxManager,
+    file_ops: Arc<FileOps>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     listen_address: String,
+    /// Default working directory for new tmux sessions created via P2P.
+    default_working_dir: String,
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -413,12 +466,16 @@ impl AgentServer {
     ///
     /// `listen_address` is a `host:port` string (e.g. `"0.0.0.0:8080"`).
     /// Pass `None` for `tls` to run without TLS (plain WebSocket).
+    /// `default_working_dir` is the working directory for new tmux sessions.
+    /// `file_root` is the sandbox root for file operations.
     pub fn new(
         listen_address: impl Into<String>,
         tls: Option<(
             Vec<rustls::pki_types::CertificateDer<'static>>,
             rustls::pki_types::PrivateKeyDer<'static>,
         )>,
+        default_working_dir: String,
+        file_root: &str,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -433,12 +490,18 @@ impl AgentServer {
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
+        let sandbox = crate::fs::sandbox::PathSandbox::new(file_root)
+            .context("failed to create file sandbox")?;
+        let file_ops = Arc::new(crate::fs::ops::FileOps::new(sandbox));
+
         Ok(Self {
             tmux_manager: TmuxManager::new(),
+            file_ops,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
             listen_address: listen_address.into(),
+            default_working_dir,
         })
     }
 
@@ -456,7 +519,9 @@ impl AgentServer {
         };
 
         let tmux_manager = Arc::new(self.tmux_manager);
+        let file_ops = Arc::clone(&self.file_ops);
         let tls_acceptor = self.tls_acceptor;
+        let default_working_dir = self.default_working_dir.clone();
         let listen_address = self.listen_address;
 
         tokio::spawn(async move {
@@ -473,10 +538,12 @@ impl AgentServer {
                         match accept_result {
                             Ok((stream, addr)) => {
                                 let tmux = Arc::clone(&tmux_manager);
+                                let fops = Arc::clone(&file_ops);
                                 let tls = tls_acceptor.clone();
+                                let wd = default_working_dir.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls).await
+                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops).await
                                     {
                                         warn!("connection error from {}: {:#}", addr, e);
                                     }
@@ -506,6 +573,8 @@ impl AgentServer {
         addr: SocketAddr,
         tmux_manager: Arc<TmuxManager>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+        default_working_dir: String,
+        file_ops: Arc<FileOps>,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -535,7 +604,16 @@ impl AgentServer {
         let sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>> =
             Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-        Self::run_message_loop(ws_stream, sink, tmux_manager, sessions, addr).await
+        Self::run_message_loop(
+            ws_stream,
+            sink,
+            tmux_manager,
+            sessions,
+            addr,
+            default_working_dir,
+            file_ops,
+        )
+        .await
     }
 
     /// Drain incoming WebSocket frames and dispatch them.
@@ -545,6 +623,8 @@ impl AgentServer {
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
         addr: SocketAddr,
+        default_working_dir: String,
+        file_ops: Arc<FileOps>,
     ) -> Result<()> {
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -557,9 +637,15 @@ impl AgentServer {
 
             match msg {
                 WsMessage::Text(text) => {
-                    let response =
-                        Self::handle_request(&text, tmux.clone(), sessions.clone(), sink.clone())
-                            .await;
+                    let response = Self::handle_request(
+                        &text,
+                        tmux.clone(),
+                        sessions.clone(),
+                        sink.clone(),
+                        &default_working_dir,
+                        file_ops.clone(),
+                    )
+                    .await;
                     let mut s = sink.lock().await;
                     if let Err(e) = s.send(WsMessage::Text(response)).await {
                         warn!("WebSocket write error to {}: {:#}", addr, e);
@@ -599,6 +685,8 @@ impl AgentServer {
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+        default_working_dir: &str,
+        file_ops: Arc<FileOps>,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
@@ -655,7 +743,12 @@ impl AgentServer {
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height)
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        default_working_dir,
+                    )
                     .await
                 {
                     Ok(()) => {
@@ -911,7 +1004,12 @@ impl AgentServer {
                     }
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height)
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        default_working_dir,
+                    )
                     .await
                 {
                     Ok(()) => {
@@ -966,6 +1064,110 @@ impl AgentServer {
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
+                }
+            }
+
+            // --- File operations ---
+            msg_types::FILE_LIST => {
+                let payload: FileListPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                match file_ops.list_dir(&payload.path).await {
+                    Ok(entries) => {
+                        let resp = serde_json::json!({ "entries": entries });
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("list_failed", &e.to_string()),
+                }
+            }
+
+            msg_types::FILE_READ => {
+                let payload: FileReadPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                match file_ops.read_file(&payload.path).await {
+                    Ok(data) => serde_json::to_string(&make_response(&id, msg_types::OK, data))
+                        .unwrap_or_default(),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("permission_denied") {
+                            err("permission_denied", &msg)
+                        } else if msg.contains("is_directory") {
+                            err("is_directory", &msg)
+                        } else if msg.contains("file_too_large") {
+                            err("file_too_large", &msg)
+                        } else {
+                            err("io_error", &msg)
+                        }
+                    }
+                }
+            }
+
+            msg_types::FILE_WRITE => {
+                let payload: FileWritePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match file_ops.write_file(&payload.path, &payload.content).await {
+                    Ok(written) => {
+                        let resp = FileWriteResponse { path, written };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("write_error", &e.to_string()),
+                }
+            }
+
+            msg_types::FILE_DELETE => {
+                let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match file_ops.delete(&payload.path).await {
+                    Ok(()) => {
+                        let resp = serde_json::json!({ "path": path, "success": true });
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("delete_failed", &e.to_string()),
+                }
+            }
+
+            msg_types::FILE_CREATE_DIR => {
+                let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match file_ops.create_dir(&payload.path).await {
+                    Ok(()) => {
+                        let resp = serde_json::json!({ "path": path, "success": true });
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("create_dir_failed", &e.to_string()),
+                }
+            }
+
+            msg_types::FILE_RENAME => {
+                let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                let from = payload.from.clone();
+                let to = payload.to.clone();
+                match file_ops.rename(&payload.from, &payload.to).await {
+                    Ok(()) => {
+                        let resp = serde_json::json!({ "from": from, "to": to, "success": true });
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("rename_failed", &e.to_string()),
                 }
             }
 
@@ -1025,6 +1227,8 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::ops::FileData;
+    use base64::Engine;
     use futures_util::SinkExt;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -1035,7 +1239,16 @@ mod tests {
     /// server construction and shutdown).
     #[allow(dead_code)]
     async fn start_test_server() -> (SocketAddr, ServerHandle) {
-        let server = AgentServer::new("127.0.0.1:0", None).expect("server creation should succeed");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let server = AgentServer::new(
+            "127.0.0.1:0",
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .expect("server creation should succeed");
+        // Leak the TempDir so the sandbox root persists for the server lifetime.
+        Box::leak(Box::new(tmp));
         let handle = server.start().await.expect("start should succeed");
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1054,7 +1267,16 @@ mod tests {
     /// need to actually connect.
     async fn start_test_server_on(port: u16) -> (SocketAddr, ServerHandle) {
         let addr_str = format!("127.0.0.1:{}", port);
-        let server = AgentServer::new(&addr_str, None).expect("server creation should succeed");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let server = AgentServer::new(
+            &addr_str,
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .expect("server creation should succeed");
+        // Leak the TempDir so the sandbox root persists for the server lifetime.
+        Box::leak(Box::new(tmp));
         let handle = server.start().await.expect("start should succeed");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         (addr_str.parse().unwrap(), handle)
@@ -1126,7 +1348,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_creation_and_shutdown() {
-        let server = AgentServer::new("127.0.0.1:0", None).unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let server = AgentServer::new(
+            "127.0.0.1:0",
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
         let handle = server.start().await.unwrap();
 
         // Shutdown should complete without error.
@@ -1195,7 +1424,9 @@ mod tests {
         // connect to.
         let tmux = TmuxManager::new();
         let session_name = "server_test_attach";
-        tmux.create_session(session_name, 80, 24).await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp")
+            .await
+            .unwrap();
 
         // Attach via WebSocket.
         let attach_payload = ClientAttachPayload {
@@ -1233,7 +1464,9 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_io";
-        tmux.create_session(session_name, 80, 24).await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp")
+            .await
+            .unwrap();
 
         // Attach.
         let attach_payload = ClientAttachPayload {
@@ -1341,6 +1574,122 @@ mod tests {
             }
             other => panic!("expected text frame, got {:?}", other),
         }
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_list_root() {
+        let (addr, handle) = start_test_server_on(18087).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req = new_message(
+            msg_types::FILE_LIST,
+            FileListPayload {
+                path: "".to_string(),
+            },
+        );
+        let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert!(resp.payload.get("entries").is_some());
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_write_and_read_roundtrip() {
+        let (addr, handle) = start_test_server_on(18088).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let content = b"nession file test";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "roundtrip_test.txt".to_string(),
+                content: b64,
+            },
+        );
+        let write_resp: Message<FileWriteResponse> =
+            send_and_receive(&mut sink, &mut stream, &write_req).await;
+        assert_eq!(write_resp.msg_type, msg_types::OK);
+        assert!(write_resp.payload.written > 0);
+
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "roundtrip_test.txt".to_string(),
+            },
+        );
+        let read_resp: Message<FileData> =
+            send_and_receive(&mut sink, &mut stream, &read_req).await;
+        assert_eq!(read_resp.msg_type, msg_types::OK);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&read_resp.payload.content)
+            .unwrap();
+        assert_eq!(&decoded, content);
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_delete() {
+        let (addr, handle) = start_test_server_on(18089).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"to delete");
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "to_delete.txt".to_string(),
+                content: b64,
+            },
+        );
+        let _: Message<FileWriteResponse> =
+            send_and_receive(&mut sink, &mut stream, &write_req).await;
+
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: "to_delete.txt".to_string(),
+            },
+        );
+        let del_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &del_req).await;
+        assert_eq!(del_resp.msg_type, msg_types::OK);
+        assert!(del_resp
+            .payload
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "to_delete.txt".to_string(),
+            },
+        );
+        let read_resp: Message<ErrorPayload> =
+            send_and_receive(&mut sink, &mut stream, &read_req).await;
+        assert_eq!(read_resp.msg_type, msg_types::ERROR);
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_permission_denied_on_escape() {
+        let (addr, handle) = start_test_server_on(18090).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "../etc/passwd".to_string(),
+            },
+        );
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert!(resp.payload.code == "permission_denied" || resp.payload.code == "io_error");
 
         handle.shutdown().await.ok();
     }

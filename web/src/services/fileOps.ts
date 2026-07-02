@@ -1,0 +1,120 @@
+import type { P2PConnection } from '../hooks/useP2PConnection';
+
+// --- Types ---
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified: number;
+}
+
+export interface FileData {
+  path: string;
+  content: string; // base64
+  mime_type: string;
+}
+
+// --- Helpers ---
+
+let msgCounter = 0;
+function generateId(): string {
+  return `file-${Date.now()}-${++msgCounter}`;
+}
+
+function base64Encode(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64Decode(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function sendRequest(
+  p2p: P2PConnection,
+  msgType: string,
+  payload: Record<string, unknown>,
+  timeoutMs = 15000,
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (p2p.connectionState === 'disconnected') {
+      reject(new Error('Connection lost'));
+      return;
+    }
+    const id = generateId();
+    const timeout = setTimeout(() => {
+      unsub();
+      reject(new Error(`File operation timeout: ${msgType}`));
+    }, timeoutMs);
+
+    const unsub = p2p.onMessage((msg) => {
+      if (msg.id === id) {
+        clearTimeout(timeout);
+        unsub();
+        if (msg.msg_type === 'error') {
+          reject(new Error(msg.payload?.message || `File operation failed: ${msgType}`));
+        } else {
+          resolve(msg.payload);
+        }
+      }
+    });
+
+    p2p.sendMessage({
+      msg_type: msgType,
+      id,
+      timestamp: Math.floor(Date.now() / 1000),
+      payload,
+    });
+  });
+}
+
+// --- Public API ---
+
+export function createFileOps(p2p: P2PConnection) {
+  return {
+    listDir: (path: string): Promise<{ entries: FileEntry[] }> =>
+      sendRequest(p2p, 'file.list', { path }),
+
+    readFile: (path: string): Promise<FileData> =>
+      sendRequest(p2p, 'file.read', { path }),
+
+    writeFile: (path: string, content: string): Promise<{ path: string; written: number }> =>
+      sendRequest(p2p, 'file.write', { path, content: base64Encode(content) }),
+
+    deleteFile: (path: string): Promise<{ path: string; success: boolean }> =>
+      sendRequest(p2p, 'file.delete', { path }),
+
+    createDir: (path: string): Promise<{ path: string; success: boolean }> =>
+      sendRequest(p2p, 'file.create_dir', { path }),
+
+    renameFile: (from: string, to: string): Promise<{ from: string; to: string; success: boolean }> =>
+      sendRequest(p2p, 'file.rename', { from, to }),
+
+    uploadFile: (path: string, file: File): Promise<{ path: string; written: number }> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = reader.result as string;
+          const b64 = content.split(',')[1];
+          sendRequest(p2p, 'file.write', { path, content: b64 })
+            .then(resolve)
+            .catch(reject);
+        };
+        reader.onerror = () => reject(new Error('Failed to read file for upload'));
+        reader.readAsDataURL(file);
+      });
+    },
+
+    base64Decode,
+    base64Encode,
+  };
+}
+
+export type FileOps = ReturnType<typeof createFileOps>;

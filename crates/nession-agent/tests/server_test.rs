@@ -19,7 +19,14 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 /// Start a test server on a specific port and return the address + handle.
 async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let addr_str = format!("127.0.0.1:{}", port);
-    let server = AgentServer::new(&addr_str, None).expect("server creation should succeed");
+    let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+    let server = AgentServer::new(
+        &addr_str,
+        None,
+        "/tmp".to_string(),
+        tmp.path().to_string_lossy().as_ref(),
+    )
+    .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     (addr_str.parse().unwrap(), handle)
@@ -123,7 +130,9 @@ async fn integration_client_attach_creates_pty() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_attach";
-    tmux.create_session(session_name, 80, 24).await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Attach.
     let attach = ClientAttachPayload {
@@ -158,7 +167,9 @@ async fn integration_terminal_io_flow() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_io";
-    tmux.create_session(session_name, 80, 24).await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Attach.
     let attach = ClientAttachPayload {
@@ -309,7 +320,7 @@ async fn integration_web_ui_session_kill() {
 
     // Create a session first.
     let tmux = TmuxManager::new();
-    tmux.create_session("webui_test_kill", 80, 24)
+    tmux.create_session("webui_test_kill", 80, 24, "/tmp")
         .await
         .unwrap();
 
