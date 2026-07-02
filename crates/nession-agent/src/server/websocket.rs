@@ -387,6 +387,8 @@ pub struct AgentServer {
     shutdown_rx: Option<mpsc::Receiver<()>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     listen_address: String,
+    /// Default working directory for new tmux sessions created via P2P.
+    default_working_dir: String,
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -413,12 +415,14 @@ impl AgentServer {
     ///
     /// `listen_address` is a `host:port` string (e.g. `"0.0.0.0:8080"`).
     /// Pass `None` for `tls` to run without TLS (plain WebSocket).
+    /// `default_working_dir` is the working directory for new tmux sessions.
     pub fn new(
         listen_address: impl Into<String>,
         tls: Option<(
             Vec<rustls::pki_types::CertificateDer<'static>>,
             rustls::pki_types::PrivateKeyDer<'static>,
         )>,
+        default_working_dir: String,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -439,6 +443,7 @@ impl AgentServer {
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
             listen_address: listen_address.into(),
+            default_working_dir,
         })
     }
 
@@ -457,6 +462,7 @@ impl AgentServer {
 
         let tmux_manager = Arc::new(self.tmux_manager);
         let tls_acceptor = self.tls_acceptor;
+        let default_working_dir = self.default_working_dir.clone();
         let listen_address = self.listen_address;
 
         tokio::spawn(async move {
@@ -474,9 +480,10 @@ impl AgentServer {
                             Ok((stream, addr)) => {
                                 let tmux = Arc::clone(&tmux_manager);
                                 let tls = tls_acceptor.clone();
+                                let wd = default_working_dir.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls).await
+                                        Self::handle_connection(stream, addr, tmux, tls, wd).await
                                     {
                                         warn!("connection error from {}: {:#}", addr, e);
                                     }
@@ -506,6 +513,7 @@ impl AgentServer {
         addr: SocketAddr,
         tmux_manager: Arc<TmuxManager>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+        default_working_dir: String,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -535,7 +543,7 @@ impl AgentServer {
         let sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>> =
             Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-        Self::run_message_loop(ws_stream, sink, tmux_manager, sessions, addr).await
+        Self::run_message_loop(ws_stream, sink, tmux_manager, sessions, addr, default_working_dir).await
     }
 
     /// Drain incoming WebSocket frames and dispatch them.
@@ -545,6 +553,7 @@ impl AgentServer {
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
         addr: SocketAddr,
+        default_working_dir: String,
     ) -> Result<()> {
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -557,9 +566,14 @@ impl AgentServer {
 
             match msg {
                 WsMessage::Text(text) => {
-                    let response =
-                        Self::handle_request(&text, tmux.clone(), sessions.clone(), sink.clone())
-                            .await;
+                    let response = Self::handle_request(
+                            &text,
+                            tmux.clone(),
+                            sessions.clone(),
+                            sink.clone(),
+                            &default_working_dir,
+                        )
+                        .await;
                     let mut s = sink.lock().await;
                     if let Err(e) = s.send(WsMessage::Text(response)).await {
                         warn!("WebSocket write error to {}: {:#}", addr, e);
@@ -599,6 +613,7 @@ impl AgentServer {
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+        default_working_dir: &str,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
@@ -655,7 +670,7 @@ impl AgentServer {
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height)
+                    .create_session(&payload.name, payload.width, payload.height, default_working_dir)
                     .await
                 {
                     Ok(()) => {
@@ -911,7 +926,7 @@ impl AgentServer {
                     }
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height)
+                    .create_session(&payload.name, payload.width, payload.height, default_working_dir)
                     .await
                 {
                     Ok(()) => {
@@ -1035,7 +1050,8 @@ mod tests {
     /// server construction and shutdown).
     #[allow(dead_code)]
     async fn start_test_server() -> (SocketAddr, ServerHandle) {
-        let server = AgentServer::new("127.0.0.1:0", None).expect("server creation should succeed");
+        let server = AgentServer::new("127.0.0.1:0", None, "/tmp".to_string())
+            .expect("server creation should succeed");
         let handle = server.start().await.expect("start should succeed");
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1054,7 +1070,8 @@ mod tests {
     /// need to actually connect.
     async fn start_test_server_on(port: u16) -> (SocketAddr, ServerHandle) {
         let addr_str = format!("127.0.0.1:{}", port);
-        let server = AgentServer::new(&addr_str, None).expect("server creation should succeed");
+        let server = AgentServer::new(&addr_str, None, "/tmp".to_string())
+            .expect("server creation should succeed");
         let handle = server.start().await.expect("start should succeed");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         (addr_str.parse().unwrap(), handle)
@@ -1126,7 +1143,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_creation_and_shutdown() {
-        let server = AgentServer::new("127.0.0.1:0", None).unwrap();
+        let server = AgentServer::new("127.0.0.1:0", None, "/tmp".to_string()).unwrap();
         let handle = server.start().await.unwrap();
 
         // Shutdown should complete without error.
@@ -1195,7 +1212,7 @@ mod tests {
         // connect to.
         let tmux = TmuxManager::new();
         let session_name = "server_test_attach";
-        tmux.create_session(session_name, 80, 24).await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
 
         // Attach via WebSocket.
         let attach_payload = ClientAttachPayload {
@@ -1233,7 +1250,7 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_io";
-        tmux.create_session(session_name, 80, 24).await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
 
         // Attach.
         let attach_payload = ClientAttachPayload {

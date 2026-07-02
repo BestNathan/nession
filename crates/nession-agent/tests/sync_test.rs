@@ -70,6 +70,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     client.connect_and_run().await.expect("connect failed").0
@@ -212,7 +213,7 @@ async fn test_session_watcher_detects_new_session() {
     let _ = tmux.kill_session(session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24)
+    tmux.create_session(session_name, 80, 24, "/tmp")
         .await
         .expect("failed to create tmux session");
 
@@ -273,7 +274,7 @@ async fn test_session_watcher_detects_removed_session() {
     let _ = tmux.kill_session(session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24)
+    tmux.create_session(session_name, 80, 24, "/tmp")
         .await
         .expect("failed to create tmux session");
 

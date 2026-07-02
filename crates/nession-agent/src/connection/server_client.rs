@@ -93,6 +93,8 @@ pub struct ServerClient {
     /// Public WebSocket URL for clients (e.g. "wss://agent.example.com/ws").
     /// When set, the server returns this to clients on session attach.
     connect_url: Option<String>,
+    /// Default working directory for new tmux sessions.
+    default_working_dir: String,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -195,7 +197,10 @@ impl ServerClient {
     /// * `hostname` - Hostname of the machine
     /// * `ip_address` - IP address of the agent
     /// * `port` - Port where the agent's WebSocket server is listening
+    /// * `connect_url` - Public WebSocket URL for P2P client connections
     /// * `metadata` - Agent metadata (tmux version, OS version, etc.)
+    /// * `tmux` - Tmux manager for handling session commands
+    /// * `default_working_dir` - Default working directory for new tmux sessions
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_url: impl Into<String>,
@@ -207,6 +212,7 @@ impl ServerClient {
         connect_url: Option<String>,
         metadata: AgentMetadata,
         tmux: Arc<TmuxManager>,
+        default_working_dir: String,
     ) -> Self {
         Self {
             server_url: server_url.into(),
@@ -216,6 +222,7 @@ impl ServerClient {
             ip_address: ip_address.into(),
             port,
             connect_url,
+            default_working_dir,
             metadata,
             tmux,
         }
@@ -486,11 +493,14 @@ impl ServerClient {
                     name, width, height
                 );
 
-                let (success, error, session_name) =
-                    match self.tmux.create_session(&name, width, height).await {
-                        Ok(()) => (true, None, Some(name.clone())),
-                        Err(e) => (false, Some(e.to_string()), None),
-                    };
+                let (success, error, session_name) = match self
+                    .tmux
+                    .create_session(&name, width, height, &self.default_working_dir)
+                    .await
+                {
+                    Ok(()) => (true, None, Some(name.clone())),
+                    Err(e) => (false, Some(e.to_string()), None),
+                };
 
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
@@ -630,6 +640,7 @@ mod tests {
             None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -672,6 +683,7 @@ mod tests {
             None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -724,6 +736,7 @@ mod tests {
             None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -804,6 +817,7 @@ mod tests {
             None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -879,6 +893,7 @@ mod tests {
             None, // connect_url
             metadata,
             Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 

@@ -71,6 +71,7 @@ async fn integration_connection_to_mock_server() {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -104,6 +105,7 @@ async fn integration_registration_message_format() {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -162,6 +164,7 @@ async fn integration_heartbeat_message_format() {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -230,6 +233,7 @@ async fn integration_session_update_message_format() {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -292,6 +296,7 @@ async fn integration_reconnection_logic() {
         None, // connect_url
         metadata,
         Arc::new(TmuxManager::new()),
+        "/tmp".to_string(),
     );
 
     // Spawn the client connection attempt in the background.

@@ -250,8 +250,12 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
 
     // Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
-    let agent_server = AgentServer::new(&config.listen_address, tls_option)
-        .context("failed to create agent server")?;
+    let agent_server = AgentServer::new(
+        &config.listen_address,
+        tls_option,
+        config.default_working_dir.clone(),
+    )
+    .context("failed to create agent server")?;
     let server_handle = agent_server
         .start()
         .await
@@ -284,6 +288,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         None, // connect_url — not used in CLI bare-metal agent mode
         metadata,
         Arc::new(TmuxManager::new()),
+        config.default_working_dir.clone(),
     );
 
     let (client_handle, heartbeat_interval_secs) = tokio::select! {
