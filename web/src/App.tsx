@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { createWebSocketService, destroyWebSocketService, WebSocketService } from './services/websocket';
 import { ConnectionStatus } from './types';
@@ -19,6 +19,7 @@ function App() {
   );
   const autoConnect = params.get('token') !== null;
   const unsubRef = useRef<(() => void) | null>(null);
+  const hasAutoConnected = useRef(false);
 
   // Clean up WebSocket service when wsService changes (e.g. reconnect)
   useEffect(() => {
@@ -37,13 +38,7 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (autoConnect && authToken && connectionStatus === 'disconnected') {
-      handleConnect();
-    }
-  }, []);
-
-  const handleConnect = async () => {
+  const handleConnect = useCallback(async () => {
     localStorage.setItem('nession_token', authToken);
     localStorage.setItem('nession_server_url', serverUrl);
 
@@ -61,7 +56,16 @@ function App() {
       toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setConnectionStatus('disconnected');
     }
-  };
+  }, [authToken, serverUrl]);
+
+  // Auto-connect on mount when auth token is provided via URL parameter.
+  // hasAutoConnected ref ensures this only fires once per mount.
+  useEffect(() => {
+    if (!hasAutoConnected.current && autoConnect && authToken && connectionStatus === 'disconnected') {
+      hasAutoConnected.current = true;
+      handleConnect();
+    }
+  }, [autoConnect, authToken, connectionStatus, handleConnect]);
 
   const handleDisconnect = () => {
     if (wsService) {

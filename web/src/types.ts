@@ -39,7 +39,7 @@ export interface WebSocketMessage {
   msg_type: string;
   id: string;
   timestamp: number;
-  payload: any;
+  payload: Record<string, unknown>;
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'authenticated';

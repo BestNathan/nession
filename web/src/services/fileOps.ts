@@ -37,12 +37,12 @@ function base64Decode(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-function sendRequest(
+function sendRequest<T>(
   p2p: P2PConnection,
   msgType: string,
   payload: Record<string, unknown>,
   timeoutMs = 15000,
-): Promise<any> {
+): Promise<T> {
   return new Promise((resolve, reject) => {
     if (p2p.connectionState === 'disconnected') {
       reject(new Error('Connection lost'));
@@ -59,9 +59,9 @@ function sendRequest(
         clearTimeout(timeout);
         unsub();
         if (msg.msg_type === 'error') {
-          reject(new Error(msg.payload?.message || `File operation failed: ${msgType}`));
+          reject(new Error(((msg.payload as Record<string, unknown>)?.message as string) || `File operation failed: ${msgType}`));
         } else {
-          resolve(msg.payload);
+          resolve(msg.payload as T);
         }
       }
     });
@@ -103,8 +103,8 @@ export function createFileOps(p2p: P2PConnection) {
         reader.onload = () => {
           const content = reader.result as string;
           const b64 = content.split(',')[1];
-          sendRequest(p2p, 'file.write', { path, content: b64 })
-            .then(resolve)
+          sendRequest<{ path: string; written: number }>(p2p, 'file.write', { path, content: b64 })
+            .then((result) => resolve(result))
             .catch(reject);
         };
         reader.onerror = () => reject(new Error('Failed to read file for upload'));

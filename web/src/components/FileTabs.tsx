@@ -73,13 +73,43 @@ export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
     });
   }, []);
 
+  const handleFileDeleted = useCallback((path: string) => {
+    setOpenFiles((prev) => {
+      const filtered = prev.filter((f) => f.path !== path);
+      if (prev.length !== filtered.length) {
+        const deletedFile = prev.find((f) => f.path === path);
+        if (deletedFile && activeTabId === deletedFile.id) {
+          setActiveTabId(filtered.length > 0 ? filtered[filtered.length - 1].id : 'terminal');
+        }
+        // Clean up dirty tracking for the deleted file
+        if (deletedFile) {
+          setDirtyFiles((prevDirty) => {
+            const next = new Set(prevDirty);
+            next.delete(deletedFile.id);
+            return next;
+          });
+        }
+      }
+      return filtered;
+    });
+  }, [activeTabId]);
+
+  const handleFileRenamed = useCallback((oldPath: string, newPath: string) => {
+    const newFilename = newPath.split('/').pop() || newPath;
+    setOpenFiles((prev) =>
+      prev.map((f) =>
+        f.path === oldPath ? { ...f, path: newPath, filename: newFilename } : f,
+      ),
+    );
+  }, []);
+
   const activeFile = openFiles.find((f) => f.id === activeTabId);
   const showTerminal = activeTabId === 'terminal';
 
   return (
     <div className="flex-1 min-h-0 flex flex-row">
       <SidePanel>
-        <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} />
+        <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
       </SidePanel>
 
       <div className="flex-1 min-w-0 flex flex-col">

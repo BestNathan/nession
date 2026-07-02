@@ -8,11 +8,20 @@ import {
   File,
   ChevronRight,
   Home,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Skeleton } from './ui/skeleton';
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from './ui/context-menu';
 import { cn } from '@/lib/utils';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
@@ -20,6 +29,10 @@ export interface FileBrowserProps {
   fileOps: FileOps;
   onFileClick: (entry: FileEntry) => void;
   initialPath?: string;
+  /** Called when a file/directory is deleted (so parent can close tabs) */
+  onFileDeleted?: (path: string) => void;
+  /** Called when a file/directory is renamed (so parent can update tabs) */
+  onFileRenamed?: (oldPath: string, newPath: string) => void;
 }
 
 const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
@@ -49,7 +62,7 @@ function formatModified(ts: number): string {
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
 
-export function FileBrowser({ fileOps, onFileClick, initialPath = '' }: FileBrowserProps) {
+export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDeleted, onFileRenamed }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,6 +73,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '' }: FileBrow
   const [showNewFile, setShowNewFile] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newName, setNewName] = useState('');
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const loadDir = useCallback(async (path: string) => {
     setLoading(true);
@@ -140,6 +155,65 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '' }: FileBrow
     e.target.value = '';
   };
 
+  const handleRenameStart = (entry: FileEntry) => {
+    setRenamingPath(entry.path);
+    setRenameValue(entry.name);
+  };
+
+  const handleRenameSubmit = async () => {
+    const name = renameValue.trim();
+    if (!name) {
+      toast.error('Name cannot be empty');
+      return;
+    }
+    if (!renamingPath) return;
+
+    const oldName = renamingPath.substring(renamingPath.lastIndexOf('/') + 1);
+    if (name === oldName) {
+      setRenamingPath(null);
+      setRenameValue('');
+      return;
+    }
+
+    const parentPath = renamingPath.substring(0, renamingPath.lastIndexOf('/'));
+    const newPath = parentPath ? `${parentPath}/${name}` : name;
+
+    try {
+      await fileOps.renameFile(renamingPath, newPath);
+      toast.success(`Renamed to ${name}`);
+      onFileRenamed?.(renamingPath, newPath);
+      setRenamingPath(null);
+      setRenameValue('');
+      loadDir(currentPath);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to rename');
+    }
+  };
+
+  const handleRenameCancel = () => {
+    setRenamingPath(null);
+    setRenameValue('');
+  };
+
+  const handleDelete = async (entry: FileEntry) => {
+    const label = entry.is_dir ? `directory "${entry.name}"` : `"${entry.name}"`;
+    if (!window.confirm(`Delete ${label}?\n\nThis action cannot be undone.`)) return;
+
+    try {
+      await fileOps.deleteFile(entry.path);
+      toast.success(`Deleted ${entry.name}`);
+      onFileDeleted?.(entry.path);
+      loadDir(currentPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete';
+      if (msg.toLowerCase().includes('not empty')) {
+        toast.error('Cannot delete non-empty directory');
+      } else {
+        toast.error(msg);
+      }
+    }
+  };
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -188,7 +262,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '' }: FileBrow
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') showNewFile ? handleCreateFile() : handleCreateFolder();
+              if (e.key === 'Enter') {
+                if (showNewFile) handleCreateFile(); else handleCreateFolder();
+              }
               if (e.key === 'Escape') { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }
             }}
             className="h-7 text-xs"
@@ -243,22 +319,54 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '' }: FileBrow
         ) : sortedEntries.length === 0 ? (
           <div className="p-3 text-center text-sm text-muted-foreground">This directory is empty</div>
         ) : (
-          sortedEntries.map((entry) => (
-            <button
-              key={entry.path}
-              onClick={() => handleEntryClick(entry)}
-              className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left"
-            >
-              {entry.is_dir ? (
-                <Folder className="h-3.5 w-3.5 mr-1.5 text-blue-400 flex-shrink-0" />
-              ) : (
-                <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
-              )}
-              <span className="flex-1 truncate">{entry.name}</span>
-              <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-              <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatModified(entry.modified)}</span>
-            </button>
-          ))
+          sortedEntries.map((entry) =>
+            renamingPath === entry.path ? (
+              <div key={entry.path} className="flex items-center gap-1 w-full px-2 py-0.5">
+                {entry.is_dir ? (
+                  <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
+                ) : (
+                  <File className="h-3.5 w-3.5 mr-1 text-muted-foreground flex-shrink-0" />
+                )}
+                <Input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameSubmit();
+                    if (e.key === 'Escape') handleRenameCancel();
+                  }}
+                  className="h-6 text-xs flex-1"
+                />
+                <Button size="sm" className="h-6 text-xs" onClick={handleRenameSubmit}>Rename</Button>
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleRenameCancel}>Cancel</Button>
+              </div>
+            ) : (
+              <ContextMenu key={entry.path}>
+                <ContextMenuTrigger
+                  onClick={() => handleEntryClick(entry)}
+                  className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default"
+                >
+                  {entry.is_dir ? (
+                    <Folder className="h-3.5 w-3.5 mr-1.5 text-blue-400 flex-shrink-0" />
+                  ) : (
+                    <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
+                  )}
+                  <span className="flex-1 truncate">{entry.name}</span>
+                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
+                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatModified(entry.modified)}</span>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-36">
+                  <ContextMenuItem onClick={() => handleRenameStart(entry)}>
+                    <Pencil /> Rename
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem variant="destructive" onClick={() => handleDelete(entry)}>
+                    <Trash2 /> Delete
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ),
+          )
         )}
       </div>
     </div>
