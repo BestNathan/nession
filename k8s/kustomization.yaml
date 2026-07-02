@@ -6,13 +6,13 @@ namespace: nession
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-9bcb6da
+  newTag: agent-b7f1102
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-9bcb6da
+  newTag: server-b7f1102
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-9bcb6da
+  newTag: ui-b7f1102
 
   # ── 共用 ──
   # ── Server 套件 ──
