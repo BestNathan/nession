@@ -91,19 +91,18 @@ impl FileOps {
     /// Rejects files larger than `MAX_READ_SIZE`.
     pub async fn read_file(&self, path: &str) -> Result<FileData> {
         let resolved = self.sandbox.resolve(path)?;
-
-        if resolved.is_dir() {
-            anyhow::bail!("is_directory: cannot read a directory");
-        }
-
-        let path_str = resolved.to_string_lossy().to_string();
-        let path_for_mime = path_str.clone();
+        let user_path = path.to_string();
+        let path_for_mime = user_path.clone();
 
         let content = task::spawn_blocking(move || -> Result<(Vec<u8>, String)> {
             let metadata = fs::metadata(&resolved)
                 .with_context(|| format!("failed to read metadata: {}", resolved.display()))?;
-            let size = metadata.len();
 
+            if metadata.is_dir() {
+                anyhow::bail!("is_directory: cannot read a directory");
+            }
+
+            let size = metadata.len();
             if size > MAX_READ_SIZE {
                 anyhow::bail!(
                     "file_too_large: file is {} bytes, max allowed is {} bytes",
@@ -115,7 +114,9 @@ impl FileOps {
             let data = fs::read(&resolved)
                 .with_context(|| format!("failed to read file: {}", resolved.display()))?;
 
-            // Detect MIME type from the file extension.
+            // Detect MIME type from the user-supplied path extension
+            // (avoids leaking the on-disk path to the caller via MIME
+            // detection resolution).
             let mime = mime_guess::from_path(&path_for_mime)
                 .first_or_text_plain()
                 .to_string();
@@ -127,7 +128,7 @@ impl FileOps {
         let encoded = base64::engine::general_purpose::STANDARD.encode(&content.0);
 
         Ok(FileData {
-            path: path_str,
+            path: user_path,
             content: encoded,
             mime_type: content.1,
         })
@@ -151,14 +152,25 @@ impl FileOps {
                     .with_context(|| format!("failed to create parent dir: {}", parent.display()))?;
             }
 
-            // Atomic write: write to temp file, then rename.
-            let tmp = resolved.with_extension("tmp");
+            // Use a unique temp file name to avoid collisions, even for
+            // extensionless files where with_extension("tmp") would give
+            // the same name for every concurrent write to the same path.
+            let tmp_id = uuid::Uuid::new_v4();
+            let tmp_name = format!(".nession-{}.tmp", tmp_id);
+            let tmp = resolved.with_file_name(&tmp_name);
+
             fs::write(&tmp, &data)
                 .with_context(|| format!("failed to write temp file: {}", tmp.display()))?;
-            fs::rename(&tmp, &resolved)
-                .with_context(|| format!("failed to rename temp file: {}", tmp.display()))?;
 
-            Ok(len)
+            match fs::rename(&tmp, &resolved) {
+                Ok(()) => Ok(len),
+                Err(e) => {
+                    // Clean up the orphaned temp file on rename failure.
+                    let _ = fs::remove_file(&tmp);
+                    Err(e)
+                        .with_context(|| format!("failed to rename temp file: {}", tmp.display()))
+                }
+            }
         })
         .await??;
 
