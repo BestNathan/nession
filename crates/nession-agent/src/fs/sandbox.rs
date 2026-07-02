@@ -61,21 +61,15 @@ impl PathSandbox {
                     match std::fs::canonicalize(ancestor) {
                         Ok(canonical) => {
                             if !canonical.starts_with(&self.root) {
-                                anyhow::bail!(
-                                    "permission_denied: path outside sandbox root"
-                                );
+                                anyhow::bail!("permission_denied: path outside sandbox root");
                             }
                             return Ok(match suffix {
                                 Some(s) => canonical.join(&s),
                                 None => canonical,
                             });
                         }
-                        Err(inner)
-                            if inner.kind() == std::io::ErrorKind::NotFound =>
-                        {
-                            let name = ancestor
-                                .file_name()
-                                .context("path has no filename")?;
+                        Err(inner) if inner.kind() == std::io::ErrorKind::NotFound => {
+                            let name = ancestor.file_name().context("path has no filename")?;
                             suffix = Some(match suffix {
                                 Some(s) => PathBuf::from(name).join(&s),
                                 None => PathBuf::from(name),
@@ -157,7 +151,10 @@ mod tests {
     fn test_resolve_nonexistent_path() {
         let (dir, sandbox) = setup_sandbox();
         let resolved = sandbox.resolve("new_file.txt").unwrap();
-        assert_eq!(resolved, dir.path().canonicalize().unwrap().join("new_file.txt"));
+        assert_eq!(
+            resolved,
+            dir.path().canonicalize().unwrap().join("new_file.txt")
+        );
     }
 
     #[test]

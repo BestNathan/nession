@@ -604,7 +604,16 @@ impl AgentServer {
         let sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>> =
             Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-        Self::run_message_loop(ws_stream, sink, tmux_manager, sessions, addr, default_working_dir, file_ops).await
+        Self::run_message_loop(
+            ws_stream,
+            sink,
+            tmux_manager,
+            sessions,
+            addr,
+            default_working_dir,
+            file_ops,
+        )
+        .await
     }
 
     /// Drain incoming WebSocket frames and dispatch them.
@@ -629,14 +638,14 @@ impl AgentServer {
             match msg {
                 WsMessage::Text(text) => {
                     let response = Self::handle_request(
-                            &text,
-                            tmux.clone(),
-                            sessions.clone(),
-                            sink.clone(),
-                            &default_working_dir,
-                            file_ops.clone(),
-                        )
-                        .await;
+                        &text,
+                        tmux.clone(),
+                        sessions.clone(),
+                        sink.clone(),
+                        &default_working_dir,
+                        file_ops.clone(),
+                    )
+                    .await;
                     let mut s = sink.lock().await;
                     if let Err(e) = s.send(WsMessage::Text(response)).await {
                         warn!("WebSocket write error to {}: {:#}", addr, e);
@@ -734,7 +743,12 @@ impl AgentServer {
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height, default_working_dir)
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        default_working_dir,
+                    )
                     .await
                 {
                     Ok(()) => {
@@ -990,7 +1004,12 @@ impl AgentServer {
                     }
                 };
                 match tmux
-                    .create_session(&payload.name, payload.width, payload.height, default_working_dir)
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        default_working_dir,
+                    )
                     .await
                 {
                     Ok(()) => {
@@ -1049,7 +1068,6 @@ impl AgentServer {
             }
 
             // --- File operations ---
-
             msg_types::FILE_LIST => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
@@ -1071,10 +1089,8 @@ impl AgentServer {
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
                 match file_ops.read_file(&payload.path).await {
-                    Ok(data) => {
-                        serde_json::to_string(&make_response(&id, msg_types::OK, data))
-                            .unwrap_or_default()
-                    }
+                    Ok(data) => serde_json::to_string(&make_response(&id, msg_types::OK, data))
+                        .unwrap_or_default(),
                     Err(e) => {
                         let msg = e.to_string();
                         if msg.contains("permission_denied") {
@@ -1211,8 +1227,8 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine;
     use crate::fs::ops::FileData;
+    use base64::Engine;
     use futures_util::SinkExt;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -1224,8 +1240,13 @@ mod tests {
     #[allow(dead_code)]
     async fn start_test_server() -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let server = AgentServer::new("127.0.0.1:0", None, "/tmp".to_string(), tmp.path().to_string_lossy().as_ref())
-            .expect("server creation should succeed");
+        let server = AgentServer::new(
+            "127.0.0.1:0",
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
         let handle = server.start().await.expect("start should succeed");
@@ -1247,8 +1268,13 @@ mod tests {
     async fn start_test_server_on(port: u16) -> (SocketAddr, ServerHandle) {
         let addr_str = format!("127.0.0.1:{}", port);
         let tmp = tempfile::tempdir().expect("tempdir");
-        let server = AgentServer::new(&addr_str, None, "/tmp".to_string(), tmp.path().to_string_lossy().as_ref())
-            .expect("server creation should succeed");
+        let server = AgentServer::new(
+            &addr_str,
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
         let handle = server.start().await.expect("start should succeed");
@@ -1323,7 +1349,13 @@ mod tests {
     #[tokio::test]
     async fn test_server_creation_and_shutdown() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let server = AgentServer::new("127.0.0.1:0", None, "/tmp".to_string(), tmp.path().to_string_lossy().as_ref()).unwrap();
+        let server = AgentServer::new(
+            "127.0.0.1:0",
+            None,
+            "/tmp".to_string(),
+            tmp.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
         let handle = server.start().await.unwrap();
 
         // Shutdown should complete without error.
@@ -1392,7 +1424,9 @@ mod tests {
         // connect to.
         let tmux = TmuxManager::new();
         let session_name = "server_test_attach";
-        tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp")
+            .await
+            .unwrap();
 
         // Attach via WebSocket.
         let attach_payload = ClientAttachPayload {
@@ -1430,7 +1464,9 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_io";
-        tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+        tmux.create_session(session_name, 80, 24, "/tmp")
+            .await
+            .unwrap();
 
         // Attach.
         let attach_payload = ClientAttachPayload {
@@ -1547,7 +1583,12 @@ mod tests {
         let (addr, handle) = start_test_server_on(18087).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let req = new_message(msg_types::FILE_LIST, FileListPayload { path: "".to_string() });
+        let req = new_message(
+            msg_types::FILE_LIST,
+            FileListPayload {
+                path: "".to_string(),
+            },
+        );
         let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
         assert_eq!(resp.msg_type, msg_types::OK);
         assert!(resp.payload.get("entries").is_some());
@@ -1562,23 +1603,30 @@ mod tests {
 
         let content = b"nession file test";
         let b64 = base64::engine::general_purpose::STANDARD.encode(content);
-        let write_req = new_message(msg_types::FILE_WRITE, FileWritePayload {
-            path: "roundtrip_test.txt".to_string(),
-            content: b64,
-        });
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "roundtrip_test.txt".to_string(),
+                content: b64,
+            },
+        );
         let write_resp: Message<FileWriteResponse> =
             send_and_receive(&mut sink, &mut stream, &write_req).await;
         assert_eq!(write_resp.msg_type, msg_types::OK);
         assert!(write_resp.payload.written > 0);
 
-        let read_req = new_message(msg_types::FILE_READ, FileReadPayload {
-            path: "roundtrip_test.txt".to_string(),
-        });
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "roundtrip_test.txt".to_string(),
+            },
+        );
         let read_resp: Message<FileData> =
             send_and_receive(&mut sink, &mut stream, &read_req).await;
         assert_eq!(read_resp.msg_type, msg_types::OK);
         let decoded = base64::engine::general_purpose::STANDARD
-            .decode(&read_resp.payload.content).unwrap();
+            .decode(&read_resp.payload.content)
+            .unwrap();
         assert_eq!(&decoded, content);
 
         handle.shutdown().await.ok();
@@ -1590,22 +1638,37 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"to delete");
-        let write_req = new_message(msg_types::FILE_WRITE, FileWritePayload {
-            path: "to_delete.txt".to_string(), content: b64,
-        });
-        let _: Message<FileWriteResponse> = send_and_receive(&mut sink, &mut stream, &write_req).await;
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "to_delete.txt".to_string(),
+                content: b64,
+            },
+        );
+        let _: Message<FileWriteResponse> =
+            send_and_receive(&mut sink, &mut stream, &write_req).await;
 
-        let del_req = new_message(msg_types::FILE_DELETE, FileDeletePayload {
-            path: "to_delete.txt".to_string(),
-        });
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: "to_delete.txt".to_string(),
+            },
+        );
         let del_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &del_req).await;
         assert_eq!(del_resp.msg_type, msg_types::OK);
-        assert!(del_resp.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(del_resp
+            .payload
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
 
-        let read_req = new_message(msg_types::FILE_READ, FileReadPayload {
-            path: "to_delete.txt".to_string(),
-        });
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "to_delete.txt".to_string(),
+            },
+        );
         let read_resp: Message<ErrorPayload> =
             send_and_receive(&mut sink, &mut stream, &read_req).await;
         assert_eq!(read_resp.msg_type, msg_types::ERROR);
@@ -1618,9 +1681,12 @@ mod tests {
         let (addr, handle) = start_test_server_on(18090).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let req = new_message(msg_types::FILE_READ, FileReadPayload {
-            path: "../etc/passwd".to_string(),
-        });
+        let req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "../etc/passwd".to_string(),
+            },
+        );
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
         assert_eq!(resp.msg_type, msg_types::ERROR);
         assert!(resp.payload.code == "permission_denied" || resp.payload.code == "io_error");

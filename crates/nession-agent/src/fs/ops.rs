@@ -148,8 +148,9 @@ impl FileOps {
         task::spawn_blocking(move || -> Result<u64> {
             // Ensure parent directory exists.
             if let Some(parent) = resolved.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create parent dir: {}", parent.display()))?;
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create parent dir: {}", parent.display())
+                })?;
             }
 
             // Use a unique temp file name to avoid collisions, even for
@@ -167,8 +168,7 @@ impl FileOps {
                 Err(e) => {
                     // Clean up the orphaned temp file on rename failure.
                     let _ = fs::remove_file(&tmp);
-                    Err(e)
-                        .with_context(|| format!("failed to rename temp file: {}", tmp.display()))
+                    Err(e).with_context(|| format!("failed to rename temp file: {}", tmp.display()))
                 }
             }
         })
@@ -183,8 +183,9 @@ impl FileOps {
 
         task::spawn_blocking(move || -> Result<()> {
             if resolved.is_dir() {
-                fs::remove_dir(&resolved)
-                    .with_context(|| format!("failed to remove directory: {}", resolved.display()))?;
+                fs::remove_dir(&resolved).with_context(|| {
+                    format!("failed to remove directory: {}", resolved.display())
+                })?;
             } else {
                 fs::remove_file(&resolved)
                     .with_context(|| format!("failed to remove file: {}", resolved.display()))?;
@@ -338,7 +339,10 @@ mod tests {
         fs::write(dir.path().join("old.txt"), b"old").unwrap();
         ops.rename("old.txt", "new.txt").await.unwrap();
         assert!(!dir.path().join("old.txt").exists());
-        assert_eq!(fs::read_to_string(dir.path().join("new.txt")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("new.txt")).unwrap(),
+            "old"
+        );
     }
 
     #[tokio::test]

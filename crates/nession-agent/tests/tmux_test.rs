@@ -15,7 +15,10 @@ async fn test_create_and_kill_session() {
     let session_name = "test_session_integration";
 
     // Create session
-    manager.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+    manager
+        .create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Verify it exists
     let sessions = manager.list_sessions().await.unwrap();

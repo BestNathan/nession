@@ -214,7 +214,9 @@ async fn test_terminal_io_through_full_chain() {
     let session_name = "e2e_terminal_io";
 
     // Create a tmux session.
-    tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Start agent server.
     let (agent_addr, agent_handle) = start_test_agent_server().await;

@@ -130,7 +130,9 @@ async fn integration_client_attach_creates_pty() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_attach";
-    tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Attach.
     let attach = ClientAttachPayload {
@@ -165,7 +167,9 @@ async fn integration_terminal_io_flow() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_io";
-    tmux.create_session(session_name, 80, 24, "/tmp").await.unwrap();
+    tmux.create_session(session_name, 80, 24, "/tmp")
+        .await
+        .unwrap();
 
     // Attach.
     let attach = ClientAttachPayload {
