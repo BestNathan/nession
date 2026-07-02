@@ -47,15 +47,47 @@ impl PathSandbox {
         let resolved = match std::fs::canonicalize(&combined) {
             Ok(p) => p,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let parent = combined
-                    .parent()
-                    .unwrap_or(&self.root);
-                let canonical_parent = std::fs::canonicalize(parent)
-                    .with_context(|| format!("parent not found for: {}", path))?;
-                let filename = combined
-                    .file_name()
-                    .context("path has no filename")?;
-                canonical_parent.join(filename)
+                // Walk up the ancestor chain to find the first existing
+                // directory, then append the non-existent suffix.
+                // This handles paths like "a/b/c" where none of the
+                // components exist yet (common for create_dir, write_file).
+                //
+                // NOTE: Use `Option<PathBuf>` for suffix to avoid
+                // `join(empty_path)` on macOS, which spuriously adds a
+                // trailing slash (e.g. `"a".join("")` → `"a/"`).
+                let mut ancestor = combined.as_path();
+                let mut suffix: Option<PathBuf> = None;
+                loop {
+                    match std::fs::canonicalize(ancestor) {
+                        Ok(canonical) => {
+                            if !canonical.starts_with(&self.root) {
+                                anyhow::bail!(
+                                    "permission_denied: path outside sandbox root"
+                                );
+                            }
+                            return Ok(match suffix {
+                                Some(s) => canonical.join(&s),
+                                None => canonical,
+                            });
+                        }
+                        Err(inner)
+                            if inner.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            let name = ancestor
+                                .file_name()
+                                .context("path has no filename")?;
+                            suffix = Some(match suffix {
+                                Some(s) => PathBuf::from(name).join(&s),
+                                None => PathBuf::from(name),
+                            });
+                            ancestor = ancestor.parent().context("path has no parent")?;
+                        }
+                        Err(inner) => {
+                            return Err(anyhow::Error::from(inner))
+                                .with_context(|| format!("failed to resolve path: {}", path))
+                        }
+                    }
+                }
             }
             Err(e) => return Err(anyhow::Error::from(e)).context("failed to resolve path"),
         };
@@ -150,10 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_rejects_absolute_path_outside_root() {
-        let (_dir, sandbox) = setup_sandbox();
-        let result = sandbox.resolve("/etc/passwd");
-        assert!(result.is_err());
+    fn test_resolve_absolute_path_strips_leading_slash() {
+        let (dir, sandbox) = setup_sandbox();
+        // Leading `/` is stripped, so `/etc/passwd` → `etc/passwd`
+        // relative to sandbox root. This is an in-sandbox non-existent path,
+        // so it resolves successfully to `<root>/etc/passwd`.
+        let result = sandbox.resolve("/etc/passwd").unwrap();
+        let expected = dir.path().canonicalize().unwrap().join("etc/passwd");
+        assert_eq!(result, expected);
     }
 
     #[test]
