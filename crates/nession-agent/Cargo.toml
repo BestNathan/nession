@@ -34,3 +34,4 @@ base64.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
 nession-server = { path = "../nession-server" }
 base64.workspace = true
+tempfile = "3"
