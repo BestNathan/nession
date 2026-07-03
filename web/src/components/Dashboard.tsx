@@ -8,6 +8,8 @@ import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import { AgentCard } from './AgentCard';
 import { SessionList } from './SessionList';
+import { SearchBar } from './SearchBar';
+import { AgentDetailPanel } from './AgentDetailPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
@@ -27,10 +29,16 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
 
   const {
     agents, loadingAgents, loadingSessions, error,
-    selectedAgentId, filteredSessions, attachingInProgress,
+    filteredAgents, filteredSessions, attachingInProgress,
     showCreateModal, sessionToKill,
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    isSearchActive,
+    sortField, sortDirection, toggleSort,
+    selectedAgent, setSelectedAgent,
+    getHeartbeatHistory,
     setShowCreateModal, setSessionToKill,
-    handleAgentClick, handleAttach, handleSessionKilled, handleSessionCreated,
+    handleAttach, handleSessionKilled, handleSessionCreated,
     fetchSessions,
   } = useDashboardHandlers(wsService);
 
@@ -43,8 +51,8 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   const handleBackToDashboard = useCallback(() => {
     setAttachedSession(null);
     setView('dashboard');
-    fetchSessions(selectedAgentId ?? undefined);
-  }, [fetchSessions, selectedAgentId]);
+    fetchSessions();
+  }, [fetchSessions]);
 
   const handleTerminalDisconnect = useCallback(() => {
     toast.error('Terminal connection lost');
@@ -55,6 +63,9 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     (err: Error) => { toast.error(`Terminal error: ${err.message}`); },
     [],
   );
+
+  const onlineCount = agents.filter((a) => a.status === 'online').length;
+  const offlineCount = agents.filter((a) => a.status === 'offline').length;
 
   // ── Terminal View ───────────────────────────────────────────────────
   if (view === 'terminal' && attachedSession) {
@@ -82,10 +93,19 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
           {connectionStatus}
         </Badge>
         <div className="flex-1" />
-        <Button size="sm" onClick={() => fetchSessions(selectedAgentId ?? undefined)} disabled={loadingAgents}>
+        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents}>
           <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
         </Button>
       </header>
+
+      <SearchBar
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        onlineCount={onlineCount}
+        offlineCount={offlineCount}
+      />
 
       {error && (
         <div className="px-6 py-2 bg-destructive/10 text-destructive text-sm flex items-center gap-2">
@@ -108,10 +128,12 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
             </div>
           ) : agents.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">No agents connected</p>
+          ) : filteredAgents.length === 0 && isSearchActive ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">No agents match your search</p>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {agents.map((a) => (
-                <AgentCard key={a.agent_id} agent={a} onClick={() => handleAgentClick(a.agent_id)} />
+              {filteredAgents.map((a) => (
+                <AgentCard key={a.agent_id} agent={a} onClick={() => setSelectedAgent(a)} />
               ))}
             </div>
           )}
@@ -121,27 +143,46 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
         <section className="flex-1 min-h-0 flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Sessions {selectedAgentId && '(filtered)'}
+              Sessions
             </h2>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => setShowCreateModal(true)} disabled={agents.every((a) => a.status !== 'online')}>
                 <Plus className="w-3.5 h-3.5 mr-1" /> Create
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => fetchSessions(selectedAgentId ?? undefined)} disabled={loadingSessions}>
+              <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions}>
                 <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
               </Button>
             </div>
           </div>
-          <SessionList sessions={filteredSessions} loading={loadingSessions} onAttach={onAttach} onKill={setSessionToKill} attachingInProgress={attachingInProgress} />
+          <SessionList
+            sessions={filteredSessions}
+            loading={loadingSessions}
+            onAttach={onAttach}
+            onKill={setSessionToKill}
+            attachingInProgress={attachingInProgress}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            toggleSort={toggleSort}
+            isSearchActive={isSearchActive}
+          />
         </section>
       </div>
+
+      {/* Agent Detail Panel */}
+      {selectedAgent && (
+        <AgentDetailPanel
+          agent={selectedAgent}
+          heartbeatHistory={getHeartbeatHistory(selectedAgent.agent_id)}
+          onClose={() => setSelectedAgent(null)}
+        />
+      )}
 
       <CreateSessionDialog
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         wsService={wsService}
         agents={agents}
-        preselectedAgentId={selectedAgentId}
+        preselectedAgentId={null}
         onCreated={handleSessionCreated}
       />
       <KillConfirmDialog
