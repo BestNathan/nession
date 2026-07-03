@@ -2,7 +2,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main, 'feat/**', 'fix/**']
 
 jobs:
   # ── 读取版本号 + 检测版本变化 + 短 hash ──
@@ -346,7 +346,7 @@ jobs:
   # ── 更新 staging overlay（仅 feat/* 分支，写入 main）──
   update-staging-kustomize:
     needs: [versions, merge]
-    if: startsWith(github.ref_name, 'feat/')
+    if: startsWith(github.ref_name, 'feat/') || startsWith(github.ref_name, 'fix/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
