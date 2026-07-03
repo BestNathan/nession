@@ -17,6 +17,13 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
+const defaultProps = {
+  sortField: 'name' as const,
+  sortDirection: 'asc' as const,
+  toggleSort: vi.fn(),
+  isSearchActive: false,
+};
+
 describe('SessionList', () => {
   it('renders session rows', () => {
     const sessions: Session[] = [
@@ -31,6 +38,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -46,6 +54,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -65,6 +74,7 @@ describe('SessionList', () => {
         onAttach={onAttach}
         onKill={vi.fn()}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -84,6 +94,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={onKill}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -99,6 +110,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -113,6 +125,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        {...defaultProps}
       />,
     );
 
@@ -129,9 +142,90 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={true}
+        {...defaultProps}
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Attach' })).toBeDisabled();
+  });
+
+  it('calls toggleSort with "name" when Name header clicked', async () => {
+    const user = userEvent.setup();
+    const toggleSort = vi.fn();
+
+    render(
+      <SessionList
+        sessions={[makeSession()]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={toggleSort}
+        isSearchActive={false}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Name' }));
+    expect(toggleSort).toHaveBeenCalledWith('name');
+  });
+
+  it('calls toggleSort with "activity" when Activity header clicked', async () => {
+    const user = userEvent.setup();
+    const toggleSort = vi.fn();
+
+    render(
+      <SessionList
+        sessions={[makeSession()]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={toggleSort}
+        isSearchActive={false}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(toggleSort).toHaveBeenCalledWith('activity');
+  });
+
+  it('shows search-empty state when isSearchActive and no sessions', () => {
+    render(
+      <SessionList
+        sessions={[]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={vi.fn()}
+        isSearchActive={true}
+      />,
+    );
+
+    expect(screen.getByText(/No agents or sessions match your search/)).toBeInTheDocument();
+  });
+
+  it('shows default empty state when not isSearchActive and no sessions', () => {
+    render(
+      <SessionList
+        sessions={[]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={vi.fn()}
+        isSearchActive={false}
+      />,
+    );
+
+    expect(screen.getByText(/No sessions for this agent/)).toBeInTheDocument();
   });
 });
