@@ -176,15 +176,49 @@ Every PR must include these three sections:
 - `cargo tarpaulin`: <X>% coverage (threshold: 90%)
 - `cargo fmt --all -- --check`: OK
 - `cargo clippy -- -D warnings`: 0 errors
+- `npm test`: <N> passed
+- `npm run coverage`: <X>% (threshold: 80%)
 - `npx tsc --noEmit`: 0 errors
 - `npm run lint`: 0 warnings
 - `npm run build`: success
 
 ## 核心功能截图
-<!-- 贴截图，证明功能正常 -->
+<!-- 使用 Playwright MCP 收集，展示变更前后 UI 效果 -->
+<!-- 命令：mcp__playwright__browser_navigate → browser_snapshot → browser_take_screenshot -->
 ```
 
 CI triggers on merge to main — builds multi-arch Docker images, pushes tags, updates k8s manifests. No manual steps after merge.
+
+### Screenshot Collection (Playwright MCP)
+
+**Mandatory after any functional UI change.** Use Playwright MCP browser tools to capture before/after screenshots for the PR body.
+
+```bash
+# 1. Start the full stack locally (3 terminals)
+cargo run -p nession-server &          # WebSocket :19090, HTTP :10080
+cargo run -p nession-agent &            # needs tmux on host
+cd web && npm run dev                   # Vite :13000, proxies /ws → :19090
+```
+
+Then use Playwright MCP tools:
+
+| Step | Tool | Purpose |
+|------|------|---------|
+| Open app | `mcp__playwright__browser_navigate` → `http://localhost:13000` | Load the web UI |
+| Inspect page | `mcp__playwright__browser_snapshot` | Find elements to interact with |
+| Type text | `mcp__playwright__browser_type` | Fill search inputs, forms |
+| Click elements | `mcp__playwright__browser_click` | Simulate button clicks, navigation |
+| Fill forms | `mcp__playwright__browser_fill_form` | Batch form interactions |
+| Screenshot | `mcp__playwright__browser_take_screenshot` | Capture page as PNG |
+
+**What to screenshot:**
+- Before/after state for each changed feature
+- Empty states (no data, no results)
+- Loading states (skeletons, spinners)
+- Error states (error banners, toasts)
+- Key interactions (search, filter, modal open/close, sort toggle)
+
+Place screenshots in the PR body under **核心功能截图** using markdown image syntax.
 
 ## Quick Reference
 
@@ -210,5 +244,5 @@ CI triggers on merge to main — builds multi-arch Docker images, pushes tags, u
 | Bumping only one version file | Both `Cargo.toml` and `web/package.json` must match. |
 | Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
 | Integration tests leaving temp DB files | Each test must clean up its own DB. |
-| PR missing test report or screenshots | All three sections are required. |
+| PR missing test report or screenshots | All three sections are required. Screenshots MUST be collected via Playwright MCP (not manual screenshots). |
 | `#[allow(clippy::*)]` in Rust | **FORBIDDEN.** Every clippy lint must be fixed properly. |
