@@ -11,5 +11,4 @@ spec:
   resources:
     requests:
       storage: 1Gi
-  # Uncomment and set your cluster's default StorageClass:
-  # storageClassName: standard
+  storageClassName: nfs-client
