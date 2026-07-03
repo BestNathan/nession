@@ -21,6 +21,19 @@ pub struct AgentRow {
     pub metadata: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionRow {
+    pub session_id: String,
+    pub agent_id: String,
+    pub session_name: String,
+    pub created_at: i64,
+    pub last_activity: i64,
+    pub status: String,
+    pub window_count: u32,
+    pub attached_clients: u32,
+    pub metadata: String,
+}
+
 impl Database {
     pub async fn new(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path)?;
@@ -104,5 +117,105 @@ impl Database {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(agents)
+    }
+
+    pub async fn insert_session(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        session_name: &str,
+        status: &str,
+        window_count: u32,
+        attached_clients: u32,
+        created_at: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        let now = chrono::Utc::now().timestamp();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions (session_id, agent_id, session_name, created_at, last_activity, status, window_count, attached_clients, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '')",
+            rusqlite::params![session_id, agent_id, session_name, created_at, now, status, window_count, attached_clients],
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn update_session_status(&self, session_id: &str, status: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE sessions SET status = ?1, last_activity = ?2 WHERE session_id = ?3",
+            rusqlite::params![status, chrono::Utc::now().timestamp(), session_id],
+        )?;
+        Ok(())
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM sessions WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )?;
+        Ok(())
+    }
+
+    pub async fn delete_sessions_by_agent(&self, agent_id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM sessions WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )?;
+        Ok(())
+    }
+
+    pub async fn list_all_sessions(&self) -> Result<Vec<SessionRow>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, agent_id, session_name, created_at, last_activity, status, window_count, attached_clients, metadata FROM sessions"
+        )?;
+
+        let sessions = stmt
+            .query_map([], |row| {
+                Ok(SessionRow {
+                    session_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    session_name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    last_activity: row.get(4)?,
+                    status: row.get(5)?,
+                    window_count: row.get(6)?,
+                    attached_clients: row.get(7)?,
+                    metadata: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(sessions)
+    }
+
+    pub async fn list_sessions_older_than(&self, duration_secs: i64) -> Result<Vec<SessionRow>> {
+        let conn = self.conn.lock().await;
+        let cutoff = chrono::Utc::now().timestamp() - duration_secs;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, agent_id, session_name, created_at, last_activity, status, window_count, attached_clients, metadata FROM sessions WHERE last_activity < ?1 AND status = 'recovering'"
+        )?;
+
+        let sessions = stmt
+            .query_map([cutoff], |row| {
+                Ok(SessionRow {
+                    session_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    session_name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    last_activity: row.get(4)?,
+                    status: row.get(5)?,
+                    window_count: row.get(6)?,
+                    attached_clients: row.get(7)?,
+                    metadata: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(sessions)
     }
 }
