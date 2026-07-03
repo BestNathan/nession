@@ -11,6 +11,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub window_count: u32,
     pub attached_clients: u32,
+    pub created_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,
 }
 
@@ -18,6 +19,8 @@ pub struct SessionInfo {
 pub enum SessionStatus {
     Active,
     Detached,
+    Recovering,
+    Orphaned,
     Zombie,
 }
 
