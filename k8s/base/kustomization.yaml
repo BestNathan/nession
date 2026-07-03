@@ -8,7 +8,6 @@ commonLabels:
 
 resources:
   - secret.yaml
-  - pvc.yaml
   - deployment-server.yaml
   - service-server.yaml
   - ingress-server.yaml
