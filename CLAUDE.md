@@ -113,6 +113,24 @@ tmux sessions (per-node)
 
 ## 2. Development Workflow
 
+**⚠ CRITICAL: Never develop on `main`. Always create a feature branch first.**
+
+```bash
+git checkout -b feat/<slug>   # or use EnterWorktree for isolated workspace
+```
+
+Before committing, verify you are NOT on `main`:
+```bash
+git branch --show-current     # must NOT be "main"
+```
+
+If already on `main` with changes, migrate them:
+```bash
+git stash
+git checkout -b feat/<slug>
+git stash pop
+```
+
 ### Prerequisites
 
 - Rust 1.88+ with `cargo`

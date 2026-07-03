@@ -9,6 +9,14 @@ description: Use when developing Nession features, writing or running tests, dec
 
 Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`, version bump in `Cargo.toml` + `web/package.json`, submit changes via PR. Never build Docker images locally — CI handles that.
 
+**⚠ Before ANY development work, verify you are NOT on `main`:**
+
+```bash
+git branch --show-current   # must NOT show "main"
+```
+
+If on `main`, create a feature branch immediately. **Never commit to main.**
+
 ## 1. Local Development
 
 Three terminals, from repo root:
@@ -168,9 +176,11 @@ CI triggers on merge to main — builds multi-arch Docker images, pushes tags, u
 
 | Mistake | Reality |
 |---------|---------|
+| Committing on `main` directly | **FORBIDDEN.** Always `git checkout -b feat/<slug>` first. Verify with `git branch --show-current`. |
 | `docker build` for Nession | **Forbidden.** CI does that. |
 | Pushing to main directly | Always use a feature branch + PR. |
 | Bumping only one version file | Both `Cargo.toml` and `web/package.json` must match. |
 | Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
 | Integration tests leaving temp DB files | Each test must clean up its own DB. |
 | PR missing test report or screenshots | All three sections are required. |
+| `#[allow(clippy::*)]` in Rust | **FORBIDDEN.** Every clippy lint must be fixed properly. |
