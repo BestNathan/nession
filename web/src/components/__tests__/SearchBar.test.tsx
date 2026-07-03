@@ -1,0 +1,170 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, act, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { SearchBar } from '../SearchBar';
+
+describe('SearchBar', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders search input and all 3 toggle buttons', () => {
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={3}
+        offlineCount={5}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('Search agents and sessions...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /All/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Online/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Offline/ })).toBeInTheDocument();
+  });
+
+  it('calls setSearchQuery after 200ms debounce', () => {
+    vi.useFakeTimers();
+    const setSearchQuery = vi.fn();
+
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    fireEvent.change(input, { target: { value: 'dev' } });
+
+    // Should not have been called yet
+    expect(setSearchQuery).not.toHaveBeenCalled();
+
+    // Advance time past the debounce threshold
+    act(() => { vi.advanceTimersByTime(250); });
+
+    expect(setSearchQuery).toHaveBeenCalledWith('dev');
+  });
+
+  it('does NOT call setSearchQuery before debounce expires', () => {
+    vi.useFakeTimers();
+    const setSearchQuery = vi.fn();
+
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    fireEvent.change(input, { target: { value: 'dev' } });
+
+    // Advance time only 100ms — before the 200ms debounce
+    act(() => { vi.advanceTimersByTime(100); });
+
+    expect(setSearchQuery).not.toHaveBeenCalled();
+  });
+
+  it('calls setStatusFilter("online") when online toggle is clicked', async () => {
+    const user = userEvent.setup();
+    const setStatusFilter = vi.fn();
+
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={setStatusFilter}
+        onlineCount={3}
+        offlineCount={5}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Online/ }));
+    expect(setStatusFilter).toHaveBeenCalledWith('online');
+  });
+
+  it('calls setStatusFilter("offline") when offline toggle is clicked', async () => {
+    const user = userEvent.setup();
+    const setStatusFilter = vi.fn();
+
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={setStatusFilter}
+        onlineCount={3}
+        offlineCount={5}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Offline/ }));
+    expect(setStatusFilter).toHaveBeenCalledWith('offline');
+  });
+
+  it('active toggle button has default variant (not outline)', () => {
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="online"
+        setStatusFilter={vi.fn()}
+        onlineCount={3}
+        offlineCount={5}
+      />,
+    );
+
+    const onlineButton = screen.getByRole('button', { name: /Online/ });
+    const allButton = screen.getByRole('button', { name: /All/ });
+
+    // Active (online) button gets default variant: bg-primary
+    expect(onlineButton.className).toContain('bg-primary');
+    // Inactive (all) button gets outline variant: border-input
+    expect(allButton.className).toContain('border-input');
+  });
+
+  it('input value reflects searchQuery prop', () => {
+    render(
+      <SearchBar
+        searchQuery="test query"
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Search agents and sessions...') as HTMLInputElement;
+    expect(input.value).toBe('test query');
+  });
+
+  it('shows online and offline counts in toggle badges', () => {
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={3}
+        offlineCount={5}
+      />,
+    );
+
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+  });
+});
