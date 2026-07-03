@@ -19,7 +19,7 @@ function getStatusVariant(status: Agent['status']): 'default' | 'secondary' | 'o
 }
 
 function computeUptime(heartbeatHistory: string[]): string | null {
-  if (heartbeatHistory.length === 0) return null;
+  if (heartbeatHistory.length === 0) {return null;}
   const diffMs = Date.now() - new Date(heartbeatHistory[0]).getTime();
   const totalMinutes = Math.floor(diffMs / 60000);
   const hours = Math.floor(totalMinutes / 60);
@@ -30,19 +30,19 @@ function computeUptime(heartbeatHistory: string[]): string | null {
 function getHeartbeatColor(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 60) return 'bg-green-500';
-  if (seconds < 180) return 'bg-amber-500';
+  if (seconds < 60) {return 'bg-green-500';}
+  if (seconds < 180) {return 'bg-amber-500';}
   return 'bg-gray-500';
 }
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) {return `${seconds}s ago`;}
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) {return `${minutes}m ago`;}
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) {return `${hours}h ago`;}
   return `${Math.floor(hours / 24)}d ago`;
 }
 
@@ -50,10 +50,11 @@ function formatAbsoluteTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function SectionHeader({ icon: Icon, title }: { icon: React.ComponentType<{ className?: string }>; title: string }) {
+function SectionHeader(props: { icon: React.ComponentType<{ className?: string }>; title: string }) {
+  const { icon: IconComponent, title } = props;
   return (
     <div className="flex items-center gap-2 mb-2">
-      <Icon className="w-4 h-4 text-muted-foreground" />
+      <IconComponent className="w-4 h-4 text-muted-foreground" />
       <h3 className="text-sm font-medium text-foreground">{title}</h3>
     </div>
   );
@@ -72,7 +73,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
   const uptime = computeUptime(heartbeatHistory);
 
   return (
-    <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
       <SheetContent side="right" className="w-[400px] sm:w-[480px] overflow-y-auto">
         <div className="p-4 space-y-4">
           {/* Header: Status badge + hostname */}
