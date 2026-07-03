@@ -111,7 +111,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {agents.map((a) => (
-                <AgentCard key={a.agent_id} agent={a} selected={selectedAgentId === a.agent_id} onClick={() => handleAgentClick(a.agent_id)} />
+                <AgentCard key={a.agent_id} agent={a} onClick={() => handleAgentClick(a.agent_id)} />
               ))}
             </div>
           )}
