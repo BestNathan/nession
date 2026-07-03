@@ -1,3 +1,16 @@
-# PVC removed - using emptyDir in deployment for now.
-# For production, configure a working StorageClass and re-add PVC.
-# The nfs-client provisioner is currently not running in this cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nession-data-pvc
+  namespace: nession
+  labels:
+    app: nession
+    component: data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment and set your cluster's default StorageClass:
+  # storageClassName: standard
