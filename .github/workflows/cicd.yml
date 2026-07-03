@@ -343,7 +343,7 @@ jobs:
           git diff --staged --quiet || git commit -m "chore: update prod image tags (sha=${{ needs.versions.outputs.short_sha }})"
           git push
 
-  # ── 更新 staging overlay（仅 feat/* 分支，写入 main）──
+  # ── 更新 staging overlay（feat/fix 分支，写入 main）──
   update-staging-kustomize:
     needs: [versions, merge]
     if: startsWith(github.ref_name, 'feat/') || startsWith(github.ref_name, 'fix/')
@@ -353,7 +353,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
           fetch-depth: 0
 
       - run: |
@@ -368,10 +367,21 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # retry on race with concurrent feat branch pushes
-          for i in 1 2 3; do
-            git pull --rebase origin main && break || sleep 2
-          done
+
+          # save updated staging kustomization, then apply on top of main
+          cp k8s/overlays/staging/kustomization.yaml /tmp/staging-kustomization.yaml
+          git fetch origin main
+          git checkout -b staging-update origin/main
+          mkdir -p k8s/overlays/staging
+          cp /tmp/staging-kustomization.yaml k8s/overlays/staging/kustomization.yaml
+
           git add k8s/overlays/staging/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
-          git push
+          if git diff --staged --quiet; then
+            echo "No change to staging overlay — skipping."
+          else
+            git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
+            # retry on race with concurrent push
+            for i in 1 2 3; do
+              git push origin staging-update:main && break || sleep 2
+            done
+          fi
