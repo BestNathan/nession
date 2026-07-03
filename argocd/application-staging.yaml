@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nession
+  name: nession-staging
   namespace: argocd
   labels:
-    app.kubernetes.io/name: nession
+    app.kubernetes.io/name: nession-staging
     app.kubernetes.io/part-of: argocd
 spec:
   project: default
@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: https://github.com/bestnathan/nession.git
     targetRevision: main
-    path: k8s
+    path: k8s/overlays/staging
 
   destination:
     server: https://kubernetes.default.svc

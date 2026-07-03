@@ -1,8 +1,8 @@
-name: Docker
+name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
 
 jobs:
   # ── 读取版本号 + 检测版本变化 + 短 hash ──
@@ -13,10 +13,19 @@ jobs:
       web_version: ${{ steps.versions.outputs.web_version }}
       version_changed: ${{ steps.versions.outputs.version_changed }}
       short_sha: ${{ steps.versions.outputs.short_sha }}
+      is_production: ${{ steps.branch-check.outputs.is_production }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - id: branch-check
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "is_production=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_production=false" >> $GITHUB_OUTPUT
+          fi
 
       - id: versions
         run: |
@@ -29,7 +38,10 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
 
           BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            # feat branches never create version tags
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
             echo "No comparable previous commit — treating as version change."
             echo "version_changed=true" >> $GITHUB_OUTPUT
           else
@@ -305,9 +317,10 @@ jobs:
               ${IMG}:ui-${WEB_VER}-amd64 ${IMG}:ui-${WEB_VER}-arm64
           fi
 
-  # ── 更新 kustomization.yaml（使用 hash 后缀 tag）──
-  update-kustomize:
+  # ── 更新 production overlay（仅 main 分支）──
+  update-prod-kustomize:
     needs: [versions, merge]
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -315,7 +328,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - run: |
-          cd k8s
+          cd k8s/overlays/production
           OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
           SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
           kustomize edit set image \
@@ -326,6 +339,39 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update image tags (sha=${{ needs.versions.outputs.short_sha }})"
+          git add k8s/overlays/production/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: update prod image tags (sha=${{ needs.versions.outputs.short_sha }})"
+          git push
+
+  # ── 更新 staging overlay（仅 feat/* 分支，写入 main）──
+  update-staging-kustomize:
+    needs: [versions, merge]
+    if: startsWith(github.ref_name, 'feat/') || startsWith(github.ref_name, 'fix/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - run: |
+          cd k8s/overlays/staging
+          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
+          kustomize edit set image \
+            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${SHORT_SHA} \
+            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${SHORT_SHA} \
+            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${SHORT_SHA}
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # retry on race with concurrent feat branch pushes
+          for i in 1 2 3; do
+            git pull --rebase origin main && break || sleep 2
+          done
+          git add k8s/overlays/staging/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
           git push

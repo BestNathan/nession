@@ -1,50 +1,52 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nession-agent
-  namespace: nession
+  name: nession-server
   labels:
     app: nession
-    component: agent
+    component: server
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: nession
-      component: agent
+      component: server
   template:
     metadata:
       labels:
         app: nession
-        component: agent
+        component: server
     spec:
       containers:
-        - name: nession-agent
-          image: ghcr.io/bestnathan/nession-agent:main
+        - name: nession-server
+          image: ghcr.io/bestnathan/nession-server:main
           imagePullPolicy: Always
           ports:
             - containerPort: 10080
               name: http
-            - containerPort: 19090
-              name: agent-ws
+            - containerPort: 18080
+              name: server-ws
           env:
             - name: LISTEN_PORT
               value: "10080"
-            - name: AGENT_ID
-              value: "k8s-agent"
-            - name: AGENT_LISTEN
-              value: "0.0.0.0:19090"
-            - name: AGENT_SERVER_URL
-              value: "ws://nession-server:18080"
-            - name: AGENT_AUTH_TOKEN
+            - name: SERVER_LISTEN
+              value: "0.0.0.0:18080"
+            - name: SERVER_BACKEND
+              value: "127.0.0.1:18080"
+            - name: SERVER_HEARTBEAT_INTERVAL
+              value: "10"
+            - name: SERVER_HEARTBEAT_TIMEOUT
+              value: "30"
+            - name: SERVER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: nession-secret
                   key: auth-token
-            - name: AGENT_CONNECT_URL
-              value: "ws://agent.nession.nhome.local/ws"
-            - name: SERVER_BACKEND
-              value: "127.0.0.1:19090"
+            - name: SERVER_DB_PATH
+              value: "/data/server.db"
+          volumeMounts:
+            - name: data
+              mountPath: /data
           livenessProbe:
             httpGet:
               path: /health
@@ -66,3 +68,7 @@ spec:
               memory: 512Mi
       imagePullSecrets:
         - name: ghcr-bestnathan
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nession-data-pvc
