@@ -107,11 +107,22 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                    let msg_type = response
+                        .get("msg_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if msg_type == "client.auth.response" {
-                        let status = response.get("payload").and_then(|v| v.get("status")).and_then(|v| v.as_str()).unwrap_or("");
-                        let message = response.get("payload").and_then(|v| v.get("message")).and_then(|v| v.as_str()).unwrap_or("");
+                        let status = response
+                            .get("payload")
+                            .and_then(|v| v.get("status"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let message = response
+                            .get("payload")
+                            .and_then(|v| v.get("message"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         if status == "success" {
                             self.authenticated = true;
@@ -163,11 +174,19 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                    let msg_type = response
+                        .get("msg_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if msg_type == "client.agents.list.response" {
-                        let agents: Vec<AgentInfo> =
-                            serde_json::from_value(response.get("payload").and_then(|v| v.get("agents")).cloned().unwrap_or(serde_json::Value::Null))?;
+                        let agents: Vec<AgentInfo> = serde_json::from_value(
+                            response
+                                .get("payload")
+                                .and_then(|v| v.get("agents"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        )?;
                         Ok(agents)
                     } else {
                         anyhow::bail!(
@@ -219,11 +238,19 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                    let msg_type = response
+                        .get("msg_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if msg_type == "client.sessions.list.response" {
-                        let sessions: Vec<SessionInfo> =
-                            serde_json::from_value(response.get("payload").and_then(|v| v.get("sessions")).cloned().unwrap_or(serde_json::Value::Null))?;
+                        let sessions: Vec<SessionInfo> = serde_json::from_value(
+                            response
+                                .get("payload")
+                                .and_then(|v| v.get("sessions"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        )?;
                         Ok(sessions)
                     } else {
                         anyhow::bail!(
@@ -277,7 +304,10 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                    let msg_type = response
+                        .get("msg_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
                     if msg_type != "client.session.attach.response" {
                         anyhow::bail!(
@@ -285,20 +315,34 @@ impl ClientConnection {
                         );
                     }
 
-                    let status = response.get("payload").and_then(|v| v.get("status")).and_then(|v| v.as_str()).unwrap_or("");
+                    let status = response
+                        .get("payload")
+                        .and_then(|v| v.get("status"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if status != "success" {
-                        let message = response.get("payload").and_then(|v| v.get("message"))
+                        let message = response
+                            .get("payload")
+                            .and_then(|v| v.get("message"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown error");
                         anyhow::bail!("Attach request failed: {message}");
                     }
 
-                    let mode = response.get("payload").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).unwrap_or("relay");
+                    let mode = response
+                        .get("payload")
+                        .and_then(|v| v.get("mode"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("relay");
                     if mode == "relay" {
                         Ok(AttachResponse::Relay)
                     } else {
-                        let p2p: P2PAttachInfo =
-                            serde_json::from_value(response.get("payload").cloned().unwrap_or(serde_json::Value::Null))?;
+                        let p2p: P2PAttachInfo = serde_json::from_value(
+                            response
+                                .get("payload")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        )?;
                         Ok(AttachResponse::P2P(p2p))
                     }
                 }
@@ -390,18 +434,29 @@ pub async fn create_session_on_agent(
         match msg {
             Ok(Message::Text(text)) => {
                 let response: serde_json::Value = serde_json::from_str(&text)?;
-                let resp_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                let resp_type = response
+                    .get("msg_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 if resp_type == "ok" {
-                    let name = response.get("payload").and_then(|v| v.get("name"))
+                    let name = response
+                        .get("payload")
+                        .and_then(|v| v.get("name"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(session_name)
                         .to_string();
                     info!("Session '{}' created on agent", name);
                     Ok(name)
                 } else if resp_type == "error" {
-                    let code = response.get("payload").and_then(|v| v.get("code")).and_then(|v| v.as_str()).unwrap_or("unknown");
-                    let message = response.get("payload").and_then(|v| v.get("message"))
+                    let code = response
+                        .get("payload")
+                        .and_then(|v| v.get("code"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let message = response
+                        .get("payload")
+                        .and_then(|v| v.get("message"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown error");
                     anyhow::bail!("Agent error ({code}): {message}")
@@ -461,18 +516,29 @@ pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> R
         match msg {
             Ok(Message::Text(text)) => {
                 let response: serde_json::Value = serde_json::from_str(&text)?;
-                let resp_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
+                let resp_type = response
+                    .get("msg_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 if resp_type == "ok" {
-                    let name = response.get("payload").and_then(|v| v.get("name"))
+                    let name = response
+                        .get("payload")
+                        .and_then(|v| v.get("name"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(session_name)
                         .to_string();
                     info!("Session '{}' killed on agent", name);
                     Ok(name)
                 } else if resp_type == "error" {
-                    let code = response.get("payload").and_then(|v| v.get("code")).and_then(|v| v.as_str()).unwrap_or("unknown");
-                    let message = response.get("payload").and_then(|v| v.get("message"))
+                    let code = response
+                        .get("payload")
+                        .and_then(|v| v.get("code"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let message = response
+                        .get("payload")
+                        .and_then(|v| v.get("message"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown error");
                     anyhow::bail!("Agent error ({code}): {message}")

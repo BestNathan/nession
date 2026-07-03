@@ -110,7 +110,9 @@ impl PtySession {
                     Some(r) => r,
                     None => {
                         let (lock, cvar) = &*reader_buf_clone;
-                        let mut buf = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let mut buf = lock
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         buf.error = Some("failed to clone PTY reader".into());
                         buf.eof = true;
                         cvar.notify_all();
@@ -126,7 +128,9 @@ impl PtySession {
                         Ok(0) => {
                             // EOF
                             let (lock, cvar) = &*reader_buf_clone;
-                            let mut buf = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut buf = lock
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             buf.eof = true;
                             cvar.notify_all();
                             return;
@@ -134,7 +138,9 @@ impl PtySession {
                         Ok(n) => n,
                         Err(e) => {
                             let (lock, cvar) = &*reader_buf_clone;
-                            let mut buf = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut buf = lock
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             buf.error = Some(e.to_string());
                             buf.eof = true;
                             cvar.notify_all();
@@ -142,7 +148,9 @@ impl PtySession {
                         }
                     };
                     let (lock, cvar) = &*reader_buf_clone;
-                    let mut buf = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut buf = lock
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     buf.data.extend(chunk.get(..n).unwrap_or(&[]));
                     cvar.notify_all();
                 }
@@ -205,7 +213,9 @@ impl PtySession {
         let len = buf.len();
         let n = task::spawn_blocking(move || {
             let (lock, cvar) = &*read_buf;
-            let mut guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut guard = lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Wait for data or EOF, bounded by timeout.
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
@@ -257,7 +267,9 @@ impl PtySession {
         let writer = Arc::clone(&self.writer);
         let data = data.to_vec();
         let n = task::spawn_blocking(move || {
-            let mut guard = writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut guard = writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.write_all(&data)?;
             guard.flush()?;
             Ok::<usize, anyhow::Error>(data.len())
@@ -276,7 +288,9 @@ impl PtySession {
             pixel_height: 0,
         };
         task::spawn_blocking(move || {
-            let guard = master.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let guard = master
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.resize(size)?;
             Ok::<(), anyhow::Error>(())
         })
@@ -288,7 +302,10 @@ impl PtySession {
     /// as closed. Idempotent.
     pub async fn close(&self) -> Result<()> {
         let already = {
-            let mut closed = self.closed.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut closed = self
+                .closed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if *closed {
                 true
             } else {
@@ -304,7 +321,9 @@ impl PtySession {
         let reader_handle = Arc::clone(&self.reader_handle);
         task::spawn_blocking(move || {
             // Kill the child first so the reader thread sees EOF.
-            let mut child_guard = child.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut child_guard = child
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(mut c) = child_guard.take() {
                 let _ = c.kill();
                 let _ = c.wait();
@@ -312,7 +331,9 @@ impl PtySession {
             drop(child_guard);
 
             // Join the reader thread (it should exit soon after the child dies).
-            let mut handle_guard = reader_handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut handle_guard = reader_handle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(h) = handle_guard.take() {
                 let _ = h.join();
             }
@@ -328,7 +349,10 @@ impl PtySession {
 
     /// Whether `close()` has been called.
     pub async fn is_closed(&self) -> bool {
-        *self.closed.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self
+            .closed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

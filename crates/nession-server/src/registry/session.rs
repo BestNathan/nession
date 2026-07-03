@@ -43,10 +43,10 @@ impl SessionRegistry {
             Ok(rows) => {
                 let mut sessions = self.sessions.write().await;
                 for row in rows {
-                    let created_at = DateTime::from_timestamp(row.created_at, 0)
-                        .unwrap_or_else(|| Utc::now());
-                    let last_activity = DateTime::from_timestamp(row.last_activity, 0)
-                        .unwrap_or_else(|| Utc::now());
+                    let created_at =
+                        DateTime::from_timestamp(row.created_at, 0).unwrap_or(Utc::now());
+                    let last_activity =
+                        DateTime::from_timestamp(row.last_activity, 0).unwrap_or(Utc::now());
                     let status = match row.status.as_str() {
                         "active" => SessionStatus::Active,
                         "detached" => SessionStatus::Detached,
@@ -90,19 +90,10 @@ impl SessionRegistry {
             SessionStatus::Orphaned => "orphaned",
             SessionStatus::Zombie => "zombie",
         };
-        let created_at_ts = session.created_at.timestamp();
 
         // Write through to SQLite first, then update in-memory.
         // DB write failure is logged but does not block the in-memory update.
-        if let Err(e) = self.db.insert_session(
-            &session.session_id,
-            &session.agent_id,
-            &session.session_name,
-            status_str,
-            session.window_count,
-            session.attached_clients,
-            created_at_ts,
-        ).await {
+        if let Err(e) = self.db.insert_session(&session, status_str).await {
             tracing::error!("Failed to persist session {}: {:#}", session.session_id, e);
         }
 
@@ -139,7 +130,11 @@ impl SessionRegistry {
 
     pub async fn remove_by_agent(&self, agent_id: &str) {
         if let Err(e) = self.db.delete_sessions_by_agent(agent_id).await {
-            tracing::error!("Failed to delete sessions for agent {} from DB: {:#}", agent_id, e);
+            tracing::error!(
+                "Failed to delete sessions for agent {} from DB: {:#}",
+                agent_id,
+                e
+            );
         }
         let mut sessions = self.sessions.write().await;
         sessions.retain(|_, s| s.agent_id != agent_id);

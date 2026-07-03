@@ -500,10 +500,32 @@ impl ServerClient {
                 debug!("Heartbeat acknowledged by server");
             }
             "server.session.create" => {
-                let request_id = msg.payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let width = u16::try_from(msg.payload.get("width").and_then(serde_json::Value::as_u64).unwrap_or(80)).unwrap_or(80);
-                let height = u16::try_from(msg.payload.get("height").and_then(serde_json::Value::as_u64).unwrap_or(24)).unwrap_or(24);
+                let request_id = msg
+                    .payload
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = msg
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let width = u16::try_from(
+                    msg.payload
+                        .get("width")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(80),
+                )
+                .unwrap_or(80);
+                let height = u16::try_from(
+                    msg.payload
+                        .get("height")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(24),
+                )
+                .unwrap_or(24);
 
                 info!(
                     "Server requested session create: name={}, width={}, height={}",
@@ -534,8 +556,18 @@ impl ServerClient {
                 sink.send(WsMessage::Text(response.to_string())).await?;
             }
             "server.session.kill" => {
-                let request_id = msg.payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let request_id = msg
+                    .payload
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = msg
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 info!("Server requested session kill: name={}", name);
 

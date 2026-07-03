@@ -141,7 +141,7 @@ async fn test_agent_unregister() {
 async fn test_agent_check_offline() {
     let registry = AgentRegistry::new(1); // 1-second timeout
 
-    let mut agent = AgentInfo {
+    let agent = AgentInfo {
         agent_id: "stale".to_string(),
         hostname: "stale-host".to_string(),
         ip_address: "10.0.0.99".to_string(),

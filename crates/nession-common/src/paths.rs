@@ -3,9 +3,12 @@ use std::path::PathBuf;
 
 /// Root directory for all nession runtime files: ~/.nession
 pub fn nession_home() -> io::Result<PathBuf> {
-    dirs::home_dir()
-        .map(|h| h.join(".nession"))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "could not determine home directory"))
+    dirs::home_dir().map(|h| h.join(".nession")).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not determine home directory",
+        )
+    })
 }
 
 /// Server component directory: ~/.nession/server

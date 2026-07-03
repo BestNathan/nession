@@ -19,6 +19,7 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::AgentMetadata;
+use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,7 +56,8 @@ async fn start_test_server(
         db_path: db_path.clone(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
+    let db = Database::new(&db_path).await.unwrap();
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
     let addr = server.local_addr().unwrap();
 
     let handle = tokio::spawn(async move {

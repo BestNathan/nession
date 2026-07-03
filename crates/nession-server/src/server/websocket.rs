@@ -4,8 +4,8 @@ use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
 use tracing::{error, info};
 
-use crate::db::Database;
 use super::handler::{ConnectionHandler, HandlerAction};
+use crate::db::Database;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;

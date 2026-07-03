@@ -121,13 +121,8 @@ impl Database {
 
     pub async fn insert_session(
         &self,
-        session_id: &str,
-        agent_id: &str,
-        session_name: &str,
+        session: &crate::registry::session::SessionInfo,
         status: &str,
-        window_count: u32,
-        attached_clients: u32,
-        created_at: i64,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
         let now = chrono::Utc::now().timestamp();
@@ -135,7 +130,16 @@ impl Database {
         conn.execute(
             "INSERT OR REPLACE INTO sessions (session_id, agent_id, session_name, created_at, last_activity, status, window_count, attached_clients, metadata)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '')",
-            rusqlite::params![session_id, agent_id, session_name, created_at, now, status, window_count, attached_clients],
+            rusqlite::params![
+                session.session_id,
+                session.agent_id,
+                session.session_name,
+                session.created_at.timestamp(),
+                now,
+                status,
+                session.window_count,
+                session.attached_clients,
+            ],
         )?;
 
         Ok(())
