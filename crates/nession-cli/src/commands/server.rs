@@ -256,12 +256,12 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
 
     // Initialize database
     info!("Initializing database at {}", config.db_path);
-    let _database = Database::new(&config.db_path).await?;
+    let database = Database::new(&config.db_path).await?;
     info!("Database initialized successfully");
 
     // Create and run WebSocket server
     info!("Creating WebSocket server");
-    let mut server = WebSocketServer::new(config).await?;
+    let mut server = WebSocketServer::new(config, std::sync::Arc::new(database)).await?;
 
     info!("Starting WebSocket server");
     server.run().await?;
