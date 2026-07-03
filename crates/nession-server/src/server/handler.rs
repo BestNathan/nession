@@ -221,6 +221,8 @@ impl ConnectionHandler {
         let status = match status_str {
             "active" => crate::registry::session::SessionStatus::Active,
             "detached" => crate::registry::session::SessionStatus::Detached,
+            "recovering" => crate::registry::session::SessionStatus::Recovering,
+            "orphaned" => crate::registry::session::SessionStatus::Orphaned,
             "zombie" => crate::registry::session::SessionStatus::Zombie,
             _ => {
                 warn!("Unknown session status '{}' for {}", status_str, session_id);
@@ -238,6 +240,7 @@ impl ConnectionHandler {
             status,
             window_count,
             attached_clients,
+            created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         };
 
@@ -393,6 +396,8 @@ impl ConnectionHandler {
                     "status": match s.status {
                         SessionStatus::Active => "active",
                         SessionStatus::Detached => "detached",
+                        SessionStatus::Recovering => "recovering",
+                        SessionStatus::Orphaned => "orphaned",
                         SessionStatus::Zombie => "zombie",
                     },
                     "window_count": s.window_count,
@@ -668,6 +673,7 @@ impl ConnectionHandler {
                         status: crate::registry::session::SessionStatus::Detached,
                         window_count: 1,
                         attached_clients: 0,
+                        created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                     };
                     self.session_registry.update_session(session_info).await;
