@@ -61,11 +61,13 @@ Before merging any PR, these MUST pass:
 |------|---------|-----------|
 | Unit + integration tests | `cargo test` | 100% pass |
 | Coverage (Rust) | `cargo tarpaulin --out Html` | **≥ 90%** line coverage |
+| Clippy (no allow) | `cargo clippy -- -D warnings` | 0 warnings, **zero** `#[allow]` |
+| Formatting | `cargo fmt -- --check` | clean |
+| Web unit tests | `cd web && npm test` | 100% pass |
+| Web coverage | `cd web && npm run coverage` | **≥ 80%** line coverage |
 | TypeScript | `cd web && npx tsc --noEmit` | 0 errors |
 | ESLint | `cd web && npm run lint` | 0 warnings |
 | Build | `cd web && npm run build` | success |
-| Formatting | `cargo fmt -- --check` | clean |
-| Clippy | `cargo clippy -- -D warnings` | 0 warnings |
 
 Coverage is enforced per-crate. New code must maintain or improve coverage — PRs that drop coverage below 90% are rejected.
 
