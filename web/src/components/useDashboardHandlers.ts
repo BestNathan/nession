@@ -4,6 +4,10 @@ import type { Agent, Session, AttachInfo } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import type { AttachedSession } from './TerminalView';
 
+export type StatusFilter = 'all' | 'online' | 'offline';
+export type SortField = 'name' | 'activity';
+export type SortDirection = 'asc' | 'desc';
+
 export interface DashboardState {
   agents: Agent[];
   sessions: Session[];
@@ -17,14 +21,14 @@ export interface DashboardState {
   showCreateModal: boolean;
   sessionToKill: Session | null;
   searchQuery: string;
-  statusFilter: 'all' | 'online' | 'offline';
-  sortField: 'name' | 'activity';
-  sortDirection: 'asc' | 'desc';
+  statusFilter: StatusFilter;
+  sortField: SortField;
+  sortDirection: SortDirection;
   isSearchActive: boolean;
   setSearchQuery: (q: string) => void;
-  setStatusFilter: (f: 'all' | 'online' | 'offline') => void;
+  setStatusFilter: (f: StatusFilter) => void;
   setSelectedAgent: (a: Agent | null) => void;
-  toggleSort: (field: 'name' | 'activity') => void;
+  toggleSort: (field: SortField) => void;
   setShowCreateModal: (show: boolean) => void;
   setSessionToKill: (s: Session | null) => void;
   handleAttach: (session: Session) => void;
@@ -47,15 +51,15 @@ function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
 }
 
 interface FilterSortOptions {
-  statusFilter: 'all' | 'online' | 'offline';
+  statusFilter: StatusFilter;
   searchQuery: string;
-  sortField: 'name' | 'activity';
-  sortDirection: 'asc' | 'desc';
+  sortField: SortField;
+  sortDirection: SortDirection;
 }
 
 function computeFilteredAgents(
   agents: Agent[],
-  statusFilter: 'all' | 'online' | 'offline',
+  statusFilter: StatusFilter,
   searchQuery: string,
 ): Agent[] {
   let result = agents;
@@ -110,9 +114,9 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [sessionToKill, setSessionToKill] = useState<Session | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const [sortField, setSortField] = useState<'name' | 'activity'>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const heartbeatHistory = useRef<Map<string, string[]>>(new Map());
 
   const fetchAgents = useCallback(async () => {
@@ -146,7 +150,7 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
     return heartbeatHistory.current.get(agentId) ?? [];
   }, []);
 
-  const toggleSort = useCallback((field: 'name' | 'activity') => {
+  const toggleSort = useCallback((field: SortField) => {
     if (sortField === field) {
       setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {

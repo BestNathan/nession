@@ -207,6 +207,33 @@ describe('useDashboardHandlers', () => {
       act(() => { result.current.setStatusFilter('online'); });
       expect(result.current.filteredAgents).toHaveLength(0);
     });
+
+    it('applies statusFilter, searchQuery, and sort to filteredSessions', () => {
+      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+
+      act(() => {
+        agentsCallback!([
+          makeAgent({ agent_id: 'a1', hostname: 'web', status: 'online' }),
+          makeAgent({ agent_id: 'a2', hostname: 'db', status: 'offline' }),
+        ]);
+        sessionsCallback!([
+          makeSession({ session_id: 'a1:prod-web', session_name: 'prod-web', agent_id: 'a1' }),
+          makeSession({ session_id: 'a1:staging-web', session_name: 'staging-web', agent_id: 'a1' }),
+          makeSession({ session_id: 'a2:prod-db', session_name: 'prod-db', agent_id: 'a2' }),
+        ]);
+      });
+
+      // Filter online only + search "prod" → only a1's prod-web
+      act(() => { result.current.setSearchQuery('prod'); });
+      act(() => { result.current.setStatusFilter('online'); });
+      expect(result.current.filteredSessions).toHaveLength(1);
+      expect(result.current.filteredSessions[0].session_name).toBe('prod-web');
+
+      // Verify the offline agent's session is excluded
+      const names = result.current.filteredSessions.map((s) => s.session_name);
+      expect(names).not.toContain('prod-db');
+      expect(names).not.toContain('staging-web');
+    });
   });
 
   // ── sorting ────────────────────────────────────────────────────────────
