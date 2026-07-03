@@ -112,9 +112,34 @@ version = "0.4.0"
 
 On merge to main, CI reads the version from these files and creates version-tagged Docker images automatically.
 
-## 4. Creating a Pull Request
+## 4. Development Cycle
 
-**Never push directly to main.** Always use a feature branch + PR.
+**Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
+
+```bash
+# STEP 1: Start from latest main, NEW branch every time
+git checkout main
+git pull
+git checkout -b feat/<slug>
+
+# STEP 2: Develop, test, commit each logical unit
+
+# STEP 3: Verify before push
+cargo test
+cargo clippy -- -D warnings
+cargo fmt --all -- --check
+cd web && npm run build && npm run lint && cd ..
+
+# STEP 4: Push and create PR
+git push -u origin feat/<slug>
+gh pr create --title "feat: <description>" --body "..."
+
+# STEP 5: After merge — return to main. OLD BRANCH IS DEAD.
+git checkout main
+git pull
+```
+
+**⚠ CRITICAL: PR merged = branch dead.** Never push more commits to a merged branch. Follow-up work — even a one-line fix — starts from a new branch off latest main.
 
 ### PR Workflow
 
@@ -125,7 +150,7 @@ Before creating a PR, **always check** whether the current branch already has an
 gh pr list --head "$(git branch --show-current)" --state open --json number,title,url
 ```
 
-**If an open PR already exists** for the current branch → update it with `gh pr edit`:
+**If an open PR already exists** → update it with `gh pr edit`:
 
 ```bash
 gh pr edit <PR-NUMBER> --title "..." --body "..."
@@ -181,6 +206,7 @@ CI triggers on merge to main — builds multi-arch Docker images, pushes tags, u
 | Committing on `main` directly | **FORBIDDEN.** Always `git checkout -b feat/<slug>` first. Verify with `git branch --show-current`. |
 | `docker build` for Nession | **Forbidden.** CI does that. |
 | Pushing to main directly | Always use a feature branch + PR. |
+| Reusing a merged branch | **DEAD.** PR merged = branch dead. Always create a new branch from latest main. |
 | Bumping only one version file | Both `Cargo.toml` and `web/package.json` must match. |
 | Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
 | Integration tests leaving temp DB files | Each test must clean up its own DB. |
