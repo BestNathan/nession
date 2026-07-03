@@ -1,0 +1,18 @@
+# Patch env vars that contain plain-string service references.
+# kustomize nameReference handles secretKeyRef, PVC claimName, and ingress
+# service backends automatically. Plain env var strings must be patched manually.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-agent
+spec:
+  template:
+    spec:
+      containers:
+        - name: nession-agent
+          env:
+            - name: AGENT_SERVER_URL
+              value: "ws://nession-server-staging:18080"
+            - name: AGENT_CONNECT_URL
+              value: "ws://staging.agent.nession.nhome.local/ws"

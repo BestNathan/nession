@@ -2,7 +2,6 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nession-agent
-  namespace: nession
   annotations:
     higress.io/domain: "agent.nession.nhome.local"
     higress.io/upstream-read-timeout: "86400"
