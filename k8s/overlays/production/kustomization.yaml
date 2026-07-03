@@ -7,15 +7,15 @@ commonLabels:
   env: production
 
 resources:
-  - ../../base
+- ../../base
 
 images:
-  - name: ghcr.io/bestnathan/nession-server
-    newName: ghcr.io/bestnathan/nession
-    newTag: server-ccd7c9a
-  - name: ghcr.io/bestnathan/nession-agent
-    newName: ghcr.io/bestnathan/nession
-    newTag: agent-ccd7c9a
-  - name: ghcr.io/bestnathan/nession-ui
-    newName: ghcr.io/bestnathan/nession
-    newTag: ui-ccd7c9a
+- name: ghcr.io/bestnathan/nession-agent
+  newName: ghcr.io/bestnathan/nession
+  newTag: agent-b55316f
+- name: ghcr.io/bestnathan/nession-server
+  newName: ghcr.io/bestnathan/nession
+  newTag: server-b55316f
+- name: ghcr.io/bestnathan/nession-ui
+  newName: ghcr.io/bestnathan/nession
+  newTag: ui-b55316f
