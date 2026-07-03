@@ -32,6 +32,11 @@ export function SearchBar({
 
   // Sync external searchQuery prop back to local state when it changes externally
   useEffect(() => {
+    // Cancel any pending debounce — the external value takes precedence
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     setLocalValue(searchQuery);
   }, [searchQuery]);
 
@@ -84,6 +89,7 @@ export function SearchBar({
               variant={isActive ? 'default' : 'outline'}
               size="sm"
               onClick={() => setStatusFilter(filter.key)}
+              aria-pressed={isActive}
             >
               {filter.label}
               {count !== undefined && (
