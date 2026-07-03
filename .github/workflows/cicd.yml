@@ -353,6 +353,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - run: |
@@ -367,14 +368,6 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # save updated staging kustomization, then apply on top of main
-          cp k8s/overlays/staging/kustomization.yaml /tmp/staging-kustomization.yaml
-          git fetch origin main
-          git checkout -b staging-update origin/main
-          mkdir -p k8s/overlays/staging
-          cp /tmp/staging-kustomization.yaml k8s/overlays/staging/kustomization.yaml
-
           git add k8s/overlays/staging/kustomization.yaml
           if git diff --staged --quiet; then
             echo "No change to staging overlay — skipping."
@@ -382,6 +375,6 @@ jobs:
             git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
             # retry on race with concurrent push
             for i in 1 2 3; do
-              git push origin staging-update:main && break || sleep 2
+              git pull --rebase origin main && git push && break || sleep 2
             done
           fi
