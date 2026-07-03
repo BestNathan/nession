@@ -56,7 +56,6 @@ export default defineConfig({
         'src/App.tsx',
         // Glue / orchestration components (covered by integration)
         'src/components/TerminalView.tsx',
-        'src/components/useDashboardHandlers.ts',
       ],
     },
   },
