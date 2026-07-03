@@ -217,14 +217,38 @@ Service ports:
 | nession-agent | 10080 | HTTP (health) |
 | nession-ui | 80 | nginx serving web/dist/ |
 
-### Release Flow
+### Development Cycle
 
-1. Develop on feature branch (worktree preferred, see below)
-2. Build & test locally: `cargo test && cd web && npm run build`
-3. Push, create PR (include `Closes #<ISSUE>` in body) → CI runs docker-publish
-4. Merge to main → auto-closes issue + CI publishes `main`-tagged images
-5. Update image tags in k8s manifests: `k8s/kustomization.yaml`
-6. `kubectl apply -k k8s/`
+**Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
+
+```bash
+# 1. START — always from latest main, always new branch
+git checkout main
+git pull
+git checkout -b feat/<slug>
+
+# 2. DEVELOP — implement, test, commit
+cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
+cd web && npm run build && npm run lint && cd ..
+
+# 3. PUBLISH — push and create PR (include Closes #<ISSUE> in body)
+git push -u origin feat/<slug>
+gh pr create --title "feat: <description>" --body "..."
+
+# 4. MERGE — after review, merge to main (CI auto-publishes images)
+
+# 5. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
+git checkout main
+git pull
+```
+
+**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
+
+```bash
+git checkout main
+git pull
+git checkout -b feat/<new-slug>
+```
 
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
