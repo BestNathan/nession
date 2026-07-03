@@ -128,9 +128,7 @@ pub async fn attach_session(
         }
     };
 
-    println!(
-        "Requesting to attach to session '{session_id}' (mode: {preferred_mode})..."
-    );
+    println!("Requesting to attach to session '{session_id}' (mode: {preferred_mode})...");
 
     // Request attach
     let attach_resp = conn
@@ -320,9 +318,7 @@ pub async fn create_session(
     }
 
     let agent_address = format!("{}:{}", agent.ip_address, agent.port);
-    println!(
-        "Creating session '{session_name}' on agent '{agent_id}' ({width}x{height})..."
-    );
+    println!("Creating session '{session_name}' on agent '{agent_id}' ({width}x{height})...");
 
     let created_name = crate::client::connection::create_session_on_agent(
         &agent_address,
@@ -331,11 +327,7 @@ pub async fn create_session(
         height,
     )
     .await
-    .with_context(|| {
-        format!(
-            "Failed to create session '{session_name}' on agent '{agent_id}'"
-        )
-    })?;
+    .with_context(|| format!("Failed to create session '{session_name}' on agent '{agent_id}'"))?;
 
     println!("Session '{created_name}' created successfully.");
 
@@ -356,9 +348,7 @@ pub async fn create_session(
 pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) -> Result<()> {
     // Parse session_id (format: agent_id:session_name)
     let (agent_id, session_name) = session_id.split_once(':').with_context(|| {
-        format!(
-            "Invalid session ID '{session_id}'. Expected format: agent_id:session_name"
-        )
+        format!("Invalid session ID '{session_id}'. Expected format: agent_id:session_name")
     })?;
 
     // Connect to server to look up agent address
@@ -376,17 +366,13 @@ pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) 
         .with_context(|| format!("Agent '{agent_id}' not found. Is it registered?"))?;
 
     let agent_address = format!("{}:{}", agent.ip_address, agent.port);
-    println!(
-        "Killing session '{session_name}' on agent '{agent_id}'..."
-    );
+    println!("Killing session '{session_name}' on agent '{agent_id}'...");
 
     let killed_name =
         crate::client::connection::kill_session_on_agent(&agent_address, session_name)
             .await
             .with_context(|| {
-                format!(
-                    "Failed to kill session '{session_name}' on agent '{agent_id}'"
-                )
+                format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
             })?;
 
     println!("Session '{killed_name}' killed successfully.");

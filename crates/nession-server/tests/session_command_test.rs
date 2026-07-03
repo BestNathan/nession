@@ -2,7 +2,9 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nession_common::config::ServerConfig;
+use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -18,7 +20,8 @@ async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
         db_path: String::new(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
+    let db = Database::new(":memory:").await.unwrap();
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
     let addr = server.local_addr().unwrap();
 
     let handle = tokio::spawn(async move {

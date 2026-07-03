@@ -235,7 +235,9 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis().try_into().unwrap_or(0),
+            .as_millis()
+            .try_into()
+            .unwrap_or(0),
         payload,
     };
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
@@ -254,7 +256,9 @@ pub fn build_terminal_resize_message(session_name: &str, width: u16, height: u16
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis().try_into().unwrap_or(0),
+            .as_millis()
+            .try_into()
+            .unwrap_or(0),
         payload,
     };
     serde_json::to_string(&msg).unwrap_or_else(|_| String::new())

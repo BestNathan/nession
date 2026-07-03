@@ -161,15 +161,30 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+        let agent_id = payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         if self.agent_registry.get(agent_id).await.is_none() {
             warn!("Heartbeat from unregistered agent: {}", agent_id);
             return Ok(HandlerAction::Reply(None));
         }
 
-        let session_count = u32::try_from(payload.get("session_count").and_then(serde_json::Value::as_u64).unwrap_or(0)).unwrap_or(0);
-        let active_sessions = u32::try_from(payload.get("active_sessions").and_then(serde_json::Value::as_u64).unwrap_or(0)).unwrap_or(0);
+        let session_count = u32::try_from(
+            payload
+                .get("session_count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
+        let active_sessions = u32::try_from(
+            payload
+                .get("active_sessions")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
         info!(
             "Heartbeat from {}: sessions={}, active={}",
@@ -201,8 +216,14 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let agent_id = payload.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-        let session_name = payload.get("session_name").and_then(|v| v.as_str()).unwrap_or("");
+        let agent_id = payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let session_name = payload
+            .get("session_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let status_str = payload.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
         if self.agent_registry.get(agent_id).await.is_none() {
@@ -221,6 +242,8 @@ impl ConnectionHandler {
         let status = match status_str {
             "active" => crate::registry::session::SessionStatus::Active,
             "detached" => crate::registry::session::SessionStatus::Detached,
+            "recovering" => crate::registry::session::SessionStatus::Recovering,
+            "orphaned" => crate::registry::session::SessionStatus::Orphaned,
             "zombie" => crate::registry::session::SessionStatus::Zombie,
             _ => {
                 warn!("Unknown session status '{}' for {}", status_str, session_id);
@@ -228,8 +251,20 @@ impl ConnectionHandler {
             }
         };
 
-        let window_count = u32::try_from(payload.get("window_count").and_then(serde_json::Value::as_u64).unwrap_or(0)).unwrap_or(0);
-        let attached_clients = u32::try_from(payload.get("attached_clients").and_then(serde_json::Value::as_u64).unwrap_or(0)).unwrap_or(0);
+        let window_count = u32::try_from(
+            payload
+                .get("window_count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
+        let attached_clients = u32::try_from(
+            payload
+                .get("attached_clients")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
         let session_info = crate::registry::session::SessionInfo {
             session_id: session_id.clone(),
@@ -238,6 +273,7 @@ impl ConnectionHandler {
             status,
             window_count,
             attached_clients,
+            created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         };
 
@@ -255,7 +291,10 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: serde_json::Value = msg.payload;
-        let auth_token = payload.get("auth_token").and_then(|v| v.as_str()).unwrap_or("");
+        let auth_token = payload
+            .get("auth_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // Empty server auth_token means no-auth mode: accept any client
         let auth_ok = self.server_auth_token.is_empty() || auth_token == self.server_auth_token;
@@ -393,6 +432,8 @@ impl ConnectionHandler {
                     "status": match s.status {
                         SessionStatus::Active => "active",
                         SessionStatus::Detached => "detached",
+                        SessionStatus::Recovering => "recovering",
+                        SessionStatus::Orphaned => "orphaned",
                         SessionStatus::Zombie => "zombie",
                     },
                     "window_count": s.window_count,
@@ -444,8 +485,16 @@ impl ConnectionHandler {
             ))));
         }
 
-        let session_id = msg.payload.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
-        let preferred_mode = msg.payload.get("preferred_mode").and_then(|v| v.as_str()).unwrap_or("p2p");
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let preferred_mode = msg
+            .payload
+            .get("preferred_mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("p2p");
 
         // Parse session_id as "agent_id:session_name"
         let (agent_id, session_name) = match session_id.split_once(':') {
@@ -579,8 +628,16 @@ impl ConnectionHandler {
             ))));
         }
 
-        let agent_id = msg.payload.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-        let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let agent_id = msg
+            .payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let name = msg
+            .payload
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         if agent_id.is_empty() || name.is_empty() {
             return Ok(HandlerAction::Reply(Some(Message::Text(
@@ -655,7 +712,10 @@ impl ConnectionHandler {
 
         match tokio::time::timeout(Duration::from_secs(10), rx).await {
             Ok(Ok(response)) => {
-                let success = response.get("success").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                let success = response
+                    .get("success")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
                 let session_id = if success {
                     let sid = format!("{agent_id}:{name}");
                     // Immediately register the session so it shows up in list
@@ -668,6 +728,7 @@ impl ConnectionHandler {
                         status: crate::registry::session::SessionStatus::Detached,
                         window_count: 1,
                         attached_clients: 0,
+                        created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                     };
                     self.session_registry.update_session(session_info).await;
@@ -675,7 +736,10 @@ impl ConnectionHandler {
                 } else {
                     None
                 };
-                let error = response.get("error").and_then(|v| v.as_str()).map(std::string::ToString::to_string);
+                let error = response
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string);
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
@@ -738,7 +802,11 @@ impl ConnectionHandler {
             ))));
         }
 
-        let session_id = msg.payload.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
@@ -830,8 +898,14 @@ impl ConnectionHandler {
 
         match tokio::time::timeout(Duration::from_secs(10), rx).await {
             Ok(Ok(response)) => {
-                let success = response.get("success").and_then(serde_json::Value::as_bool).unwrap_or(false);
-                let error = response.get("error").and_then(|v| v.as_str()).map(std::string::ToString::to_string);
+                let success = response
+                    .get("success")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let error = response
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string);
 
                 if success {
                     self.session_registry.remove(session_id).await;
@@ -890,7 +964,12 @@ impl ConnectionHandler {
             }
         };
 
-        let request_id = msg.payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let request_id = msg
+            .payload
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if request_id.is_empty() {
             warn!("agent.session.command.response missing request_id");
             return Ok(HandlerAction::Reply(None));
@@ -900,7 +979,10 @@ impl ConnectionHandler {
             "Received command response from agent {}: request_id={}, command={}",
             agent_id,
             request_id,
-            msg.payload.get("command").and_then(|v| v.as_str()).unwrap_or("unknown")
+            msg.payload
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         );
 
         self.command_broker

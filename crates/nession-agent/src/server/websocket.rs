@@ -533,7 +533,10 @@ impl AgentServer {
             .await
             .with_context(|| format!("failed to bind {}", self.listen_address))?;
 
-        let shutdown_rx = self.shutdown_rx.take().ok_or_else(|| anyhow::anyhow!("shutdown_rx taken twice"))?;
+        let shutdown_rx = self
+            .shutdown_rx
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("shutdown_rx taken twice"))?;
         let handle = ServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
         };

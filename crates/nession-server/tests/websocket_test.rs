@@ -1,5 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
+use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::connect_async;
 
@@ -8,6 +10,19 @@ fn current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+
+async fn start_test_server(
+    config: nession_common::config::ServerConfig,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let db = Database::new(&config.db_path).await.unwrap();
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    (addr, handle)
 }
 
 #[tokio::test]
@@ -22,14 +37,7 @@ async fn test_server_accepts_connection() {
         db_path: "./test_ws_accept.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        server.run().await.unwrap();
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let result = connect_async(&url).await;
@@ -51,14 +59,7 @@ async fn test_agent_registration() {
         db_path: "./test_ws_register.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        server.run().await.unwrap();
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -114,14 +115,7 @@ async fn test_invalid_auth_token() {
         db_path: "./test_ws_auth.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        server.run().await.unwrap();
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -170,14 +164,7 @@ async fn test_heartbeat_without_registration() {
         db_path: "./test_ws_heartbeat.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        server.run().await.unwrap();
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -228,10 +215,7 @@ async fn test_client_agents_list_unauthenticated() {
         db_path: "./test_ws_alist.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-    tokio::spawn(async move { server.run().await.unwrap() });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -270,10 +254,7 @@ async fn test_close_frame_triggers_disconnect() {
         db_path: "./test_ws_close.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-    tokio::spawn(async move { server.run().await.unwrap() });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -304,10 +285,7 @@ async fn test_agent_registration_with_connect_url() {
         db_path: "./test_ws_connect_url.db".to_string(),
     };
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let addr = server.local_addr().unwrap();
-    tokio::spawn(async move { server.run().await.unwrap() });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let (addr, _handle) = start_test_server(config).await;
 
     let url = format!("ws://{}", addr);
     let (mut ws, _) = connect_async(&url).await.unwrap();

@@ -71,4 +71,5 @@ spec:
         - name: ghcr-bestnathan
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: nession-data-pvc

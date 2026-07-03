@@ -5,6 +5,7 @@ use tokio_tungstenite::accept_async;
 use tracing::{error, info};
 
 use super::handler::{ConnectionHandler, HandlerAction};
+use crate::db::Database;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
@@ -14,14 +15,20 @@ pub struct WebSocketServer {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    db: Arc<Database>,
     listener: Option<TcpListener>,
 }
 
 impl WebSocketServer {
-    pub async fn new(config: ServerConfig) -> anyhow::Result<Self> {
+    pub async fn new(config: ServerConfig, db: Arc<Database>) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(&config.listen_address).await?;
         let agent_registry = Arc::new(AgentRegistry::new(config.heartbeat_timeout_secs));
-        let session_registry = Arc::new(SessionRegistry::new());
+        let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
+
+        // Load persisted sessions from the database. They will be shown as
+        // "recovering" until their agent reconnects and confirms them.
+        session_registry.load_from_db().await;
+
         let command_broker = Arc::new(CommandBroker::new());
 
         Ok(Self {
@@ -29,6 +36,7 @@ impl WebSocketServer {
             agent_registry,
             session_registry,
             command_broker,
+            db,
             listener: Some(listener),
         })
     }
@@ -92,6 +100,42 @@ impl WebSocketServer {
                                 }
                             }
                         });
+                    }
+                }
+            });
+        }
+
+        // Background sweep: periodically clean up orphaned sessions whose
+        // agent has been unreachable for more than 24 hours.
+        {
+            let session_registry = Arc::clone(&self.session_registry);
+            let db = Arc::clone(&self.db);
+            // Run every hour — orphan cleanup is not latency-sensitive.
+            let sweep_period = std::time::Duration::from_secs(3600);
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(sweep_period);
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    // 24 hours in seconds
+                    let cutoff = 24 * 3600i64;
+                    match db.list_sessions_older_than(cutoff).await {
+                        Ok(rows) => {
+                            if rows.is_empty() {
+                                continue;
+                            }
+                            for row in &rows {
+                                info!(
+                                    "Cleaning orphaned session {} (agent: {}, last activity: {})",
+                                    row.session_id, row.agent_id, row.last_activity
+                                );
+                                session_registry.remove(&row.session_id).await;
+                            }
+                            tracing::info!("Cleaned {} orphaned sessions", rows.len());
+                        }
+                        Err(e) => {
+                            error!("Orphan session sweep failed: {:#}", e);
+                        }
                     }
                 }
             });

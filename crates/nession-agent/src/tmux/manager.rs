@@ -41,7 +41,10 @@ impl TmuxManager {
                 let parts: Vec<&str> = line.split('\t').collect();
                 if parts.len() == 6 {
                     Some(SessionInfo {
-                        name: parts.first().map(std::string::ToString::to_string).unwrap_or_default(),
+                        name: parts
+                            .first()
+                            .map(std::string::ToString::to_string)
+                            .unwrap_or_default(),
                         created_at: parts.get(1).and_then(|s| s.parse().ok())?,
                         window_count: parts.get(2).and_then(|s| s.parse().ok())?,
                         attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,

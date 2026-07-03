@@ -2,7 +2,9 @@
 
 use nession_cli::commands::client::attach_session;
 use nession_common::config::ServerConfig;
+use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -19,6 +21,19 @@ fn create_test_config(port: u16) -> ServerConfig {
     }
 }
 
+async fn start_test_server(
+    config: ServerConfig,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let db = Database::new(&config.db_path).await.unwrap();
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        let _ = server.run().await;
+    });
+    sleep(Duration::from_millis(100)).await;
+    (addr, handle)
+}
+
 #[tokio::test]
 async fn test_attach_session_p2p_mode() {
     // This test requires a full setup with server, agent, and tmux session
@@ -28,13 +43,7 @@ async fn test_attach_session_p2p_mode() {
     // Start server
     let config = create_test_config(18090);
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let server_handle = tokio::spawn(async move {
-        let _ = server.run().await;
-    });
-
-    // Give server time to start
-    sleep(Duration::from_millis(100)).await;
+    let (_addr, server_handle) = start_test_server(config).await;
 
     // Try to attach - should fail gracefully since no agent/session exists
     let result = attach_session(
@@ -57,12 +66,7 @@ async fn test_attach_session_relay_mode() {
     // Similar to P2P test but with relay mode forced
     let config = create_test_config(18091);
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let server_handle = tokio::spawn(async move {
-        let _ = server.run().await;
-    });
-
-    sleep(Duration::from_millis(100)).await;
+    let (_addr, server_handle) = start_test_server(config).await;
 
     let result = attach_session(
         "ws://127.0.0.1:18091",
@@ -83,12 +87,7 @@ async fn test_attach_session_auto_fallback() {
     // Test that auto mode (None) works
     let config = create_test_config(18092);
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let server_handle = tokio::spawn(async move {
-        let _ = server.run().await;
-    });
-
-    sleep(Duration::from_millis(100)).await;
+    let (_addr, server_handle) = start_test_server(config).await;
 
     let result = attach_session(
         "ws://127.0.0.1:18092",
@@ -108,12 +107,7 @@ async fn test_attach_session_auto_fallback() {
 async fn test_attach_session_invalid_mode() {
     let config = create_test_config(18093);
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let server_handle = tokio::spawn(async move {
-        let _ = server.run().await;
-    });
-
-    sleep(Duration::from_millis(100)).await;
+    let (_addr, server_handle) = start_test_server(config).await;
 
     let result = attach_session(
         "ws://127.0.0.1:18093",
@@ -135,12 +129,7 @@ async fn test_attach_session_invalid_mode() {
 async fn test_attach_session_bad_credentials() {
     let config = create_test_config(18094);
 
-    let mut server = WebSocketServer::new(config).await.unwrap();
-    let server_handle = tokio::spawn(async move {
-        let _ = server.run().await;
-    });
-
-    sleep(Duration::from_millis(100)).await;
+    let (_addr, server_handle) = start_test_server(config).await;
 
     let result = attach_session(
         "ws://127.0.0.1:18094",
