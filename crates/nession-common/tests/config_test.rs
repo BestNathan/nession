@@ -31,7 +31,8 @@ fn test_server_config_defaults() {
     assert_eq!(
         config.db_path,
         nession_common::paths::server_db_path()
+            .expect("home dir required for test")
             .to_string_lossy()
-            .as_ref()
+            .into_owned()
     ); // default
 }

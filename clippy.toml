@@ -1,0 +1,15 @@
+# Clippy configuration for Nession
+# Based on openai/codex codex-rs clippy.toml
+
+# Allow unwrap/expect in tests (they're acceptable for test assertions)
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+
+# Error size threshold for result_large_err lint (bytes)
+large-error-threshold = 256
+
+# Cognitive complexity threshold (functions exceeding this get a warning)
+cognitive-complexity-threshold = 25
+
+# Max lines per function (use clippy::too_many_lines)
+too-many-lines-threshold = 150

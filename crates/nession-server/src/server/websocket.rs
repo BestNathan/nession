@@ -130,7 +130,7 @@ impl WebSocketServer {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Server not initialized"))?
             .local_addr()
-            .map_err(|e| anyhow::anyhow!("Failed to get local address: {}", e))
+            .map_err(|e| anyhow::anyhow!("Failed to get local address: {e}"))
     }
 }
 

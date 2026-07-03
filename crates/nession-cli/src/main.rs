@@ -193,6 +193,7 @@ async fn main() -> Result<()> {
             } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::agent_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -201,6 +202,7 @@ async fn main() -> Result<()> {
             AgentAction::Stop { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::agent_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -209,6 +211,7 @@ async fn main() -> Result<()> {
             AgentAction::Status { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::agent_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -223,6 +226,7 @@ async fn main() -> Result<()> {
             } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::server_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -231,6 +235,7 @@ async fn main() -> Result<()> {
             ServerAction::Stop { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::server_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -239,6 +244,7 @@ async fn main() -> Result<()> {
             ServerAction::Status { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::server_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
@@ -292,8 +298,7 @@ async fn main() -> Result<()> {
                 // Prompt for confirmation unless --force is set
                 if !force {
                     print!(
-                        "Are you sure you want to kill session '{}'? [y/N] ",
-                        session_id
+                        "Are you sure you want to kill session '{session_id}'? [y/N] "
                     );
                     use std::io::Write;
                     std::io::stdout().flush()?;

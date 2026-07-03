@@ -371,7 +371,7 @@ pub struct FileRenamePayload {
 // --- Protocol helpers ---
 
 fn now_timestamp() -> u64 {
-    chrono::Utc::now().timestamp() as u64
+    chrono::Utc::now().timestamp().unsigned_abs()
 }
 
 /// Extract the tmux session name from a web UI session_id.
@@ -533,7 +533,7 @@ impl AgentServer {
             .await
             .with_context(|| format!("failed to bind {}", self.listen_address))?;
 
-        let shutdown_rx = self.shutdown_rx.take().expect("shutdown_rx taken twice");
+        let shutdown_rx = self.shutdown_rx.take().ok_or_else(|| anyhow::anyhow!("shutdown_rx taken twice"))?;
         let handle = ServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
         };
@@ -732,7 +732,7 @@ impl AgentServer {
                 return serde_json::to_string(&make_error(
                     "unknown",
                     "parse_error",
-                    &format!("invalid JSON: {}", e),
+                    &format!("invalid JSON: {e}"),
                 ))
                 .unwrap_or_default();
             }
@@ -853,7 +853,7 @@ impl AgentServer {
                                     Ok(n) => {
                                         use base64::Engine;
                                         let encoded = base64::engine::general_purpose::STANDARD
-                                            .encode(&buf[..n]);
+                                            .encode(buf.get(..n).unwrap_or(&[]));
                                         let output = TerminalOutputPayload {
                                             session_name: session_name_clone.clone(),
                                             data: encoded,
@@ -972,7 +972,7 @@ impl AgentServer {
                         ip_address: ip,
                         port,
                         status: "online".to_string(),
-                        session_count: sessions_list.len() as u32,
+                        session_count: u32::try_from(sessions_list.len()).unwrap_or(0),
                         last_heartbeat: chrono::Utc::now().to_rfc3339(),
                     };
                     let resp = WebAgentsListResponse {
@@ -991,7 +991,7 @@ impl AgentServer {
                         .map(|s| {
                             let session_id = format!("{}:{}", agent_id, s.name);
                             WebSessionInfo {
-                                session_id: session_id.clone(),
+                                session_id,
                                 agent_id: agent_id.to_string(),
                                 session_name: s.name,
                                 status: if s.attached_clients > 0 {
@@ -1021,7 +1021,7 @@ impl AgentServer {
                 let resp = WebAttachInfo {
                     mode: "p2p".to_string(),
                     session_id: payload.session_id,
-                    session_name: session_name.clone(),
+                    session_name,
                     agent_address: listen_address.to_string(),
                 };
                 serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
@@ -1210,7 +1210,7 @@ impl AgentServer {
 
             unknown => err(
                 "unknown_message_type",
-                &format!("unknown message type: {}", unknown),
+                &format!("unknown message type: {unknown}"),
             ),
         }
     }

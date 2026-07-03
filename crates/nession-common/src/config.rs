@@ -27,6 +27,7 @@ fn default_heartbeat_timeout() -> u64 {
 
 fn default_db_path() -> String {
     crate::paths::server_db_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
         .to_string_lossy()
         .into_owned()
 }

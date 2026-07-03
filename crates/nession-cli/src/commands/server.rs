@@ -17,7 +17,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
     // Check if server is already running
     if let Ok(pid) = read_pid_file(&pid_file) {
         if is_process_running(pid) {
-            anyhow::bail!("Server is already running with PID {}", pid);
+            anyhow::bail!("Server is already running with PID {pid}");
         } else {
             // Process not running but PID file exists, clean it up
             let _ = fs::remove_file(&pid_file);
@@ -30,7 +30,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
     if foreground {
         // Run in foreground
         info!("Starting server in foreground mode");
-        println!("Starting nession-server with config: {}", config_path);
+        println!("Starting nession-server with config: {config_path}");
         println!("Listen address: {}", config.listen_address);
         println!("Database: {}", config.db_path);
         println!("Press Ctrl+C to stop");
@@ -81,21 +81,21 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         // Read the PID from the file written by the child
         match read_pid_file(&pid_file) {
             Ok(pid) => {
-                println!("Server started in background with PID {}", pid);
-                println!("PID file: {}", pid_file);
+                println!("Server started in background with PID {pid}");
+                println!("PID file: {pid_file}");
             }
             Err(_) => {
                 println!("Server started in background (waiting for PID file...)");
                 // Wait a bit more and try again
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 if let Ok(pid) = read_pid_file(&pid_file) {
-                    println!("Server started in background with PID {}", pid);
+                    println!("Server started in background with PID {pid}");
                 } else {
                     println!("Server is starting, check logs for status");
                 }
             }
         }
-        println!("Config: {}", config_path);
+        println!("Config: {config_path}");
     }
 
     Ok(())
@@ -114,13 +114,13 @@ pub async fn stop(pid_file: String) -> Result<()> {
 
     // Check if process is running
     if !is_process_running(pid) {
-        println!("Server process {} is not running", pid);
+        println!("Server process {pid} is not running");
         // Clean up stale PID file
         let _ = fs::remove_file(&pid_file);
         return Ok(());
     }
 
-    println!("Stopping server (PID {})...", pid);
+    println!("Stopping server (PID {pid})...");
 
     // Send SIGTERM
     #[cfg(unix)]
@@ -196,9 +196,9 @@ pub async fn status(pid_file: String) -> Result<()> {
     let uptime = get_process_uptime(pid);
 
     println!("Status: running");
-    println!("PID: {}", pid);
+    println!("PID: {pid}");
     if let Some(uptime_str) = uptime {
-        println!("Uptime: {}", uptime_str);
+        println!("Uptime: {uptime_str}");
     }
 
     // Try to load config to show additional info
@@ -215,9 +215,9 @@ pub async fn status(pid_file: String) -> Result<()> {
 fn load_server_config(path: &str) -> Result<ServerConfig> {
     if Path::new(path).exists() {
         let config_str = fs::read_to_string(path)
-            .with_context(|| format!("failed to read config file: {}", path))?;
+            .with_context(|| format!("failed to read config file: {path}"))?;
         let config: ServerConfig = toml::from_str(&config_str)
-            .with_context(|| format!("failed to parse config file: {}", path))?;
+            .with_context(|| format!("failed to parse config file: {path}"))?;
         Ok(config)
     } else {
         info!("No config file found at '{}', using defaults", path);
@@ -229,6 +229,7 @@ fn load_server_config(path: &str) -> Result<ServerConfig> {
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
             db_path: nession_common::paths::server_db_path()
+                .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
                 .to_string_lossy()
                 .into_owned(),
         })
@@ -272,14 +273,14 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
 /// Write PID to file.
 fn write_pid_file(path: &str, pid: u32) -> Result<()> {
     fs::write(path, pid.to_string())
-        .with_context(|| format!("failed to write PID file: {}", path))?;
+        .with_context(|| format!("failed to write PID file: {path}"))?;
     Ok(())
 }
 
 /// Read PID from file.
 fn read_pid_file(path: &str) -> Result<u32> {
     let content =
-        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {}", path))?;
+        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {path}"))?;
     let pid: u32 = content
         .trim()
         .parse()
@@ -315,11 +316,11 @@ fn get_process_uptime(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
         // Try to read process start time from /proc on Linux
-        if let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", pid)) {
+        if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
             // Parse start time (field 22, 0-indexed 21)
             let fields: Vec<&str> = stat.split_whitespace().collect();
             if fields.len() > 21 {
-                if let Ok(start_ticks) = fields[21].parse::<u64>() {
+                if let Some(start_ticks) = fields.get(21).and_then(|s| s.parse::<u64>().ok()) {
                     // Get system boot time and clock ticks per second
                     if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks())
                     {
@@ -375,12 +376,12 @@ fn format_duration(seconds: u64) -> String {
     let secs = seconds % 60;
 
     if days > 0 {
-        format!("{}d {}h {}m {}s", days, hours, minutes, secs)
+        format!("{days}d {hours}h {minutes}m {secs}s")
     } else if hours > 0 {
-        format!("{}h {}m {}s", hours, minutes, secs)
+        format!("{hours}h {minutes}m {secs}s")
     } else if minutes > 0 {
-        format!("{}m {}s", minutes, secs)
+        format!("{minutes}m {secs}s")
     } else {
-        format!("{}s", secs)
+        format!("{secs}s")
     }
 }

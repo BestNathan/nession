@@ -17,7 +17,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
     // Check if agent is already running
     if let Ok(pid) = read_pid_file(&pid_file) {
         if is_process_running(pid) {
-            anyhow::bail!("Agent is already running with PID {}", pid);
+            anyhow::bail!("Agent is already running with PID {pid}");
         } else {
             // Process not running but PID file exists, clean it up
             let _ = fs::remove_file(&pid_file);
@@ -30,7 +30,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
     if foreground {
         // Run in foreground
         info!("Starting agent in foreground mode");
-        println!("Starting nession-agent with config: {}", config_path);
+        println!("Starting nession-agent with config: {config_path}");
         println!("Agent ID: {}", config.agent_id);
         println!("Press Ctrl+C to stop");
 
@@ -80,21 +80,21 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         // Read the PID from the file written by the child
         match read_pid_file(&pid_file) {
             Ok(pid) => {
-                println!("Agent started in background with PID {}", pid);
-                println!("PID file: {}", pid_file);
+                println!("Agent started in background with PID {pid}");
+                println!("PID file: {pid_file}");
             }
             Err(_) => {
                 println!("Agent started in background (waiting for PID file...)");
                 // Wait a bit more and try again
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 if let Ok(pid) = read_pid_file(&pid_file) {
-                    println!("Agent started in background with PID {}", pid);
+                    println!("Agent started in background with PID {pid}");
                 } else {
                     println!("Agent is starting, check logs for status");
                 }
             }
         }
-        println!("Config: {}", config_path);
+        println!("Config: {config_path}");
     }
 
     Ok(())
@@ -113,13 +113,13 @@ pub async fn stop(pid_file: String) -> Result<()> {
 
     // Check if process is running
     if !is_process_running(pid) {
-        println!("Agent process {} is not running", pid);
+        println!("Agent process {pid} is not running");
         // Clean up stale PID file
         let _ = fs::remove_file(&pid_file);
         return Ok(());
     }
 
-    println!("Stopping agent (PID {})...", pid);
+    println!("Stopping agent (PID {pid})...");
 
     // Send SIGTERM
     #[cfg(unix)]
@@ -195,9 +195,9 @@ pub async fn status(pid_file: String) -> Result<()> {
     let uptime = get_process_uptime(pid);
 
     println!("Status: running");
-    println!("PID: {}", pid);
+    println!("PID: {pid}");
     if let Some(uptime_str) = uptime {
-        println!("Uptime: {}", uptime_str);
+        println!("Uptime: {uptime_str}");
     }
 
     // Try to load config to show additional info
@@ -214,9 +214,9 @@ pub async fn status(pid_file: String) -> Result<()> {
 fn load_agent_config(path: &str) -> Result<AgentConfig> {
     if Path::new(path).exists() {
         let config_str = fs::read_to_string(path)
-            .with_context(|| format!("failed to read config file: {}", path))?;
+            .with_context(|| format!("failed to read config file: {path}"))?;
         let config: AgentConfig = toml::from_str(&config_str)
-            .with_context(|| format!("failed to parse config file: {}", path))?;
+            .with_context(|| format!("failed to parse config file: {path}"))?;
         Ok(config)
     } else {
         info!("No config file found at '{}', using defaults", path);
@@ -357,7 +357,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
 
     // Wait for shutdown signal
     info!("Agent is running. Press Ctrl+C to stop.");
-    wait_for_shutdown().await;
+    wait_for_shutdown().await?;
     info!("Shutdown signal received, stopping components...");
 
     // Graceful shutdown
@@ -382,14 +382,14 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
 /// Write PID to file.
 fn write_pid_file(path: &str, pid: u32) -> Result<()> {
     fs::write(path, pid.to_string())
-        .with_context(|| format!("failed to write PID file: {}", path))?;
+        .with_context(|| format!("failed to write PID file: {path}"))?;
     Ok(())
 }
 
 /// Read PID from file.
 fn read_pid_file(path: &str) -> Result<u32> {
     let content =
-        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {}", path))?;
+        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {path}"))?;
     let pid: u32 = content
         .trim()
         .parse()
@@ -425,11 +425,11 @@ fn get_process_uptime(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
         // Try to read process start time from /proc on Linux
-        if let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", pid)) {
+        if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
             // Parse start time (field 22, 0-indexed 21)
             let fields: Vec<&str> = stat.split_whitespace().collect();
             if fields.len() > 21 {
-                if let Ok(start_ticks) = fields[21].parse::<u64>() {
+                if let Some(start_ticks) = fields.get(21).and_then(|s| s.parse::<u64>().ok()) {
                     // Get system boot time and clock ticks per second
                     if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks())
                     {
@@ -485,13 +485,13 @@ fn format_duration(seconds: u64) -> String {
     let secs = seconds % 60;
 
     if days > 0 {
-        format!("{}d {}h {}m {}s", days, hours, minutes, secs)
+        format!("{days}d {hours}h {minutes}m {secs}s")
     } else if hours > 0 {
-        format!("{}h {}m {}s", hours, minutes, secs)
+        format!("{hours}h {minutes}m {secs}s")
     } else if minutes > 0 {
-        format!("{}m {}s", minutes, secs)
+        format!("{minutes}m {secs}s")
     } else {
-        format!("{}s", secs)
+        format!("{secs}s")
     }
 }
 
@@ -515,14 +515,14 @@ fn load_tls(
 }
 
 /// Wait for shutdown signal (SIGINT/SIGTERM).
-async fn wait_for_shutdown() {
+async fn wait_for_shutdown() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
         let mut sigint =
-            signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
+            signal(SignalKind::interrupt()).context("failed to register SIGINT handler")?;
         let mut sigterm =
-            signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+            signal(SignalKind::terminate()).context("failed to register SIGTERM handler")?;
         tokio::select! {
             _ = sigint.recv() => {
                 info!("Received SIGINT");
@@ -537,9 +537,10 @@ async fn wait_for_shutdown() {
     {
         tokio::signal::ctrl_c()
             .await
-            .expect("failed to listen for ctrl+c");
+            .context("failed to listen for ctrl+c")?;
         info!("Received Ctrl+C");
     }
+    Ok(())
 }
 
 /// Get the system hostname.

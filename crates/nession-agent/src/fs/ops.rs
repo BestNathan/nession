@@ -45,7 +45,7 @@ impl FileOps {
         let resolved = self.sandbox.resolve(path)?;
 
         if !resolved.is_dir() {
-            anyhow::bail!("not_a_directory: {}", path);
+            anyhow::bail!("not_a_directory: {path}");
         }
 
         let entries = task::spawn_blocking(move || -> Result<Vec<FileEntry>> {
@@ -105,9 +105,7 @@ impl FileOps {
             let size = metadata.len();
             if size > MAX_READ_SIZE {
                 anyhow::bail!(
-                    "file_too_large: file is {} bytes, max allowed is {} bytes",
-                    size,
-                    MAX_READ_SIZE
+                    "file_too_large: file is {size} bytes, max allowed is {MAX_READ_SIZE} bytes"
                 );
             }
 
@@ -157,7 +155,7 @@ impl FileOps {
             // extensionless files where with_extension("tmp") would give
             // the same name for every concurrent write to the same path.
             let tmp_id = uuid::Uuid::new_v4();
-            let tmp_name = format!(".nession-{}.tmp", tmp_id);
+            let tmp_name = format!(".nession-{tmp_id}.tmp");
             let tmp = resolved.with_file_name(&tmp_name);
 
             fs::write(&tmp, &data)

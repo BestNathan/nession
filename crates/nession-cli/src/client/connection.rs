@@ -65,7 +65,7 @@ impl ClientConnection {
 
         let (ws_stream, _) = connect_async(server_url)
             .await
-            .with_context(|| format!("Failed to connect to server at {}", server_url))?;
+            .with_context(|| format!("Failed to connect to server at {server_url}"))?;
 
         info!("WebSocket connection established");
 
@@ -107,28 +107,27 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response["msg_type"].as_str().unwrap_or("");
+                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                     if msg_type == "client.auth.response" {
-                        let status = response["payload"]["status"].as_str().unwrap_or("");
-                        let message = response["payload"]["message"].as_str().unwrap_or("");
+                        let status = response.get("payload").and_then(|v| v.get("status")).and_then(|v| v.as_str()).unwrap_or("");
+                        let message = response.get("payload").and_then(|v| v.get("message")).and_then(|v| v.as_str()).unwrap_or("");
 
                         if status == "success" {
                             self.authenticated = true;
                             info!("Authentication successful");
                             Ok(())
                         } else {
-                            anyhow::bail!("Authentication failed: {}", message)
+                            anyhow::bail!("Authentication failed: {message}")
                         }
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.auth.response, got {}",
-                            msg_type
+                            "Unexpected response: expected client.auth.response, got {msg_type}"
                         )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
-                Err(e) => anyhow::bail!("Error receiving auth response: {}", e),
+                Err(e) => anyhow::bail!("Error receiving auth response: {e}"),
             }
         } else {
             anyhow::bail!("Server closed connection during authentication")
@@ -164,21 +163,20 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response["msg_type"].as_str().unwrap_or("");
+                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                     if msg_type == "client.agents.list.response" {
                         let agents: Vec<AgentInfo> =
-                            serde_json::from_value(response["payload"]["agents"].clone())?;
+                            serde_json::from_value(response.get("payload").and_then(|v| v.get("agents")).cloned().unwrap_or(serde_json::Value::Null))?;
                         Ok(agents)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.agents.list.response, got {}",
-                            msg_type
+                            "Unexpected response: expected client.agents.list.response, got {msg_type}"
                         )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
-                Err(e) => anyhow::bail!("Error receiving agents list: {}", e),
+                Err(e) => anyhow::bail!("Error receiving agents list: {e}"),
             }
         } else {
             anyhow::bail!("Server closed connection")
@@ -199,7 +197,9 @@ impl ClientConnection {
 
         let mut payload = json!({});
         if let Some(agent) = agent_id {
-            payload["agent_id"] = json!(agent);
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("agent_id".to_string(), json!(agent));
+            }
         }
 
         let request = json!({
@@ -219,21 +219,20 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response["msg_type"].as_str().unwrap_or("");
+                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                     if msg_type == "client.sessions.list.response" {
                         let sessions: Vec<SessionInfo> =
-                            serde_json::from_value(response["payload"]["sessions"].clone())?;
+                            serde_json::from_value(response.get("payload").and_then(|v| v.get("sessions")).cloned().unwrap_or(serde_json::Value::Null))?;
                         Ok(sessions)
                     } else {
                         anyhow::bail!(
-                            "Unexpected response: expected client.sessions.list.response, got {}",
-                            msg_type
+                            "Unexpected response: expected client.sessions.list.response, got {msg_type}"
                         )
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
-                Err(e) => anyhow::bail!("Error receiving sessions list: {}", e),
+                Err(e) => anyhow::bail!("Error receiving sessions list: {e}"),
             }
         } else {
             anyhow::bail!("Server closed connection")
@@ -278,34 +277,33 @@ impl ClientConnection {
             match msg {
                 Ok(Message::Text(text)) => {
                     let response: serde_json::Value = serde_json::from_str(&text)?;
-                    let msg_type = response["msg_type"].as_str().unwrap_or("");
+                    let msg_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                     if msg_type != "client.session.attach.response" {
                         anyhow::bail!(
-                            "Unexpected response: expected client.session.attach.response, got {}",
-                            msg_type
+                            "Unexpected response: expected client.session.attach.response, got {msg_type}"
                         );
                     }
 
-                    let status = response["payload"]["status"].as_str().unwrap_or("");
+                    let status = response.get("payload").and_then(|v| v.get("status")).and_then(|v| v.as_str()).unwrap_or("");
                     if status != "success" {
-                        let message = response["payload"]["message"]
-                            .as_str()
+                        let message = response.get("payload").and_then(|v| v.get("message"))
+                            .and_then(|v| v.as_str())
                             .unwrap_or("unknown error");
-                        anyhow::bail!("Attach request failed: {}", message);
+                        anyhow::bail!("Attach request failed: {message}");
                     }
 
-                    let mode = response["payload"]["mode"].as_str().unwrap_or("relay");
+                    let mode = response.get("payload").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).unwrap_or("relay");
                     if mode == "relay" {
                         Ok(AttachResponse::Relay)
                     } else {
                         let p2p: P2PAttachInfo =
-                            serde_json::from_value(response["payload"].clone())?;
+                            serde_json::from_value(response.get("payload").cloned().unwrap_or(serde_json::Value::Null))?;
                         Ok(AttachResponse::P2P(p2p))
                     }
                 }
                 Ok(_) => anyhow::bail!("Unexpected message type from server"),
-                Err(e) => anyhow::bail!("Error receiving attach response: {}", e),
+                Err(e) => anyhow::bail!("Error receiving attach response: {e}"),
             }
         } else {
             anyhow::bail!("Server closed connection")
@@ -336,7 +334,7 @@ pub async fn connect_to_agent(
 
     let (ws_stream, _) = connect_async(agent_address)
         .await
-        .with_context(|| format!("Failed to connect to agent at {}", agent_address))?;
+        .with_context(|| format!("Failed to connect to agent at {agent_address}"))?;
 
     info!("Agent WebSocket connection established");
     Ok(ws_stream)
@@ -357,12 +355,12 @@ pub async fn create_session_on_agent(
 ) -> Result<String> {
     use futures_util::StreamExt;
 
-    let url = format!("ws://{}", agent_address);
+    let url = format!("ws://{agent_address}");
     info!("Connecting to agent at {} to create session", url);
 
     let (mut ws_stream, _) = connect_async(&url)
         .await
-        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+        .with_context(|| format!("Failed to connect to agent at {url}"))?;
 
     let msg_id = format!(
         "create_{}",
@@ -392,30 +390,29 @@ pub async fn create_session_on_agent(
         match msg {
             Ok(Message::Text(text)) => {
                 let response: serde_json::Value = serde_json::from_str(&text)?;
-                let resp_type = response["msg_type"].as_str().unwrap_or("");
+                let resp_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                 if resp_type == "ok" {
-                    let name = response["payload"]["name"]
-                        .as_str()
+                    let name = response.get("payload").and_then(|v| v.get("name"))
+                        .and_then(|v| v.as_str())
                         .unwrap_or(session_name)
                         .to_string();
                     info!("Session '{}' created on agent", name);
                     Ok(name)
                 } else if resp_type == "error" {
-                    let code = response["payload"]["code"].as_str().unwrap_or("unknown");
-                    let message = response["payload"]["message"]
-                        .as_str()
+                    let code = response.get("payload").and_then(|v| v.get("code")).and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let message = response.get("payload").and_then(|v| v.get("message"))
+                        .and_then(|v| v.as_str())
                         .unwrap_or("unknown error");
-                    anyhow::bail!("Agent error ({}): {}", code, message)
+                    anyhow::bail!("Agent error ({code}): {message}")
                 } else {
                     anyhow::bail!(
-                        "Unexpected response from agent: expected 'ok' or 'error', got '{}'",
-                        resp_type
+                        "Unexpected response from agent: expected 'ok' or 'error', got '{resp_type}'"
                     )
                 }
             }
             Ok(_) => anyhow::bail!("Unexpected message type from agent"),
-            Err(e) => anyhow::bail!("Error receiving response from agent: {}", e),
+            Err(e) => anyhow::bail!("Error receiving response from agent: {e}"),
         }
     } else {
         anyhow::bail!("Agent closed connection during session creation")
@@ -431,12 +428,12 @@ pub async fn create_session_on_agent(
 pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> Result<String> {
     use futures_util::StreamExt;
 
-    let url = format!("ws://{}", agent_address);
+    let url = format!("ws://{agent_address}");
     info!("Connecting to agent at {} to kill session", url);
 
     let (mut ws_stream, _) = connect_async(&url)
         .await
-        .with_context(|| format!("Failed to connect to agent at {}", url))?;
+        .with_context(|| format!("Failed to connect to agent at {url}"))?;
 
     let msg_id = format!(
         "kill_{}",
@@ -464,30 +461,29 @@ pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> R
         match msg {
             Ok(Message::Text(text)) => {
                 let response: serde_json::Value = serde_json::from_str(&text)?;
-                let resp_type = response["msg_type"].as_str().unwrap_or("");
+                let resp_type = response.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
 
                 if resp_type == "ok" {
-                    let name = response["payload"]["name"]
-                        .as_str()
+                    let name = response.get("payload").and_then(|v| v.get("name"))
+                        .and_then(|v| v.as_str())
                         .unwrap_or(session_name)
                         .to_string();
                     info!("Session '{}' killed on agent", name);
                     Ok(name)
                 } else if resp_type == "error" {
-                    let code = response["payload"]["code"].as_str().unwrap_or("unknown");
-                    let message = response["payload"]["message"]
-                        .as_str()
+                    let code = response.get("payload").and_then(|v| v.get("code")).and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let message = response.get("payload").and_then(|v| v.get("message"))
+                        .and_then(|v| v.as_str())
                         .unwrap_or("unknown error");
-                    anyhow::bail!("Agent error ({}): {}", code, message)
+                    anyhow::bail!("Agent error ({code}): {message}")
                 } else {
                     anyhow::bail!(
-                        "Unexpected response from agent: expected 'ok' or 'error', got '{}'",
-                        resp_type
+                        "Unexpected response from agent: expected 'ok' or 'error', got '{resp_type}'"
                     )
                 }
             }
             Ok(_) => anyhow::bail!("Unexpected message type from agent"),
-            Err(e) => anyhow::bail!("Error receiving response from agent: {}", e),
+            Err(e) => anyhow::bail!("Error receiving response from agent: {e}"),
         }
     } else {
         anyhow::bail!("Agent closed connection during session kill")

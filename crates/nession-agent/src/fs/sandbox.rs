@@ -78,7 +78,7 @@ impl PathSandbox {
                         }
                         Err(inner) => {
                             return Err(anyhow::Error::from(inner))
-                                .with_context(|| format!("failed to resolve path: {}", path))
+                                .with_context(|| format!("failed to resolve path: {path}"))
                         }
                     }
                 }

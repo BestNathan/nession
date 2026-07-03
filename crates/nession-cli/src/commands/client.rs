@@ -64,7 +64,7 @@ pub async fn list_sessions(
     // Display results
     if sessions.is_empty() {
         if let Some(aid) = agent_id {
-            println!("No sessions found for agent '{}'.", aid);
+            println!("No sessions found for agent '{aid}'.");
         } else {
             println!("No sessions found.");
         }
@@ -124,13 +124,12 @@ pub async fn attach_session(
         Some("relay") => "relay",
         Some("p2p") | None => "p2p",
         Some(other) => {
-            anyhow::bail!("Invalid mode '{}'. Use 'p2p' or 'relay'.", other);
+            anyhow::bail!("Invalid mode '{other}'. Use 'p2p' or 'relay'.");
         }
     };
 
     println!(
-        "Requesting to attach to session '{}' (mode: {})...",
-        session_id, preferred_mode
+        "Requesting to attach to session '{session_id}' (mode: {preferred_mode})..."
     );
 
     // Request attach
@@ -166,7 +165,7 @@ pub async fn attach_session(
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs(),
                 payload: ClientAttachPayload {
                     session_name: p2p_info.session_name.clone(),
@@ -230,7 +229,7 @@ pub async fn attach_session(
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs(),
                 payload: ClientAttachPayload {
                     session_name: session_name.to_string(),
@@ -243,7 +242,7 @@ pub async fn attach_session(
             let mut transport = transport;
             transport.send_text(attach_json).await?;
 
-            println!("Attached to session '{}' via relay.", session_name);
+            println!("Attached to session '{session_name}' via relay.");
 
             // Create cancellation channel
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
@@ -310,7 +309,7 @@ pub async fn create_session(
     let agent = agents
         .iter()
         .find(|a| a.agent_id == agent_id)
-        .with_context(|| format!("Agent '{}' not found. Is it registered?", agent_id))?;
+        .with_context(|| format!("Agent '{agent_id}' not found. Is it registered?"))?;
 
     if agent.status != "online" {
         anyhow::bail!(
@@ -322,8 +321,7 @@ pub async fn create_session(
 
     let agent_address = format!("{}:{}", agent.ip_address, agent.port);
     println!(
-        "Creating session '{}' on agent '{}' ({}x{})...",
-        session_name, agent_id, width, height
+        "Creating session '{session_name}' on agent '{agent_id}' ({width}x{height})..."
     );
 
     let created_name = crate::client::connection::create_session_on_agent(
@@ -335,12 +333,11 @@ pub async fn create_session(
     .await
     .with_context(|| {
         format!(
-            "Failed to create session '{}' on agent '{}'",
-            session_name, agent_id
+            "Failed to create session '{session_name}' on agent '{agent_id}'"
         )
     })?;
 
-    println!("Session '{}' created successfully.", created_name);
+    println!("Session '{created_name}' created successfully.");
 
     Ok(())
 }
@@ -360,8 +357,7 @@ pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) 
     // Parse session_id (format: agent_id:session_name)
     let (agent_id, session_name) = session_id.split_once(':').with_context(|| {
         format!(
-            "Invalid session ID '{}'. Expected format: agent_id:session_name",
-            session_id
+            "Invalid session ID '{session_id}'. Expected format: agent_id:session_name"
         )
     })?;
 
@@ -377,12 +373,11 @@ pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) 
     let agent = agents
         .iter()
         .find(|a| a.agent_id == agent_id)
-        .with_context(|| format!("Agent '{}' not found. Is it registered?", agent_id))?;
+        .with_context(|| format!("Agent '{agent_id}' not found. Is it registered?"))?;
 
     let agent_address = format!("{}:{}", agent.ip_address, agent.port);
     println!(
-        "Killing session '{}' on agent '{}'...",
-        session_name, agent_id
+        "Killing session '{session_name}' on agent '{agent_id}'..."
     );
 
     let killed_name =
@@ -390,12 +385,11 @@ pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) 
             .await
             .with_context(|| {
                 format!(
-                    "Failed to kill session '{}' on agent '{}'",
-                    session_name, agent_id
+                    "Failed to kill session '{session_name}' on agent '{agent_id}'"
                 )
             })?;
 
-    println!("Session '{}' killed successfully.", killed_name);
+    println!("Session '{killed_name}' killed successfully.");
 
     Ok(())
 }
@@ -413,18 +407,18 @@ fn format_time_ago(timestamp: &str) -> String {
             return "just now".to_string();
         }
         if secs < 60 {
-            return format!("{}s ago", secs);
+            return format!("{secs}s ago");
         }
         let mins = secs / 60;
         if mins < 60 {
-            return format!("{}m ago", mins);
+            return format!("{mins}m ago");
         }
         let hours = mins / 60;
         if hours < 24 {
-            return format!("{}h ago", hours);
+            return format!("{hours}h ago");
         }
         let days = hours / 24;
-        return format!("{}d ago", days);
+        return format!("{days}d ago");
     }
 
     // Try to parse as unix timestamp (seconds)
@@ -439,18 +433,18 @@ fn format_time_ago(timestamp: &str) -> String {
             return "just now".to_string();
         }
         if elapsed < 60 {
-            return format!("{}s ago", elapsed);
+            return format!("{elapsed}s ago");
         }
         let mins = elapsed / 60;
         if mins < 60 {
-            return format!("{}m ago", mins);
+            return format!("{mins}m ago");
         }
         let hours = mins / 60;
         if hours < 24 {
-            return format!("{}h ago", hours);
+            return format!("{hours}h ago");
         }
         let days = hours / 24;
-        return format!("{}d ago", days);
+        return format!("{days}d ago");
     }
 
     // Fallback: return the original string

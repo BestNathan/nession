@@ -104,7 +104,7 @@ impl CommandBroker {
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             payload,
         };

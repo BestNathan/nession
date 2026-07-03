@@ -41,12 +41,12 @@ impl TmuxManager {
                 let parts: Vec<&str> = line.split('\t').collect();
                 if parts.len() == 6 {
                     Some(SessionInfo {
-                        name: parts[0].to_string(),
-                        created_at: parts[1].parse().ok()?,
-                        window_count: parts[2].parse().ok()?,
-                        attached_clients: parts[3].parse().ok()?,
-                        width: parts[4].parse().ok()?,
-                        height: parts[5].parse().ok()?,
+                        name: parts.first().map(std::string::ToString::to_string).unwrap_or_default(),
+                        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
+                        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
+                        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
+                        width: parts.get(4).and_then(|s| s.parse().ok())?,
+                        height: parts.get(5).and_then(|s| s.parse().ok())?,
                     })
                 } else {
                     None
@@ -81,7 +81,7 @@ impl TmuxManager {
             .await?;
 
         if !status.success() {
-            anyhow::bail!("Failed to create session: {}", name);
+            anyhow::bail!("Failed to create session: {name}");
         }
 
         Ok(())
@@ -94,7 +94,7 @@ impl TmuxManager {
             .await?;
 
         if !status.success() {
-            anyhow::bail!("Failed to kill session: {}", name);
+            anyhow::bail!("Failed to kill session: {name}");
         }
 
         Ok(())
@@ -107,7 +107,7 @@ impl TmuxManager {
             .await?;
 
         if !status.success() {
-            anyhow::bail!("Failed to send keys to session: {}", session_name);
+            anyhow::bail!("Failed to send keys to session: {session_name}");
         }
 
         Ok(())

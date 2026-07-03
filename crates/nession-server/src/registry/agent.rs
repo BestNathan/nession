@@ -73,7 +73,7 @@ impl AgentRegistry {
 
         for (agent_id, agent) in agents.iter_mut() {
             if agent.status == AgentStatus::Online {
-                let elapsed = (now - agent.last_heartbeat).num_seconds() as u64;
+                let elapsed = (now - agent.last_heartbeat).num_seconds().unsigned_abs();
                 if elapsed > self.heartbeat_timeout_secs {
                     agent.status = AgentStatus::Offline;
                     offline.push(agent_id.clone());

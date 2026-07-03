@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
 
     // 8. Wait for shutdown signal (Ctrl+C or SIGTERM)
     info!("Agent is running. Press Ctrl+C to stop.");
-    wait_for_shutdown().await;
+    wait_for_shutdown().await?;
     info!("Shutdown signal received, stopping components...");
 
     // 9. Graceful shutdown of all components
@@ -213,9 +213,9 @@ fn load_config() -> Result<AgentConfig> {
 
     if Path::new(&config_path).exists() {
         let config_str = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("failed to read config file: {}", config_path))?;
+            .with_context(|| format!("failed to read config file: {config_path}"))?;
         let config: AgentConfig = toml::from_str(&config_str)
-            .with_context(|| format!("failed to parse config file: {}", config_path))?;
+            .with_context(|| format!("failed to parse config file: {config_path}"))?;
         Ok(config)
     } else {
         info!("No config file found at '{}', using defaults", config_path);
@@ -241,14 +241,14 @@ fn load_tls(
 }
 
 /// Wait for a shutdown signal (SIGINT/SIGTERM).
-async fn wait_for_shutdown() {
+async fn wait_for_shutdown() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
         let mut sigint =
-            signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
+            signal(SignalKind::interrupt()).context("failed to register SIGINT handler")?;
         let mut sigterm =
-            signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+            signal(SignalKind::terminate()).context("failed to register SIGTERM handler")?;
         tokio::select! {
             _ = sigint.recv() => {
                 info!("Received SIGINT");
@@ -263,9 +263,10 @@ async fn wait_for_shutdown() {
     {
         tokio::signal::ctrl_c()
             .await
-            .expect("failed to listen for ctrl+c");
+            .context("failed to listen for ctrl+c")?;
         info!("Received Ctrl+C");
     }
+    Ok(())
 }
 
 /// Get the system hostname.

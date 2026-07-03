@@ -67,6 +67,7 @@ fn load_config() -> anyhow::Result<ServerConfig> {
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
             db_path: nession_common::paths::server_db_path()
+                .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
                 .to_string_lossy()
                 .into_owned(),
         })

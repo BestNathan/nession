@@ -130,6 +130,15 @@ cargo run -p nession-server    # Start server (port 19090 ws, 10080 http)
 cargo run -p nession-agent     # Start agent (needs config)
 ```
 
+**Rust linting:**
+```bash
+cargo fmt --all -- --check      # Formatting check
+cargo clippy -- -D warnings     # Lint — MUST pass with 0 warnings
+```
+- `#[allow(clippy::*)]` is **forbidden**. Every clippy lint must be fixed properly, not silenced.
+- `clippy.toml` contains lint thresholds (`cognitive-complexity-threshold = 25`, `too-many-lines-threshold = 150`).
+- Workspace lints in `Cargo.toml` (`[workspace.lints.clippy]`) apply to all crates via `[lints] workspace = true`.
+
 **Web UI:** work inside `web/`.
 ```bash
 cd web

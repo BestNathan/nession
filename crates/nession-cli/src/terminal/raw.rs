@@ -235,10 +235,10 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis() as u64,
+            .as_millis().try_into().unwrap_or(0),
         payload,
     };
-    serde_json::to_string(&msg).expect("terminal.input message serialization cannot fail")
+    serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
 }
 
 /// Build a `terminal.resize` message.
@@ -254,10 +254,10 @@ pub fn build_terminal_resize_message(session_name: &str, width: u16, height: u16
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis() as u64,
+            .as_millis().try_into().unwrap_or(0),
         payload,
     };
-    serde_json::to_string(&msg).expect("terminal.resize message serialization cannot fail")
+    serde_json::to_string(&msg).unwrap_or_else(|_| String::new())
 }
 
 /// Try to extract `terminal.output` data from a JSON message. Returns `None`

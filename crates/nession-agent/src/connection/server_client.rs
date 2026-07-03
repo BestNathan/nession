@@ -500,10 +500,10 @@ impl ServerClient {
                 debug!("Heartbeat acknowledged by server");
             }
             "server.session.create" => {
-                let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
-                let name = msg.payload["name"].as_str().unwrap_or("").to_string();
-                let width = msg.payload["width"].as_u64().unwrap_or(80) as u16;
-                let height = msg.payload["height"].as_u64().unwrap_or(24) as u16;
+                let request_id = msg.payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let width = u16::try_from(msg.payload.get("width").and_then(serde_json::Value::as_u64).unwrap_or(80)).unwrap_or(80);
+                let height = u16::try_from(msg.payload.get("height").and_then(serde_json::Value::as_u64).unwrap_or(24)).unwrap_or(24);
 
                 info!(
                     "Server requested session create: name={}, width={}, height={}",
@@ -522,7 +522,7 @@ impl ServerClient {
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp() as u64,
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                     "payload": {
                         "request_id": request_id,
                         "command": "session.create",
@@ -534,8 +534,8 @@ impl ServerClient {
                 sink.send(WsMessage::Text(response.to_string())).await?;
             }
             "server.session.kill" => {
-                let request_id = msg.payload["request_id"].as_str().unwrap_or("").to_string();
-                let name = msg.payload["name"].as_str().unwrap_or("").to_string();
+                let request_id = msg.payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
                 info!("Server requested session kill: name={}", name);
 
@@ -547,7 +547,7 @@ impl ServerClient {
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
-                    "timestamp": chrono::Utc::now().timestamp() as u64,
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                     "payload": {
                         "request_id": request_id,
                         "command": "session.kill",
@@ -582,7 +582,7 @@ fn new_message<P: Serialize>(msg_type: &str, payload: P) -> ProtocolMessage<P> {
     Message {
         msg_type: msg_type.to_string(),
         id: uuid::Uuid::new_v4().to_string(),
-        timestamp: chrono::Utc::now().timestamp() as u64,
+        timestamp: chrono::Utc::now().timestamp().unsigned_abs(),
         payload,
     }
 }
