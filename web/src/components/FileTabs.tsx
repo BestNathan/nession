@@ -48,7 +48,7 @@ export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
 
   const handleCloseFile = useCallback((id: string) => {
     if (dirtyFiles.has(id)) {
-      if (!window.confirm('Unsaved changes will be lost. Close anyway?')) return;
+      if (!window.confirm('Unsaved changes will be lost. Close anyway?')) {return;}
     }
     setOpenFiles((prev) => {
       const filtered = prev.filter((f) => f.id !== id);
@@ -67,8 +67,8 @@ export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
   const handleDirtyChange = useCallback((id: string, dirty: boolean) => {
     setDirtyFiles((prev) => {
       const next = new Set(prev);
-      if (dirty) next.add(id);
-      else next.delete(id);
+      if (dirty) {next.add(id);}
+      else {next.delete(id);}
       return next;
     });
   }, []);

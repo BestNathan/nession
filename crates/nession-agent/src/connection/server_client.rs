@@ -113,6 +113,9 @@ pub struct ServerClientHandle {
     /// Set by the supervisor after a reconnection so that the
     /// SessionWatcher can force a full session re-sync to the server.
     sync_needed: Arc<AtomicBool>,
+    /// Set by the supervisor to indicate whether the connection is currently live.
+    /// The SessionWatcher checks this to skip sending updates while disconnected.
+    connected: Arc<AtomicBool>,
 }
 
 impl ServerClientHandle {
@@ -125,6 +128,13 @@ impl ServerClientHandle {
     /// session re-sync is required (server-side registry may be stale).
     pub fn take_sync_needed(&self) -> bool {
         self.sync_needed.swap(false, Ordering::SeqCst)
+    }
+
+    /// Returns `true` when the supervisor has an active connection to the server.
+    /// The SessionWatcher uses this to skip sending updates while disconnected,
+    /// avoiding accumulation of stale messages in the outbox channel.
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::SeqCst)
     }
 
     /// Queue a heartbeat message for delivery to the server.
@@ -244,18 +254,20 @@ impl ServerClient {
         // registration. Using a bounded channel of 1 keeps it simple.
         let (interval_tx, mut interval_rx) = mpsc::channel::<Option<u64>>(1);
         let sync_needed = Arc::new(AtomicBool::new(false));
+        let connected = Arc::new(AtomicBool::new(false));
 
         let handle = ServerClientHandle {
             outbox: outbox_tx,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
             sync_needed: sync_needed.clone(),
+            connected: connected.clone(),
         };
 
         // Spawn the supervisor; it owns the reconnect loop and never returns
         // until shutdown.
         tokio::spawn(async move {
-            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed)
+            self.supervise(outbox_rx, shutdown_rx, interval_tx, sync_needed, connected)
                 .await;
         });
 
@@ -271,6 +283,7 @@ impl ServerClient {
         mut shutdown_rx: mpsc::Receiver<()>,
         interval_tx: mpsc::Sender<Option<u64>>,
         sync_needed: Arc<AtomicBool>,
+        connected: Arc<AtomicBool>,
     ) {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY;
         let mut reported_interval = false;
@@ -286,6 +299,7 @@ impl ServerClient {
                 Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
                     reconnect_delay = INITIAL_RECONNECT_DELAY;
+                    connected.store(true, Ordering::SeqCst);
 
                     // Notify the SessionWatcher that a full re-sync is needed
                     // because the server-side session registry may be stale.
@@ -302,6 +316,9 @@ impl ServerClient {
                     let outcome = self
                         .run_connection(sink, stream, &mut outbox_rx, &mut shutdown_rx)
                         .await;
+                    // Connection dropped — mark as disconnected so the
+                    // SessionWatcher pauses sending updates until reconnected.
+                    connected.store(false, Ordering::SeqCst);
                     match outcome {
                         ConnectionOutcome::Shutdown => {
                             info!("Server client shut down");

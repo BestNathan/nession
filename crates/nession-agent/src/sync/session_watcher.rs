@@ -91,6 +91,14 @@ impl SessionWatcher {
 
     /// Poll tmux for the current session list and send updates for any changes.
     async fn poll_and_sync(&mut self) -> Result<()> {
+        // Skip polling while disconnected — updates would accumulate in the
+        // outbox channel and become stale. The full re-sync on reconnect
+        // (via take_sync_needed below) will catch up.
+        if !self.handle.is_connected() {
+            debug!("Skipping session poll — not connected to server");
+            return Ok(());
+        }
+
         // If the supervisor reconnected, the server-side session registry was
         // wiped. Reset our previous state so every session is re-synced.
         if self.handle.take_sync_needed() {

@@ -38,24 +38,24 @@ export interface FileBrowserProps {
 const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
 
 function formatSize(bytes: number): string {
-  if (bytes === 0) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes === 0) {return '';}
+  if (bytes < 1024) {return `${bytes} B`;}
+  if (bytes < 1024 * 1024) {return `${(bytes / 1024).toFixed(1)} KB`;}
+  if (bytes < 1024 * 1024 * 1024) {return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;}
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function formatModified(ts: number): string {
-  if (!ts) return '';
+  if (!ts) {return '';}
   const now = Date.now();
   const diff = now - ts * 1000;
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) {return 'just now';}
+  if (mins < 60) {return `${mins}m ago`;}
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) {return `${hours}h ago`;}
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
+  if (days < 30) {return `${days}d ago`;}
   return new Date(ts * 1000).toLocaleDateString();
 }
 
@@ -113,7 +113,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
   const handleCreateFile = async () => {
     const name = newName.trim();
-    if (!name) return;
+    if (!name) {return;}
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
     try {
       await fileOps.writeFile(fullPath, '');
@@ -128,7 +128,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
   const handleCreateFolder = async () => {
     const name = newName.trim();
-    if (!name) return;
+    if (!name) {return;}
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
     try {
       await fileOps.createDir(fullPath);
@@ -143,7 +143,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {return;}
     const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name;
     try {
       await fileOps.uploadFile(fullPath, file);
@@ -166,7 +166,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       toast.error('Name cannot be empty');
       return;
     }
-    if (!renamingPath) return;
+    if (!renamingPath) {return;}
 
     const oldName = renamingPath.substring(renamingPath.lastIndexOf('/') + 1);
     if (name === oldName) {
@@ -197,7 +197,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
   const handleDelete = async (entry: FileEntry) => {
     const label = entry.is_dir ? `directory "${entry.name}"` : `"${entry.name}"`;
-    if (!window.confirm(`Delete ${label}?\n\nThis action cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${label}?\n\nThis action cannot be undone.`)) {return;}
 
     try {
       await fileOps.deleteFile(entry.path);
@@ -224,11 +224,11 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const sortedEntries = [...entries].sort((a, b) => {
-    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    if (a.is_dir !== b.is_dir) {return a.is_dir ? -1 : 1;}
     const dir = sortDir === 'asc' ? 1 : -1;
-    if (sortKey === 'name') return dir * a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-    if (sortKey === 'size') return dir * (a.size - b.size);
-    if (sortKey === 'modified') return dir * (a.modified - b.modified);
+    if (sortKey === 'name') {return dir * a.name.toLowerCase().localeCompare(b.name.toLowerCase());}
+    if (sortKey === 'size') {return dir * (a.size - b.size);}
+    if (sortKey === 'modified') {return dir * (a.modified - b.modified);}
     return 0;
   });
 
@@ -263,7 +263,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (showNewFile) handleCreateFile(); else handleCreateFolder();
+                if (showNewFile) {handleCreateFile();} else {handleCreateFolder();}
               }
               if (e.key === 'Escape') { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }
             }}
@@ -332,8 +332,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRenameSubmit();
-                    if (e.key === 'Escape') handleRenameCancel();
+                    if (e.key === 'Enter') {handleRenameSubmit();}
+                    if (e.key === 'Escape') {handleRenameCancel();}
                   }}
                   className="h-6 text-xs flex-1"
                 />

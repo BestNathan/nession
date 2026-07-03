@@ -241,9 +241,8 @@ async fn integration_terminal_io_flow() {
 // ---------------------------------------------------------------------------
 
 use nession_agent::server::websocket::{
-    WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload,
-    WebSessionCreateResponse, WebSessionKillPayload, WebSessionKillResponse,
-    WebSessionsListResponse,
+    WebAgentsListResponse, WebAttachInfo, WebSessionCreatePayload, WebSessionCreateResponse,
+    WebSessionKillPayload, WebSessionKillResponse, WebSessionsListResponse,
 };
 
 #[tokio::test]

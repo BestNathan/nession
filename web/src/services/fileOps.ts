@@ -26,14 +26,14 @@ function generateId(): string {
 function base64Encode(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) {binary += String.fromCharCode(bytes[i]);}
   return btoa(binary);
 }
 
 function base64Decode(b64: string): string {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i++) {bytes[i] = binary.charCodeAt(i);}
   return new TextDecoder().decode(bytes);
 }
 

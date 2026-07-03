@@ -196,6 +196,13 @@ rtk proxy not installed. Without it, use raw commands directly (e.g., `git statu
 ### shadcn `cn` import fails
 Tailwind/shadcn not initialized. Run from `web/`: `npx shadcn@latest init` then `npm install`.
 
+### ESLint fails with "Cannot find package 'typescript-eslint'"
+The ESLint flat config (`eslint.config.js`) requires the `typescript-eslint` umbrella package. Run:
+```bash
+cd web && npm install --save-dev typescript-eslint
+```
+This is already in `web/package.json` — only needed if working from a stale checkout or partial install.
+
 ### Vite dev server won't start
 Check port 13000 not in use: `lsof -i :13000`. Check `web/vite.config.ts` for correct proxy target.
 

@@ -35,7 +35,7 @@ export function SidePanel({
     const startWidth = width;
 
     const onMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
+      if (!isResizing.current) {return;}
       const delta = e.clientX - startX;
       const newWidth = Math.min(maxWidth, Math.max(minWidth, startWidth + delta));
       setWidth(newWidth);

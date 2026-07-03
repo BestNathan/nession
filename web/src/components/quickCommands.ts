@@ -34,9 +34,9 @@ export const PRESETS: QuickCommand[] = [
 export function loadUserCommands(): QuickCommand[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {return [];}
     // Keep only well-formed entries.
     return parsed.filter(
       (c): c is QuickCommand =>

@@ -36,7 +36,7 @@ export function KillConfirmDialog({
     }
   }, [isOpen]);
 
-  if (!session) return null;
+  if (!session) {return null;}
 
   const handleConfirm = async () => {
     setLoading(true);

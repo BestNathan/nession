@@ -137,6 +137,8 @@ npm install            # Install deps (needed once, after any package.json chang
 npm run dev            # Vite dev server on :13000, proxies /ws → localhost:19090
 npm run build          # Production build → web/dist/
 npm run lint           # ESLint check
+npm test                # Vitest (unit + component tests)
+npm run coverage        # Vitest with coverage (≥ 80% threshold)
 npx tsc --noEmit       # TypeScript check (no output files)
 ```
 

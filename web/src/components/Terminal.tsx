@@ -1,11 +1,11 @@
-import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useState } from 'react';
+import { Terminal as XTerm, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import type { IDisposable } from '@xterm/xterm';
 import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
 import type { WebSocketService } from '../services/websocket';
-import type { P2PConnection } from '../hooks/useP2PConnection';
+import type { ConnectionState, P2PConnection } from '../hooks/useP2PConnection';
+import type { ConnectionStatus } from '../types';
 
 // Simple unique ID generator for agent protocol messages
 let _msgCounter = 0;
@@ -17,7 +17,7 @@ function generateId(): string {
 function encodeB64(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) {binary += String.fromCharCode(bytes[i]);}
   return btoa(binary);
 }
 
@@ -25,9 +25,11 @@ function encodeB64(s: string): string {
 function decodeB64(b64: string): string {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i++) {bytes[i] = binary.charCodeAt(i);}
   return new TextDecoder().decode(bytes);
 }
+
+type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
 
 /** Imperative methods exposed by the Terminal component via ref. */
 export interface TerminalHandle {
@@ -49,10 +51,12 @@ export interface TerminalProps {
   p2pConnection?: P2PConnection | null;
   /** Pre-authenticated server connection for relay mode */
   serverConnection?: WebSocketService;
-  /** Called when the WebSocket disconnects unexpectedly */
+  /** Called when the WebSocket disconnects after exhausting all retries */
   onDisconnect?: () => void;
   /** Called when a connection or runtime error occurs */
   onError?: (error: Error) => void;
+  /** Called when the reconnection banner state changes (so parent can disable toolbar) */
+  onBannerChange?: (blocked: boolean) => void;
 }
 
 /**
@@ -61,6 +65,10 @@ export interface TerminalProps {
  * Connects to either an agent directly (P2P mode) or through the server
  * as a relay (relay mode), and bridges keyboard input / display output
  * between xterm.js and the remote tmux session over WebSocket.
+ *
+ * When the connection drops unexpectedly, the terminal shows a
+ * "Reconnecting…" banner and automatically attempts to restore the
+ * link without destroying the xterm instance or its scrollback.
  */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
@@ -71,6 +79,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     serverConnection,
     onDisconnect,
     onError,
+    onBannerChange,
   },
   ref,
 ) {
@@ -93,20 +102,34 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Tracks whether we have sent client.attach — prevents duplicate sends on
   // repeated connectionState == 'connected' observations.
   const attachSentRef = useRef(false);
+  // Tracks whether we were ever successfully connected (to distinguish
+  // initial connection failures from reconnection drops).
+  const wasConnectedRef = useRef(false);
+
+  // Banner state: 'none' | 'reconnecting' | 'failed'
+  const [banner, setBanner] = useState<ReconnectBanner>('none');
+  // Reconnect attempt count for display in the banner.
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+
+  // Track whether we're in a state where input should be blocked.
+  const isBlocked = banner !== 'none';
 
   useImperativeHandle(
     ref,
     () => ({
       sendText: (text: string) => {
-        sendDataRef.current?.(text);
+        if (!isBlocked) {
+          sendDataRef.current?.(text);
+        }
       },
     }),
-    [],
+    [isBlocked],
   );
   // Refs to callback props avoid re-running the effect when the caller
   // passes a new inline arrow function on every render.
   const onDisconnectRef = useRef(onDisconnect);
   const onErrorRef = useRef(onError);
+  const onBannerChangeRef = useRef(onBannerChange);
 
   // Keep callback refs in sync without triggering the effect below.
   useEffect(() => {
@@ -116,6 +139,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    onBannerChangeRef.current = onBannerChange;
+  }, [onBannerChange]);
+
+  // Notify parent when banner/blocked state changes.
+  useEffect(() => {
+    onBannerChangeRef.current?.(banner !== 'none');
+  }, [banner]);
 
   const reportError = useCallback((err: Error) => {
     console.error('Terminal error:', err);
@@ -131,11 +163,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // would be no handler to receive the message.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (mode !== 'p2p' || !p2pConnection) return;
+    if (mode !== 'p2p' || !p2pConnection) {return;}
 
     const unsub = p2pConnection.onMessage((msg) => {
       const term = termRef.current;
-      if (!term) return;
+      if (!term) {return;}
 
       // Binary data (synthetic __binary__ message from the hook)
       if (msg.msg_type === '__binary__') {
@@ -156,7 +188,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         case 'error':
           // Ignore errors from keepalive pings (agent doesn't
           // recognise the msg_type and sends back an error).
-          if (msg.id?.startsWith('ka-')) break;
+          if (msg.id?.startsWith('ka-')) {break;}
           reportError(new Error(((msg.payload as Record<string, unknown>)?.message as string) || 'Remote error'));
           break;
         case 'keepalive.pong':
@@ -172,6 +204,44 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [mode, p2pConnection, reportError]);
 
   // ---------------------------------------------------------------------------
+  // Attach helper — sends client.attach and triggers a prompt redraw.
+  // Used for both initial connection and reconnection.
+  // ---------------------------------------------------------------------------
+  const doAttach = useCallback((term: XTerm, fitAddon: FitAddon, conn: P2PConnection, name: string) => {
+    console.log('[Terminal] Sending client.attach');
+    conn.sendMessage({
+      msg_type: 'client.attach',
+      id: generateId(),
+      timestamp: Math.floor(Date.now() / 1000),
+      payload: {
+        session_name: name,
+        width: term.cols,
+        height: term.rows,
+      },
+    });
+
+    // Refit terminal after connection is established.
+    setTimeout(() => {
+      try {
+        fitAddon.fit();
+        console.log('[Terminal] Refit terminal:', term.cols, 'x', term.rows);
+      } catch {
+        // Container may still be zero-sized in edge cases – ignore.
+      }
+    }, 100);
+
+    // Trigger a prompt redraw from the remote shell.
+    const encoder = new TextEncoder();
+    const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
+    conn.sendMessage({
+      msg_type: 'terminal.input',
+      id: generateId(),
+      timestamp: Math.floor(Date.now() / 1000),
+      payload: { session_name: name, data: b64 },
+    });
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // P2P connection-state watcher
   //
   // Runs separately from the main terminal effect because connectionState
@@ -179,69 +249,99 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   //
   // Responsibilities:
   //   1. Send client.attach when the P2P WebSocket becomes connected.
-  //   2. Trigger onDisconnect when the connection drops after being attached.
-  //   3. Report an error when the connection fails before ever attaching.
+  //   2. Show/hide reconnection banner when connection drops/restores.
+  //   3. Trigger onDisconnect after max retries exhausted.
   // ---------------------------------------------------------------------------
-  // Snapshot connection state — depends on the primitive, not the object reference.
-  const p2pState = p2pConnection?.connectionState;
+  const p2pState: ConnectionState | undefined = p2pConnection?.connectionState;
+  const p2pReconnectAttempt = p2pConnection?.reconnectAttempt ?? 0;
 
   useEffect(() => {
     const conn = p2pConnRef.current;
-    if (!conn || mode !== 'p2p') return;
+    if (!conn || mode !== 'p2p') {return;}
 
-    // Send client.attach when we become connected.
-    if (p2pState === 'connected' && !attachSentRef.current) {
-      attachSentRef.current = true;
-
+    // Send client.attach when we become connected (initial or reconnected).
+    if (p2pState === 'connected') {
       const term = termRef.current;
-      if (!term) return;
+      const fitAddon = fitAddonRef.current;
+      if (!term || !fitAddon) {return;}
 
-      console.log('[Terminal] P2P connected, sending client.attach');
-      conn.sendMessage({
-        msg_type: 'client.attach',
-        id: generateId(),
-        timestamp: Math.floor(Date.now() / 1000),
-        payload: {
-          session_name: sessionName,
-          width: term.cols,
-          height: term.rows,
-        },
-      });
+      if (!attachSentRef.current) {
+        attachSentRef.current = true;
+        wasConnectedRef.current = true;
+        doAttach(term, fitAddon, conn, sessionName);
+      }
 
-      // Refit terminal after connection is established.
-      setTimeout(() => {
-        if (fitAddonRef.current && termRef.current) {
-          try {
-            fitAddonRef.current.fit();
-            console.log('[Terminal] Refit terminal:', termRef.current.cols, 'x', termRef.current.rows);
-          } catch {
-            // Container may still be zero-sized in edge cases – ignore.
-          }
-        }
-      }, 100);
-
-      // Trigger a prompt redraw from the remote shell.
-      const encoder = new TextEncoder();
-      const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
-      conn.sendMessage({
-        msg_type: 'terminal.input',
-        id: generateId(),
-        timestamp: Math.floor(Date.now() / 1000),
-        payload: { session_name: sessionName, data: b64 },
-      });
+      // Clear any banner on successful (re)connection.
+      setBanner('none');
     }
 
-    // Call onDisconnect when the connection drops after having been attached.
-    if (p2pState === 'disconnected' && attachSentRef.current) {
-      console.log('[Terminal] P2P connection lost');
-      onDisconnectRef.current?.();
+    // Show reconnecting banner when connection drops after having been attached.
+    if (p2pState === 'reconnecting') {
+      setBanner('reconnecting');
+      setReconnectAttempt(p2pReconnectAttempt);
+      // Keep attachSentRef as true so we don't re-send on reconnect.
+      // The actual re-attach happens in the 'connected' branch above.
+      // But we need to re-send client.attach on reconnect, so reset the flag.
       attachSentRef.current = false;
     }
-  }, [p2pState, mode, sessionName]);
+
+    // When disconnected after reconnection attempts are exhausted.
+    if (p2pState === 'disconnected') {
+      if (wasConnectedRef.current && banner === 'reconnecting') {
+        // We were reconnecting and now disconnected — retries exhausted.
+        setBanner('failed');
+        attachSentRef.current = false;
+
+        // Show failure banner for 3s then navigate away.
+        setTimeout(() => {
+          onDisconnectRef.current?.();
+        }, 3000);
+      } else if (attachSentRef.current && banner === 'none') {
+        // Direct disconnect without reconnection (e.g. agent killed, no retries left).
+        // This can happen when the hook's maxReconnectAttempts is set to 0.
+        onDisconnectRef.current?.();
+        attachSentRef.current = false;
+      }
+    }
+  }, [p2pState, p2pReconnectAttempt, mode, sessionName, doAttach, banner]);
+
+  // ---------------------------------------------------------------------------
+  // Relay mode: subscribe to server connection changes for reconnection.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (mode !== 'relay' || !serverConnection) {return;}
+
+    const unsub = serverConnection.onConnectionChange((status: ConnectionStatus) => {
+      if (status === 'disconnected' || status === 'connecting') {
+        // Server connection dropped — show reconnecting banner.
+        if (attachSentRef.current) {
+          setBanner('reconnecting');
+        }
+      } else if (status === 'authenticated') {
+        // Server reconnected — re-attach to the session.
+        if (attachSentRef.current) {
+          setBanner('none');
+          console.log('[Terminal] Relay reconnected, re-attaching to session:', sessionId);
+
+          serverConnection.requestAttach(sessionId, 'relay').then((attachInfo) => {
+            // Re-subscribe to terminal output for this session.
+            // The existing effect handles terminal.input forwarding;
+            // we just need the output subscription re-established.
+            console.log('[Terminal] Relay re-attach response:', attachInfo.mode);
+          }).catch((err) => {
+            console.error('[Terminal] Relay re-attach failed:', err);
+            reportError(err instanceof Error ? err : new Error(String(err)));
+          });
+        }
+      }
+    });
+
+    return unsub;
+  }, [mode, serverConnection, sessionId, reportError]);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {return;}
 
     // ---------------------------------------------------------------------------
     // 1. Create xterm.js Terminal instance with dark theme
@@ -317,11 +417,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const handleWheel = (e: WheelEvent) => {
       const buffer = term.buffer.active;
       // Only intercept when there is scrollback content available.
-      if (buffer.length <= term.rows) return;
+      if (buffer.length <= term.rows) {return;}
       e.preventDefault();
       e.stopPropagation();
       const delta = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-      if (delta !== 0) term.scrollLines(delta);
+      if (delta !== 0) {term.scrollLines(delta);}
     };
     // xterm.js attaches its own wheel listener to the textarea inside the
     // terminal element, so we need useCapture to intercept before xterm.
@@ -330,12 +430,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     /** Send the current terminal dimensions to the remote end. */
     const sendResize = () => {
-      if (!active) return;
+      if (!active) {return;}
       const { cols, rows } = term;
       try {
         if (mode === 'p2p') {
           const conn = p2pConnRef.current;
-          if (conn) {
+          if (conn && conn.connectionState === 'connected') {
             conn.sendMessage({
               msg_type: 'terminal.resize',
               id: generateId(),
@@ -355,13 +455,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
      * Actually send raw text to the remote session.
      * P2P: terminal.input with base64 data + session_name.
      * Relay: serverConnection.sendTerminalInput(sessionId, data).
-     * No-op if the connection is not open.
+     * No-op if the connection is not open or input is blocked.
      */
     const doSendData = (data: string) => {
+      // Block input while reconnecting.
+      if (isBlockedRef.current) {return;}
       try {
         if (mode === 'p2p') {
           const conn = p2pConnRef.current;
-          if (conn) {
+          if (conn && conn.connectionState === 'connected') {
             conn.sendMessage({
               msg_type: 'terminal.input',
               id: generateId(),
@@ -394,7 +496,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     const sendMouseData = throttle(
       (data: string) => {
-        if (active) doSendData(data);
+        if (active) {doSendData(data);}
       },
       MOUSE_THROTTLE_MS,
       { leading: true, trailing: true },
@@ -408,7 +510,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
      * escape sequences are sent immediately with zero added latency.
      */
     const sendData = (data: string) => {
-      if (!active) return;
+      if (!active) {return;}
       if (isMouseEvent(data)) {
         sendMouseData(data);
       } else {
@@ -426,7 +528,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // The first mount's cleanup closes the WebSocket before it can connect.
     // Use a short delay to ensure we're in the "real" mount.
     mountTimer = setTimeout(() => {
-      if (!active) return; // cleanup already ran, don't connect
+      if (!active) {return;} // cleanup already ran, don't connect
 
     if (mode === 'p2p') {
       const conn = p2pConnRef.current;
@@ -478,8 +580,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Forward terminal resize events, debounced to 150ms to avoid flooding
       // the server during rapid window resizes or drag operations.
       relayResizeDisposable = term.onResize(({ cols, rows }) => {
-        if (!active) return;
-        if (resizeTimer) clearTimeout(resizeTimer);
+        if (!active) {return;}
+        if (resizeTimer) {clearTimeout(resizeTimer);}
         resizeTimer = setTimeout(() => {
           try {
             if (serverConnection?.isConnected()) {
@@ -490,6 +592,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           }
         }, 150);
       });
+
+      // Mark as attached so relay reconnection logic knows to re-attach.
+      attachSentRef.current = true;
+      wasConnectedRef.current = true;
 
       // Send initial dimensions now that the terminal is open.
       sendResize();
@@ -511,9 +617,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // 4. Window resize handling (both modes)
     // ---------------------------------------------------------------------------
     const handleWindowResize = () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
+      if (resizeTimer) {clearTimeout(resizeTimer);}
       resizeTimer = setTimeout(() => {
-        if (!active) return;
+        if (!active) {return;}
         try {
           fitAddon.fit();
           sendResize();
@@ -536,6 +642,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       sendDataRef.current = null;
       clearTimeout(mountTimer);
       attachSentRef.current = false;
+      wasConnectedRef.current = false;
 
       window.removeEventListener('resize', handleWindowResize);
 
@@ -572,8 +679,37 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, sessionName, mode, serverConnection]);
 
+  // Derive isBlocked from current banner state (reactive, not captured in closure).
+  const isCurrentlyBlocked = banner !== 'none';
+  // Re-derive sendDataRef when block state changes so doSendData can gate on it.
+  // We use a ref to avoid re-creating the entire effect.
+  const isBlockedRef = useRef(isCurrentlyBlocked);
+  isBlockedRef.current = isCurrentlyBlocked;
+
   return (
-    <div className="flex-1 min-w-0 h-full">
+    <div className="flex-1 min-w-0 h-full relative">
+      {/* Reconnection banner overlay */}
+      {banner !== 'none' && (
+        <div
+          className={
+            banner === 'reconnecting'
+              ? 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-yellow-600/90 text-yellow-50'
+              : 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-red-600/90 text-red-50'
+          }
+        >
+          {banner === 'reconnecting' ? (
+            <>
+              <span className="inline-block animate-spin">⚡</span>
+              Reconnecting… (attempt {reconnectAttempt}/10)
+            </>
+          ) : (
+            <>
+              <span>⚠</span>
+              Connection lost. Please reload.
+            </>
+          )}
+        </div>
+      )}
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );

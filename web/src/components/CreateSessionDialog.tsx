@@ -56,7 +56,7 @@ export function CreateSessionDialog({
   }, [isOpen, preselectedAgentId, onlineAgents]);
 
   const validateName = (name: string): string | null => {
-    if (!name.trim()) return 'Session name is required';
+    if (!name.trim()) {return 'Session name is required';}
     if (!/^[a-zA-Z0-9_\-.]+$/.test(name.trim())) {
       return 'Only letters, digits, underscores, hyphens, and dots allowed';
     }

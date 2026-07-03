@@ -5,7 +5,7 @@ use tokio_tungstenite::accept_async;
 use tracing::{error, info};
 
 use super::handler::{ConnectionHandler, HandlerAction};
-use crate::registry::{AgentRegistry, SessionRegistry};
+use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
 
@@ -54,8 +54,11 @@ impl WebSocketServer {
 
         // Background sweeper: periodically mark agents that have missed their
         // heartbeat window as offline so clients stop targeting dead agents.
+        // Sessions for offline agents are cleaned after a 30s grace period
+        // to allow for agent reconnection.
         {
             let agent_registry = Arc::clone(&self.agent_registry);
+            let session_registry = Arc::clone(&self.session_registry);
             let command_broker = Arc::clone(&self.command_broker);
             // Sweep at the heartbeat cadence (min 1s) so detection latency stays
             // close to the configured timeout.
@@ -69,6 +72,26 @@ impl WebSocketServer {
                     for agent_id in offline {
                         info!("Agent {} marked offline (heartbeat timeout)", agent_id);
                         command_broker.unregister_agent(&agent_id).await;
+
+                        // Schedule session cleanup after 30s grace period.
+                        // If the agent reconnects before the grace period
+                        // expires, its sessions are preserved.
+                        let session_registry = Arc::clone(&session_registry);
+                        let agent_registry = Arc::clone(&agent_registry);
+                        let agent_id_clone = agent_id.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                            // Only clean if agent is still offline after grace period.
+                            if let Some(agent) = agent_registry.get(&agent_id_clone).await {
+                                if agent.status == AgentStatus::Offline {
+                                    info!(
+                                        "Cleaning sessions for offline agent {} (grace period expired)",
+                                        agent_id_clone
+                                    );
+                                    session_registry.remove_by_agent(&agent_id_clone).await;
+                                }
+                            }
+                        });
                     }
                 }
             });

@@ -30,14 +30,14 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
 
     fileOps.readFile(path)
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled) {return;}
         const decoded = fileOps.base64Decode(data.content);
         setContent(decoded);
         setOriginalContent(decoded);
         setLoading(false);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled) {return;}
         setError(err instanceof Error ? err.message : 'Failed to read file');
         setLoading(false);
       });
@@ -73,13 +73,13 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
-      if (isDirty && !isReadOnly) handleSave();
+      if (isDirty && !isReadOnly) {handleSave();}
     }
   };
 
   const handleCloseClick = () => {
     if (isDirty) {
-      if (!window.confirm('You have unsaved changes. Close anyway?')) return;
+      if (!window.confirm('You have unsaved changes. Close anyway?')) {return;}
     }
     onClose();
   };
