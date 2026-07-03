@@ -5,7 +5,6 @@ import type { Agent } from '../types';
 
 interface AgentCardProps {
   agent: Agent;
-  selected: boolean;
   onClick: () => void;
 }
 
@@ -28,12 +27,11 @@ function formatRelativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function AgentCard({ agent, selected, onClick }: AgentCardProps) {
+export function AgentCard({ agent, onClick }: AgentCardProps) {
   return (
     <Card
       className={cn(
         'cursor-pointer transition-all hover:border-primary/50',
-        selected && 'ring-2 ring-primary',
         agent.status === 'online' && 'border-green-500/30',
       )}
       onClick={onClick}

@@ -250,6 +250,36 @@ git pull
 git checkout -b feat/<new-slug>
 ```
 
+### Screenshots with Playwright
+
+**After any functional UI change, collect screenshots via Playwright MCP** to prove the feature works visually. This is mandatory before creating a PR.
+
+```bash
+# 1. Start the app locally (server + agent + web)
+cargo run -p nession-server &        # :19090 ws, :10080 http
+cargo run -p nession-agent &          # needs tmux
+cd web && npm run dev                 # :13000
+
+# 2. Use Playwright MCP browser tools to:
+#    - Navigate to http://localhost:13000
+#    - Log in (if needed)
+#    - Navigate to the feature you changed
+#    - Take screenshots of BEFORE and AFTER states
+#    - Save screenshots to a temp location for PR attachment
+```
+
+Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Screenshots go in the PR body under the **核心功能截图** section.
+
+### Release Flow
+
+1. Develop on feature branch (worktree preferred, see below)
+2. Build & test locally: `cargo test && cd web && npm run build`
+3. **Collect screenshots** via Playwright MCP for any functional UI changes
+4. Push, create PR (include `Closes #<ISSUE>` in body, screenshots in PR body) → CI runs docker-publish
+5. Merge to main → auto-closes issue + CI publishes `main`-tagged images
+6. Update image tags in k8s manifests: `k8s/kustomization.yaml`
+7. `kubectl apply -k k8s/`
+
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
 ### Worktree Convention
