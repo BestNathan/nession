@@ -303,8 +303,9 @@ mod tests {
 
         // Verify round-trip: pass a path from list_dir back to read_file.
         let content = ops.read_file(&file.path).await.unwrap();
-        let decoded =
-            base64::engine::general_purpose::STANDARD.decode(&content.content).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&content.content)
+            .unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "a");
     }
 
@@ -324,8 +325,9 @@ mod tests {
 
         // Round-trip through read_file.
         let data = ops.read_file(&file.path).await.unwrap();
-        let decoded =
-            base64::engine::general_purpose::STANDARD.decode(&data.content).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&data.content)
+            .unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "nested");
     }
 
