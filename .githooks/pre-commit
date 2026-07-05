@@ -38,7 +38,7 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 fi
 
-# ── Web: ESLint ──────────────────────────────────────────────────────────
+# ── Web: ESLint + TSC ────────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ web: eslint --max-warnings 0${NC}"
   if ! (cd web && npx eslint . --report-unused-disable-directives --max-warnings 0 2>/dev/null); then
@@ -46,6 +46,14 @@ if [ -n "$STAGED_TSX" ]; then
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ eslint${NC}"
+  fi
+
+  echo -e "${YELLOW}→ web: tsc --noEmit${NC}"
+  if ! (cd web && npx tsc --noEmit 2>/dev/null); then
+    echo -e "${RED}✗ tsc failed — run 'cd web && npx tsc --noEmit' to see details${NC}"
+    HAS_ERROR=1
+  else
+    echo -e "${GREEN}✓ tsc${NC}"
   fi
 fi
 
