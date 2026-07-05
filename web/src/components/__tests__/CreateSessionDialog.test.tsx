@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Agent } from '../../types';
+import type { Agent, CreateSessionResponse } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 
 // Mock the ui/dialog module to render content directly (no portal)
@@ -361,7 +361,9 @@ describe('CreateSessionDialog', () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
     // Never resolves so we can inspect the loading state
-    const createSession = vi.fn(() => new Promise(() => {}));
+    const createSession = vi.fn().mockImplementation(
+      () => new Promise<CreateSessionResponse>(() => {}),
+    );
 
     render(
       <CreateSessionDialog
