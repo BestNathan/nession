@@ -1676,6 +1676,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_file_list_then_read_roundtrip() {
+        let (addr, handle) = start_test_server_on(18091).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // 1. Write a file.
+        let content = b"roundtrip via list_dir path";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "rt/from_list.txt".to_string(),
+                content: b64,
+            },
+        );
+        let write_resp: Message<FileWriteResponse> =
+            send_and_receive(&mut sink, &mut stream, &write_req).await;
+        assert_eq!(write_resp.msg_type, msg_types::OK);
+
+        // 2. List the directory to get entry paths.
+        let list_req = new_message(
+            msg_types::FILE_LIST,
+            FileListPayload {
+                path: "rt".to_string(),
+            },
+        );
+        let list_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &list_req).await;
+        assert_eq!(list_resp.msg_type, msg_types::OK);
+
+        let entries = list_resp
+            .payload
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .expect("entries should be an array");
+        assert_eq!(entries.len(), 1);
+        let entry_path = entries[0]
+            .get("path")
+            .and_then(|v| v.as_str())
+            .expect("entry should have a path");
+        // Path must be relative, not absolute.
+        assert_eq!(entry_path, "rt/from_list.txt");
+
+        // 3. Read the file using the path returned by list_dir.
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: entry_path.to_string(),
+            },
+        );
+        let read_resp: Message<FileData> =
+            send_and_receive(&mut sink, &mut stream, &read_req).await;
+        assert_eq!(read_resp.msg_type, msg_types::OK);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&read_resp.payload.content)
+            .unwrap();
+        assert_eq!(&decoded, content);
+
+        // 4. Delete using the path from list_dir.
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: entry_path.to_string(),
+            },
+        );
+        let del_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &del_req).await;
+        assert_eq!(del_resp.msg_type, msg_types::OK);
+        assert!(del_resp
+            .payload
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
     async fn test_file_delete() {
         let (addr, handle) = start_test_server_on(18089).await;
         let (mut sink, mut stream) = connect_client(addr).await;
