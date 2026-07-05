@@ -368,62 +368,47 @@ jobs:
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════
-  # Native binaries — macOS amd64 (Intel)
+  # Native binaries — macOS (arm64 native + amd64 cross-compile)
   # ═══════════════════════════════════════════════════════════════════
-  build-macos-amd64:
-    needs: [version-check, rust-check, web-check]
-    if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: ".", cache-all-crates: "true" }
-
-      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
-
-      - name: Package
-        run: |
-          V="${{ needs.version-check.outputs.rust_version }}"
-          mkdir -p dist
-          for bin in nession-server nession-agent nession; do
-            cp "target/release/${bin}" "dist/${bin}"
-          done
-          tar -czf "nession-${V}-darwin-amd64.tar.gz" -C dist .
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-macos-amd64
-          path: nession-*.tar.gz
-          retention-days: 7
-
-  # ═══════════════════════════════════════════════════════════════════
-  # Native binaries — macOS arm64 (Apple Silicon)
-  # ═══════════════════════════════════════════════════════════════════
-  build-macos-arm64:
+  build-macos:
     needs: [version-check, rust-check, web-check]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
 
-      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+      - name: Build (arm64)
+        run: cargo build --release --target aarch64-apple-darwin --bin nession-server --bin nession-agent --bin nession
 
-      - name: Package
+      - name: Build (amd64)
+        run: cargo build --release --target x86_64-apple-darwin --bin nession-server --bin nession-agent --bin nession
+
+      - name: Package arm64
         run: |
           V="${{ needs.version-check.outputs.rust_version }}"
-          mkdir -p dist
+          mkdir -p dist-arm64
           for bin in nession-server nession-agent nession; do
-            cp "target/release/${bin}" "dist/${bin}"
+            cp "target/aarch64-apple-darwin/release/${bin}" "dist-arm64/${bin}"
           done
-          tar -czf "nession-${V}-darwin-arm64.tar.gz" -C dist .
+          tar -czf "nession-${V}-darwin-arm64.tar.gz" -C dist-arm64 .
+
+      - name: Package amd64
+        run: |
+          V="${{ needs.version-check.outputs.rust_version }}"
+          mkdir -p dist-amd64
+          for bin in nession-server nession-agent nession; do
+            cp "target/x86_64-apple-darwin/release/${bin}" "dist-amd64/${bin}"
+          done
+          tar -czf "nession-${V}-darwin-amd64.tar.gz" -C dist-amd64 .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-macos-arm64
+          name: binaries-macos
           path: nession-*.tar.gz
           retention-days: 7
 
@@ -433,7 +418,7 @@ jobs:
   create-release:
     needs:
       [version-check, merge,
-       build-linux-amd64, build-linux-arm64, build-macos-amd64, build-macos-arm64]
+       build-linux-amd64, build-linux-arm64, build-macos]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
