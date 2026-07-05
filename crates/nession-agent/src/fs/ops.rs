@@ -48,6 +48,8 @@ impl FileOps {
             anyhow::bail!("not_a_directory: {path}");
         }
 
+        let root = self.sandbox.root().to_path_buf();
+
         let entries = task::spawn_blocking(move || -> Result<Vec<FileEntry>> {
             let mut result: Vec<FileEntry> = Vec::new();
             let dir = fs::read_dir(&resolved)
@@ -59,9 +61,16 @@ impl FileOps {
                 let entry_path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
 
+                // Strip sandbox root so paths are relative — downstream
+                // operations resolve against the same root via the sandbox.
+                let relative_path = entry_path
+                    .strip_prefix(&root)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| name.clone());
+
                 result.push(FileEntry {
                     name,
-                    path: entry_path.to_string_lossy().to_string(),
+                    path: relative_path,
                     is_dir: metadata.is_dir(),
                     size: metadata.len(),
                     modified: metadata
