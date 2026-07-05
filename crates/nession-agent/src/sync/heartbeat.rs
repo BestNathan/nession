@@ -123,8 +123,12 @@ fn get_uptime_seconds() -> u64 {
     {
         if let Ok(content) = std::fs::read_to_string("/proc/uptime") {
             if let Some(first) = content.split_whitespace().next() {
-                if let Ok(val) = first.parse::<f64>() {
-                    return (val as i64).max(0) as u64;
+                // /proc/uptime: "12345.67 98765.43"
+                // Parse integer part directly to avoid f64→u64 cast
+                if let Some(int_part) = first.split('.').next() {
+                    if let Ok(val) = int_part.parse::<u64>() {
+                        return val;
+                    }
                 }
             }
         }
@@ -140,7 +144,7 @@ fn get_load_average() -> [f64; 3] {
     {
         if let Ok(content) = std::fs::read_to_string("/proc/loadavg") {
             let parts: Vec<&str> = content.split_whitespace().collect();
-            let load1 = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let load1 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0.0);
             let load5 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0.0);
             let load15 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
             return [load1, load5, load15];
