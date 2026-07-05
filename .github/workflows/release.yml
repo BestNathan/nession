@@ -1,0 +1,544 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Version check — gate for entire workflow
+  # ═══════════════════════════════════════════════════════════════════
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      rust_version: ${{ steps.check.outputs.rust_version }}
+      web_version: ${{ steps.check.outputs.web_version }}
+      short_sha: ${{ steps.check.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: check
+        run: |
+          RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+          echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
+          echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "No comparable previous commit — treating as version change."
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            PREV_RUST=$(git show ${BEFORE}:Cargo.toml 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
+            PREV_WEB=$(git show ${BEFORE}:web/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+            if [ "$RUST_VER" != "$PREV_RUST" ] || [ "$WEB_VER" != "$PREV_WEB" ]; then
+              echo "Version changed (rust: ${PREV_RUST} -> ${RUST_VER}, web: ${PREV_WEB} -> ${WEB_VER})."
+              echo "version_changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version unchanged (rust: ${RUST_VER}, web: ${WEB_VER}). Skipping release."
+              echo "version_changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Check — lint + test
+  # ═══════════════════════════════════════════════════════════════════
+  rust-check:
+    needs: version-check
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+
+  web-check:
+    needs: version-check
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci
+      - run: cd web && npm run lint
+      - run: cd web && npx tsc --noEmit
+      - run: cd web && npm test
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Build web UI
+  # ═══════════════════════════════════════════════════════════════════
+  build-web:
+    needs: [version-check, rust-check, web-check]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 1
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Docker amd64 — version tags only
+  # ═══════════════════════════════════════════════════════════════════
+  build-amd64:
+    needs: [version-check, build-web]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: /tmp/web-dist
+
+      - name: Set image refs
+        run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent
+      - run: |
+          mkdir -p /tmp/server-bin /tmp/agent-bin
+          cp target/release/nession-server /tmp/server-bin/
+          cp target/release/nession-agent /tmp/agent-bin/
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push server (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64
+          build-contexts: |
+            server-bin=/tmp/server-bin
+            web-dist=/tmp/web-dist
+
+      - name: Build & push agent (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64
+          build-contexts: |
+            agent-bin=/tmp/agent-bin
+            web-dist=/tmp/web-dist
+
+      - name: Build & push UI (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-amd64
+          build-contexts: |
+            web-dist=/tmp/web-dist
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Docker arm64 — version tags only
+  # ═══════════════════════════════════════════════════════════════════
+  build-arm64:
+    needs: [version-check, build-web]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: /tmp/web-dist
+
+      - name: Set image refs
+        run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent
+      - run: |
+          mkdir -p /tmp/server-bin /tmp/agent-bin
+          cp target/release/nession-server /tmp/server-bin/
+          cp target/release/nession-agent /tmp/agent-bin/
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push server (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.server.prebuilt
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64
+          build-contexts: |
+            server-bin=/tmp/server-bin
+            web-dist=/tmp/web-dist
+
+      - name: Build & push agent (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent.prebuilt
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64
+          build-contexts: |
+            agent-bin=/tmp/agent-bin
+            web-dist=/tmp/web-dist
+
+      - name: Build & push UI (version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui.prebuilt
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-arm64
+          build-contexts: |
+            web-dist=/tmp/web-dist
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Merge multi-arch manifests (version tags only)
+  # ═══════════════════════════════════════════════════════════════════
+  merge:
+    needs: [version-check, build-amd64, build-arm64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch version manifests
+        run: |
+          IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
+          RUST_VER="${{ needs.version-check.outputs.rust_version }}"
+          WEB_VER="${{ needs.version-check.outputs.web_version }}"
+
+          for prefix in server agent; do
+            docker buildx imagetools create -t ${IMG}:${prefix}-${RUST_VER} \
+              ${IMG}:${prefix}-${RUST_VER}-amd64 ${IMG}:${prefix}-${RUST_VER}-arm64
+          done
+          docker buildx imagetools create -t ${IMG}:ui-${WEB_VER} \
+            ${IMG}:ui-${WEB_VER}-amd64 ${IMG}:ui-${WEB_VER}-arm64
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Update production kustomize
+  # ═══════════════════════════════════════════════════════════════════
+  update-prod-kustomize:
+    needs: [version-check, merge]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: |
+          cd k8s/overlays/production
+          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          RUST_VER="${{ needs.version-check.outputs.rust_version }}"
+          WEB_VER="${{ needs.version-check.outputs.web_version }}"
+          kustomize edit set image \
+            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${RUST_VER} \
+            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${RUST_VER} \
+            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${WEB_VER}
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/production/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: update prod image tags to v${{ needs.version-check.outputs.rust_version }} [skip ci]"
+          git push
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Native binaries — Linux amd64
+  # ═══════════════════════════════════════════════════════════════════
+  build-linux-amd64:
+    needs: [version-check, rust-check, web-check]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+
+      - name: Package
+        run: |
+          V="${{ needs.version-check.outputs.rust_version }}"
+          mkdir -p dist
+          for bin in nession-server nession-agent nession; do
+            cp "target/release/${bin}" "dist/${bin}"
+          done
+          tar -czf "nession-${V}-linux-amd64.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-linux-amd64
+          path: nession-*.tar.gz
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Native binaries — Linux arm64
+  # ═══════════════════════════════════════════════════════════════════
+  build-linux-arm64:
+    needs: [version-check, rust-check, web-check]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+
+      - name: Package
+        run: |
+          V="${{ needs.version-check.outputs.rust_version }}"
+          mkdir -p dist
+          for bin in nession-server nession-agent nession; do
+            cp "target/release/${bin}" "dist/${bin}"
+          done
+          tar -czf "nession-${V}-linux-arm64.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-linux-arm64
+          path: nession-*.tar.gz
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Native binaries — macOS amd64 (Intel)
+  # ═══════════════════════════════════════════════════════════════════
+  build-macos-amd64:
+    needs: [version-check, rust-check, web-check]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+
+      - name: Package
+        run: |
+          V="${{ needs.version-check.outputs.rust_version }}"
+          mkdir -p dist
+          for bin in nession-server nession-agent nession; do
+            cp "target/release/${bin}" "dist/${bin}"
+          done
+          tar -czf "nession-${V}-darwin-amd64.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-macos-amd64
+          path: nession-*.tar.gz
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Native binaries — macOS arm64 (Apple Silicon)
+  # ═══════════════════════════════════════════════════════════════════
+  build-macos-arm64:
+    needs: [version-check, rust-check, web-check]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+
+      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+
+      - name: Package
+        run: |
+          V="${{ needs.version-check.outputs.rust_version }}"
+          mkdir -p dist
+          for bin in nession-server nession-agent nession; do
+            cp "target/release/${bin}" "dist/${bin}"
+          done
+          tar -czf "nession-${V}-darwin-arm64.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-macos-arm64
+          path: nession-*.tar.gz
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Create GitHub Release
+  # ═══════════════════════════════════════════════════════════════════
+  create-release:
+    needs:
+      [version-check, merge,
+       build-linux-amd64, build-linux-arm64, build-macos-amd64, build-macos-arm64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version-check.outputs.rust_version }}
+          name: v${{ needs.version-check.outputs.rust_version }}
+          body: |
+            ## Nession v${{ needs.version-check.outputs.rust_version }}
+
+            ### Docker Images
+            - `ghcr.io/${{ github.repository_owner }}/nession:server-${{ needs.version-check.outputs.rust_version }}`
+            - `ghcr.io/${{ github.repository_owner }}/nession:agent-${{ needs.version-check.outputs.rust_version }}`
+            - `ghcr.io/${{ github.repository_owner }}/nession:ui-${{ needs.version-check.outputs.web_version }}`
+
+            ### Native Binaries
+            | Platform | Architectures |
+            |----------|---------------|
+            | Linux | amd64, arm64 |
+            | macOS | amd64 (Intel), arm64 (Apple Silicon) |
+          files: release-assets/*
+          generate_release_notes: true
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Cleanup — keep last 5 GitHub Releases
+  # ═══════════════════════════════════════════════════════════════════
+  cleanup-releases:
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete old releases (keep last 5)
+        run: |
+          echo "Fetching releases..."
+          TAGS=$(gh release list --limit 100 --json tagName,createdAt \
+            -q 'sort_by(.createdAt) | reverse | .[].tagName' 2>/dev/null || echo "")
+
+          if [ -z "$TAGS" ]; then
+            echo "No releases found — skipping cleanup."
+            exit 0
+          fi
+
+          COUNT=0
+          for TAG in $TAGS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 5 ]; then
+              echo "Deleting release: ${TAG}"
+              gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || \
+                echo "  ⚠ Failed to delete release ${TAG}"
+            else
+              echo "Keeping release: ${TAG} (position: ${COUNT})"
+            fi
+          done
+
+          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old releases."
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Cleanup — keep last 5 GHCR version-tagged packages
+  # ═══════════════════════════════════════════════════════════════════
+  cleanup-ghcr:
+    needs: merge
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old package versions (keep last 5)
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          PACKAGE="nession"
+
+          echo "Fetching versions for ${OWNER}/${PACKAGE}..."
+          VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
+            --paginate \
+            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+
+          if [ -z "$VERSIONS" ]; then
+            echo "No versions found — skipping cleanup."
+            exit 0
+          fi
+
+          COUNT=0
+          for ID in $VERSIONS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 5 ]; then
+              echo "Deleting version ${ID} (position: ${COUNT})"
+              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
+                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
+            else
+              echo "Keeping version ${ID} (position: ${COUNT})"
+            fi
+          done
+
+          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."

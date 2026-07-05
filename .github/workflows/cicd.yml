@@ -2,62 +2,63 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, 'feat/**', 'fix/**']
+    branches: ['feat/**', 'fix/**']
 
 jobs:
-  # ── 读取版本号 + 检测版本变化 + 短 hash ──
+  # ═══════════════════════════════════════════════════════════════════
+  # Check — lint + test (fail fast)
+  # ═══════════════════════════════════════════════════════════════════
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+
+  web-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci
+      - run: cd web && npm run lint
+      - run: cd web && npx tsc --noEmit
+      - run: cd web && npm test
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Versions
+  # ═══════════════════════════════════════════════════════════════════
   versions:
+    needs: [rust-check, web-check]
     runs-on: ubuntu-latest
     outputs:
       rust_version: ${{ steps.versions.outputs.rust_version }}
       web_version: ${{ steps.versions.outputs.web_version }}
-      version_changed: ${{ steps.versions.outputs.version_changed }}
       short_sha: ${{ steps.versions.outputs.short_sha }}
-      is_production: ${{ steps.branch-check.outputs.is_production }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - id: branch-check
-        run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "is_production=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_production=false" >> $GITHUB_OUTPUT
-          fi
 
       - id: versions
         run: |
           RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
-
-          BEFORE="${{ github.event.before }}"
-          if [ "${{ github.ref_name }}" != "main" ]; then
-            # feat branches never create version tags
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
-            echo "No comparable previous commit — treating as version change."
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-          else
-            PREV_RUST=$(git show ${BEFORE}:Cargo.toml 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
-            PREV_WEB=$(git show ${BEFORE}:web/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
-            if [ "$RUST_VER" != "$PREV_RUST" ] || [ "$WEB_VER" != "$PREV_WEB" ]; then
-              echo "Version changed (rust: ${PREV_RUST} -> ${RUST_VER}, web: ${PREV_WEB} -> ${WEB_VER})."
-              echo "version_changed=true" >> $GITHUB_OUTPUT
-            else
-              echo "Version unchanged (rust: ${RUST_VER}, web: ${WEB_VER})."
-              echo "version_changed=false" >> $GITHUB_OUTPUT
-            fi
-          fi
           echo "Rust: ${RUST_VER}, Web: ${WEB_VER}, SHA: ${SHORT_SHA}"
 
-  # ── Build web UI 一次（架构无关）──
+  # ═══════════════════════════════════════════════════════════════════
+  # Build web UI
+  # ═══════════════════════════════════════════════════════════════════
   build-web:
     needs: versions
     runs-on: ubuntu-latest
@@ -75,7 +76,9 @@ jobs:
           path: web/dist/
           retention-days: 1
 
-  # ── amd64: 原生 x86_64 ──
+  # ═══════════════════════════════════════════════════════════════════
+  # amd64 — hash tags only
+  # ═══════════════════════════════════════════════════════════════════
   build-amd64:
     needs: [versions, build-web]
     runs-on: ubuntu-latest
@@ -92,10 +95,7 @@ jobs:
       - name: Set image refs
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
-          echo "RUST_VER=${{ needs.versions.outputs.rust_version }}" >> $GITHUB_ENV
-          echo "WEB_VER=${{ needs.versions.outputs.web_version }}" >> $GITHUB_ENV
           echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
-          echo "VER_CHG=${{ needs.versions.outputs.version_changed }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -114,70 +114,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tags: always hash tag; on version change also version tag
-      - name: Compute server tags
-        id: server-tags
-        run: |
-          TAGS="${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Compute agent tags
-        id: agent-tags
-        run: |
-          TAGS="${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Compute UI tags
-        id: ui-tags
-        run: |
-          TAGS="${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:ui-${{ env.WEB_VER }}-amd64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Build & push server (amd64)
+      - name: Build & push server (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.server-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push agent (amd64)
+      - name: Build & push agent (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.agent-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push UI (amd64)
+      - name: Build & push UI (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.ui.prebuilt
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.ui-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64
           build-contexts: |
             web-dist=/tmp/web-dist
 
-  # ── arm64: GitHub 原生 ARM runner ──
+  # ═══════════════════════════════════════════════════════════════════
+  # arm64 — hash tags only
+  # ═══════════════════════════════════════════════════════════════════
   build-arm64:
     needs: [versions, build-web]
     runs-on: ubuntu-24.04-arm
@@ -194,10 +168,7 @@ jobs:
       - name: Set image refs
         run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
-          echo "RUST_VER=${{ needs.versions.outputs.rust_version }}" >> $GITHUB_ENV
-          echo "WEB_VER=${{ needs.versions.outputs.web_version }}" >> $GITHUB_ENV
           echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
-          echo "VER_CHG=${{ needs.versions.outputs.version_changed }}" >> $GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -216,69 +187,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute server tags
-        id: server-tags
-        run: |
-          TAGS="${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Compute agent tags
-        id: agent-tags
-        run: |
-          TAGS="${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Compute UI tags
-        id: ui-tags
-        run: |
-          TAGS="${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64"
-          if [ "${{ env.VER_CHG }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.IMG }}:ui-${{ env.WEB_VER }}-arm64"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Build & push server (arm64)
+      - name: Build & push server (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ steps.server-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push agent (arm64)
+      - name: Build & push agent (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ steps.agent-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push UI (arm64)
+      - name: Build & push UI (hash)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.ui.prebuilt
           platforms: linux/arm64
           push: true
-          tags: ${{ steps.ui-tags.outputs.tags }}
+          tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64
           build-contexts: |
             web-dist=/tmp/web-dist
 
-  # ── 合并 multi-arch manifests ──
+  # ═══════════════════════════════════════════════════════════════════
+  # Merge multi-arch manifests (hash tags only)
+  # ═══════════════════════════════════════════════════════════════════
   merge:
     needs: [versions, build-amd64, build-arm64]
     runs-on: ubuntu-latest
@@ -291,62 +237,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create multi-arch manifests
+      - name: Create multi-arch hash manifests
         run: |
           IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          RUST_VER="${{ needs.versions.outputs.rust_version }}"
-          WEB_VER="${{ needs.versions.outputs.web_version }}"
           SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
-          VER_CHG="${{ needs.versions.outputs.version_changed }}"
 
-          # Always create hash-based manifests
-          for prefix in server agent; do
+          for prefix in server agent ui; do
             docker buildx imagetools create -t ${IMG}:${prefix}-${SHORT_SHA} \
               ${IMG}:${prefix}-${SHORT_SHA}-amd64 ${IMG}:${prefix}-${SHORT_SHA}-arm64
           done
-          docker buildx imagetools create -t ${IMG}:ui-${SHORT_SHA} \
-            ${IMG}:ui-${SHORT_SHA}-amd64 ${IMG}:ui-${SHORT_SHA}-arm64
 
-          # On version change, also create version-based manifests (alias)
-          if [ "${VER_CHG}" = "true" ]; then
-            for prefix in server agent; do
-              docker buildx imagetools create -t ${IMG}:${prefix}-${RUST_VER} \
-                ${IMG}:${prefix}-${RUST_VER}-amd64 ${IMG}:${prefix}-${RUST_VER}-arm64
-            done
-            docker buildx imagetools create -t ${IMG}:ui-${WEB_VER} \
-              ${IMG}:ui-${WEB_VER}-amd64 ${IMG}:ui-${WEB_VER}-arm64
-          fi
-
-  # ── 更新 production overlay（仅 main 分支）──
-  update-prod-kustomize:
-    needs: [versions, merge]
-    if: github.ref_name == 'main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: |
-          cd k8s/overlays/production
-          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
-          SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
-          kustomize edit set image \
-            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${SHORT_SHA} \
-            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${SHORT_SHA} \
-            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${SHORT_SHA}
-
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s/overlays/production/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update prod image tags (sha=${{ needs.versions.outputs.short_sha }})"
-          git push
-
-  # ── 更新 staging overlay（feat/fix 分支，写入 main）──
+  # ═══════════════════════════════════════════════════════════════════
+  # Update staging kustomize (writes to main branch)
+  # ═══════════════════════════════════════════════════════════════════
   update-staging-kustomize:
     needs: [versions, merge]
-    if: startsWith(github.ref_name, 'feat/') || startsWith(github.ref_name, 'fix/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -373,8 +278,45 @@ jobs:
             echo "No change to staging overlay — skipping."
           else
             git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
-            # retry on race with concurrent push
-            for i in 1 2 3; do
+            for i in 1 2 3 4 5; do
               git pull --rebase origin main && git push && break || sleep 2
             done
           fi
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Cleanup — keep last 5 GHCR hash-tagged versions
+  # ═══════════════════════════════════════════════════════════════════
+  cleanup-ghcr:
+    needs: merge
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old package versions (keep last 5)
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          PACKAGE="nession"
+
+          echo "Fetching versions for ${OWNER}/${PACKAGE}..."
+          VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
+            --paginate \
+            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+
+          if [ -z "$VERSIONS" ]; then
+            echo "No versions found — skipping cleanup."
+            exit 0
+          fi
+
+          COUNT=0
+          for ID in $VERSIONS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 5 ]; then
+              echo "Deleting version ${ID} (position: ${COUNT})"
+              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
+                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
+            else
+              echo "Keeping version ${ID} (position: ${COUNT})"
+            fi
+          done
+
+          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."
