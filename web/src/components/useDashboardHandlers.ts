@@ -122,7 +122,11 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
   const fetchAgents = useCallback(async () => {
     setLoadingAgents(true);
     setError(null);
-    try { setAgents(await wsService.listAgents()); }
+    try {
+      const newAgents = await wsService.listAgents();
+      setAgents(newAgents);
+      trackHeartbeats(newAgents, heartbeatHistory.current);
+    }
     catch (err) { const msg = err instanceof Error ? err.message : 'Failed to fetch agents'; setError(msg); toast.error(msg); }
     finally { setLoadingAgents(false); }
   }, [wsService]);
