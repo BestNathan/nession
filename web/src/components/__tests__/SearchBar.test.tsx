@@ -167,4 +167,79 @@ describe('SearchBar', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
   });
+
+  it('external searchQuery change clears pending debounce', () => {
+    vi.useFakeTimers();
+    const setSearchQuery = vi.fn();
+
+    const { rerender } = render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Search agents and sessions...');
+    fireEvent.change(input, { target: { value: 'abort-me' } });
+
+    // Before debounce fires, parent updates searchQuery externally
+    rerender(
+      <SearchBar
+        searchQuery="external-value"
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    // Advance past debounce — the pending debounce should have been cancelled
+    act(() => { vi.advanceTimersByTime(250); });
+
+    // setSearchQuery should NOT have been called because the debounce was cleared
+    expect(setSearchQuery).not.toHaveBeenCalled();
+    // The input should reflect the external value
+    expect((input as HTMLInputElement).value).toBe('external-value');
+  });
+
+  it('rapid typing cancels previous debounce', () => {
+    vi.useFakeTimers();
+    const setSearchQuery = vi.fn();
+
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Search agents and sessions...');
+
+    // First keystroke
+    fireEvent.change(input, { target: { value: 'a' } });
+    act(() => { vi.advanceTimersByTime(100); });
+
+    // Second keystroke before first debounce fires
+    fireEvent.change(input, { target: { value: 'ab' } });
+    act(() => { vi.advanceTimersByTime(100); });
+
+    // Only 100ms after second keystroke — still not enough
+    expect(setSearchQuery).not.toHaveBeenCalled();
+
+    // Advance past debounce from second keystroke
+    act(() => { vi.advanceTimersByTime(150); });
+
+    // Only the last value should be sent
+    expect(setSearchQuery).toHaveBeenCalledTimes(1);
+    expect(setSearchQuery).toHaveBeenCalledWith('ab');
+  });
 });
