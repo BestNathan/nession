@@ -140,7 +140,13 @@ export function useP2PConnection(
   const activeRef = useRef(true);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  // Start in 'connecting' when we have an agent to reach. Child effects (e.g.
+  // FileBrowser's load-on-mount) run before this hook's connect effect, so an
+  // initial 'disconnected' would make waitForConnection() reject before the
+  // socket even starts. 'connecting' correctly makes those callers wait.
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    options?.agentUrl ? 'connecting' : 'disconnected',
+  );
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   // Mirror connectionState into a ref so waitForConnection can read live state
@@ -172,15 +178,17 @@ export function useP2PConnection(
     connectWs(ctx);
 
     const handlers = handlersRef.current;
-    const waiters = waitersRef.current;
     return () => {
       activeRef.current = false;
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
       handlers.clear();
-      // Reject any in-flight waiters so callers don't hang after teardown.
-      waiters.forEach((w) => w.reject(new Error('Connection closed')));
-      waiters.clear();
+      // NOTE: pending waitForConnection() waiters are intentionally NOT rejected
+      // here. Under React StrictMode (dev) this effect runs mount → cleanup →
+      // mount; rejecting on cleanup would fail a file op issued during the first
+      // mount even though the second connection is about to succeed. Waiters
+      // persist (ref survives the remount) and are settled by the connectionState
+      // effect on (re)connect, or expire via their own timeout on real unmount.
     };
   }, [agentUrl, connectionToken, onError, maxReconnectAttempts, reconnectBaseDelay]);
 
