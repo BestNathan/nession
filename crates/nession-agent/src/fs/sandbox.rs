@@ -29,9 +29,21 @@ impl PathSandbox {
     /// Returns an error with code `permission_denied` if the resolved
     /// path lies outside the root.
     pub fn resolve(&self, path: &str) -> Result<PathBuf> {
-        // Normalize: strip leading '/' to make it relative to root
+        // Normalize: strip leading '/' to make it relative to root.
+        // Defensive: also strip the sandbox root's own directory name if
+        // the path already starts with it. Without this, clients that send
+        // paths like "/root/.bashrc" (absolute paths on a root="/root"
+        // sandbox) end up doubled to "/root/root/.bashrc" after joining.
         let relative = path.trim_start_matches('/');
-        let combined = self.root.join(relative);
+        let relative = if let Some(root_name) = self.root.file_name() {
+            Path::new(relative)
+                .strip_prefix(root_name)
+                .map(|p| p.as_os_str().to_string_lossy().into_owned())
+                .unwrap_or_else(|_| relative.to_string())
+        } else {
+            relative.to_string()
+        };
+        let combined = self.root.join(&relative);
 
         // Early-detection heuristic for `..` traversal attempts.
         // This catches obvious escapes before touching the filesystem,
@@ -222,6 +234,44 @@ mod tests {
 
         let resolved = sandbox.resolve("/slash_test.txt").unwrap();
         assert_eq!(resolved, file.canonicalize().unwrap());
+    }
+
+    /// Regression test: when a client sends an absolute path whose first
+    /// component matches the sandbox root's own directory name, the root
+    /// must NOT be doubled. E.g., sandbox at `/root` + path `root/.bashrc`
+    /// must resolve to `/root/.bashrc`, not `/root/root/.bashrc`.
+    #[test]
+    fn test_resolve_strips_duplicated_root_name() {
+        // Create a sandbox in a parent dir whose name matches the first
+        // path component we'll resolve (simulates "/root" + "root/.bashrc").
+        let parent = tempfile::tempdir().unwrap();
+        let root_dir_name = "testroot";
+        let root_path = parent.path().join(root_dir_name);
+        fs::create_dir(&root_path).unwrap();
+
+        let sandbox = PathSandbox::new(&root_path).unwrap();
+
+        // Create a target file inside the sandbox.
+        let target = root_path.join(".bashrc");
+        fs::write(&target, b"hello").unwrap();
+
+        // 1. Relative path with root name duplicated (the failing case).
+        let dup_relative = format!("{}/.bashrc", root_dir_name);
+        let resolved = sandbox.resolve(&dup_relative).unwrap();
+        assert_eq!(resolved, target.canonicalize().unwrap());
+
+        // 2. Absolute path that starts with the root name.
+        let dup_absolute = format!("/{}/.bashrc", root_dir_name);
+        let resolved = sandbox.resolve(&dup_absolute).unwrap();
+        assert_eq!(resolved, target.canonicalize().unwrap());
+
+        // 3. Regular relative path (no duplication) still works.
+        let resolved = sandbox.resolve(".bashrc").unwrap();
+        assert_eq!(resolved, target.canonicalize().unwrap());
+
+        // 4. Absolute path without root-name duplication still works.
+        let resolved = sandbox.resolve("/.bashrc").unwrap();
+        assert_eq!(resolved, target.canonicalize().unwrap());
     }
 
     #[test]
