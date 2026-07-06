@@ -196,8 +196,9 @@ mod tests {
         {
             assert!(uptime.is_some());
             let uptime_secs = uptime.unwrap();
-            // Should be at least 0 seconds (just started)
-            assert!(uptime_secs >= 0);
+            // A freshly-read uptime should be a sane, bounded value
+            // (u64 is inherently >= 0, so assert an upper bound instead).
+            assert!(uptime_secs < 60 * 60 * 24 * 365 * 100);
         }
 
         #[cfg(not(target_os = "linux"))]
