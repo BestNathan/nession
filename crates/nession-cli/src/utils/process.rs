@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// Returns the number of seconds since the Unix epoch when the system was booted.
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn get_boot_time() -> Result<i64> {
     use std::fs;
 
@@ -30,6 +31,7 @@ pub fn get_boot_time() -> Result<i64> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 pub fn get_boot_time() -> Result<i64> {
     // On non-Linux systems, estimate boot time from current time minus uptime
     // This is a fallback implementation
@@ -46,6 +48,7 @@ pub fn get_boot_time() -> Result<i64> {
 ///
 /// On Linux, this is typically 100. On other systems, we use a default value.
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn get_clock_ticks() -> Result<i64> {
     use std::process::Command;
 
@@ -63,6 +66,7 @@ pub fn get_clock_ticks() -> Result<i64> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 pub fn get_clock_ticks() -> Result<i64> {
     // Default value for non-Linux systems
     Ok(100)
@@ -110,6 +114,7 @@ pub fn get_process_uptime(_pid: u32) -> Option<u64> {
 /// Get the current timestamp as a DateTime<Local>.
 ///
 /// Returns the current local time.
+#[allow(dead_code)]
 pub fn current_timestamp() -> DateTime<Local> {
     Local::now()
 }
@@ -121,6 +126,7 @@ pub fn current_timestamp() -> DateTime<Local> {
 /// - "5 minutes ago"
 /// - "2 hours ago"
 /// - "1 day ago"
+#[allow(dead_code)]
 pub fn format_time_ago(timestamp: DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration = now.signed_duration_since(timestamp);

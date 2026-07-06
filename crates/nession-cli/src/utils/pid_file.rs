@@ -54,6 +54,7 @@ pub fn is_process_running(pid: u32) -> bool {
 ///
 /// Returns `true` if the PID file exists and the process is running.
 /// Returns `false` if the file doesn't exist, is invalid, or the process is not running.
+#[allow(dead_code)]
 pub fn is_process_running_from_pid_file(path: &str) -> bool {
     if !Path::new(path).exists() {
         return false;

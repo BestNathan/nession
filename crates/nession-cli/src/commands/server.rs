@@ -1,11 +1,12 @@
 //! Server CLI commands implementation.
 
+use crate::utils::{pid_file, process};
 use anyhow::{Context, Result};
 use nession_common::config::ServerConfig;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tracing::{error, info};
 
 /// Start the server process.
@@ -15,8 +16,8 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         .context("failed to create nession component directories")?;
 
     // Check if server is already running
-    if let Ok(pid) = read_pid_file(&pid_file) {
-        if is_process_running(pid) {
+    if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
+        if pid_file::is_process_running(pid) {
             anyhow::bail!("Server is already running with PID {pid}");
         } else {
             // Process not running but PID file exists, clean it up
@@ -37,7 +38,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
 
         // Write PID file for the current process (foreground mode)
         let pid = std::process::id();
-        write_pid_file(&pid_file, pid)?;
+        pid_file::write_pid_file(&pid_file, pid)?;
 
         // Run the server directly (this will block)
         let result = run_server_foreground(config).await;
@@ -79,7 +80,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Read the PID from the file written by the child
-        match read_pid_file(&pid_file) {
+        match pid_file::read_pid_file(&pid_file) {
             Ok(pid) => {
                 println!("Server started in background with PID {pid}");
                 println!("PID file: {pid_file}");
@@ -88,7 +89,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
                 println!("Server started in background (waiting for PID file...)");
                 // Wait a bit more and try again
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                if let Ok(pid) = read_pid_file(&pid_file) {
+                if let Ok(pid) = pid_file::read_pid_file(&pid_file) {
                     println!("Server started in background with PID {pid}");
                 } else {
                     println!("Server is starting, check logs for status");
@@ -104,7 +105,7 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
 /// Stop the server process.
 pub async fn stop(pid_file: String) -> Result<()> {
     // Read PID file
-    let pid = match read_pid_file(&pid_file) {
+    let pid = match pid_file::read_pid_file(&pid_file) {
         Ok(pid) => pid,
         Err(_) => {
             println!("Server is not running (no PID file found)");
@@ -113,7 +114,7 @@ pub async fn stop(pid_file: String) -> Result<()> {
     };
 
     // Check if process is running
-    if !is_process_running(pid) {
+    if !pid_file::is_process_running(pid) {
         println!("Server process {pid} is not running");
         // Clean up stale PID file
         let _ = fs::remove_file(&pid_file);
@@ -137,7 +138,7 @@ pub async fn stop(pid_file: String) -> Result<()> {
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
-        if !is_process_running(pid) {
+        if !pid_file::is_process_running(pid) {
             println!("Server stopped successfully");
             // Clean up PID file
             let _ = fs::remove_file(&pid_file);
@@ -161,7 +162,7 @@ pub async fn stop(pid_file: String) -> Result<()> {
     // Wait a bit more for SIGKILL
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    if is_process_running(pid) {
+    if pid_file::is_process_running(pid) {
         error!("Failed to stop server process {}", pid);
         anyhow::bail!("Failed to stop server process");
     }
@@ -176,7 +177,7 @@ pub async fn stop(pid_file: String) -> Result<()> {
 /// Show server status.
 pub async fn status(pid_file: String) -> Result<()> {
     // Read PID file
-    let pid = match read_pid_file(&pid_file) {
+    let pid = match pid_file::read_pid_file(&pid_file) {
         Ok(pid) => pid,
         Err(_) => {
             println!("Status: stopped (no PID file)");
@@ -185,7 +186,7 @@ pub async fn status(pid_file: String) -> Result<()> {
     };
 
     // Check if process is running
-    if !is_process_running(pid) {
+    if !pid_file::is_process_running(pid) {
         println!("Status: stopped (process not running)");
         // Clean up stale PID file
         let _ = fs::remove_file(&pid_file);
@@ -193,7 +194,7 @@ pub async fn status(pid_file: String) -> Result<()> {
     }
 
     // Get process start time for uptime calculation
-    let uptime = get_process_uptime(pid);
+    let uptime = process::get_process_uptime(pid).map(pid_file::format_duration);
 
     println!("Status: running");
     println!("PID: {pid}");
@@ -268,120 +269,4 @@ async fn run_server_foreground(config: ServerConfig) -> Result<()> {
 
     info!("nession-server stopped");
     Ok(())
-}
-
-/// Write PID to file.
-fn write_pid_file(path: &str, pid: u32) -> Result<()> {
-    fs::write(path, pid.to_string())
-        .with_context(|| format!("failed to write PID file: {path}"))?;
-    Ok(())
-}
-
-/// Read PID from file.
-fn read_pid_file(path: &str) -> Result<u32> {
-    let content =
-        fs::read_to_string(path).with_context(|| format!("failed to read PID file: {path}"))?;
-    let pid: u32 = content
-        .trim()
-        .parse()
-        .with_context(|| "failed to parse PID from file")?;
-    Ok(pid)
-}
-
-/// Check if a process is running.
-fn is_process_running(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        use nix::errno::Errno;
-        use nix::sys::signal::kill;
-        use nix::unistd::Pid;
-
-        let nix_pid = Pid::from_raw(pid as i32);
-        match kill(nix_pid, None) {
-            Ok(_) => true,
-            Err(Errno::ESRCH) => false,
-            Err(_) => false,
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        // On non-unix systems, try to read from /proc or use other methods
-        false
-    }
-}
-
-/// Get process uptime as a formatted string.
-fn get_process_uptime(pid: u32) -> Option<String> {
-    #[cfg(unix)]
-    {
-        // Try to read process start time from /proc on Linux
-        if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
-            // Parse start time (field 22, 0-indexed 21)
-            let fields: Vec<&str> = stat.split_whitespace().collect();
-            if fields.len() > 21 {
-                if let Some(start_ticks) = fields.get(21).and_then(|s| s.parse::<u64>().ok()) {
-                    // Get system boot time and clock ticks per second
-                    if let (Ok(boot_time), Some(clock_ticks)) = (get_boot_time(), get_clock_ticks())
-                    {
-                        let start_time = boot_time + (start_ticks / clock_ticks);
-                        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-                        let uptime_secs = now.saturating_sub(start_time);
-                        return Some(format_duration(uptime_secs));
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Get system boot time (Unix timestamp).
-#[cfg(unix)]
-fn get_boot_time() -> Result<u64, ()> {
-    if let Ok(stat) = fs::read_to_string("/proc/stat") {
-        for line in stat.lines() {
-            if line.starts_with("btime ") {
-                if let Some(btime_str) = line.split_whitespace().nth(1) {
-                    if let Ok(btime) = btime_str.parse::<u64>() {
-                        return Ok(btime);
-                    }
-                }
-            }
-        }
-    }
-    Err(())
-}
-
-/// Get clock ticks per second.
-#[cfg(unix)]
-fn get_clock_ticks() -> Option<u64> {
-    use std::process::Command;
-
-    let output = Command::new("getconf").arg("CLK_TCK").output().ok()?;
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.trim().parse().ok()
-    } else {
-        Some(100) // Default on most Linux systems
-    }
-}
-
-/// Format duration in seconds to human-readable string.
-fn format_duration(seconds: u64) -> String {
-    let days = seconds / 86400;
-    let hours = (seconds % 86400) / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
-
-    if days > 0 {
-        format!("{days}d {hours}h {minutes}m {secs}s")
-    } else if hours > 0 {
-        format!("{hours}h {minutes}m {secs}s")
-    } else if minutes > 0 {
-        format!("{minutes}m {secs}s")
-    } else {
-        format!("{secs}s")
-    }
 }
