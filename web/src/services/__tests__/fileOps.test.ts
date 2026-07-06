@@ -6,6 +6,13 @@ interface MockP2P extends P2PConnection {
   _respond: (id: string, msgType: string, payload: unknown) => void;
 }
 
+/**
+ * Flush pending microtasks. sendRequest now awaits waitForConnection() before
+ * sending, so the sendMessage call lands on a microtask rather than
+ * synchronously — tests must flush before inspecting mock.calls.
+ */
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
 function makeP2PConnection(state: P2PConnection['connectionState'] = 'connected'): MockP2P {
   const handlers = new Set<(msg: P2PMessage) => void>();
   return {
@@ -13,6 +20,11 @@ function makeP2PConnection(state: P2PConnection['connectionState'] = 'connected'
     reconnectAttempt: 0,
     sendMessage: vi.fn(),
     close: vi.fn(),
+    waitForConnection: vi.fn(() =>
+      state === 'disconnected'
+        ? Promise.reject(new Error('Connection lost'))
+        : Promise.resolve(),
+    ),
     onMessage: vi.fn((handler: (msg: P2PMessage) => void) => {
       handlers.add(handler);
       return () => { handlers.delete(handler); };
@@ -51,6 +63,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.listDir('/tmp');
+      await flush();
       // Extract the message ID from the send call
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       const id = sendCall.id;
@@ -72,6 +85,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.readFile('/etc/hosts');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sendCall.msg_type).toBe('file.read');
 
@@ -90,6 +104,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.writeFile('/tmp/new.txt', 'hello');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sendCall.msg_type).toBe('file.write');
       expect(sendCall.payload.path).toBe('/tmp/new.txt');
@@ -108,6 +123,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.deleteFile('/tmp/old.txt');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sendCall.msg_type).toBe('file.delete');
 
@@ -123,6 +139,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.createDir('/tmp/newdir');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sendCall.msg_type).toBe('file.create_dir');
 
@@ -138,6 +155,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.renameFile('/tmp/a', '/tmp/b');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sendCall.msg_type).toBe('file.rename');
       expect(sendCall.payload.from).toBe('/tmp/a');
@@ -155,6 +173,7 @@ describe('fileOps', () => {
       const ops = createFileOps(p2p);
 
       const promise = ops.listDir('/nonexistent');
+      await flush();
       const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
 
       p2p._respond(sendCall.id, 'error', { message: 'Not found' });
@@ -165,6 +184,43 @@ describe('fileOps', () => {
       const p2p = makeP2PConnection('disconnected');
       const ops = createFileOps(p2p);
       await expect(ops.listDir('/tmp')).rejects.toThrow('Connection lost');
+    });
+
+    it('waits for the connection before sending (does not fire while connecting)', async () => {
+      // Simulate a socket that starts 'connecting' then resolves once ready —
+      // mirrors a fresh P2P attach where FileBrowser loads on mount.
+      const handlers = new Set<(msg: P2PMessage) => void>();
+      let resolveConn!: () => void;
+      const connReady = new Promise<void>((r) => { resolveConn = r; });
+      const p2p: MockP2P = {
+        connectionState: 'connecting',
+        reconnectAttempt: 0,
+        sendMessage: vi.fn(),
+        close: vi.fn(),
+        waitForConnection: vi.fn(() => connReady),
+        onMessage: vi.fn((h: (msg: P2PMessage) => void) => {
+          handlers.add(h);
+          return () => { handlers.delete(h); };
+        }),
+        _respond(id, msgType, payload) {
+          handlers.forEach((h) => h({ msg_type: msgType, id, timestamp: Date.now(), payload }));
+        },
+      };
+      const ops = createFileOps(p2p);
+
+      const promise = ops.listDir('/tmp');
+      await flush();
+      // Not connected yet → nothing sent.
+      expect((p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+
+      // Connection becomes ready → request is flushed.
+      resolveConn();
+      await flush();
+      const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(sendCall.msg_type).toBe('file.list');
+
+      p2p._respond(sendCall.id, 'ok', { entries: [] });
+      await expect(promise).resolves.toEqual({ entries: [] });
     });
   });
 

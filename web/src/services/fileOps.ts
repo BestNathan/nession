@@ -1,5 +1,16 @@
 import type { P2PConnection } from '../hooks/useP2PConnection';
 
+/**
+ * Minimal transport slice fileOps needs from a P2PConnection. These three
+ * methods are useCallback-stable for the connection's lifetime, so memoizing
+ * fileOps on them (rather than the whole connection object, whose
+ * connectionState field mutates every render) keeps its identity stable.
+ */
+export type FileTransport = Pick<
+  P2PConnection,
+  'sendMessage' | 'onMessage' | 'waitForConnection'
+>;
+
 // --- Types ---
 
 export interface FileEntry {
@@ -38,46 +49,48 @@ function base64Decode(b64: string): string {
 }
 
 function sendRequest<T>(
-  p2p: P2PConnection,
+  p2p: FileTransport,
   msgType: string,
   payload: Record<string, unknown>,
   timeoutMs = 15000,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
-    if (p2p.connectionState === 'disconnected') {
-      reject(new Error('Connection lost'));
-      return;
-    }
-    const id = generateId();
-    const timeout = setTimeout(() => {
-      unsub();
-      reject(new Error(`File operation timeout: ${msgType}`));
-    }, timeoutMs);
-
-    const unsub = p2p.onMessage((msg) => {
-      if (msg.id === id) {
-        clearTimeout(timeout);
+    // Wait for the transport to be ready before sending. On a fresh attach the
+    // P2P socket is still 'connecting', so firing immediately would either drop
+    // the frame (readyState !== OPEN) and time out, or reject with
+    // "Connection lost" on the initial 'disconnected' state. Queue instead.
+    p2p.waitForConnection(timeoutMs).then(() => {
+      const id = generateId();
+      const timeout = setTimeout(() => {
         unsub();
-        if (msg.msg_type === 'error') {
-          reject(new Error(((msg.payload as Record<string, unknown>)?.message as string) || `File operation failed: ${msgType}`));
-        } else {
-          resolve(msg.payload as T);
-        }
-      }
-    });
+        reject(new Error(`File operation timeout: ${msgType}`));
+      }, timeoutMs);
 
-    p2p.sendMessage({
-      msg_type: msgType,
-      id,
-      timestamp: Math.floor(Date.now() / 1000),
-      payload,
-    });
+      const unsub = p2p.onMessage((msg) => {
+        if (msg.id === id) {
+          clearTimeout(timeout);
+          unsub();
+          if (msg.msg_type === 'error') {
+            reject(new Error(((msg.payload as Record<string, unknown>)?.message as string) || `File operation failed: ${msgType}`));
+          } else {
+            resolve(msg.payload as T);
+          }
+        }
+      });
+
+      p2p.sendMessage({
+        msg_type: msgType,
+        id,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload,
+      });
+    }).catch(reject);
   });
 }
 
 // --- Public API ---
 
-export function createFileOps(p2p: P2PConnection) {
+export function createFileOps(p2p: FileTransport) {
   return {
     listDir: (path: string): Promise<{ entries: FileEntry[] }> =>
       sendRequest(p2p, 'file.list', { path }),

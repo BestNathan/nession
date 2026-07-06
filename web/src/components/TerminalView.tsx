@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo } from '../types';
 import type { WebSocketService } from '../services/websocket';
@@ -36,7 +36,22 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       : null,
   );
 
-  const fileOps = p2pConnection ? createFileOps(p2pConnection) : null;
+  // Stable across re-renders. The hook returns a fresh object literal each
+  // render, but its transport methods are useCallback-stable for the
+  // connection's lifetime and fileOps uses only those — not the mutating
+  // connectionState field. Keying the memo on those stable refs recreates
+  // fileOps only when the connection is rebuilt, so FileBrowser's
+  // load-on-mount effect doesn't re-fire on every state transition.
+  const sendMessage = p2pConnection?.sendMessage;
+  const onMessage = p2pConnection?.onMessage;
+  const waitForConnection = p2pConnection?.waitForConnection;
+  const fileOps = useMemo(
+    () =>
+      sendMessage && onMessage && waitForConnection
+        ? createFileOps({ sendMessage, onMessage, waitForConnection })
+        : null,
+    [sendMessage, onMessage, waitForConnection],
+  );
 
   const terminalElement = (
     <Terminal
