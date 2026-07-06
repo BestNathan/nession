@@ -321,3 +321,98 @@ async fn test_agent_registration_with_connect_url() {
         .await
         .ok();
 }
+
+#[tokio::test]
+async fn test_server_local_addr() {
+    let config = nession_common::config::ServerConfig {
+        listen_address: "127.0.0.1:0".to_string(),
+        tls_cert_path: String::new(),
+        tls_key_path: String::new(),
+        auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
+        heartbeat_timeout_secs: 30,
+        db_path: "./test_ws_local_addr.db".to_string(),
+    };
+
+    let db = Database::new(&config.db_path).await.unwrap();
+    let server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
+    let addr = server.local_addr().unwrap();
+
+    assert_eq!(addr.ip().to_string(), "127.0.0.1");
+    assert!(addr.port() > 0);
+
+    tokio::fs::remove_file("./test_ws_local_addr.db").await.ok();
+}
+
+#[tokio::test]
+async fn test_client_sessions_list_authenticated() {
+    let config = nession_common::config::ServerConfig {
+        listen_address: "127.0.0.1:0".to_string(),
+        tls_cert_path: String::new(),
+        tls_key_path: String::new(),
+        auth_token: "test_token".to_string(),
+        heartbeat_interval_secs: 10,
+        heartbeat_timeout_secs: 30,
+        db_path: "./test_ws_sessions_list.db".to_string(),
+    };
+
+    let (addr, _handle) = start_test_server(config).await;
+
+    let url = format!("ws://{}", addr);
+    let (mut ws_stream, _) = connect_async(&url).await.unwrap();
+
+    // Authenticate
+    let auth_msg = serde_json::json!({
+        "msg_type": "client.auth",
+        "id": "msg_auth",
+        "timestamp": current_timestamp(),
+        "payload": {
+            "auth_token": "test_token"
+        }
+    });
+
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let response = ws_stream.next().await.unwrap().unwrap();
+    let response_text = match response {
+        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+        _ => panic!("Expected text response"),
+    };
+
+    let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(response_msg["payload"]["status"], "success");
+
+    // Request sessions list
+    let sessions_msg = serde_json::json!({
+        "msg_type": "client.sessions.list",
+        "id": "msg_sessions",
+        "timestamp": current_timestamp(),
+        "payload": {}
+    });
+
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            sessions_msg.to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let response = ws_stream.next().await.unwrap().unwrap();
+    let response_text = match response {
+        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+        _ => panic!("Expected text response"),
+    };
+
+    let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(response_msg["msg_type"], "client.sessions.list.response");
+    assert!(response_msg["payload"]["sessions"].is_array());
+
+    tokio::fs::remove_file("./test_ws_sessions_list.db")
+        .await
+        .ok();
+}
