@@ -122,6 +122,10 @@ pub mod msg_types {
     pub const FILE_CREATE_DIR: &str = "file.create_dir";
     pub const FILE_RENAME: &str = "file.rename";
 
+    // Keepalive (P2P client → agent)
+    pub const KEEPALIVE_PING: &str = "keepalive.ping";
+    pub const KEEPALIVE_PONG: &str = "keepalive.pong";
+
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
     pub const OK: &str = "ok";
@@ -1107,6 +1111,12 @@ impl AgentServer {
                 }
             }
 
+            // --- Keepalive ---
+            msg_types::KEEPALIVE_PING => {
+                serde_json::to_string(&make_response(&id, msg_types::KEEPALIVE_PONG, ()))
+                    .unwrap_or_default()
+            }
+
             // --- File operations ---
             msg_types::FILE_LIST => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
@@ -1595,6 +1605,25 @@ mod tests {
         assert_eq!(resp.msg_type, msg_types::ERROR);
         assert_eq!(resp.id, "test-unknown");
         assert_eq!(resp.payload.code, "unknown_message_type");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_keepalive_ping_returns_pong() {
+        let (addr, handle) = start_test_server_on(18092).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req: Message<serde_json::Value> = Message {
+            msg_type: msg_types::KEEPALIVE_PING.to_string(),
+            id: "ka-test-123".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::KEEPALIVE_PONG);
+        assert_eq!(resp.id, "ka-test-123");
 
         handle.shutdown().await.ok();
     }
