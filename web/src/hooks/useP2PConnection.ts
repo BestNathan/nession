@@ -17,6 +17,13 @@ export interface P2PConnection {
   connectionState: ConnectionState;
   reconnectAttempt: number;
   close: () => void;
+  /**
+   * Resolves once the socket is connected, or rejects if it becomes
+   * permanently disconnected / the wait times out. Lets callers (e.g. file
+   * operations issued right after attach) queue until the transport is ready
+   * instead of firing into a still-connecting socket.
+   */
+  waitForConnection: (timeoutMs?: number) => Promise<void>;
 }
 
 interface UseP2PConnectionOptions {
@@ -133,8 +140,23 @@ export function useP2PConnection(
   const activeRef = useRef(true);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  // Start in 'connecting' when we have an agent to reach. Child effects (e.g.
+  // FileBrowser's load-on-mount) run before this hook's connect effect, so an
+  // initial 'disconnected' would make waitForConnection() reject before the
+  // socket even starts. 'connecting' correctly makes those callers wait.
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    options?.agentUrl ? 'connecting' : 'disconnected',
+  );
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+
+  // Mirror connectionState into a ref so waitForConnection can read live state
+  // without being re-created (and without stale closures) on every transition.
+  const connectionStateRef = useRef<ConnectionState>(connectionState);
+  connectionStateRef.current = connectionState;
+
+  // Pending waitForConnection() waiters, settled event-driven from the
+  // connectionState effect below (no busy-polling — works under fake timers).
+  const waitersRef = useRef<Set<{ resolve: () => void; reject: (e: Error) => void }>>(new Set());
 
   const agentUrl = options?.agentUrl;
   const connectionToken = options?.connectionToken;
@@ -161,8 +183,29 @@ export function useP2PConnection(
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
       handlers.clear();
+      // NOTE: pending waitForConnection() waiters are intentionally NOT rejected
+      // here. Under React StrictMode (dev) this effect runs mount → cleanup →
+      // mount; rejecting on cleanup would fail a file op issued during the first
+      // mount even though the second connection is about to succeed. Waiters
+      // persist (ref survives the remount) and are settled by the connectionState
+      // effect on (re)connect, or expire via their own timeout on real unmount.
     };
   }, [agentUrl, connectionToken, onError, maxReconnectAttempts, reconnectBaseDelay]);
+
+  // Settle any pending waitForConnection() promises whenever the state settles
+  // into a terminal-for-waiting value ('connected' → resolve, 'disconnected' →
+  // reject). Event-driven so it works with fake timers and adds no latency.
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      const waiters = waitersRef.current;
+      waitersRef.current = new Set();
+      waiters.forEach((w) => w.resolve());
+    } else if (connectionState === 'disconnected') {
+      const waiters = waitersRef.current;
+      waitersRef.current = new Set();
+      waiters.forEach((w) => w.reject(new Error('Connection lost')));
+    }
+  }, [connectionState]);
 
   const sendMessage = useCallback((msg: Record<string, unknown>) => {
     try { if (wsRef.current?.readyState === WebSocket.OPEN) {wsRef.current.send(JSON.stringify(msg));} }
@@ -180,6 +223,27 @@ export function useP2PConnection(
     setConnectionState('disconnected');
   }, []);
 
+  const waitForConnection = useCallback((timeoutMs = 15_000): Promise<void> => {
+    const state = connectionStateRef.current;
+    if (state === 'connected') {return Promise.resolve();}
+    if (state === 'disconnected') {return Promise.reject(new Error('Connection lost'));}
+
+    // 'connecting' | 'reconnecting' — register a waiter settled by the
+    // connectionState effect. Guard with a timeout so a socket that never
+    // opens doesn't hang the caller forever.
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve: () => { clearTimeout(timer); resolve(); },
+        reject: (e: Error) => { clearTimeout(timer); reject(e); },
+      };
+      const timer = setTimeout(() => {
+        waitersRef.current.delete(waiter);
+        reject(new Error('Connection timeout'));
+      }, timeoutMs);
+      waitersRef.current.add(waiter);
+    });
+  }, []);
+
   if (!options) {return null;}
-  return { sendMessage, onMessage, connectionState, reconnectAttempt, close };
+  return { sendMessage, onMessage, connectionState, reconnectAttempt, close, waitForConnection };
 }

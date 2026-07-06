@@ -395,4 +395,205 @@ describe('useDashboardHandlers', () => {
       expect(result.current.isSearchActive).toBe(true);
     });
   });
+
+  // ── fetch agents/sessions error handling ───────────────────────────
+
+  describe('fetch errors', () => {
+    it('sets error when fetchAgents fails', async () => {
+      const mock = createMockWsService();
+      mock.listAgents = vi.fn().mockRejectedValue(new Error('Fetch agents failed'));
+      // Keep onAgentsChanged / onSessionsChanged registered
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+      mock.listSessions = vi.fn().mockResolvedValue([]);
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      // Wait for the initial fetch to settle
+      await vi.waitFor(() => {
+        expect(result.current.error).toContain('Fetch agents failed');
+      });
+    });
+
+    it('sets error when fetchSessions fails', async () => {
+      const mock = createMockWsService();
+      mock.listAgents = vi.fn().mockResolvedValue([]);
+      mock.listSessions = vi.fn().mockRejectedValue(new Error('Fetch sessions failed'));
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      await vi.waitFor(() => {
+        expect(result.current.error).toContain('Fetch sessions failed');
+      });
+    });
+  });
+
+  // ── attach flow ────────────────────────────────────────────────────
+
+  describe('handleAttach', () => {
+    it('sets attachingInProgress during attach', async () => {
+      const mock = createMockWsService();
+      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach =
+        vi.fn().mockResolvedValue({ mode: 'p2p', session_id: 'agent-1:s1', agent_address: 'ws://a/ws', connection_token: 'tok' });
+      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
+      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      // Wait for initial fetch
+      await vi.waitFor(() => {
+        expect(result.current.loadingAgents).toBe(false);
+      });
+
+      const session = makeSession();
+      act(() => { result.current.handleAttach(session); });
+
+      expect(result.current.attachingInProgress).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(result.current.attachingInProgress).toBe(false);
+      });
+    });
+
+    it('falls back to relay when p2p attach fails', async () => {
+      const mock = createMockWsService();
+      const requestAttach = vi.fn()
+        .mockRejectedValueOnce(new Error('P2P failed'))
+        .mockResolvedValueOnce({ mode: 'relay', session_id: 'agent-1:s1' });
+      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach = requestAttach;
+      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
+      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      await vi.waitFor(() => {
+        expect(result.current.loadingAgents).toBe(false);
+      });
+
+      act(() => { result.current.handleAttach(makeSession()); });
+
+      await vi.waitFor(() => {
+        expect(result.current.attachingInProgress).toBe(false);
+      });
+
+      expect(requestAttach).toHaveBeenCalledTimes(2);
+      expect(requestAttach).toHaveBeenNthCalledWith(1, 'agent-1:session-1', 'p2p');
+      expect(requestAttach).toHaveBeenNthCalledWith(2, 'agent-1:session-1', 'relay');
+    });
+
+    it('sets error when both p2p and relay attach fail', async () => {
+      const mock = createMockWsService();
+      const requestAttach = vi.fn()
+        .mockRejectedValueOnce(new Error('P2P failed'))
+        .mockRejectedValueOnce(new Error('Relay failed'));
+      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach = requestAttach;
+      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
+      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      await vi.waitFor(() => {
+        expect(result.current.loadingAgents).toBe(false);
+      });
+
+      act(() => { result.current.handleAttach(makeSession()); });
+
+      await vi.waitFor(() => {
+        expect(result.current.attachingInProgress).toBe(false);
+        expect(result.current.error).toContain('Relay failed');
+      });
+    });
+  });
+
+  // ── handleSessionCreated / handleSessionKilled ─────────────────────
+
+  describe('session lifecycle callbacks', () => {
+    it('handleSessionCreated closes modal and refreshes sessions', async () => {
+      const fetchSessions = vi.fn().mockResolvedValue([]);
+      const mock = createMockWsService();
+      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
+      mock.listSessions = fetchSessions;
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      await vi.waitFor(() => {
+        expect(result.current.loadingAgents).toBe(false);
+      });
+
+      act(() => { result.current.handleSessionCreated(); });
+
+      expect(result.current.showCreateModal).toBe(false);
+      // fetchSessions is called — it may have been called once initially too
+      expect(fetchSessions).toHaveBeenCalled();
+    });
+
+    it('handleSessionKilled clears kill target and refreshes', async () => {
+      const fetchSessions = vi.fn().mockResolvedValue([]);
+      const mock = createMockWsService();
+      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
+      mock.listSessions = fetchSessions;
+      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
+      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+
+      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+
+      await vi.waitFor(() => {
+        expect(result.current.loadingAgents).toBe(false);
+      });
+
+      act(() => { result.current.handleSessionKilled(); });
+
+      expect(result.current.sessionToKill).toBeNull();
+      expect(fetchSessions).toHaveBeenCalled();
+    });
+  });
+
+  // ── session filtering by searchQuery ───────────────────────────────
+
+  describe('session search filtering', () => {
+    it('filters sessions by session_name', () => {
+      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+
+      act(() => {
+        agentsCallback!([makeAgent({ agent_id: 'a1' })]);
+        sessionsCallback!([
+          makeSession({ session_id: 'a1:prod', session_name: 'prod-app', agent_id: 'a1' }),
+          makeSession({ session_id: 'a1:staging', session_name: 'staging-app', agent_id: 'a1' }),
+        ]);
+      });
+
+      act(() => { result.current.setSearchQuery('prod'); });
+      expect(result.current.filteredSessions).toHaveLength(1);
+      expect(result.current.filteredSessions[0].session_name).toBe('prod-app');
+    });
+
+    it('filters sessions by agent_id', () => {
+      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+
+      act(() => {
+        agentsCallback!([
+          makeAgent({ agent_id: 'node-a' }),
+          makeAgent({ agent_id: 'node-b' }),
+        ]);
+        sessionsCallback!([
+          makeSession({ session_id: 'node-a:app', session_name: 'app', agent_id: 'node-a' }),
+          makeSession({ session_id: 'node-b:db', session_name: 'db', agent_id: 'node-b' }),
+        ]);
+      });
+
+      act(() => { result.current.setSearchQuery('node-a'); });
+      expect(result.current.filteredSessions).toHaveLength(1);
+      expect(result.current.filteredSessions[0].agent_id).toBe('node-a');
+    });
+  });
 });

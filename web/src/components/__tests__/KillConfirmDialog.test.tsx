@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Session } from '../../types';
+import type { Session, KillSessionResponse } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 
 // Mock Dialog to render children directly (no portal)
@@ -32,9 +32,10 @@ function makeSession(): Session {
   };
 }
 
-function makeWsService(): WebSocketService {
+function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketService {
   return {
     killSession: vi.fn().mockResolvedValue({ success: true }),
+    ...overrides,
   } as unknown as WebSocketService;
 }
 
@@ -149,5 +150,174 @@ describe('KillConfirmDialog', () => {
 
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
     expect(wsService.killSession).toHaveBeenCalledWith('agent-1:my-session');
+  });
+
+  it('shows error when killSession returns success=false', async () => {
+    const user = userEvent.setup();
+    const { KillConfirmDialog } = KillConfirmDialogModule;
+    const wsService = makeWsService();
+    (wsService.killSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: false,
+      error: 'Session not found',
+    });
+
+    render(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session not found')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error when killSession throws', async () => {
+    const user = userEvent.setup();
+    const { KillConfirmDialog } = KillConfirmDialogModule;
+    const wsService = makeWsService();
+    (wsService.killSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Network error'),
+    );
+
+    render(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeInTheDocument();
+    });
+  });
+
+  it('shows generic error when killSession throws non-Error', async () => {
+    const user = userEvent.setup();
+    const { KillConfirmDialog } = KillConfirmDialogModule;
+    const wsService = makeWsService();
+    (wsService.killSession as ReturnType<typeof vi.fn>).mockRejectedValue('unknown');
+
+    render(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to kill session')).toBeInTheDocument();
+    });
+  });
+
+  it('shows "Killing..." loading text during submission', async () => {
+    const { KillConfirmDialog } = KillConfirmDialogModule;
+    // Never resolves so we can observe the loading state
+    const killSession = vi.fn().mockImplementation(
+      () => new Promise<KillSessionResponse>(() => {}),
+    );
+
+    render(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ killSession })}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
+    });
+
+    // Use fireEvent for synchronous click — userEvent awaits the handler promise
+    fireEvent.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Killing...')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    });
+  });
+
+  it('resets error state when dialog is reopened', async () => {
+    const user = userEvent.setup();
+    const { KillConfirmDialog } = KillConfirmDialogModule;
+    const wsService = makeWsService();
+    (wsService.killSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('fail'),
+    );
+
+    const { rerender } = render(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
+    });
+
+    // Trigger error
+    await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+    await waitFor(() => {
+      expect(screen.getByText('fail')).toBeInTheDocument();
+    });
+
+    // Close and reopen
+    rerender(
+      <KillConfirmDialog
+        isOpen={false}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+    rerender(
+      <KillConfirmDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={wsService}
+        session={makeSession()}
+        onKilled={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('fail')).not.toBeInTheDocument();
+    });
   });
 });

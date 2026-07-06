@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { X, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SidePanel } from './SidePanel';
@@ -15,11 +15,58 @@ export interface OpenFile {
 interface FileTabsProps {
   fileOps: FileOps;
   terminalElement: React.ReactNode;
+  /**
+   * Called when the terminal tab becomes visible again after a file tab was
+   * shown. Lets the parent refit the terminal, which cannot measure itself
+   * while hidden (display:none).
+   */
+  onTerminalReveal?: () => void;
 }
 
 const MAX_TABS = 10;
 
-export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
+interface TabBarProps {
+  openFiles: OpenFile[];
+  activeTabId: string;
+  dirtyFiles: Set<string>;
+  showTerminal: boolean;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+}
+
+/** Horizontal tab strip: a fixed Terminal tab followed by one tab per open file. */
+function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, onSelect, onClose }: TabBarProps) {
+  return (
+    <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
+      <button
+        onClick={() => onSelect('terminal')}
+        className={cn(
+          'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0',
+          showTerminal ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
+        )}
+      >
+        <Terminal className="h-3 w-3" /> Terminal
+      </button>
+
+      {openFiles.map((file) => (
+        <button
+          key={file.id}
+          onClick={() => onSelect(file.id)}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0 max-w-[160px]',
+            activeTabId === file.id ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <span className="truncate">{file.filename}</span>
+          {dirtyFiles.has(file.id) && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />}
+          <X className="h-3 w-3 flex-shrink-0 hover:text-destructive ml-0.5" onClick={(e) => { e.stopPropagation(); onClose(file.id); }} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function FileTabs({ fileOps, terminalElement, onTerminalReveal }: FileTabsProps) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('terminal');
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
@@ -106,6 +153,18 @@ export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
   const activeFile = openFiles.find((f) => f.id === activeTabId);
   const showTerminal = activeTabId === 'terminal';
 
+  // Refit the terminal whenever it transitions back into view. It stays mounted
+  // (hidden via CSS) so its xterm instance + scrollback survive tab switches,
+  // but xterm can't measure itself while display:none, so it needs a refit on
+  // reveal. Skip the very first mount (already fits itself on open).
+  const wasTerminalVisibleRef = useRef(showTerminal);
+  useEffect(() => {
+    if (showTerminal && !wasTerminalVisibleRef.current) {
+      onTerminalReveal?.();
+    }
+    wasTerminalVisibleRef.current = showTerminal;
+  }, [showTerminal, onTerminalReveal]);
+
   return (
     <div className="flex-1 min-h-0 flex flex-row">
       <SidePanel>
@@ -114,37 +173,27 @@ export function FileTabs({ fileOps, terminalElement }: FileTabsProps) {
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Tab bar */}
-        <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
-          <button
-            onClick={() => setActiveTabId('terminal')}
-            className={cn(
-              'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0',
-              showTerminal ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <Terminal className="h-3 w-3" /> Terminal
-          </button>
-
-          {openFiles.map((file) => (
-            <button
-              key={file.id}
-              onClick={() => setActiveTabId(file.id)}
-              className={cn(
-                'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0 max-w-[160px]',
-                activeTabId === file.id ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <span className="truncate">{file.filename}</span>
-              {dirtyFiles.has(file.id) && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />}
-              <X className="h-3 w-3 flex-shrink-0 hover:text-destructive ml-0.5" onClick={(e) => { e.stopPropagation(); handleCloseFile(file.id); }} />
-            </button>
-          ))}
-        </div>
+        <TabBar
+          openFiles={openFiles}
+          activeTabId={activeTabId}
+          dirtyFiles={dirtyFiles}
+          showTerminal={showTerminal}
+          onSelect={setActiveTabId}
+          onClose={handleCloseFile}
+        />
 
         {/* Content */}
-        <div className="flex-1 min-h-0">
-          {showTerminal ? terminalElement : activeFile ? (
-            <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
+        <div className="flex-1 min-h-0 relative">
+          {/* Terminal stays mounted at all times — hidden (not unmounted) when a
+              file tab is active — so its xterm instance and scrollback survive
+              tab switches. `hidden` sets display:none; refit happens on reveal. */}
+          <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
+            {terminalElement}
+          </div>
+          {!showTerminal && activeFile ? (
+            <div className="absolute inset-0">
+              <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
+            </div>
           ) : null}
         </div>
       </div>

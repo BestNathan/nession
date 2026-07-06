@@ -120,6 +120,38 @@ describe('useP2PConnection', () => {
     expect(result.current!.connectionState).toBe('connected');
   });
 
+  it('waitForConnection resolves once connected', async () => {
+    setupMock();
+    const { result } = renderHook(() =>
+      useP2PConnection({
+        agentUrl: 'ws://agent:9090/ws',
+        sessionName: 'test',
+        maxReconnectAttempts: 2,
+      }),
+    );
+
+    // Still connecting — the promise should not have resolved yet.
+    let resolved = false;
+    const waitPromise = result.current!.waitForConnection(5_000).then(() => { resolved = true; });
+    expect(resolved).toBe(false);
+
+    await flushTimers(); // socket opens → 'connected'
+    await act(async () => { await waitPromise; });
+    expect(resolved).toBe(true);
+  });
+
+  it('waitForConnection resolves immediately when already connected', async () => {
+    setupMock();
+    const { result } = renderHook(() =>
+      useP2PConnection({ agentUrl: 'ws://agent:9090/ws', sessionName: 'test' }),
+    );
+    await flushTimers();
+    expect(result.current!.connectionState).toBe('connected');
+
+    // Fast path: no timers needed.
+    await act(async () => { await result.current!.waitForConnection(); });
+  });
+
   it('reconnects after unexpected close', async () => {
     setupMock(2); // auto-open first AND second (reconnect) WebSockets
     const { result } = renderHook(() =>

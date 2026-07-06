@@ -155,3 +155,99 @@ async fn test_session_recovery_empty_db() {
     registry.load_from_db().await;
     assert!(registry.list().await.is_empty());
 }
+
+#[tokio::test]
+async fn test_load_from_db_with_populated_data() {
+    // Create a DB with pre-populated sessions
+    let db = Database::new(":memory:").await.unwrap();
+    let db = Arc::new(db);
+
+    // Insert sessions with different statuses
+    let s1 = make_session("a1:s1", "a1", "s1", SessionStatus::Active);
+    let s2 = make_session("a1:s2", "a1", "s2", SessionStatus::Detached);
+    db.insert_session(&s1, "active").await.unwrap();
+    db.insert_session(&s2, "detached").await.unwrap();
+
+    // Create registry and load from DB
+    let registry = SessionRegistry::new(db);
+    registry.load_from_db().await;
+
+    // Verify sessions were loaded
+    let sessions = registry.list().await;
+    assert_eq!(sessions.len(), 2);
+
+    // Verify status mapping
+    let loaded_s1 = registry.get("a1:s1").await.unwrap();
+    assert_eq!(loaded_s1.status, SessionStatus::Active);
+    assert_eq!(loaded_s1.session_name, "s1");
+
+    let loaded_s2 = registry.get("a1:s2").await.unwrap();
+    assert_eq!(loaded_s2.status, SessionStatus::Detached);
+    assert_eq!(loaded_s2.session_name, "s2");
+}
+
+#[tokio::test]
+async fn test_load_from_db_status_mapping() {
+    let db = Database::new(":memory:").await.unwrap();
+    let db = Arc::new(db);
+
+    // Insert sessions with various status strings
+    let base = make_session("a:s", "a", "s", SessionStatus::Active);
+    db.insert_session(&base, "active").await.unwrap();
+
+    let base = make_session("a:d", "a", "d", SessionStatus::Detached);
+    db.insert_session(&base, "detached").await.unwrap();
+
+    let base = make_session("a:z", "a", "z", SessionStatus::Zombie);
+    db.insert_session(&base, "zombie").await.unwrap();
+
+    // Unknown status should map to Recovering
+    let base = make_session("a:u", "a", "u", SessionStatus::Recovering);
+    db.insert_session(&base, "unknown_status").await.unwrap();
+
+    // Also test "recovering" status
+    let base = make_session("a:r", "a", "r", SessionStatus::Recovering);
+    db.insert_session(&base, "recovering").await.unwrap();
+
+    let registry = SessionRegistry::new(db);
+    registry.load_from_db().await;
+
+    assert_eq!(
+        registry.get("a:s").await.unwrap().status,
+        SessionStatus::Active
+    );
+    assert_eq!(
+        registry.get("a:d").await.unwrap().status,
+        SessionStatus::Detached
+    );
+    assert_eq!(
+        registry.get("a:z").await.unwrap().status,
+        SessionStatus::Zombie
+    );
+    assert_eq!(
+        registry.get("a:u").await.unwrap().status,
+        SessionStatus::Recovering
+    );
+    assert_eq!(
+        registry.get("a:r").await.unwrap().status,
+        SessionStatus::Recovering
+    );
+}
+
+#[tokio::test]
+async fn test_load_from_db_preserves_window_count_and_clients() {
+    let db = Database::new(":memory:").await.unwrap();
+    let db = Arc::new(db);
+
+    let mut session = make_session("a:s", "a", "s", SessionStatus::Active);
+    session.window_count = 5;
+    session.attached_clients = 3;
+    db.insert_session(&session, "active").await.unwrap();
+
+    let registry = SessionRegistry::new(db);
+    registry.load_from_db().await;
+
+    let loaded = registry.get("a:s").await.unwrap();
+    assert_eq!(loaded.window_count, 5);
+    assert_eq!(loaded.attached_clients, 3);
+}

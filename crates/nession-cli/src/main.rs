@@ -9,6 +9,8 @@ mod client;
 
 mod terminal;
 
+mod utils;
+
 /// Default server URL (ws://127.0.0.1:8080).
 const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:8080";
 

@@ -12,9 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
       - run: cargo test
@@ -97,9 +96,8 @@ jobs:
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
           echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
 
       - run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
@@ -170,9 +168,8 @@ jobs:
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
           echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
 
       - run: cargo build --release --bin nession-server --bin nession-agent
       - run: |

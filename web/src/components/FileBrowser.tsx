@@ -280,7 +280,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
           <Home className="h-3 w-3" />
         </button>
         {segments.map((seg, i) => {
-          const path = '/' + segments.slice(0, i + 1).join('/');
+          const path = segments.slice(0, i + 1).join('/');
           return (
             <span key={path} className="flex items-center gap-0.5 flex-shrink-0">
               <ChevronRight className="h-3 w-3" />

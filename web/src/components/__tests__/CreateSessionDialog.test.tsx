@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Agent } from '../../types';
+import type { Agent, CreateSessionResponse } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 
 // Mock the ui/dialog module to render content directly (no portal)
@@ -34,13 +34,16 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
-function makeWsService(): WebSocketService {
+function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketService {
   return {
     createSession: vi.fn().mockResolvedValue({ success: true }),
+    ...overrides,
   } as unknown as WebSocketService;
 }
 
 describe('CreateSessionDialog', () => {
+  // ── Rendering ─────────────────────────────────────────────────────────
+
   it('renders dialog when open', async () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
@@ -146,6 +149,315 @@ describe('CreateSessionDialog', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    });
+  });
+
+  // ── Form submission: success ──────────────────────────────────────────
+
+  it('creates session successfully and calls onCreated + onClose', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const onCreated = vi.fn();
+    const onClose = vi.fn();
+    const createSession = vi.fn().mockResolvedValue({ success: true, session_id: 'agent-1:my-session' });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={onClose}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={onCreated}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'my-session');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-session');
+      expect(onCreated).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  // ── Form submission: failure ──────────────────────────────────────────
+
+  it('shows error when createSession returns success=false', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Agent is offline',
+    });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'test');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent is offline')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error when createSession throws', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn().mockRejectedValue(new Error('Network error'));
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'test');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeInTheDocument();
+    });
+  });
+
+  it('shows generic error when createSession throws non-Error', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn().mockRejectedValue('unknown');
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'test');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to create session')).toBeInTheDocument();
+    });
+  });
+
+  // ── Validation ────────────────────────────────────────────────────────
+
+  it('shows error for empty session name', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn();
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Session name is required')).toBeInTheDocument();
+    });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('shows error for invalid session name characters', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn();
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'bad name!');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Only letters, digits/)).toBeInTheDocument();
+    });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('accepts session name with hyphens and dots', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    const createSession = vi.fn().mockResolvedValue({ success: true });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'my-app.v2');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-app.v2');
+    });
+  });
+
+  // ── Loading state ─────────────────────────────────────────────────────
+
+  it('shows "Creating..." and disables buttons during submission', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    // Never resolves so we can inspect the loading state
+    const createSession = vi.fn().mockImplementation(
+      () => new Promise<CreateSessionResponse>(() => {}),
+    );
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService({ createSession })}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText('my-session'), 'test');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Creating...')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    });
+  });
+
+  // ── preselectedAgentId ────────────────────────────────────────────────
+
+  it('preselects agent when preselectedAgentId is provided', async () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService()}
+        agents={[makeAgent({ agent_id: 'agent-1' }), makeAgent({ agent_id: 'agent-2' })]}
+        preselectedAgentId="agent-2"
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      // The Create button should be enabled because agent-2 is online
+      expect(screen.getByRole('button', { name: 'Create' })).not.toBeDisabled();
+    });
+  });
+
+  // ── State reset on reopen ─────────────────────────────────────────────
+
+  it('resets error state when dialog is reopened', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+
+    const { rerender } = render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+    });
+
+    // Trigger validation error
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => {
+      expect(screen.getByText('Session name is required')).toBeInTheDocument();
+    });
+
+    // Close and reopen
+    rerender(
+      <CreateSessionDialog
+        isOpen={false}
+        onClose={vi.fn()}
+        wsService={makeWsService()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+    rerender(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        wsService={makeWsService()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('Session name is required')).not.toBeInTheDocument();
     });
   });
 });

@@ -48,6 +48,8 @@ impl FileOps {
             anyhow::bail!("not_a_directory: {path}");
         }
 
+        let root = self.sandbox.root().to_path_buf();
+
         let entries = task::spawn_blocking(move || -> Result<Vec<FileEntry>> {
             let mut result: Vec<FileEntry> = Vec::new();
             let dir = fs::read_dir(&resolved)
@@ -59,9 +61,16 @@ impl FileOps {
                 let entry_path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
 
+                // Strip sandbox root so paths are relative — downstream
+                // operations resolve against the same root via the sandbox.
+                let relative_path = entry_path
+                    .strip_prefix(&root)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| name.clone());
+
                 result.push(FileEntry {
                     name,
-                    path: entry_path.to_string_lossy().to_string(),
+                    path: relative_path,
                     is_dir: metadata.is_dir(),
                     size: metadata.len(),
                     modified: metadata
@@ -274,6 +283,52 @@ mod tests {
         assert_eq!(entries[1].name, "a.txt");
         assert_eq!(entries[2].name, "b.txt");
         assert_eq!(entries[2].size, 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_returns_paths_relative_to_sandbox_root() {
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+
+        let entries = ops.list_dir("").await.unwrap();
+        assert_eq!(entries.len(), 2);
+
+        let subdir = entries.iter().find(|e| e.name == "subdir").unwrap();
+        let file = entries.iter().find(|e| e.name == "a.txt").unwrap();
+
+        // Paths must be relative to sandbox root, not absolute OS paths.
+        assert_eq!(subdir.path, "subdir");
+        assert_eq!(file.path, "a.txt");
+
+        // Verify round-trip: pass a path from list_dir back to read_file.
+        let content = ops.read_file(&file.path).await.unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&content.content)
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "a");
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_nested_path_is_relative() {
+        let (dir, ops) = setup();
+        fs::create_dir_all(dir.path().join("deep/nested")).unwrap();
+        fs::write(dir.path().join("deep/nested/file.txt"), b"nested").unwrap();
+
+        let entries = ops.list_dir("deep/nested").await.unwrap();
+        assert_eq!(entries.len(), 1);
+
+        let file = &entries[0];
+        assert_eq!(file.name, "file.txt");
+        // Path must be relative, not absolute.
+        assert_eq!(file.path, "deep/nested/file.txt");
+
+        // Round-trip through read_file.
+        let data = ops.read_file(&file.path).await.unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&data.content)
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "nested");
     }
 
     #[tokio::test]

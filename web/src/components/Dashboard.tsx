@@ -95,7 +95,7 @@ function DashboardHeader({
           {connectionStatus}
         </Badge>
         <div className="flex-1" />
-        <Button size="sm" onClick={fetchSessions} disabled={loadingAgents}>
+        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents}>
           <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
         </Button>
       </header>

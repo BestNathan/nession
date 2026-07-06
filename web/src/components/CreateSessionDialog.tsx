@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -42,7 +42,7 @@ export function CreateSessionDialog({
   const [error, setError] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  const onlineAgents = agents.filter((a) => a.status === 'online');
+  const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
 
   useEffect(() => {
     if (isOpen) {

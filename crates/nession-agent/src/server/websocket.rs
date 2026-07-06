@@ -122,6 +122,10 @@ pub mod msg_types {
     pub const FILE_CREATE_DIR: &str = "file.create_dir";
     pub const FILE_RENAME: &str = "file.rename";
 
+    // Keepalive (P2P client → agent)
+    pub const KEEPALIVE_PING: &str = "keepalive.ping";
+    pub const KEEPALIVE_PONG: &str = "keepalive.pong";
+
     // Agent → Client
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
     pub const OK: &str = "ok";
@@ -1107,6 +1111,12 @@ impl AgentServer {
                 }
             }
 
+            // --- Keepalive ---
+            msg_types::KEEPALIVE_PING => {
+                serde_json::to_string(&make_response(&id, msg_types::KEEPALIVE_PONG, ()))
+                    .unwrap_or_default()
+            }
+
             // --- File operations ---
             msg_types::FILE_LIST => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
@@ -1600,6 +1610,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_keepalive_ping_returns_pong() {
+        let (addr, handle) = start_test_server_on(18092).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req: Message<serde_json::Value> = Message {
+            msg_type: msg_types::KEEPALIVE_PING.to_string(),
+            id: "ka-test-123".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::KEEPALIVE_PONG);
+        assert_eq!(resp.id, "ka-test-123");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
     async fn test_invalid_json_returns_error() {
         let (addr, handle) = start_test_server_on(18086).await;
         let (mut sink, mut stream) = connect_client(addr).await;
@@ -1676,6 +1705,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_file_list_then_read_roundtrip() {
+        let (addr, handle) = start_test_server_on(18091).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // 1. Write a file.
+        let content = b"roundtrip via list_dir path";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "rt/from_list.txt".to_string(),
+                content: b64,
+            },
+        );
+        let write_resp: Message<FileWriteResponse> =
+            send_and_receive(&mut sink, &mut stream, &write_req).await;
+        assert_eq!(write_resp.msg_type, msg_types::OK);
+
+        // 2. List the directory to get entry paths.
+        let list_req = new_message(
+            msg_types::FILE_LIST,
+            FileListPayload {
+                path: "rt".to_string(),
+            },
+        );
+        let list_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &list_req).await;
+        assert_eq!(list_resp.msg_type, msg_types::OK);
+
+        let entries = list_resp
+            .payload
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .expect("entries should be an array");
+        assert_eq!(entries.len(), 1);
+        let entry_path = entries[0]
+            .get("path")
+            .and_then(|v| v.as_str())
+            .expect("entry should have a path");
+        // Path must be relative, not absolute.
+        assert_eq!(entry_path, "rt/from_list.txt");
+
+        // 3. Read the file using the path returned by list_dir.
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: entry_path.to_string(),
+            },
+        );
+        let read_resp: Message<FileData> =
+            send_and_receive(&mut sink, &mut stream, &read_req).await;
+        assert_eq!(read_resp.msg_type, msg_types::OK);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&read_resp.payload.content)
+            .unwrap();
+        assert_eq!(&decoded, content);
+
+        // 4. Delete using the path from list_dir.
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: entry_path.to_string(),
+            },
+        );
+        let del_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &del_req).await;
+        assert_eq!(del_resp.msg_type, msg_types::OK);
+        assert!(del_resp
+            .payload
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
     async fn test_file_delete() {
         let (addr, handle) = start_test_server_on(18089).await;
         let (mut sink, mut stream) = connect_client(addr).await;
@@ -1735,5 +1841,206 @@ mod tests {
         assert!(resp.payload.code == "permission_denied" || resp.payload.code == "io_error");
 
         handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_create_dir() {
+        let (addr, handle) = start_test_server_on(18093).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // Create a nested directory
+        let create_req = new_message(
+            msg_types::FILE_CREATE_DIR,
+            FileCreateDirPayload {
+                path: "test_dir/sub_dir".to_string(),
+            },
+        );
+        let create_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &create_req).await;
+        assert_eq!(create_resp.msg_type, msg_types::OK);
+        assert_eq!(
+            create_resp
+                .payload
+                .get("success")
+                .unwrap()
+                .as_bool()
+                .unwrap(),
+            true
+        );
+
+        // Verify directory exists by listing it
+        let list_req = new_message(
+            msg_types::FILE_LIST,
+            FileListPayload {
+                path: "test_dir/sub_dir".to_string(),
+            },
+        );
+        let list_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &list_req).await;
+        assert_eq!(list_resp.msg_type, msg_types::OK);
+
+        // Clean up
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: "test_dir/sub_dir".to_string(),
+            },
+        );
+        let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: "test_dir".to_string(),
+            },
+        );
+        let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_file_rename() {
+        let (addr, handle) = start_test_server_on(18094).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // Write a file
+        let content = b"rename test";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let write_req = new_message(
+            msg_types::FILE_WRITE,
+            FileWritePayload {
+                path: "old_name.txt".to_string(),
+                content: b64,
+            },
+        );
+        let _ = send_and_receive::<_, FileWriteResponse>(&mut sink, &mut stream, &write_req).await;
+
+        // Rename the file
+        let rename_req = new_message(
+            msg_types::FILE_RENAME,
+            FileRenamePayload {
+                from: "old_name.txt".to_string(),
+                to: "new_name.txt".to_string(),
+            },
+        );
+        let rename_resp: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &rename_req).await;
+        assert_eq!(rename_resp.msg_type, msg_types::OK);
+        assert_eq!(
+            rename_resp
+                .payload
+                .get("success")
+                .unwrap()
+                .as_bool()
+                .unwrap(),
+            true
+        );
+
+        // Read from new location
+        let read_req = new_message(
+            msg_types::FILE_READ,
+            FileReadPayload {
+                path: "new_name.txt".to_string(),
+            },
+        );
+        let read_resp: Message<FileData> =
+            send_and_receive(&mut sink, &mut stream, &read_req).await;
+        assert_eq!(read_resp.msg_type, msg_types::OK);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&read_resp.payload.content)
+            .unwrap();
+        assert_eq!(&decoded, content);
+
+        // Clean up
+        let del_req = new_message(
+            msg_types::FILE_DELETE,
+            FileDeletePayload {
+                path: "new_name.txt".to_string(),
+            },
+        );
+        let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_terminal_input_invalid_base64() {
+        let (addr, handle) = start_test_server_on(18095).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let tmux = TmuxManager::new();
+        let session_name = "server_test_invalid_b64";
+        tmux.create_session(session_name, 80, 24, "/tmp")
+            .await
+            .unwrap();
+
+        // Attach first
+        let attach_payload = ClientAttachPayload {
+            session_name: session_name.to_string(),
+            width: 80,
+            height: 24,
+        };
+        let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
+        let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &attach_req).await;
+
+        // Send invalid base64 data
+        let input_payload = TerminalInputPayload {
+            session_name: session_name.to_string(),
+            data: "!!!not-valid-base64!!!".to_string(),
+        };
+        let input_req = new_message(msg_types::TERMINAL_INPUT, input_payload);
+        let input_resp: Message<ErrorPayload> =
+            send_and_receive(&mut sink, &mut stream, &input_req).await;
+        assert_eq!(input_resp.msg_type, msg_types::ERROR);
+        assert_eq!(input_resp.payload.code, "decode_error");
+
+        // Clean up
+        let detach_payload = ClientDetachPayload {
+            session_name: session_name.to_string(),
+        };
+        let detach_req = new_message(msg_types::CLIENT_DETACH, detach_payload);
+        let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &detach_req).await;
+
+        tmux.kill_session(session_name).await.ok();
+        handle.shutdown().await.ok();
+    }
+
+    #[test]
+    fn test_parse_listen_address_ipv4() {
+        let (ip, port) = parse_listen_address("0.0.0.0:8080");
+        assert_eq!(ip, "0.0.0.0");
+        assert_eq!(port, 8080);
+    }
+
+    #[test]
+    fn test_parse_listen_address_ipv6() {
+        let (ip, port) = parse_listen_address("[::1]:9090");
+        // The function strips the brackets from IPv6 addresses
+        assert_eq!(ip, "::1");
+        assert_eq!(port, 9090);
+    }
+
+    #[test]
+    fn test_parse_listen_address_invalid() {
+        // Invalid format should fall back to default
+        let (ip, port) = parse_listen_address("not-a-valid-address");
+        assert_eq!(ip, "127.0.0.1");
+        assert_eq!(port, 9090);
+    }
+
+    #[test]
+    fn test_extract_session_name_with_agent_prefix() {
+        assert_eq!(extract_session_name("agent1:mysession"), "mysession");
+    }
+
+    #[test]
+    fn test_extract_session_name_without_prefix() {
+        assert_eq!(extract_session_name("mysession"), "mysession");
+    }
+
+    #[test]
+    fn test_extract_session_name_multiple_colons() {
+        // Should take everything after the first colon
+        assert_eq!(extract_session_name("agent:session:extra"), "session:extra");
     }
 }

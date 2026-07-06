@@ -38,6 +38,13 @@ export interface TerminalHandle {
    * relay modes. No-op if the underlying connection is not open.
    */
   sendText: (text: string) => void;
+  /**
+   * Refit the terminal to its container and push the new dimensions to the
+   * remote session. Call this after the terminal becomes visible again (e.g.
+   * switching back from a hidden tab), because xterm cannot measure itself
+   * while `display:none` and may have stale dimensions.
+   */
+  refit: () => void;
 }
 
 export interface TerminalProps {
@@ -88,6 +95,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // effect once the transport is established. Lets the imperative handle (and the
   // keystroke path) reuse one mode-aware sender. Null when not connected.
   const sendDataRef = useRef<((data: string) => void) | null>(null);
+  // Holds the "refit terminal + push new dimensions" closure, assigned inside
+  // the connection effect. Lets the imperative refit() reuse the effect's
+  // fitAddon + sendResize without duplicating the mode-aware resize logic.
+  const refitRef = useRef<(() => void) | null>(null);
 
   // Ref to latest p2pConnection so the main effect closure always accesses the
   // current value without re-running on every connectionState change.
@@ -121,6 +132,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (!isBlocked) {
           sendDataRef.current?.(text);
         }
+      },
+      refit: () => {
+        refitRef.current?.();
       },
     }),
     [isBlocked],
@@ -521,6 +535,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Expose the sender to the imperative handle for the lifetime of this effect.
     sendDataRef.current = sendData;
 
+    // Expose a refit closure: fit to the (now-visible) container, then push the
+    // updated dimensions to the remote session. Deferred to the next frame so
+    // the browser has applied the visibility change and laid out the container
+    // (fit() measures 0 while the element is still display:none).
+    refitRef.current = () => {
+      if (!active) {return;}
+      requestAnimationFrame(() => {
+        if (!active) {return;}
+        try {
+          fitAddon.fit();
+          sendResize();
+        } catch {
+          // Container may be zero-sized (still hidden) — ignore.
+        }
+      });
+    };
+
     // ---------------------------------------------------------------------------
     // 2. Establish the WebSocket connection
     // ---------------------------------------------------------------------------
@@ -640,6 +671,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return () => {
       active = false;
       sendDataRef.current = null;
+      refitRef.current = null;
       clearTimeout(mountTimer);
       attachSentRef.current = false;
       wasConnectedRef.current = false;

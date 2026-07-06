@@ -30,5 +30,8 @@ async-trait.workspace = true
 base64.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+tempfile = "3.10"
+
 [lints]
 workspace = true

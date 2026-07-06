@@ -964,4 +964,289 @@ mod tests {
         handle.shutdown().await.ok();
         server_handle.abort();
     }
+
+    /// Mock server that sends a session create command after registration.
+    async fn start_mock_server_with_session_create(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                // Send registration response.
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": {
+                        "status": "accepted",
+                        "message": "ok"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+
+                // Skip registration message from client.
+                let _ = stream.next().await;
+
+                // Send session create command.
+                let create_cmd = serde_json::json!({
+                    "msg_type": "server.session.create",
+                    "id": "cmd-1",
+                    "timestamp": 1234567891,
+                    "payload": {
+                        "request_id": "req-123",
+                        "name": "test-session-create",
+                        "width": 100,
+                        "height": 30
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(create_cmd.to_string())).await;
+
+                // Collect response.
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_session_create_command() {
+        let port = 28086;
+        let (server_handle, mut msg_rx) = start_mock_server_with_session_create(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-create",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // Wait for the command response.
+        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+            .await
+            .expect("timeout waiting for command response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["payload"]["request_id"], "req-123");
+        assert_eq!(parsed["payload"]["command"], "session.create");
+        assert_eq!(parsed["payload"]["success"], true);
+        assert_eq!(parsed["payload"]["session_name"], "test-session-create");
+
+        // Clean up the created session.
+        let tmux = TmuxManager::new();
+        let _ = tmux.kill_session("test-session-create").await;
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that sends a session kill command after registration.
+    async fn start_mock_server_with_session_kill(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                // Send registration response.
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": {
+                        "status": "accepted",
+                        "message": "ok"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+
+                // Skip registration message from client.
+                let _ = stream.next().await;
+
+                // First create a session to kill.
+                let tmux = TmuxManager::new();
+                let _ = tmux
+                    .create_session("test-session-kill", 80, 24, "/tmp")
+                    .await;
+
+                // Send session kill command.
+                let kill_cmd = serde_json::json!({
+                    "msg_type": "server.session.kill",
+                    "id": "cmd-2",
+                    "timestamp": 1234567892,
+                    "payload": {
+                        "request_id": "req-456",
+                        "name": "test-session-kill"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(kill_cmd.to_string())).await;
+
+                // Collect response.
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_session_kill_command() {
+        let port = 28087;
+        let (server_handle, mut msg_rx) = start_mock_server_with_session_kill(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-kill",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // Wait for the command response.
+        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+            .await
+            .expect("timeout waiting for command response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["payload"]["request_id"], "req-456");
+        assert_eq!(parsed["payload"]["command"], "session.kill");
+        assert_eq!(parsed["payload"]["success"], true);
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that sends a heartbeat ack after registration.
+    async fn start_mock_server_with_heartbeat_ack(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (_msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                // Send registration response.
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": {
+                        "status": "accepted",
+                        "message": "ok"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+
+                // Skip registration message from client.
+                let _ = stream.next().await;
+
+                // Send heartbeat ack.
+                let ack = serde_json::json!({
+                    "msg_type": "server.heartbeat.ack",
+                    "id": "ack-1",
+                    "timestamp": 1234567893,
+                    "payload": {}
+                });
+                let _ = sink.send(WsMessage::Text(ack.to_string())).await;
+
+                // Keep connection alive.
+                while let Some(Ok(_)) = stream.next().await {}
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_heartbeat_ack() {
+        let port = 28088;
+        let (server_handle, _msg_rx) = start_mock_server_with_heartbeat_ack(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-ack",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // Just verify the connection stays alive (heartbeat ack is handled internally).
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
 }
