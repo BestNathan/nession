@@ -172,7 +172,20 @@ impl PtySession {
     ///
     /// The child process inherits the slave side of the PTY; the master side
     /// is retained here for read/write/resize operations.
+    ///
+    /// The tmux status line is disabled for the session before attaching. The
+    /// web UI renders its own session header, so tmux's status bar is
+    /// redundant; worse, over a raw PTY pipe its periodic redraws (every
+    /// `status-interval`) accumulate in the terminal scrollback instead of
+    /// overwriting in place, producing repeated `[session] 0:bash* …` lines.
     pub async fn attach(session_name: &str, width: u16, height: u16) -> Result<Self> {
+        // Turn off the status line for this session (idempotent, best-effort).
+        // Failure here shouldn't block attaching — fall through to attach.
+        let _ = tokio::process::Command::new("tmux")
+            .args(["set-option", "-t", session_name, "status", "off"])
+            .status()
+            .await;
+
         let mut cmd = CommandBuilder::new("tmux");
         cmd.args(["attach-session", "-t", session_name]);
         // tmux requires TERM to be set when attaching via PTY
