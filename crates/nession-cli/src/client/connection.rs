@@ -11,6 +11,7 @@ use tokio_tungstenite::{
 use tracing::{debug, info};
 
 /// Client connection to the central server.
+#[derive(Debug)]
 pub struct ClientConnection {
     ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     authenticated: bool,
@@ -553,5 +554,400 @@ pub async fn kill_session_on_agent(agent_address: &str, session_name: &str) -> R
         }
     } else {
         anyhow::bail!("Agent closed connection during session kill")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+
+    /// Start a mock WebSocket server that accepts connections and echoes messages.
+    async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, SocketAddr) {
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                // Echo messages back
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let Message::Text(text) = msg {
+                        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+                        let msg_type = parsed
+                            .get("msg_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+
+                        let response = match msg_type {
+                            "client.auth" => {
+                                let token = parsed
+                                    .get("payload")
+                                    .and_then(|v| v.get("auth_token"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+
+                                if token == "valid_token" {
+                                    json!({
+                                        "msg_type": "client.auth.response",
+                                        "id": parsed.get("id").unwrap(),
+                                        "timestamp": 0,
+                                        "payload": {
+                                            "status": "success",
+                                            "message": "ok"
+                                        }
+                                    })
+                                } else {
+                                    json!({
+                                        "msg_type": "client.auth.response",
+                                        "id": parsed.get("id").unwrap(),
+                                        "timestamp": 0,
+                                        "payload": {
+                                            "status": "failed",
+                                            "message": "invalid token"
+                                        }
+                                    })
+                                }
+                            }
+                            "client.agents.list" => {
+                                json!({
+                                    "msg_type": "client.agents.list.response",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "agents": [
+                                            {
+                                                "agent_id": "agent1",
+                                                "hostname": "host1",
+                                                "ip_address": "127.0.0.1",
+                                                "port": 8080,
+                                                "status": "online",
+                                                "session_count": 2,
+                                                "last_heartbeat": "2024-01-01T00:00:00Z"
+                                            }
+                                        ]
+                                    }
+                                })
+                            }
+                            "client.sessions.list" => {
+                                json!({
+                                    "msg_type": "client.sessions.list.response",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "sessions": [
+                                            {
+                                                "session_id": "agent1:session1",
+                                                "agent_id": "agent1",
+                                                "session_name": "session1",
+                                                "status": "active",
+                                                "window_count": 1,
+                                                "attached_clients": 0
+                                            }
+                                        ]
+                                    }
+                                })
+                            }
+                            "client.session.attach" => {
+                                let preferred_mode = parsed
+                                    .get("payload")
+                                    .and_then(|v| v.get("preferred_mode"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("auto");
+
+                                if preferred_mode == "relay" {
+                                    json!({
+                                        "msg_type": "client.session.attach.response",
+                                        "id": parsed.get("id").unwrap(),
+                                        "timestamp": 0,
+                                        "payload": {
+                                            "status": "success",
+                                            "mode": "relay"
+                                        }
+                                    })
+                                } else {
+                                    json!({
+                                        "msg_type": "client.session.attach.response",
+                                        "id": parsed.get("id").unwrap(),
+                                        "timestamp": 0,
+                                        "payload": {
+                                            "status": "success",
+                                            "mode": "p2p",
+                                            "agent_address": "ws://127.0.0.1:9090",
+                                            "connection_token": "token123",
+                                            "session_name": "session1"
+                                        }
+                                    })
+                                }
+                            }
+                            _ => {
+                                json!({
+                                    "msg_type": "error",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "code": "unknown_message_type",
+                                        "message": format!("unknown message type: {}", msg_type)
+                                    }
+                                })
+                            }
+                        };
+
+                        let _ = sink.send(Message::Text(response.to_string())).await;
+                    }
+                }
+            }
+        });
+
+        (handle, addr)
+    }
+
+    #[tokio::test]
+    async fn test_connect_and_authenticate_success() {
+        let port = 29081;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let result = ClientConnection::connect(&format!("ws://{}", addr), "valid_token").await;
+        assert!(result.is_ok());
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_connect_and_authenticate_failure() {
+        let port = 29082;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let result = ClientConnection::connect(&format!("ws://{}", addr), "invalid_token").await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Authentication failed"));
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_list_agents() {
+        let port = 29083;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let agents = conn.list_agents().await.unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_id, "agent1");
+        assert_eq!(agents[0].hostname, "host1");
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions() {
+        let port = 29084;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let sessions = conn.list_sessions(None).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "agent1:session1");
+        assert_eq!(sessions[0].session_name, "session1");
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_with_agent_filter() {
+        let port = 29085;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let sessions = conn.list_sessions(Some("agent1")).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_request_attach_p2p() {
+        let port = 29086;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let response = conn.request_attach("agent1:session1", "p2p").await.unwrap();
+        match response {
+            AttachResponse::P2P(info) => {
+                assert_eq!(info.agent_address, "ws://127.0.0.1:9090");
+                assert_eq!(info.connection_token, "token123");
+                assert_eq!(info.session_name, "session1");
+            }
+            AttachResponse::Relay => panic!("Expected P2P response"),
+        }
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_request_attach_relay() {
+        let port = 29087;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let response = conn
+            .request_attach("agent1:session1", "relay")
+            .await
+            .unwrap();
+        match response {
+            AttachResponse::Relay => {}
+            AttachResponse::P2P(_) => panic!("Expected Relay response"),
+        }
+
+        server_handle.abort();
+    }
+
+    /// Start a mock agent server for testing create_session_on_agent and kill_session_on_agent
+    async fn start_mock_agent_server(port: u16) -> (tokio::task::JoinHandle<()>, SocketAddr) {
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock agent server");
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                // Echo messages back
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let Message::Text(text) = msg {
+                        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+                        let msg_type = parsed
+                            .get("msg_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+
+                        let response = match msg_type {
+                            "session.create" => {
+                                let name = parsed
+                                    .get("payload")
+                                    .and_then(|v| v.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+
+                                json!({
+                                    "msg_type": "ok",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "name": name
+                                    }
+                                })
+                            }
+                            "session.kill" => {
+                                let name = parsed
+                                    .get("payload")
+                                    .and_then(|v| v.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+
+                                json!({
+                                    "msg_type": "ok",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "name": name
+                                    }
+                                })
+                            }
+                            _ => {
+                                json!({
+                                    "msg_type": "error",
+                                    "id": parsed.get("id").unwrap(),
+                                    "timestamp": 0,
+                                    "payload": {
+                                        "code": "unknown_message_type",
+                                        "message": format!("unknown message type: {}", msg_type)
+                                    }
+                                })
+                            }
+                        };
+
+                        let _ = sink.send(Message::Text(response.to_string())).await;
+                    }
+                }
+            }
+        });
+
+        (handle, addr)
+    }
+
+    #[tokio::test]
+    async fn test_create_session_on_agent() {
+        let port = 29088;
+        let (server_handle, addr) = start_mock_agent_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let result = create_session_on_agent(&format!("{}", addr), "test-session", 80, 24).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test-session");
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_kill_session_on_agent() {
+        let port = 29089;
+        let (server_handle, addr) = start_mock_agent_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let result = kill_session_on_agent(&format!("{}", addr), "test-session").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test-session");
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_close() {
+        let port = 29090;
+        let (server_handle, addr) = start_mock_server(port).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut conn = ClientConnection::connect(&format!("ws://{}", addr), "valid_token")
+            .await
+            .unwrap();
+
+        let result = conn.close().await;
+        assert!(result.is_ok());
+
+        server_handle.abort();
     }
 }
