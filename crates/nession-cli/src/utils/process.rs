@@ -21,7 +21,10 @@ pub fn get_boot_time() -> Result<i64> {
         if line.starts_with("btime ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
-                let btime: i64 = parts[1].parse().context("Failed to parse boot time")?;
+                let btime: i64 = parts
+                    .get(1)
+                    .and_then(|s| s.parse().ok())
+                    .context("Failed to parse boot time")?;
                 return Ok(btime);
             }
         }
@@ -80,7 +83,7 @@ pub fn get_clock_ticks() -> Result<i64> {
 pub fn get_process_uptime(pid: u32) -> Option<u64> {
     use std::fs;
 
-    let stat_path = format!("/proc/{}/stat", pid);
+    let stat_path = format!("/proc/{pid}/stat");
     let stat_content = fs::read_to_string(&stat_path).ok()?;
 
     // Parse the 22nd field (starttime) from /proc/[pid]/stat
@@ -95,9 +98,9 @@ pub fn get_process_uptime(pid: u32) -> Option<u64> {
         return None;
     }
 
-    let starttime: u64 = fields[19].parse().ok()?;
-    let clock_ticks = get_clock_ticks().ok()? as u64;
-    let boot_time = get_boot_time().ok()? as u64;
+    let starttime: u64 = fields.get(19).and_then(|s| s.parse().ok())?;
+    let clock_ticks = get_clock_ticks().ok()?.cast_unsigned();
+    let boot_time = get_boot_time().ok()?.cast_unsigned();
 
     let process_start_time = boot_time + (starttime / clock_ticks);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
