@@ -113,7 +113,8 @@ impl TmuxManager {
     }
 
     /// Write a shell script with `export` lines and source it into the
-    /// session, clearing the command from view immediately afterwards.
+    /// session. The command line is cleared afterwards via ANSI escape so
+    /// it barely flashes on screen.
     pub async fn source_env(
         &self,
         session_name: &str,
@@ -129,8 +130,10 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write source script: {}", path.display()))?;
 
-        // Source, then clear the command line so the user barely sees it.
-        let cmd = format!("source {}; tput cuu1; tput el", path.display());
+        // Source the file then move up 1 line and clear to end of line so
+        // the command disappears from view. ANSI \033[1A (cursor up) +
+        // \033[2K (clear line) works in all modern terminals.
+        let cmd = format!(". {}; printf '\\033[1A\\033[2K'", path.display());
         self.send_keys(session_name, &cmd).await
     }
 
@@ -151,7 +154,7 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
 
-        let cmd = format!("source {}; tput cuu1; tput el", path.display());
+        let cmd = format!(". {}; printf '\\033[1A\\033[2K'", path.display());
         self.send_keys(session_name, &cmd).await
     }
 
@@ -170,7 +173,7 @@ impl TmuxManager {
 
     pub async fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args(["send-keys", "-t", session_name, keys])
+            .args(["send-keys", "-t", session_name, keys, "Enter"])
             .status()
             .await?;
 

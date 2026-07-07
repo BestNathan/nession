@@ -31,7 +31,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const isP2P = attachInfo.mode === 'p2p';
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
-  const [bottomTab, setBottomTab] = useState<'env' | 'commands'>('env');
+  const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
 
   const p2pConnection = useP2PConnection(
     isP2P && attachInfo.agent_address
@@ -132,26 +132,14 @@ function BottomBar({
   envPanel,
   commandsPanel,
 }: {
-  activeTab: 'env' | 'commands';
-  onTabChange: (tab: 'env' | 'commands') => void;
+  activeTab: 'commands' | 'env';
+  onTabChange: (tab: 'commands' | 'env') => void;
   envPanel: React.ReactNode;
   commandsPanel: React.ReactNode;
 }) {
   return (
     <div className="border-t flex-shrink-0 flex flex-col" style={{ height: 160 }}>
       <div className="flex border-b">
-        <button
-          type="button"
-          onClick={() => onTabChange('env')}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            activeTab === 'env'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Package className="w-3 h-3" /> Env
-        </button>
         <button
           type="button"
           onClick={() => onTabChange('commands')}
@@ -163,6 +151,18 @@ function BottomBar({
           )}
         >
           <TerminalIcon className="w-3 h-3" /> Commands
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange('env')}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+            activeTab === 'env'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Package className="w-3 h-3" /> Env
         </button>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
