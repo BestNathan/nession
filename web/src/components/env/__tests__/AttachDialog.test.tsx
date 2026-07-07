@@ -72,6 +72,25 @@ describe('AttachDialog', () => {
     expect(screen.queryByText('Relay')).not.toBeInTheDocument();
   });
 
+  it('filters out stale cached refs for files that no longer exist', async () => {
+    // localStorage has a stale ref to a deleted file.
+    localStorage.setItem(
+      'nession_attach_prefs',
+      JSON.stringify({ mode: 'auto', envFiles: [{ name: 'ghost.env', source: 'server' }] }),
+    );
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AttachDialog isOpen onClose={vi.fn()} wsService={makeWs()} session={session()} onConfirm={onConfirm} />,
+    );
+    await waitFor(() => expect(screen.getByText('a.env')).toBeInTheDocument());
+    // The stale ref is filtered out — no selection and prefs are cleaned.
+    await user.click(screen.getByRole('button', { name: /^Attach$/ }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.anything(), 'auto', []);
+    const saved = JSON.parse(localStorage.getItem('nession_attach_prefs') ?? '{}');
+    expect(saved.envFiles).toHaveLength(0);
+  });
+
   it('pre-fills from saved preferences', async () => {
     localStorage.setItem(
       'nession_attach_prefs',

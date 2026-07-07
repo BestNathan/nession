@@ -13,7 +13,8 @@ import { Label } from '../ui/label';
 import type { AttachMode, EnvFileInfo, EnvFileRef, Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
-import { loadAttachPrefs } from '../../services/attachPrefs';
+import { refKey } from './envRef';
+import { loadAttachPrefs, saveAttachPrefs } from '../../services/attachPrefs';
 
 interface AttachDialogProps {
   isOpen: boolean;
@@ -54,7 +55,19 @@ export function AttachDialog({ isOpen, onClose, wsService, session, onConfirm }:
     setLoading(true);
     wsService
       .listEnvFiles()
-      .then((resp) => setFiles(resp.files))
+      .then((resp) => {
+        setFiles(resp.files);
+        // Drop stale refs that reference files that no longer exist so the
+        // user isn't stuck with phantom selections (the multi-select only
+        // renders items from the files list — there's no way to deselect a
+        // file that isn't visible).
+        const validKeys = new Set(resp.files.map((f) => refKey(f)));
+        const validSelected = prefs.envFiles.filter((r) => validKeys.has(refKey(r)));
+        if (validSelected.length !== prefs.envFiles.length) {
+          saveAttachPrefs({ mode: prefs.mode, envFiles: validSelected });
+        }
+        setSelected(validSelected);
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to list env files'))
       .finally(() => setLoading(false));
   }, [isOpen, wsService]);
