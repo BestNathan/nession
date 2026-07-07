@@ -52,9 +52,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
   };
 
   return (
-    <div className="flex flex-col gap-1.5 p-2 h-full">
+    <div className="flex flex-col h-full">
       {/* Quick command buttons — compact, scrollable row */}
-      <div className="flex flex-wrap gap-1 content-start overflow-y-auto flex-1 min-h-0">
+      <div className="flex flex-wrap gap-1 content-start overflow-y-auto flex-1 min-h-0 p-2 pb-0">
         {PRESETS.map((cmd) => (
           <Button key={cmd.id} variant="outline" size="sm"
             className="h-6 text-[11px] px-2" disabled={disabled}
@@ -90,12 +90,17 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
         )}
       </div>
 
-      {/* Input row */}
-      <div className="flex gap-1.5 flex-shrink-0">
+      {/* Input row — pinned to bottom */}
+      <div className="flex gap-1.5 flex-shrink-0 p-2 pt-1 border-t">
         <Input placeholder="Type to send… (Enter to submit)"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendInput(); } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendInput();
+            }
+          }}
           className="h-7 text-xs flex-1" disabled={disabled} />
         <Button variant="outline" size="icon" className="h-7 w-7 flex-shrink-0" title="Send"
           onClick={sendInput} disabled={disabled}>

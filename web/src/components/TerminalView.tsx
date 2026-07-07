@@ -138,7 +138,7 @@ function BottomBar({
   commandsPanel: React.ReactNode;
 }) {
   return (
-    <div className="border-t flex-shrink-0 flex flex-col" style={{ height: 160 }}>
+    <div className="border-t flex-shrink-0 flex flex-col max-h-[45%]">
       <div className="flex border-b">
         <button
           type="button"
