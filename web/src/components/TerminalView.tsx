@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import type { AttachInfo } from '../types';
+import type { AttachInfo, ActiveEnvFile, EnvFileRef } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
@@ -14,6 +14,8 @@ export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
   sessionName: string;
+  /** Env files applied by this client at attach time (removed on detach). */
+  appliedEnv?: EnvFileRef[];
 }
 
 interface TerminalViewProps {
@@ -29,6 +31,21 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const isP2P = attachInfo.mode === 'p2p';
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
+  const [activeEnv, setActiveEnv] = useState<ActiveEnvFile[]>([]);
+
+  // Load which env files are active on this session (visible to all who attach).
+  useEffect(() => {
+    let cancelled = false;
+    wsService
+      .getSessionEnvActive(sessionId)
+      .then((resp) => {
+        if (!cancelled) {setActiveEnv(resp.active);}
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [wsService, sessionId]);
 
   const p2pConnection = useP2PConnection(
     isP2P && attachInfo.agent_address
@@ -79,6 +96,22 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
         <Badge variant={attachInfo.mode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
           {attachInfo.mode.toUpperCase()}
         </Badge>
+        {activeEnv.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground">env:</span>
+            {activeEnv.map((e) => (
+              <Badge
+                key={`${e.source}:${e.agent_id ?? ''}:${e.name}:${e.phase}`}
+                variant="outline"
+                className="text-[10px] px-1.5 py-0"
+                title={`${e.source}${e.agent_id ? `:${e.agent_id}` : ''} · ${e.phase}${e.applied_by ? ` · by ${e.applied_by}` : ''}`}
+              >
+                {e.name}
+                <span className="ml-1 opacity-60">{e.phase}</span>
+              </Badge>
+            ))}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col">

@@ -791,6 +791,7 @@ impl AgentServer {
                         payload.width,
                         payload.height,
                         default_working_dir,
+                        &[],
                     )
                     .await
                 {
@@ -1053,6 +1054,7 @@ impl AgentServer {
                         payload.width,
                         payload.height,
                         default_working_dir,
+                        &[],
                     )
                     .await
                 {
@@ -1477,7 +1479,7 @@ mod tests {
         // connect to.
         let tmux = TmuxManager::new();
         let session_name = "server_test_attach";
-        tmux.create_session(session_name, 80, 24, "/tmp")
+        tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 
@@ -1517,7 +1519,7 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_io";
-        tmux.create_session(session_name, 80, 24, "/tmp")
+        tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 
@@ -1970,7 +1972,7 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_invalid_b64";
-        tmux.create_session(session_name, 80, 24, "/tmp")
+        tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 

@@ -31,7 +31,7 @@ export interface DashboardState {
   toggleSort: (field: SortField) => void;
   setShowCreateModal: (show: boolean) => void;
   setSessionToKill: (s: Session | null) => void;
-  handleAttach: (session: Session) => void;
+  handleAttach: (session: Session) => Promise<void>;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
   fetchSessions: (agentId?: string) => Promise<void>;

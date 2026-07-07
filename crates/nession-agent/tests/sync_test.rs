@@ -213,7 +213,7 @@ async fn test_session_watcher_detects_new_session() {
     let _ = tmux.kill_session(session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24, "/tmp")
+    tmux.create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .expect("failed to create tmux session");
 
@@ -274,7 +274,7 @@ async fn test_session_watcher_detects_removed_session() {
     let _ = tmux.kill_session(session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24, "/tmp")
+    tmux.create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .expect("failed to create tmux session");
 

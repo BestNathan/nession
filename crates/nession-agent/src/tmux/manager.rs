@@ -66,25 +66,64 @@ impl TmuxManager {
         width: u16,
         height: u16,
         working_dir: &str,
+        env: &[(String, String)],
     ) -> Result<()> {
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+            "-c",
+            working_dir,
+        ]);
+
+        // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
+        // tmux the flag is rejected and session creation fails loudly rather
+        // than silently dropping the environment.
+        for (key, value) in env {
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+
+        let status = cmd.status().await?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to create session: {name}");
+        }
+
+        Ok(())
+    }
+
+    /// Set an environment variable on a running session (`set-environment`).
+    /// The variable becomes visible to processes started afterwards in the
+    /// session (e.g. new windows/panes), not to already-running shells.
+    pub async fn set_environment(&self, session_name: &str, key: &str, value: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                name,
-                "-x",
-                &width.to_string(),
-                "-y",
-                &height.to_string(),
-                "-c",
-                working_dir,
-            ])
+            .args(["set-environment", "-t", session_name, key, value])
             .status()
             .await?;
 
         if !status.success() {
-            anyhow::bail!("Failed to create session: {name}");
+            anyhow::bail!("Failed to set environment {key} on session: {session_name}");
+        }
+
+        Ok(())
+    }
+
+    /// Remove an environment variable from a running session
+    /// (`set-environment -u`).
+    pub async fn unset_environment(&self, session_name: &str, key: &str) -> Result<()> {
+        let status = Command::new("tmux")
+            .args(["set-environment", "-u", "-t", session_name, key])
+            .status()
+            .await?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to unset environment {key} on session: {session_name}");
         }
 
         Ok(())

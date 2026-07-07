@@ -36,6 +36,16 @@ pub fn agent_pid_path() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("agent.pid"))
 }
 
+/// Server env-file directory: ~/.nession/server/envs
+pub fn server_envs_dir() -> io::Result<PathBuf> {
+    server_dir().map(|d| d.join("envs"))
+}
+
+/// Agent env-file directory: ~/.nession/agent/envs
+pub fn agent_envs_dir() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("envs"))
+}
+
 /// Create server and agent component directories if they don't exist.
 pub fn ensure_component_dirs() -> io::Result<()> {
     std::fs::create_dir_all(server_dir()?)?;

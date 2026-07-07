@@ -37,6 +37,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketService {
   return {
     createSession: vi.fn().mockResolvedValue({ success: true }),
+    listEnvFiles: vi.fn().mockResolvedValue({ files: [] }),
     ...overrides,
   } as unknown as WebSocketService;
 }
@@ -179,7 +180,7 @@ describe('CreateSessionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-session');
+      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-session', []);
       expect(onCreated).toHaveBeenCalled();
       expect(onClose).toHaveBeenCalled();
     });
@@ -351,7 +352,7 @@ describe('CreateSessionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-app.v2');
+      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-app.v2', []);
     });
   });
 

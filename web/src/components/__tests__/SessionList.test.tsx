@@ -18,6 +18,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 }
 
 const defaultProps = {
+  onAttachWithEnv: vi.fn(),
   sortField: 'name' as const,
   sortDirection: 'asc' as const,
   toggleSort: vi.fn(),
@@ -160,6 +161,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        onAttachWithEnv={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -182,6 +184,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        onAttachWithEnv={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -201,6 +204,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        onAttachWithEnv={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -219,6 +223,7 @@ describe('SessionList', () => {
         onAttach={vi.fn()}
         onKill={vi.fn()}
         attachingInProgress={false}
+        onAttachWithEnv={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}

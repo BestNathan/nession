@@ -6,6 +6,7 @@ use tracing::{error, info};
 
 use super::handler::{ConnectionHandler, HandlerAction};
 use crate::db::Database;
+use crate::env::EnvService;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
@@ -15,6 +16,7 @@ pub struct WebSocketServer {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    env_service: Arc<EnvService>,
     db: Arc<Database>,
     listener: Option<TcpListener>,
 }
@@ -31,11 +33,16 @@ impl WebSocketServer {
 
         let command_broker = Arc::new(CommandBroker::new());
 
+        let env_root = nession_common::paths::server_envs_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".nession/server/envs"));
+        let env_service = EnvService::new(env_root);
+
         Ok(Self {
             config,
             agent_registry,
             session_registry,
             command_broker,
+            env_service,
             db,
             listener: Some(listener),
         })
@@ -145,24 +152,18 @@ impl WebSocketServer {
             let (tcp_stream, addr) = listener.accept().await?;
             info!("New connection from: {}", addr);
 
-            let agent_registry = Arc::clone(&self.agent_registry);
-            let session_registry = Arc::clone(&self.session_registry);
-            let command_broker = Arc::clone(&self.command_broker);
-            let auth_token = self.config.auth_token.clone();
+            let ctx = ServerContext {
+                agent_registry: Arc::clone(&self.agent_registry),
+                session_registry: Arc::clone(&self.session_registry),
+                command_broker: Arc::clone(&self.command_broker),
+                env_service: Arc::clone(&self.env_service),
+                auth_token: self.config.auth_token.clone(),
+                heartbeat_interval_secs,
+            };
             let tls_acceptor = tls_acceptor.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(
-                    tcp_stream,
-                    tls_acceptor,
-                    agent_registry,
-                    session_registry,
-                    command_broker,
-                    auth_token,
-                    heartbeat_interval_secs,
-                )
-                .await
-                {
+                if let Err(e) = handle_connection(tcp_stream, tls_acceptor, ctx).await {
                     error!("Connection error: {}", e);
                 }
             });
@@ -202,47 +203,31 @@ fn build_tls_acceptor(cert_path: &str, key_path: &str) -> anyhow::Result<TlsAcce
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
+/// Shared, cheaply-cloneable state handed to each connection handler task.
+#[derive(Clone)]
+struct ServerContext {
+    agent_registry: Arc<AgentRegistry>,
+    session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
+    env_service: Arc<EnvService>,
+    auth_token: String,
+    heartbeat_interval_secs: u64,
+}
+
 async fn handle_connection(
     tcp_stream: tokio::net::TcpStream,
     tls_acceptor: Option<TlsAcceptor>,
-    agent_registry: Arc<AgentRegistry>,
-    session_registry: Arc<SessionRegistry>,
-    command_broker: Arc<CommandBroker>,
-    auth_token: String,
-    heartbeat_interval_secs: u64,
+    ctx: ServerContext,
 ) -> anyhow::Result<()> {
     if let Some(acceptor) = tls_acceptor {
         let tls_stream = acceptor.accept(tcp_stream).await?;
-        handle_ws_stream(
-            tls_stream,
-            agent_registry,
-            session_registry,
-            command_broker,
-            auth_token,
-            heartbeat_interval_secs,
-        )
-        .await
+        handle_ws_stream(tls_stream, ctx).await
     } else {
-        handle_ws_stream(
-            tcp_stream,
-            agent_registry,
-            session_registry,
-            command_broker,
-            auth_token,
-            heartbeat_interval_secs,
-        )
-        .await
+        handle_ws_stream(tcp_stream, ctx).await
     }
 }
 
-async fn handle_ws_stream<S>(
-    stream: S,
-    agent_registry: Arc<AgentRegistry>,
-    session_registry: Arc<SessionRegistry>,
-    command_broker: Arc<CommandBroker>,
-    auth_token: String,
-    heartbeat_interval_secs: u64,
-) -> anyhow::Result<()>
+async fn handle_ws_stream<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -250,12 +235,22 @@ where
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
+    let ServerContext {
+        agent_registry,
+        session_registry,
+        command_broker,
+        env_service,
+        auth_token,
+        heartbeat_interval_secs,
+    } = ctx;
+
     let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
     let mut handler = ConnectionHandler::new(
         agent_registry,
         session_registry,
         command_broker.clone(),
+        env_service,
         auth_token,
         heartbeat_interval_secs,
     );
