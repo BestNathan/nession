@@ -638,19 +638,6 @@ describe('WebSocketService', () => {
       expect((await p).success).toBe(true);
     });
 
-    it('getSessionEnvActive returns active files', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.getSessionEnvActive('agent:s');
-      const id = JSON.parse(findSendCall(last(), 'client.session.env.active')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { active: [{ name: 'a.env', source: 'server', phase: 'create' }] } }),
-      }));
-      const result = await p;
-      expect(result.active).toHaveLength(1);
-      expect(result.active[0].phase).toBe('create');
-    });
-
     it('env methods throw when not authenticated', async () => {
       const ws = new WebSocketService('ws://localhost/ws', 'token');
       await expect(ws.listEnvFiles()).rejects.toThrow('Not authenticated');

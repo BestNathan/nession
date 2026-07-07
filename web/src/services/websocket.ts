@@ -18,7 +18,6 @@ import {
   EnvWriteResponse,
   EnvDeleteResponse,
   SessionEnvResponse,
-  SessionEnvActiveResponse,
 } from '../types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
@@ -292,15 +291,6 @@ export class WebSocketService {
     return this.request<SessionEnvResponse>('client.session.env.unset', {
       session_id: sessionId,
       env_files: envFiles,
-    });
-  }
-
-  async getSessionEnvActive(sessionId: string): Promise<SessionEnvActiveResponse> {
-    if (!this.authenticated) {
-      throw new Error('Not authenticated');
-    }
-    return this.request<SessionEnvActiveResponse>('client.session.env.active', {
-      session_id: sessionId,
     });
   }
 

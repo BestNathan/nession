@@ -95,14 +95,6 @@ export interface EnvFileRef {
   agent_id?: string;
 }
 
-export interface ActiveEnvFile {
-  name: string;
-  source: EnvSource;
-  agent_id?: string;
-  phase: string; // "create" | "attach"
-  applied_by?: string;
-}
-
 export interface EnvListResponse {
   files: EnvFileInfo[];
   error?: string;
@@ -131,9 +123,4 @@ export interface SessionEnvResponse {
   success: boolean;
   error?: string;
   warnings?: string[];
-}
-
-export interface SessionEnvActiveResponse {
-  active: ActiveEnvFile[];
-  error?: string;
 }
