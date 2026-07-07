@@ -657,19 +657,18 @@ impl ServerClient {
                             return Ok(());
                         }
                     };
-                let env = flatten_snapshots(&payload.snapshots);
+                // One source script per snapshot (env file), sent via send-keys
+                // to the session. Each command is hidden from view with tput.
                 let mut error: Option<String> = None;
-                for (key, value) in &env {
-                    if let Err(e) = self.tmux.set_environment(&payload.name, key, value).await {
+                for snap in &payload.snapshots {
+                    if let Err(e) = self
+                        .tmux
+                        .source_env(&payload.name, &snap.name, &snap.vars)
+                        .await
+                    {
                         error = Some(e.to_string());
                         break;
                     }
-                }
-                // Also broadcast to already-running panes so existing shells
-                // pick up the vars immediately (set-environment only affects
-                // new windows/panes). Best-effort: pane errors are ignored.
-                if error.is_none() && !env.is_empty() {
-                    let _ = self.tmux.broadcast_export(&payload.name, &env).await;
                 }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
@@ -694,21 +693,12 @@ impl ServerClient {
                         }
                     };
                 let mut error: Option<String> = None;
-                for key in &payload.keys {
-                    // Best-effort: keep unsetting even if one fails, but report
-                    // the first error.
-                    if let Err(e) = self.tmux.unset_environment(&payload.name, key).await {
-                        if error.is_none() {
-                            error = Some(e.to_string());
-                        }
-                    }
-                }
-                // Also broadcast unset to already-running panes.
-                if error.is_none() && !payload.keys.is_empty() {
-                    let _ = self
-                        .tmux
-                        .broadcast_unset(&payload.name, &payload.keys)
-                        .await;
+                if let Err(e) = self
+                    .tmux
+                    .unsource_env(&payload.name, "all", &payload.keys)
+                    .await
+                {
+                    error = Some(e.to_string());
                 }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",

@@ -1,17 +1,13 @@
 import { useState, useCallback } from 'react';
-import { toast } from 'sonner';
-import type { Session, EnvFileRef, AttachMode } from '../types';
-import type { WebSocketService } from '../services/websocket';
+import type { Session, AttachMode } from '../types';
 import type { AttachedSession } from './TerminalView';
 import { saveAttachPrefs } from '../services/attachPrefs';
 
 /**
  * Owns the attach-to-terminal transition: the attach dialog, connection-mode
- * selection, optional attach-time env application, detach-time cleanup, and
- * persisting the last-used preferences. Keeps Dashboard lean.
+ * selection, and persisting the last-used preference. Keeps Dashboard lean.
  */
 export function useAttachFlow(
-  wsService: WebSocketService,
   handleAttach: (session: Session, mode?: AttachMode) => Promise<void>,
   fetchSessions: () => void,
 ) {
@@ -20,59 +16,34 @@ export function useAttachFlow(
   const [attachDialogSession, setAttachDialogSession] = useState<Session | null>(null);
 
   const attachAndShow = useCallback(
-    async (session: Session, mode: AttachMode, envFiles: EnvFileRef[]) => {
-      // Remember the choice for next time.
-      saveAttachPrefs({ mode, envFiles });
-
+    async (session: Session, mode: AttachMode) => {
+      saveAttachPrefs({ mode });
       await handleAttach(session, mode);
       const attached = (handleAttach as unknown as { _attached?: AttachedSession })._attached;
       if (!attached) {
         return;
       }
-      let appliedEnv: EnvFileRef[] = [];
-      if (envFiles.length > 0) {
-        try {
-          const resp = await wsService.applySessionEnv(session.session_id, envFiles);
-          if (resp.success) {
-            appliedEnv = envFiles;
-            const warns = resp.warnings ?? [];
-            if (warns.length > 0) {
-              toast.warning(`Env applied with warnings: ${warns.join('; ')}`);
-            } else {
-              toast.success(`Applied ${envFiles.length} env file(s)`);
-            }
-          } else {
-            toast.error(resp.error ?? 'Failed to apply env files');
-          }
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : 'Failed to apply env files');
-        }
-      }
-      setAttachedSession({ ...attached, appliedEnv });
+      setAttachedSession(attached);
       setView('terminal');
     },
-    [handleAttach, wsService],
+    [handleAttach],
   );
 
   // The Attach button opens the dialog; confirming performs the attach.
   const onAttach = useCallback((session: Session) => setAttachDialogSession(session), []);
   const confirmAttach = useCallback(
-    (session: Session, mode: AttachMode, envFiles: EnvFileRef[]) => {
+    (session: Session, mode: AttachMode) => {
       setAttachDialogSession(null);
-      void attachAndShow(session, mode, envFiles);
+      void attachAndShow(session, mode);
     },
     [attachAndShow],
   );
 
   const backToDashboard = useCallback(() => {
-    const applied = attachedSession?.appliedEnv;
-    if (attachedSession && applied && applied.length > 0) {
-      void wsService.unsetSessionEnv(attachedSession.sessionId, applied).catch(() => undefined);
-    }
     setAttachedSession(null);
     setView('dashboard');
     fetchSessions();
-  }, [attachedSession, wsService, fetchSessions]);
+  }, [fetchSessions]);
 
   return {
     view, setView,

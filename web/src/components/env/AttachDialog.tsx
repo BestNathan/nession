@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -10,19 +9,15 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
-import type { AttachMode, EnvFileInfo, EnvFileRef, Session } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
-import { EnvFileMultiSelect } from './EnvFileMultiSelect';
-import { refKey } from './envRef';
-import { loadAttachPrefs, saveAttachPrefs } from '../../services/attachPrefs';
+import type { AttachMode, Session } from '../../types';
+import { loadAttachPrefs } from '../../services/attachPrefs';
 
 interface AttachDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  wsService: WebSocketService;
   session: Session | null;
-  /** Called with the chosen mode + env files; the flow performs the attach. */
-  onConfirm: (session: Session, mode: AttachMode, envFiles: EnvFileRef[]) => void;
+  /** Called with the chosen mode; the flow performs the attach. */
+  onConfirm: (session: Session, mode: AttachMode) => void;
 }
 
 // Relay is intentionally omitted: the server's relay attach path is not yet
@@ -34,47 +29,23 @@ const MODES: { value: AttachMode; label: string; hint: string }[] = [
 ];
 
 /**
- * Unified attach dialog: pick connection mode and (optionally) env files to
- * apply on attach. Pre-fills from the last-used preferences.
+ * Attach dialog: pick connection mode. Pre-fills from the last-used preference.
  */
-export function AttachDialog({ isOpen, onClose, wsService, session, onConfirm }: AttachDialogProps) {
+export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDialogProps) {
   const [mode, setMode] = useState<AttachMode>('auto');
-  const [files, setFiles] = useState<EnvFileInfo[]>([]);
-  const [selected, setSelected] = useState<EnvFileRef[]>([]);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
       return;
     }
     const prefs = loadAttachPrefs();
-    // Relay isn't offered as a forced mode (see MODES); coerce any stale
-    // stored value back to auto.
+    // Coerce any stale stored relay value back to auto.
     setMode(prefs.mode === 'relay' ? 'auto' : prefs.mode);
-    setSelected(prefs.envFiles);
-    setLoading(true);
-    wsService
-      .listEnvFiles()
-      .then((resp) => {
-        setFiles(resp.files);
-        // Drop stale refs that reference files that no longer exist so the
-        // user isn't stuck with phantom selections (the multi-select only
-        // renders items from the files list — there's no way to deselect a
-        // file that isn't visible).
-        const validKeys = new Set(resp.files.map((f) => refKey(f)));
-        const validSelected = prefs.envFiles.filter((r) => validKeys.has(refKey(r)));
-        if (validSelected.length !== prefs.envFiles.length) {
-          saveAttachPrefs({ mode: prefs.mode, envFiles: validSelected });
-        }
-        setSelected(validSelected);
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to list env files'))
-      .finally(() => setLoading(false));
-  }, [isOpen, wsService]);
+  }, [isOpen]);
 
   const handleConfirm = () => {
     if (session) {
-      onConfirm(session, mode, selected);
+      onConfirm(session, mode);
     }
   };
 
@@ -106,25 +77,13 @@ export function AttachDialog({ isOpen, onClose, wsService, session, onConfirm }:
               ))}
             </div>
           </div>
-          <div className="space-y-2">
-            <Label>Env Files (optional)</Label>
-            <p className="text-xs text-muted-foreground">
-              Applied to the session on attach and removed when you detach.
-            </p>
-            <EnvFileMultiSelect
-              files={files}
-              selected={selected}
-              onChange={setSelected}
-              disabled={loading}
-            />
-          </div>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button type="button" onClick={handleConfirm}>
-            Attach{selected.length > 0 ? ` with ${selected.length}` : ''}
+            Attach
           </Button>
         </DialogFooter>
       </DialogContent>

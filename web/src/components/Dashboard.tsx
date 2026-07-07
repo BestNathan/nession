@@ -206,7 +206,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     attachDialogSession, setAttachDialogSession,
     onAttach, confirmAttach,
     backToDashboard,
-  } = useAttachFlow(wsService, handleAttach, fetchSessions);
+  } = useAttachFlow(handleAttach, fetchSessions);
 
   const handleTerminalDisconnect = useCallback(() => {
     toast.error('Terminal connection lost');
@@ -297,7 +297,6 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
       <AttachDialog
         isOpen={attachDialogSession !== null}
         onClose={() => setAttachDialogSession(null)}
-        wsService={wsService}
         session={attachDialogSession}
         onConfirm={confirmAttach}
       />

@@ -1,11 +1,13 @@
-import { useMemo, useRef, useState, useEffect } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import type { AttachInfo, ActiveEnvFile, EnvFileRef } from '../types';
+import { useMemo, useRef, useState } from 'react';
+import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
+import type { AttachInfo } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
+import { EnvPanel } from './env/EnvPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 import { useP2PConnection } from '../hooks/useP2PConnection';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
@@ -14,8 +16,6 @@ export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
   sessionName: string;
-  /** Env files applied by this client at attach time (removed on detach). */
-  appliedEnv?: EnvFileRef[];
 }
 
 interface TerminalViewProps {
@@ -31,21 +31,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const isP2P = attachInfo.mode === 'p2p';
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
-  const [activeEnv, setActiveEnv] = useState<ActiveEnvFile[]>([]);
-
-  // Load which env files are active on this session (visible to all who attach).
-  useEffect(() => {
-    let cancelled = false;
-    wsService
-      .getSessionEnvActive(sessionId)
-      .then((resp) => {
-        if (!cancelled) {setActiveEnv(resp.active);}
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [wsService, sessionId]);
+  const [bottomTab, setBottomTab] = useState<'env' | 'commands'>('env');
 
   const p2pConnection = useP2PConnection(
     isP2P && attachInfo.agent_address
@@ -96,22 +82,6 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
         <Badge variant={attachInfo.mode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
           {attachInfo.mode.toUpperCase()}
         </Badge>
-        {activeEnv.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-muted-foreground">env:</span>
-            {activeEnv.map((e) => (
-              <Badge
-                key={`${e.source}:${e.agent_id ?? ''}:${e.name}:${e.phase}`}
-                variant="outline"
-                className="text-[10px] px-1.5 py-0"
-                title={`${e.source}${e.agent_id ? `:${e.agent_id}` : ''} · ${e.phase}${e.applied_by ? ` · by ${e.applied_by}` : ''}`}
-              >
-                {e.name}
-                <span className="ml-1 opacity-60">{e.phase}</span>
-              </Badge>
-            ))}
-          </div>
-        )}
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col">
@@ -122,16 +92,81 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             terminalElement={
               <div className="flex-1 min-h-0 flex flex-col">
                 <div className="flex-1 min-h-0">{terminalElement}</div>
-                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} disabled={toolbarDisabled} />
+                <BottomBar
+                  activeTab={bottomTab}
+                  onTabChange={setBottomTab}
+                  envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+                  commandsPanel={
+                    <TerminalToolbar
+                      sendText={(text) => terminalRef.current?.sendText(text)}
+                      disabled={toolbarDisabled}
+                    />
+                  }
+                />
               </div>
             }
           />
         ) : (
           <>
             <div className="flex-1 min-h-0">{terminalElement}</div>
-            <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+            <BottomBar
+              activeTab={bottomTab}
+              onTabChange={setBottomTab}
+              envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+              commandsPanel={
+                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+              }
+            />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Bottom bar: tabbed Env Files / Quick Commands ────────────────────────
+
+function BottomBar({
+  activeTab,
+  onTabChange,
+  envPanel,
+  commandsPanel,
+}: {
+  activeTab: 'env' | 'commands';
+  onTabChange: (tab: 'env' | 'commands') => void;
+  envPanel: React.ReactNode;
+  commandsPanel: React.ReactNode;
+}) {
+  return (
+    <div className="border-t flex-shrink-0 flex flex-col" style={{ height: 160 }}>
+      <div className="flex border-b">
+        <button
+          type="button"
+          onClick={() => onTabChange('env')}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+            activeTab === 'env'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Package className="w-3 h-3" /> Env
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange('commands')}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+            activeTab === 'commands'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <TerminalIcon className="w-3 h-3" /> Commands
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
   );
