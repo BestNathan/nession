@@ -67,6 +67,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       onDisconnect={onDisconnect}
       onError={onError}
       onBannerChange={setToolbarDisabled}
+      onCtrlD={onBack}
     />
   );
 

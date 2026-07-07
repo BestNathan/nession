@@ -29,16 +29,6 @@ function decodeB64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** Ctrl+D double-tap guard: returns true if data should be blocked. */
-function guardCtrlD(term: import('@xterm/xterm').Terminal, data: string, ref: { current: number }): boolean {
-  if (data !== '\x04') { ref.current = 0; return false; }
-  const now = Date.now();
-  if (now - ref.current < 1000) { ref.current = 0; return false; }
-  ref.current = now;
-  term.write('\r\n⚠  Press Ctrl+D again within 1s to send EOF, or any other key to cancel.\r\n');
-  return true;
-}
-
 type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
 
 /** Imperative methods exposed by the Terminal component via ref. */
@@ -74,6 +64,8 @@ export interface TerminalProps {
   onError?: (error: Error) => void;
   /** Called when the reconnection banner state changes (so parent can disable toolbar) */
   onBannerChange?: (blocked: boolean) => void;
+  /** Called when Ctrl+D is pressed — should detach from the session */
+  onCtrlD?: () => void;
 }
 
 /**
@@ -97,12 +89,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onDisconnect,
     onError,
     onBannerChange,
+    onCtrlD,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Ctrl+D double-tap guard: first press warns, second within 1s passes through.
-  const lastCtrlDRef = useRef(0);
   // Holds the live "send text to remote" closure, assigned inside the connection
   // effect once the transport is established. Lets the imperative handle (and the
   // keystroke path) reuse one mode-aware sender. Null when not connected.
@@ -617,7 +608,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Forward keyboard input from xterm to the server.
       relayInputDisposable = term.onData((data) => {
-        if (!guardCtrlD(term, data, lastCtrlDRef)) { sendData(data); }
+        if (data === '\x04') { onCtrlD?.(); return; }
+        sendData(data);
       });
 
       // Forward terminal resize events, debounced to 150ms to avoid flooding
@@ -651,7 +643,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // ---------------------------------------------------------------------------
     dataDisposable = term.onData((data) => {
       if (mode !== 'p2p') { return; }
-      if (!guardCtrlD(term, data, lastCtrlDRef)) { sendData(data); }
+      if (data === '\x04') { onCtrlD?.(); return; }
+      sendData(data);
     });
 
     // ---------------------------------------------------------------------------
