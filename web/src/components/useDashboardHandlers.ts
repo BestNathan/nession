@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
-import type { Agent, Session, AttachInfo } from '../types';
+import type { Agent, Session, AttachInfo, AttachMode } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import type { AttachedSession } from './TerminalView';
 
@@ -31,7 +31,7 @@ export interface DashboardState {
   toggleSort: (field: SortField) => void;
   setShowCreateModal: (show: boolean) => void;
   setSessionToKill: (s: Session | null) => void;
-  handleAttach: (session: Session) => Promise<void>;
+  handleAttach: (session: Session, mode?: AttachMode) => Promise<void>;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
   fetchSessions: (agentId?: string) => Promise<void>;
@@ -175,13 +175,19 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
 
   const isSearchActive = searchQuery !== '' || statusFilter !== 'all';
 
-  const handleAttach = useCallback(async (session: Session) => {
+  const handleAttach = useCallback(async (session: Session, mode: AttachMode = 'auto') => {
     setAttachingInProgress(true);
     setError(null);
     try {
       let attachInfo: AttachInfo;
-      try { attachInfo = await wsService.requestAttach(session.session_id, 'p2p'); }
-      catch { attachInfo = await wsService.requestAttach(session.session_id, 'relay'); }
+      if (mode === 'auto') {
+        // Try P2P first, fall back to relay on failure.
+        try { attachInfo = await wsService.requestAttach(session.session_id, 'p2p'); }
+        catch { attachInfo = await wsService.requestAttach(session.session_id, 'relay'); }
+      } else {
+        // Forced mode: honor the user's choice, no fallback.
+        attachInfo = await wsService.requestAttach(session.session_id, mode);
+      }
       (handleAttach as unknown as { _attached?: AttachedSession })._attached = {
         sessionId: session.session_id, sessionName: session.session_name, attachInfo,
       };

@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, SearchX, FileCog } from 'lucide-react';
+import { ArrowUp, ArrowDown, SearchX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -10,7 +10,6 @@ interface SessionListProps {
   sessions: Session[];
   loading: boolean;
   onAttach: (session: Session) => void;
-  onAttachWithEnv: (session: Session) => void;
   onKill: (session: Session) => void;
   attachingInProgress: boolean;
   sortField: SortField;
@@ -23,7 +22,6 @@ export function SessionList({
   sessions,
   loading,
   onAttach,
-  onAttachWithEnv,
   onKill,
   attachingInProgress,
   sortField,
@@ -70,7 +68,7 @@ export function SessionList({
           <button className="w-16 flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('activity')}>
             Activity {sortField === 'activity' && (sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
           </button>
-          <span className="w-[164px] flex-shrink-0" />
+          <span className="w-[124px] flex-shrink-0" />
         </div>
         <div className="divide-y divide-border">
           {sessions.map((session) => (
@@ -102,15 +100,6 @@ export function SessionList({
                   disabled={attachingInProgress}
                 >
                   Attach
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onAttachWithEnv(session)}
-                  disabled={attachingInProgress}
-                  title="Attach with env files"
-                >
-                  <FileCog className="w-3.5 h-3.5" />
                 </Button>
                 <Button
                   size="sm"

@@ -11,7 +11,7 @@ import { SessionList } from './SessionList';
 import { SearchBar } from './SearchBar';
 import { AgentDetailPanel } from './AgentDetailPanel';
 import { EnvManager } from './env/EnvManager';
-import { AttachEnvDialog } from './env/AttachEnvDialog';
+import { AttachDialog } from './env/AttachDialog';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
@@ -138,7 +138,7 @@ function RenderTerminal({
 
 function SessionsSection({
   agents, filteredSessions, loadingSessions, attachingInProgress,
-  onCreate, fetchSessions, onAttach, onAttachWithEnv, onKill,
+  onCreate, fetchSessions, onAttach, onKill,
   sortField, sortDirection, toggleSort, isSearchActive,
 }: {
   agents: Agent[];
@@ -148,7 +148,6 @@ function SessionsSection({
   onCreate: () => void;
   fetchSessions: () => void;
   onAttach: (s: Session) => void;
-  onAttachWithEnv: (s: Session) => void;
   onKill: (s: Session) => void;
   sortField: import('./useDashboardHandlers').SortField;
   sortDirection: import('./useDashboardHandlers').SortDirection;
@@ -174,7 +173,6 @@ function SessionsSection({
         sessions={filteredSessions}
         loading={loadingSessions}
         onAttach={onAttach}
-        onAttachWithEnv={onAttachWithEnv}
         onKill={onKill}
         attachingInProgress={attachingInProgress}
         sortField={sortField}
@@ -205,8 +203,8 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   const {
     view, setView,
     attachedSession,
-    attachEnvSession, setAttachEnvSession,
-    onAttach, onAttachWithEnv, confirmAttachEnv,
+    attachDialogSession, setAttachDialogSession,
+    onAttach, confirmAttach,
     backToDashboard,
   } = useAttachFlow(wsService, handleAttach, fetchSessions);
 
@@ -264,7 +262,6 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
           onCreate={() => setShowCreateModal(true)}
           fetchSessions={fetchSessions}
           onAttach={onAttach}
-          onAttachWithEnv={onAttachWithEnv}
           onKill={setSessionToKill}
           sortField={sortField}
           sortDirection={sortDirection}
@@ -297,12 +294,12 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
         session={sessionToKill}
         onKilled={handleSessionKilled}
       />
-      <AttachEnvDialog
-        isOpen={attachEnvSession !== null}
-        onClose={() => setAttachEnvSession(null)}
+      <AttachDialog
+        isOpen={attachDialogSession !== null}
+        onClose={() => setAttachDialogSession(null)}
         wsService={wsService}
-        session={attachEnvSession}
-        onConfirm={confirmAttachEnv}
+        session={attachDialogSession}
+        onConfirm={confirmAttach}
       />
     </div>
   );

@@ -35,6 +35,14 @@ export interface AttachInfo {
   connection_token?: string;
 }
 
+/**
+ * Connection mode the user requests when attaching.
+ * - 'auto': try P2P, fall back to relay (default)
+ * - 'p2p': force direct agent connection (error if unavailable)
+ * - 'relay': force proxy through the server
+ */
+export type AttachMode = 'auto' | 'p2p' | 'relay';
+
 export interface WebSocketMessage {
   msg_type: string;
   id: string;

@@ -1,25 +1,30 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import type { Session, EnvFileRef } from '../types';
+import type { Session, EnvFileRef, AttachMode } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import type { AttachedSession } from './TerminalView';
+import { saveAttachPrefs } from '../services/attachPrefs';
 
 /**
- * Owns the attach-to-terminal transition, including optional attach-time env
- * application and detach-time cleanup. Keeps Dashboard lean.
+ * Owns the attach-to-terminal transition: the attach dialog, connection-mode
+ * selection, optional attach-time env application, detach-time cleanup, and
+ * persisting the last-used preferences. Keeps Dashboard lean.
  */
 export function useAttachFlow(
   wsService: WebSocketService,
-  handleAttach: (session: Session) => Promise<void>,
+  handleAttach: (session: Session, mode?: AttachMode) => Promise<void>,
   fetchSessions: () => void,
 ) {
   const [view, setView] = useState<'dashboard' | 'terminal' | 'env'>('dashboard');
   const [attachedSession, setAttachedSession] = useState<AttachedSession | null>(null);
-  const [attachEnvSession, setAttachEnvSession] = useState<Session | null>(null);
+  const [attachDialogSession, setAttachDialogSession] = useState<Session | null>(null);
 
   const attachAndShow = useCallback(
-    async (session: Session, envFiles: EnvFileRef[]) => {
-      await handleAttach(session);
+    async (session: Session, mode: AttachMode, envFiles: EnvFileRef[]) => {
+      // Remember the choice for next time.
+      saveAttachPrefs({ mode, envFiles });
+
+      await handleAttach(session, mode);
       const attached = (handleAttach as unknown as { _attached?: AttachedSession })._attached;
       if (!attached) {
         return;
@@ -49,12 +54,12 @@ export function useAttachFlow(
     [handleAttach, wsService],
   );
 
-  const onAttach = useCallback((session: Session) => void attachAndShow(session, []), [attachAndShow]);
-  const onAttachWithEnv = useCallback((session: Session) => setAttachEnvSession(session), []);
-  const confirmAttachEnv = useCallback(
-    (session: Session, envFiles: EnvFileRef[]) => {
-      setAttachEnvSession(null);
-      void attachAndShow(session, envFiles);
+  // The Attach button opens the dialog; confirming performs the attach.
+  const onAttach = useCallback((session: Session) => setAttachDialogSession(session), []);
+  const confirmAttach = useCallback(
+    (session: Session, mode: AttachMode, envFiles: EnvFileRef[]) => {
+      setAttachDialogSession(null);
+      void attachAndShow(session, mode, envFiles);
     },
     [attachAndShow],
   );
@@ -72,8 +77,8 @@ export function useAttachFlow(
   return {
     view, setView,
     attachedSession,
-    attachEnvSession, setAttachEnvSession,
-    onAttach, onAttachWithEnv, confirmAttachEnv,
+    attachDialogSession, setAttachDialogSession,
+    onAttach, confirmAttach,
     backToDashboard,
   };
 }
