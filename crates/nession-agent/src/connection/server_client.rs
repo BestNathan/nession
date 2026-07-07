@@ -665,6 +665,12 @@ impl ServerClient {
                         break;
                     }
                 }
+                // Also broadcast to already-running panes so existing shells
+                // pick up the vars immediately (set-environment only affects
+                // new windows/panes). Best-effort: pane errors are ignored.
+                if error.is_none() && !env.is_empty() {
+                    let _ = self.tmux.broadcast_export(&payload.name, &env).await;
+                }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
@@ -696,6 +702,13 @@ impl ServerClient {
                             error = Some(e.to_string());
                         }
                     }
+                }
+                // Also broadcast unset to already-running panes.
+                if error.is_none() && !payload.keys.is_empty() {
+                    let _ = self
+                        .tmux
+                        .broadcast_unset(&payload.name, &payload.keys)
+                        .await;
                 }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",

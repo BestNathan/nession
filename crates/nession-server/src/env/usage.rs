@@ -83,6 +83,7 @@ impl EnvUsageRegistry {
     }
 
     /// Record env files applied to a session at create time.
+    /// Skips files that already have a usage record for the same phase (idempotent).
     pub fn record_create(&self, session_id: &str, files: &[EnvFileRef], applied_by: Option<&str>) {
         let mut sessions = self
             .sessions
@@ -90,6 +91,10 @@ impl EnvUsageRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = sessions.entry(session_id.to_string()).or_default();
         for f in files {
+            let key = FileKey::from_ref(f);
+            if entry.iter().any(|u| u.matches(&key) && u.phase == "create") {
+                continue;
+            }
             entry.push(Usage {
                 name: f.name.clone(),
                 source: f.source,
@@ -101,6 +106,7 @@ impl EnvUsageRegistry {
     }
 
     /// Record env files applied to a session at attach time.
+    /// Skips files that already have a usage record for the same phase (idempotent).
     pub fn record_attach(&self, session_id: &str, files: &[EnvFileRef], applied_by: Option<&str>) {
         let mut sessions = self
             .sessions
@@ -108,6 +114,10 @@ impl EnvUsageRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = sessions.entry(session_id.to_string()).or_default();
         for f in files {
+            let key = FileKey::from_ref(f);
+            if entry.iter().any(|u| u.matches(&key) && u.phase == "attach") {
+                continue;
+            }
             entry.push(Usage {
                 name: f.name.clone(),
                 source: f.source,
@@ -254,6 +264,16 @@ mod tests {
         reg.record_create("agent:s1", &[file_ref("a.env")], None);
         reg.remove_attach("agent:s1", &[file_ref("a.env")], None);
         // create-phase usage survives an attach removal
+        assert_eq!(reg.active_for("agent:s1").len(), 1);
+    }
+
+    #[test]
+    fn record_attach_is_idempotent() {
+        let reg = EnvUsageRegistry::new();
+        let f = file_ref("a.env");
+        // Same file attached twice should only produce one record.
+        reg.record_attach("agent:s1", &[f.clone()], Some("alice"));
+        reg.record_attach("agent:s1", &[f], Some("alice"));
         assert_eq!(reg.active_for("agent:s1").len(), 1);
     }
 

@@ -129,6 +129,78 @@ impl TmuxManager {
         Ok(())
     }
 
+    /// Send `export KEY=VALUE ...` to every pane in the session so that
+    /// already-running shells pick up the env vars immediately. Pane errors
+    /// are ignored (best-effort — a pane may not have a shell).
+    pub async fn broadcast_export(
+        &self,
+        session_name: &str,
+        vars: &[(String, String)],
+    ) -> Result<()> {
+        if vars.is_empty() {
+            return Ok(());
+        }
+        let export_cmd = format!(
+            "export {}",
+            vars.iter()
+                .map(|(k, v)| format!("{k}={}", Self::shell_escape(v)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        self.send_keys_to_all_panes(session_name, &export_cmd).await
+    }
+
+    /// Send `unset KEY ...` to every pane so already-running shells drop the vars.
+    pub async fn broadcast_unset(&self, session_name: &str, keys: &[String]) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let unset_cmd = format!("unset {}", keys.join(" "));
+        self.send_keys_to_all_panes(session_name, &unset_cmd).await
+    }
+
+    /// List all pane IDs for a session, then send a shell command to each.
+    async fn send_keys_to_all_panes(&self, session_name: &str, command: &str) -> Result<()> {
+        let output = Command::new("tmux")
+            .args(["list-panes", "-t", session_name, "-F", "#{pane_id}"])
+            .output()
+            .await?;
+        if !output.status.success() {
+            anyhow::bail!("Failed to list panes for session: {session_name}");
+        }
+        let pane_ids: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+
+        for pane_id in &pane_ids {
+            // Best-effort: a pane may not accept input (e.g. dead pane).
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", pane_id, command, "Enter"])
+                .status()
+                .await;
+        }
+        Ok(())
+    }
+
+    /// Escape a value for safe use in a single-quoted shell string.
+    /// Single quotes inside the value are replaced with `'\''`.
+    fn shell_escape(value: &str) -> String {
+        if value.is_empty() {
+            return "''".to_string();
+        }
+        // Only need quoting if value contains shell metacharacters or spaces.
+        if value
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+        {
+            return value.to_string();
+        }
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         let status = Command::new("tmux")
             .args(["kill-session", "-t", name])
