@@ -745,7 +745,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           )}
         </div>
       )}
-      <div ref={containerRef} className="h-full w-full" />
+      <div ref={containerRef} className="h-full w-full select-text" />
     </div>
   );
 });

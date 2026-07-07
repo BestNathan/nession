@@ -130,10 +130,10 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write source script: {}", path.display()))?;
 
-        // Source the file then move up 1 line and clear to end of line so
-        // the command disappears from view. ANSI \033[1A (cursor up) +
-        // \033[2K (clear line) works in all modern terminals.
-        let cmd = format!(". {}; printf '\\033[1A\\033[2K'", path.display());
+        // Leading space + HISTCONTROL=ignorespace keeps the command out of
+        // shell history. ANSI \033[1A (cursor up) + \033[2K (clear line)
+        // removes it from view immediately after execution.
+        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
         self.send_keys(session_name, &cmd).await
     }
 
@@ -154,7 +154,8 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
 
-        let cmd = format!(". {}; printf '\\033[1A\\033[2K'", path.display());
+        // Leading space keeps it out of history (HISTCONTROL=ignorespace).
+        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
         self.send_keys(session_name, &cmd).await
     }
 
