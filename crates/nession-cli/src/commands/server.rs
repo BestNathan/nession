@@ -203,7 +203,10 @@ pub async fn status(pid_file: String) -> Result<()> {
     }
 
     // Try to load config to show additional info
-    if let Ok(config) = load_server_config("server-config.toml") {
+    let default_config_path = nession_common::paths::server_config_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from("server-config.toml"));
+    let default_config_path = default_config_path.to_string_lossy();
+    if let Ok(config) = load_server_config(&default_config_path) {
         println!("Listen address: {}", config.listen_address);
         println!("Database: {}", config.db_path);
         println!("Heartbeat timeout: {}s", config.heartbeat_timeout_secs);

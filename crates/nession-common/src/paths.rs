@@ -46,6 +46,16 @@ pub fn agent_envs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("envs"))
 }
 
+/// Agent default config path: ~/.nession/agent-config.toml
+pub fn agent_config_path() -> io::Result<PathBuf> {
+    nession_home().map(|h| h.join("agent-config.toml"))
+}
+
+/// Server default config path: ~/.nession/server-config.toml
+pub fn server_config_path() -> io::Result<PathBuf> {
+    nession_home().map(|h| h.join("server-config.toml"))
+}
+
 /// Create server and agent component directories if they don't exist.
 pub fn ensure_component_dirs() -> io::Result<()> {
     std::fs::create_dir_all(server_dir()?)?;

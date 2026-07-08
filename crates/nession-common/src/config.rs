@@ -17,6 +17,20 @@ pub struct ServerConfig {
     pub db_path: String,
 }
 
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            listen_address: "0.0.0.0:19090".to_string(),
+            tls_cert_path: String::new(),
+            tls_key_path: String::new(),
+            auth_token: String::new(),
+            heartbeat_interval_secs: default_heartbeat_interval(),
+            heartbeat_timeout_secs: default_heartbeat_timeout(),
+            db_path: default_db_path(),
+        }
+    }
+}
+
 fn default_heartbeat_interval() -> u64 {
     10
 }
