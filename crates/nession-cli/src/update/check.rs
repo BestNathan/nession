@@ -22,15 +22,9 @@ pub async fn background_check() -> Option<String> {
     }
 
     let client = if let Ok(api_url) = std::env::var("NESSION_UPDATE_API_URL") {
-        match GitHubReleaseClient::with_base_url(api_url) {
-            Ok(c) => c,
-            Err(_) => return None,
-        }
+        GitHubReleaseClient::with_base_url(api_url).ok()?
     } else {
-        match GitHubReleaseClient::new() {
-            Ok(c) => c,
-            Err(_) => return None,
-        }
+        GitHubReleaseClient::new().ok()?
     };
 
     let release = match tokio::time::timeout(

@@ -71,26 +71,6 @@ fn checksum_mismatch_detected() {
 }
 
 #[test]
-fn cache_roundtrip_integration() {
-    use nession_cli::update::cache;
-    let cache_path = nession_common::paths::nession_home()
-        .unwrap()
-        .join("update-check.json");
-    let _ = std::fs::remove_file(&cache_path);
-    let cache_data = cache::UpdateCache {
-        checked_at: chrono::Utc::now(),
-        latest_version: "0.5.0".into(),
-        current_version: "0.4.2".into(),
-        update_available: true,
-    };
-    cache::write_cache(&cache_data).unwrap();
-    let read = cache::read_cache().unwrap();
-    assert_eq!(read.latest_version, "0.5.0");
-    assert!(read.update_available);
-    let _ = std::fs::remove_file(&cache_path);
-}
-
-#[test]
 fn platform_detection_is_valid() {
     let platform = nession_cli::update::github::platform_string();
     let valid = ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"];
@@ -324,6 +304,21 @@ async fn background_check_all_scenarios() {
     std::env::remove_var("NESSION_UPDATE_API_URL");
     assert!(msg.contains("Update available"));
     assert!(msg.contains("99.99.99"));
+
+    // Scenario 4: Fresh cache with no update → returns None
+    cache::write_cache(&UpdateCache {
+        checked_at: Utc::now(),
+        latest_version: "0.4.2".into(),
+        current_version: "0.4.2".into(),
+        update_available: false,
+    })
+    .unwrap();
+    assert!(
+        nession_cli::update::check::background_check()
+            .await
+            .is_none(),
+        "fresh cache with no update should return None"
+    );
 
     let _ = std::fs::remove_file(&cache_path);
 }

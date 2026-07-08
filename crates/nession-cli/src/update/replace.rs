@@ -61,7 +61,7 @@ pub fn check_disk_space(path: &Path, needed: u64) -> Result<(), UpdateError> {
     let dir_str = dir.to_string_lossy();
 
     let output = Command::new("df")
-        .args(["--block-size=1", &dir_str])
+        .args(["-k", &dir_str])
         .output()
         .map_err(|_| UpdateError::Io(std::io::Error::other("failed to run df")))?;
 
@@ -70,16 +70,18 @@ pub fn check_disk_space(path: &Path, needed: u64) -> Result<(), UpdateError> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let avail = stdout
+    // df -k output: "Available" is 4th column (index 3), in 1K blocks.
+    let avail_kb = stdout
         .lines()
         .nth(1)
         .and_then(|line| line.split_whitespace().nth(3))
         .and_then(|s| s.parse::<u64>().ok());
 
-    match avail {
-        Some(a) if a < needed => Err(UpdateError::InsufficientSpace {
+    match avail_kb {
+        // needed is in bytes; convert KB to bytes for comparison.
+        Some(a) if a * 1024 < needed => Err(UpdateError::InsufficientSpace {
             need: needed,
-            have: a,
+            have: a * 1024,
         }),
         _ => Ok(()),
     }
@@ -191,6 +193,40 @@ mod tests {
     }
 
     #[test]
+    fn is_process_running_known_process() {
+        // launchd (macOS) or systemd (Linux) should always be running.
+        let pid = is_process_running("launchd");
+        if pid.is_none() {
+            // Try Linux systemd.
+            let pid = is_process_running("systemd");
+            if pid.is_none() {
+                // Neither found, test at least doesn't crash.
+                return;
+            }
+            assert!(pid.unwrap() > 0);
+        } else {
+            assert!(pid.unwrap() > 0);
+        }
+    }
+
+    #[test]
+    fn check_write_permission_file_negative() {
+        // Create a file inside a tempdir, then make the directory non-writable.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test-bin");
+        std::fs::write(&file_path, b"content").unwrap();
+        let mut dir_perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        dir_perms.set_readonly(true);
+        std::fs::set_permissions(dir.path(), dir_perms).unwrap();
+        let result = check_write_permission(&file_path);
+        assert!(matches!(result, Err(UpdateError::PermissionDenied(_))));
+        // Restore permissions so tempdir cleanup doesn't fail.
+        let mut dir_perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        dir_perms.set_readonly(false);
+        std::fs::set_permissions(dir.path(), dir_perms).unwrap();
+    }
+
+    #[test]
     fn cli_install_dir_returns_ok() {
         let result = cli_install_dir();
         assert!(result.is_ok(), "should find CLI install dir");
@@ -213,6 +249,16 @@ mod tests {
     }
 
     #[test]
+    fn locate_binary_not_in_path() {
+        // A binary that definitely doesn't exist.
+        let found = locate_binary(
+            "nonexistent-binary-xyz-12345",
+            Path::new("/nonexistent-dir"),
+        );
+        assert!(found.is_none());
+    }
+
+    #[test]
     fn locate_binary_in_cli_dir() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("testbin");
@@ -224,8 +270,18 @@ mod tests {
     #[test]
     fn check_disk_space_happy_path() {
         let dir = tempfile::tempdir().unwrap();
-        // The temp dir should have at least 1 byte free
         assert!(check_disk_space(dir.path(), 1).is_ok());
+    }
+
+    #[test]
+    fn check_disk_space_insufficient() {
+        // u64::MAX bytes is impossibly large → should fail on any real system.
+        let result = check_disk_space(Path::new("."), u64::MAX);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            UpdateError::InsufficientSpace { .. }
+        ));
     }
 
     #[test]
