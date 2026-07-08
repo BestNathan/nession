@@ -1,0 +1,11 @@
+$ nession update --help
+Self-update nession to the latest version
+
+Usage: nession update [OPTIONS]
+
+Options:
+      --check                    Only check for updates (don't install)
+      --version <VERSION>        Update/downgrade to a specific version
+      --dry-run                  Simulate the update without changing files
+      --yes                      Skip confirmation prompt
+  -h, --help                     Print help

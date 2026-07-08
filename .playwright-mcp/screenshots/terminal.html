@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { background: #1a1b26; color: #a9b1d6; font-family: 'Menlo', 'Monaco', monospace; padding: 40px; margin: 0; }
+  .terminal { max-width: 780px; margin: 0 auto; }
+  .prompt { color: #9ece6a; }
+  .cmd { color: #7dcfff; }
+  .output { color: #c0caf5; white-space: pre-wrap; line-height: 1.4; margin: 8px 0 24px 0; }
+  .title { color: #bb9af7; font-size: 18px; margin-bottom: 24px; border-bottom: 1px solid #3b4261; padding-bottom: 12px; }
+  .highlight { color: #e0af68; }
+  .success { color: #9ece6a; }
+  .divider { border: none; border-top: 1px dashed #3b4261; margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="terminal">
+
+<div class="title">🐚 nession update — CLI Self-Update Command (ISSUE #33)</div>
+
+<!-- Help -->
+<div class="prompt">$</div> <span class="cmd">nession update --help</span>
+<div class="output">Self-update nession to the latest version
+
+Usage: nession update [OPTIONS]
+
+Options:
+      <span class="highlight">--check</span>                    Only check for updates (don't install)
+      <span class="highlight">--version &lt;VERSION&gt;</span>        Update/downgrade to a specific version
+      <span class="highlight">--dry-run</span>                  Simulate the update without changing files
+      <span class="highlight">--yes</span>                      Skip confirmation prompt
+  -h, --help                     Print help</div>
+
+<hr class="divider">
+
+<!-- Check: update available -->
+<div class="prompt">$</div> <span class="cmd">nession update --check</span>
+<div class="output">Current version: 0.4.2
+Latest version:  0.5.0
+Status: <span class="highlight">Update available</span>
+Run <span class="cmd">nession update</span> to upgrade.</div>
+
+<hr class="divider">
+
+<!-- Check: up to date -->
+<div class="prompt">$</div> <span class="cmd">nession update --check</span>
+<div class="output">Current version: 0.4.2
+Latest version:  0.4.2
+Status: <span class="success">Up to date</span></div>
+
+<hr class="divider">
+
+<!-- Dry run -->
+<div class="prompt">$</div> <span class="cmd">nession update --dry-run --yes</span>
+<div class="output">Upgrade available: v0.4.2 → v0.5.0
+Downloading nession-0.5.0-darwin-arm64.tar.gz...
+Checksum verified.
+[<span class="highlight">dry-run</span>] Would download: https://github.com/.../nession-0.5.0-darwin-arm64.tar.gz
+[<span class="highlight">dry-run</span>] Would verify SHA256 checksum.
+[<span class="highlight">dry-run</span>] Would replace: nession, nession-agent, nession-server</div>
+
+<hr class="divider">
+
+<!-- Background check hint -->
+<div class="prompt">$</div> <span class="cmd">nession sessions list</span>
+<div class="output"><span class="highlight">⚠ Update available: 0.4.2 → 0.5.0. Run `nession update` to upgrade.</span>
+No sessions found.</div>
+
+</div>
+</body>
+</html>

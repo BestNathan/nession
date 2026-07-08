@@ -1,0 +1,4 @@
+$ nession update --check --version 0.4.2
+Current version: 0.4.2
+Latest version:  0.4.2
+Status: Up to date
