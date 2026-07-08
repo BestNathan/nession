@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useState } from 'react';
 import { Terminal as XTerm, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
 import type { WebSocketService } from '../services/websocket';
@@ -393,6 +394,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrollback: 10000,
     });
 
+    const canvasAddon = new CanvasAddon();
+    term.loadAddon(canvasAddon);
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
@@ -745,7 +748,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           )}
         </div>
       )}
-      <div ref={containerRef} className="h-full w-full select-text" />
+      <div ref={containerRef} className="h-full w-full" />
     </div>
   );
 });

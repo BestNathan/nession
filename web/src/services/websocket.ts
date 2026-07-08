@@ -341,7 +341,13 @@ export class WebSocketService {
         timeout,
       });
 
-      this.ws!.send(JSON.stringify(message));
+      try {
+        this.ws!.send(JSON.stringify(message));
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(new Error(`Failed to serialize message: ${err instanceof Error ? err.message : String(err)}`));
+      }
     });
   }
 
