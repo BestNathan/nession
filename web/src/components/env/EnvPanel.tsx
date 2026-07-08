@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Play, X, FileText, RefreshCw } from 'lucide-react';
+import { Play, X, FileText, RefreshCw, Check } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
@@ -18,12 +18,14 @@ interface EnvPanelProps {
 function EnvFileRow({
   file,
   isSourced,
+  isCreateTime,
   isBusy,
   onSource,
   onUnsource,
 }: {
   file: EnvFileInfo;
   isSourced: boolean;
+  isCreateTime: boolean;
   isBusy: boolean;
   onSource: (f: EnvFileInfo) => void;
   onUnsource: (f: EnvFileInfo) => void;
@@ -37,13 +39,19 @@ function EnvFileRow({
       </Badge>
       <span className="text-[10px] text-muted-foreground w-8 text-right">{file.var_count}v</span>
       {isSourced ? (
-        <Button
-          size="sm" variant="ghost"
-          className="h-6 px-1.5 text-[10px] text-destructive hover:text-destructive"
-          onClick={() => onUnsource(file)} disabled={isBusy}
-        >
-          <X className="w-3 h-3" />
-        </Button>
+        isCreateTime ? (
+          <span className="h-6 w-6 flex items-center justify-center text-emerald-500" title="Applied at session creation">
+            <Check className="w-3.5 h-3.5" />
+          </span>
+        ) : (
+          <Button
+            size="sm" variant="ghost"
+            className="h-6 px-1.5 text-[10px] text-destructive hover:text-destructive"
+            onClick={() => onUnsource(file)} disabled={isBusy}
+          >
+            <X className="w-3 h-3" />
+          </Button>
+        )
       ) : (
         <Button
           size="sm" variant="ghost"
@@ -67,6 +75,7 @@ function EnvFileRow({
 export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
   const [files, setFiles] = useState<EnvFileInfo[]>([]);
   const [sourced, setSourced] = useState<Set<string>>(new Set());
+  const [createTimeKeys, setCreateTimeKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
 
@@ -79,7 +88,26 @@ export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
       .finally(() => setLoading(false));
   }, [wsService]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+    // Pre-mark env files applied at session create time as already sourced.
+    wsService
+      .getSessionEnvActive(sessionId)
+      .then((resp) => {
+        const ck = resp.active
+          .filter((a) => a.phase === 'create')
+          .map((a) => refKey(a));
+        if (ck.length > 0) {
+          setCreateTimeKeys(new Set(ck));
+          setSourced((prev) => {
+            const next = new Set(prev);
+            for (const k of ck) { next.add(k); }
+            return next;
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [refresh, sessionId, wsService]);
 
   const source = useCallback(
     async (file: EnvFileInfo) => {
@@ -147,6 +175,7 @@ export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
                 key={refKey(file)}
                 file={file}
                 isSourced={sourced.has(refKey(file))}
+                isCreateTime={createTimeKeys.has(refKey(file))}
                 isBusy={busy.has(refKey(file))}
                 onSource={source}
                 onUnsource={unsource}

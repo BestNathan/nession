@@ -119,6 +119,16 @@ export interface EnvDeleteResponse {
   error?: string;
 }
 
+export interface ActiveEnvFile {
+  name: string;
+  source: EnvSource;
+  agent_id?: string;
+  phase: string; // "create" | "attach"
+}
+
+export interface SessionEnvActiveResponse {
+  active: ActiveEnvFile[];
+}
 export interface SessionEnvResponse {
   success: boolean;
   error?: string;
