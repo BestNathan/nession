@@ -16,8 +16,8 @@ use thiserror::Error;
 /// Errors that can occur during the update process.
 #[derive(Debug, Error)]
 pub enum UpdateError {
-    #[error("Network error: unable to reach GitHub API")]
-    Network(#[from] reqwest::Error),
+    #[error("Network error: {0}")]
+    Network(String),
 
     #[error("GitHub API rate limited. Try again later.")]
     RateLimited,
@@ -48,6 +48,12 @@ pub enum UpdateError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<reqwest::Error> for UpdateError {
+    fn from(err: reqwest::Error) -> Self {
+        UpdateError::Network(err.to_string())
+    }
 }
 
 /// Outcome for a single binary replacement.
