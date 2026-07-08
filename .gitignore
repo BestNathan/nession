@@ -92,3 +92,6 @@ test-results/
 .claude/settings.local.json
 *.local
 agent-config.toml
+build_rs_cov.profraw
+lcov.info
+tarpaulin-report.json

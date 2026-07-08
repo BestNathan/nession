@@ -333,10 +333,19 @@ jobs:
           done
           tar -czf "nession-${V}-linux-amd64.tar.gz" -C dist .
 
+      - name: Generate checksums
+        run: sha256sum nession-*.tar.gz > checksums-linux-amd64.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-linux-amd64
           path: nession-*.tar.gz
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-linux-amd64
+          path: checksums-linux-amd64.txt
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════
@@ -363,10 +372,19 @@ jobs:
           done
           tar -czf "nession-${V}-linux-arm64.tar.gz" -C dist .
 
+      - name: Generate checksums
+        run: sha256sum nession-*.tar.gz > checksums-linux-arm64.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-linux-arm64
           path: nession-*.tar.gz
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-linux-arm64
+          path: checksums-linux-arm64.txt
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════
@@ -409,10 +427,21 @@ jobs:
           done
           tar -czf "nession-${V}-darwin-amd64.tar.gz" -C dist-amd64 .
 
+      - name: Generate checksums
+        run: |
+          sha256sum nession-*-darwin-arm64.tar.gz > checksums-darwin-arm64.txt
+          sha256sum nession-*-darwin-amd64.tar.gz > checksums-darwin-amd64.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-macos
           path: nession-*.tar.gz
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-macos
+          path: checksums-darwin-*.txt
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════
@@ -432,6 +461,17 @@ jobs:
           pattern: binaries-*
           path: release-assets
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: checksums-*
+          path: ./
+          merge-multiple: true
+
+      - name: Merge checksums
+        run: |
+          cat checksums-*.txt > release-assets/checksums.txt
+          rm -f checksums-*.txt
 
       - name: List assets
         run: ls -la release-assets/
@@ -454,6 +494,12 @@ jobs:
             |----------|---------------|
             | Linux | amd64, arm64 |
             | macOS | amd64 (Intel), arm64 (Apple Silicon) |
+
+            ### Verification
+            Verify downloads with `checksums.txt`:
+            ```bash
+            sha256sum -c checksums.txt
+            ```
           files: release-assets/*
           generate_release_notes: true
 

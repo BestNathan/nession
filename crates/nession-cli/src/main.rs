@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 
+mod update;
+
 mod client;
 
 mod terminal;
@@ -55,6 +57,24 @@ enum Commands {
     Sessions {
         #[command(subcommand)]
         action: SessionsAction,
+    },
+    /// Self-update nession to the latest version
+    Update {
+        /// Only check for updates (don't install)
+        #[arg(long)]
+        check: bool,
+
+        /// Update/downgrade to a specific version
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Simulate the update without changing files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -182,8 +202,34 @@ fn resolve_auth_token(cli_token: Option<String>) -> String {
     cli_token.unwrap_or_else(|| DEFAULT_AUTH_TOKEN.to_string())
 }
 
+fn should_skip_background_check() -> bool {
+    if std::env::var("NESSION_NO_UPDATE_CHECK").is_ok() {
+        return true;
+    }
+    let args: Vec<String> = std::env::args().collect();
+    for arg in &args {
+        if arg == "--help" || arg == "-h" || arg == "help" {
+            return true;
+        }
+    }
+    for arg in &args {
+        if arg == "--version" || arg == "-V" {
+            return true;
+        }
+    }
+    false
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    if !should_skip_background_check() {
+        tokio::spawn(async {
+            if let Some(msg) = update::check::background_check().await {
+                eprintln!("{msg}");
+            }
+        });
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -316,6 +362,14 @@ async fn main() -> Result<()> {
                 commands::client::kill_session(&server_url, &auth_token, &session_id).await?;
             }
         },
+        Commands::Update {
+            check,
+            version,
+            dry_run,
+            yes,
+        } => {
+            commands::update::run_update(check, version, dry_run, yes).await?;
+        }
     }
 
     Ok(())
