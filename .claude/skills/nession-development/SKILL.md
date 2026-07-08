@@ -37,7 +37,7 @@ Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm 
 # Claude Code 中直接使用 EnterWorktree 工具创建隔离环境
 # 或者手动：
 git checkout main && git pull
-git worktree add -b worktree/<slug> ../nession-<slug> main
+git worktree add -b feat/<slug> ../nession-<slug> main
 cd ../nession-<slug>
 ```
 
@@ -48,21 +48,21 @@ cd ../nession-<slug>
 开始任何开发前，必须确认你**不在 main 上**：
 
 ```bash
-git branch --show-current   # 必须显示 worktree/<slug>，绝对不能是 "main"
+git branch --show-current   # 必须显示 feat/<slug>，绝对不能是 "main"
 ```
 
 ### 完成开发后
 
 ```bash
 # 1. 推送分支，创建 PR
-git push -u origin worktree/<slug>
+git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
 
 # 2. PR 合并后，清理 worktree
 git checkout main && git pull
 git worktree remove ../nession-<slug>
 git worktree prune
-git branch -d worktree/<slug>
+git branch -d feat/<slug>
 ```
 
 **Claude Code 方式** — PR 合并后使用 `ExitWorktree` 退出并清理（action: "remove"）。
@@ -181,7 +181,7 @@ On merge to main, CI reads the version from these files and creates version-tagg
 # 手动方式：
 git checkout main
 git pull
-git worktree add -b worktree/<slug> ../nession-<slug> main
+git worktree add -b feat/<slug> ../nession-<slug> main
 cd ../nession-<slug>
 
 # STEP 2: Develop, test, commit each logical unit
@@ -193,7 +193,7 @@ cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
 # STEP 4: Push and create PR
-git push -u origin worktree/<slug>
+git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
 
 # STEP 5: After merge — cleanup. OLD WORKTREE IS DEAD.
@@ -202,7 +202,7 @@ git checkout main
 git pull
 git worktree remove ../nession-<slug>
 git worktree prune
-git branch -d worktree/<slug>
+git branch -d feat/<slug>
 ```
 
 **⚠ CRITICAL: PR merged = worktree dead.** Never push more commits to a merged branch. Follow-up work — even a one-line fix — starts from a **new worktree** off latest main.
@@ -325,7 +325,7 @@ Place screenshots in the PR body under **核心功能截图** using markdown ima
 | Task | Command |
 |------|---------|
 | Create worktree (CC) | `EnterWorktree` tool |
-| Create worktree (manual) | `git worktree add -b worktree/<slug> ../nession-<slug> main` |
+| Create worktree (manual) | `git worktree add -b feat/<slug> ../nession-<slug> main` |
 | Verify not on main | `git branch --show-current` |
 | Run all tests | `cargo test` |
 | Coverage | `cargo tarpaulin --out Html` |
