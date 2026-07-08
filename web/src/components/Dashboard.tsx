@@ -164,7 +164,7 @@ function SessionsSection({
           <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')}>
             <Plus className="w-3.5 h-3.5 mr-1" /> Create
           </Button>
-          <Button size="sm" variant="ghost" onClick={fetchSessions} disabled={loadingSessions}>
+          <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions}>
             <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
           </Button>
         </div>
