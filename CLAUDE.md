@@ -109,6 +109,7 @@ tmux sessions (per-node)
 - **shadcn components:** Individual primitives in `components/ui/`, added via CLI, version-controlled.
 - **ESLint:** `eslint-disable` comments are forbidden. All lint violations must be fixed properly (type narrowing, destructuring deps, extracting non-component exports). `--max-warnings 0` is enforced.
 - **Event handlers:** Never pass a function with optional parameters directly to `onClick`/`onChange` — React events will be passed as the first argument and may flow into `JSON.stringify`, causing circular-reference errors. Always wrap: `onClick={() => fn()}`.
+- **React effect ordering:** Child component effects run before parent effects on first mount. Hooks managing async connection state must initialize to the optimistic in-progress value (`'connecting'`), not `'disconnected'` — otherwise child effects that depend on the connection will reject before the parent has a chance to start it. Also, under StrictMode (dev), effects run mount→cleanup→mount; don't reject in-flight promise waiters in cleanup — let them survive on a ref and settle on the second mount.
 
 ---
 
@@ -134,7 +135,7 @@ git stash pop
 
 ### Prerequisites
 
-- Rust 1.88+ with `cargo`
+- Rust (see `rust-toolchain.toml` for pinned version) with `cargo`
 - Node.js 20+ with `npm`
 - tmux (for agent — not needed for server/client dev)
 - Docker (for builds), kubectl + kustomize (for k8s deploys)
@@ -157,6 +158,21 @@ cargo clippy -- -D warnings     # Lint — MUST pass with 0 warnings
 - `#[allow(clippy::*)]` is **forbidden**. Every clippy lint must be fixed properly, not silenced.
 - `clippy.toml` contains lint thresholds (`cognitive-complexity-threshold = 25`, `too-many-lines-threshold = 150`).
 - Workspace lints in `Cargo.toml` (`[workspace.lints.clippy]`) apply to all crates via `[lints] workspace = true`.
+
+**Rust toolchain:** `rust-toolchain.toml` is the single source of truth (currently `channel = "1.96.0"`). CI uses `actions-rust-lang/setup-rust-toolchain@v1` which reads it natively — no version hardcoded in the workflow. To bump Rust, edit `rust-toolchain.toml` only, then `rustup toolchain install <ver> --component rustfmt --component clippy`.
+
+**Linux-only code:** `#[cfg(target_os = "linux")]` blocks (including test assertions) are NOT compiled or linted on macOS. Lint violations there (e.g. `u64 >= 0`) only surface in CI. Manually review these blocks for platform-independent lint issues before pushing.
+
+**Local demo stack (for Playwright verification):** use an isolated HOME so env/db files don't pollute `~/.nession`:
+```bash
+# Server (no-auth mode when auth_token is empty)
+HOME=/tmp/nession-demo cargo run -p nession-server
+# Agent (needs config as argv[1], tmux required)
+HOME=/tmp/nession-demo cargo run -p nession-agent -- agent-config.toml
+# Web (vite proxies /ws → localhost:19090)
+cd web && npm run dev
+```
+Server listens on `127.0.0.1:19090` (ws) + `:10080` (http), agent on `:19091`. In the browser (http://localhost:13000), use any non-empty token to log in. Run `localStorage.clear()` first to drop stale prefilled values. Clean up with `pkill -f 'target/debug/nession-(server|agent)'` and `pkill -f vite`.
 
 **Web UI:** work inside `web/`.
 ```bash
@@ -269,7 +285,7 @@ cd web && npm run dev                 # :13000
 #    - Save screenshots to a temp location for PR attachment
 ```
 
-Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Screenshots go in the PR body under the **核心功能截图** section.
+Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Save screenshots to `.playwright-mcp/screenshots/` (gitignored, never committed). Reference them in the PR body under the **核心功能截图** section using repo-relative paths.
 
 ### Release Flow
 

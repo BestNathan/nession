@@ -90,6 +90,7 @@ test-results/
 # Local config (per-developer)
 # ================================
 .claude/settings.local.json
+.claude/worktrees/
 *.local
 agent-config.toml
 build_rs_cov.profraw
