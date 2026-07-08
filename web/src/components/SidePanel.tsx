@@ -79,13 +79,15 @@ export function SidePanel({
         )}
       </div>
 
-      {/* Toggle button */}
+      {/* Toggle button — when closed, semi-transparent so it doesn't block terminal content */}
       <button
         onClick={toggle}
         className={cn(
           'absolute top-1/2 -translate-y-1/2 h-16 w-5 flex items-center justify-center',
-          'bg-muted border rounded-r-md cursor-pointer hover:bg-accent transition-colors z-20',
-          isOpen ? '-right-5' : 'left-0',
+          'border shadow-sm cursor-pointer transition-all z-20',
+          isOpen
+            ? '-right-5 bg-muted rounded-r-md hover:bg-accent'
+            : 'left-0 bg-background/60 rounded-r-md hover:bg-accent/80 opacity-50 hover:opacity-100',
         )}
         title={isOpen ? 'Close panel' : 'Open panel'}
       >

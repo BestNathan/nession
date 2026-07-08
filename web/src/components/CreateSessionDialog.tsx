@@ -16,8 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import type { Agent } from '../types';
+import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
 import type { WebSocketService } from '../services/websocket';
+import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;
@@ -26,6 +27,36 @@ interface CreateSessionDialogProps {
   agents: Agent[];
   preselectedAgentId?: string | null;
   onCreated: () => void;
+}
+
+function AgentSelect({
+  agents,
+  value,
+  onChange,
+  disabled,
+}: {
+  agents: Agent[];
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="agent">Agent</Label>
+      <Select value={value} onValueChange={(v) => v && onChange(v)} disabled={disabled}>
+        <SelectTrigger id="agent">
+          <SelectValue placeholder="Select an agent" />
+        </SelectTrigger>
+        <SelectContent>
+          {agents.map((agent) => (
+            <SelectItem key={agent.agent_id} value={agent.agent_id}>
+              {agent.hostname} ({agent.agent_id})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 export function CreateSessionDialog({
@@ -40,6 +71,8 @@ export function CreateSessionDialog({
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
+  const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
@@ -50,10 +83,16 @@ export function CreateSessionDialog({
       setSessionName('');
       setLoading(false);
       setError(null);
+      setSelectedEnv([]);
+      // Load available env files (optional selection — failure is non-fatal).
+      wsService
+        .listEnvFiles()
+        .then((resp) => setEnvFiles(resp.files))
+        .catch(() => setEnvFiles([]));
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
     // onlineAgents derived from agents — stable across renders when agents unchanged
-  }, [isOpen, preselectedAgentId, onlineAgents]);
+  }, [isOpen, preselectedAgentId, onlineAgents, wsService]);
 
   const validateName = (name: string): string | null => {
     if (!name.trim()) {return 'Session name is required';}
@@ -78,7 +117,7 @@ export function CreateSessionDialog({
     setLoading(true);
     setError(null);
     try {
-      const result = await wsService.createSession(agentId, sessionName.trim());
+      const result = await wsService.createSession(agentId, sessionName.trim(), selectedEnv);
       if (result.success) {
         onCreated();
         onClose();
@@ -99,21 +138,7 @@ export function CreateSessionDialog({
           <DialogTitle>Create Session</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="agent">Agent</Label>
-            <Select value={agentId} onValueChange={(value) => value && setAgentId(value)} disabled={loading}>
-              <SelectTrigger id="agent">
-                <SelectValue placeholder="Select an agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {onlineAgents.map((agent) => (
-                  <SelectItem key={agent.agent_id} value={agent.agent_id}>
-                    {agent.hostname} ({agent.agent_id})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <AgentSelect agents={onlineAgents} value={agentId} onChange={setAgentId} disabled={loading} />
           <div className="space-y-2">
             <Label htmlFor="name">Session Name</Label>
             <Input
@@ -125,6 +150,16 @@ export function CreateSessionDialog({
               placeholder="my-session"
               disabled={loading}
               autoComplete="off"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Env Files (optional)</Label>
+            <EnvFileMultiSelect
+              files={envFiles}
+              selected={selectedEnv}
+              onChange={setSelectedEnv}
+              disabled={loading}
+              emptyLabel="No env files — create one in Env Files"
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

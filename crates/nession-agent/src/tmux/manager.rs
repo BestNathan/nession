@@ -1,6 +1,20 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tokio::fs;
 use tokio::process::Command;
+
+/// Fixed-path script names, keyed by session + env-file name so they are
+/// reused (overwritten) across repeated source / unsource operations.
+fn source_script_path(session: &str, name: &str) -> PathBuf {
+    let safe = name.replace(['/', '\\'], "_");
+    PathBuf::from(format!("/tmp/nession-source-{session}-{safe}"))
+}
+
+fn unsource_script_path(session: &str, name: &str) -> PathBuf {
+    let safe = name.replace(['/', '\\'], "_");
+    PathBuf::from(format!("/tmp/nession-unsource-{session}-{safe}"))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
@@ -66,28 +80,83 @@ impl TmuxManager {
         width: u16,
         height: u16,
         working_dir: &str,
+        env: &[(String, String)],
     ) -> Result<()> {
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                name,
-                "-x",
-                &width.to_string(),
-                "-y",
-                &height.to_string(),
-                "-c",
-                working_dir,
-            ])
-            .status()
-            .await?;
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+            "-c",
+            working_dir,
+        ]);
+
+        // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
+        // tmux the flag is rejected and session creation fails loudly rather
+        // than silently dropping the environment.
+        for (key, value) in env {
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+
+        let status = cmd.status().await?;
 
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
         }
 
         Ok(())
+    }
+
+    /// Write a shell script with `export` lines and source it into the
+    /// session. The command line is cleared afterwards via ANSI escape so
+    /// it barely flashes on screen.
+    pub async fn source_env(
+        &self,
+        session_name: &str,
+        env_name: &str,
+        vars: &[(String, String)],
+    ) -> Result<()> {
+        let path = source_script_path(session_name, env_name);
+        let mut content = String::new();
+        for (k, v) in vars {
+            content.push_str(&format!("export {k}='{}'\n", v.replace('\'', "'\\''")));
+        }
+        fs::write(&path, &content)
+            .await
+            .with_context(|| format!("failed to write source script: {}", path.display()))?;
+
+        // Leading space + HISTCONTROL=ignorespace keeps the command out of
+        // shell history. ANSI \033[1A (cursor up) + \033[2K (clear line)
+        // removes it from view immediately after execution.
+        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
+        self.send_keys(session_name, &cmd).await
+    }
+
+    /// Write a shell script with `unset` lines and source it into the
+    /// session, clearing the command from view.
+    pub async fn unsource_env(
+        &self,
+        session_name: &str,
+        env_name: &str,
+        keys: &[String],
+    ) -> Result<()> {
+        let path = unsource_script_path(session_name, env_name);
+        let content = keys.iter().fold(String::new(), |mut s, k| {
+            s.push_str(&format!("unset {k}\n"));
+            s
+        });
+        fs::write(&path, &content)
+            .await
+            .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
+
+        // Leading space keeps it out of history (HISTCONTROL=ignorespace).
+        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
+        self.send_keys(session_name, &cmd).await
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
@@ -105,7 +174,7 @@ impl TmuxManager {
 
     pub async fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args(["send-keys", "-t", session_name, keys])
+            .args(["send-keys", "-t", session_name, keys, "Enter"])
             .status()
             .await?;
 

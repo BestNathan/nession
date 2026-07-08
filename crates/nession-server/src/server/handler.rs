@@ -4,9 +4,13 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
+use crate::env::EnvService;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::command_broker::CommandBroker;
-use nession_common::protocol::{AgentRegisterPayload, ProtocolMessage};
+use nession_common::env_file::parse_env;
+use nession_common::protocol::{
+    AgentRegisterPayload, EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage,
+};
 
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
@@ -23,6 +27,7 @@ pub struct ConnectionHandler {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    env_service: Arc<EnvService>,
     server_auth_token: String,
     /// Heartbeat interval (seconds) advertised to agents on registration.
     heartbeat_interval_secs: u64,
@@ -35,6 +40,7 @@ impl ConnectionHandler {
         agent_registry: Arc<AgentRegistry>,
         session_registry: Arc<SessionRegistry>,
         command_broker: Arc<CommandBroker>,
+        env_service: Arc<EnvService>,
         server_auth_token: String,
         heartbeat_interval_secs: u64,
     ) -> Self {
@@ -42,6 +48,7 @@ impl ConnectionHandler {
             agent_registry,
             session_registry,
             command_broker,
+            env_service,
             server_auth_token,
             heartbeat_interval_secs,
             authenticated_client: false,
@@ -89,6 +96,13 @@ impl ConnectionHandler {
             "client.session.attach" => self.handle_client_session_attach(msg).await,
             "client.session.create" => self.handle_client_session_create(msg).await,
             "client.session.kill" => self.handle_client_session_kill(msg).await,
+            "client.env.list" => self.handle_client_env_list(msg).await,
+            "client.env.get" => self.handle_client_env_get(msg).await,
+            "client.env.write" => self.handle_client_env_write(msg).await,
+            "client.env.delete" => self.handle_client_env_delete(msg).await,
+            "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
+            "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
+            "client.session.env.active" => self.handle_client_session_env_active(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
                 Ok(HandlerAction::Reply(None))
@@ -696,9 +710,37 @@ impl ConnectionHandler {
 
         let request_id = uuid::Uuid::new_v4().to_string();
 
+        // Optional env files selected for create-time injection.
+        let env_refs: Vec<EnvFileRef> = msg
+            .payload
+            .get("env_files")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let env_snapshots = if env_refs.is_empty() {
+            Vec::new()
+        } else {
+            match self.resolve_snapshots(agent_id, &env_refs).await {
+                Ok(s) => s,
+                Err(e) => {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": "client.session.create.response",
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": { "success": false, "error": e }
+                        })
+                        .to_string(),
+                    ))));
+                }
+            }
+        };
+
         info!(
-            "Client requested session create on agent {}: name={}",
-            agent_id, name
+            "Client requested session create on agent {}: name={}, env_files={}",
+            agent_id,
+            name,
+            env_refs.len()
         );
 
         let rx = self
@@ -711,7 +753,8 @@ impl ConnectionHandler {
                     "request_id": request_id,
                     "name": name,
                     "width": 80,
-                    "height": 24
+                    "height": 24,
+                    "env_snapshots": env_snapshots,
                 }),
             )
             .await;
@@ -738,6 +781,10 @@ impl ConnectionHandler {
                         last_activity: chrono::Utc::now(),
                     };
                     self.session_registry.update_session(session_info).await;
+                    // Record create-time env usage for visibility + in-use lock.
+                    if !env_refs.is_empty() {
+                        self.env_service.usage.record_create(&sid, &env_refs, None);
+                    }
                     Some(sid)
                 } else {
                     None
@@ -915,6 +962,10 @@ impl ConnectionHandler {
 
                 if success {
                     self.session_registry.remove(session_id).await;
+                    // Session destroyed: create-time env vars are gone with it
+                    // (EC7) and any attach-time usage is now moot, so release
+                    // all locks this session held.
+                    self.env_service.usage.clear_session(session_id);
                 }
 
                 Ok(HandlerAction::Reply(Some(Message::Text(
@@ -997,6 +1048,599 @@ impl ConnectionHandler {
 
         Ok(HandlerAction::Reply(None))
     }
+
+    // ========================================================================
+    // Environment-variable file management
+    // ========================================================================
+
+    /// Send a command to an agent and await its response (10s timeout).
+    /// Returns the response payload, or an error string on timeout/disconnect.
+    async fn agent_command(
+        &self,
+        agent_id: &str,
+        msg_type: &str,
+        mut payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("request_id".to_string(), json!(request_id));
+        }
+        let rx = self
+            .command_broker
+            .send_command(agent_id, msg_type, &request_id, payload)
+            .await;
+        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(_)) => Err("Agent disconnected".to_string()),
+            Err(_) => Err("Timeout waiting for agent response".to_string()),
+        }
+    }
+
+    /// Handle `client.env.list` — aggregate server env files with those from
+    /// every online agent (EC6: same filename on both shows twice with badges).
+    async fn handle_client_env_list(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.list.response",
+                json!({ "files": [], "error": "Not authenticated" }),
+            ));
+        }
+
+        let mut files = self.env_service.store.list().await.unwrap_or_default();
+
+        // Query each online agent for its local files.
+        for agent in self.agent_registry.list().await {
+            if agent.status != AgentStatus::Online {
+                continue;
+            }
+            match self
+                .agent_command(&agent.agent_id, "server.env.list", json!({}))
+                .await
+            {
+                Ok(resp) => {
+                    if let Some(arr) = resp.get("files").and_then(|v| v.as_array()) {
+                        for f in arr {
+                            if let Ok(info) = serde_json::from_value::<
+                                nession_common::protocol::EnvFileInfo,
+                            >(f.clone())
+                            {
+                                files.push(info);
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("env.list from agent {} failed: {}", agent.agent_id, e),
+            }
+        }
+
+        Ok(reply_json(
+            &msg.id,
+            "client.env.list.response",
+            json!({ "files": files }),
+        ))
+    }
+
+    /// Handle `client.env.get` — read one env file's content and report which
+    /// sessions currently use it (for the in-use lock).
+    async fn handle_client_env_get(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.get.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let (name, source, agent_id) = parse_env_ref(&msg.payload);
+        if name.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.get.response",
+                json!({ "success": false, "error": "name is required" }),
+            ));
+        }
+
+        let in_use_by = self
+            .env_service
+            .usage
+            .sessions_using(&name, source, agent_id.as_deref());
+
+        let result = match source {
+            EnvSource::Server => self
+                .env_service
+                .store
+                .read(&name)
+                .await
+                .map_err(|e| e.to_string()),
+            EnvSource::Agent => match &agent_id {
+                Some(aid) => self
+                    .agent_command(aid, "server.env.get", json!({ "name": name }))
+                    .await
+                    .and_then(|resp| {
+                        if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
+                            Ok(resp
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string())
+                        } else {
+                            Err(resp
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("read failed")
+                                .to_string())
+                        }
+                    }),
+                None => Err("agent_id is required for agent files".to_string()),
+            },
+        };
+
+        match result {
+            Ok(content) => Ok(reply_json(
+                &msg.id,
+                "client.env.get.response",
+                json!({ "success": true, "content": content, "in_use_by": in_use_by }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.env.get.response",
+                json!({ "success": false, "error": e, "in_use_by": in_use_by }),
+            )),
+        }
+    }
+
+    /// Handle `client.env.write` — create/overwrite an env file. Blocks writes
+    /// to files currently in use by a running session (SC5/EC10).
+    async fn handle_client_env_write(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.write.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let (name, source, agent_id) = parse_env_ref(&msg.payload);
+        let content = msg
+            .payload
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let overwrite = msg
+            .payload
+            .get("overwrite")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        if name.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.write.response",
+                json!({ "success": false, "error": "name is required" }),
+            ));
+        }
+
+        // In-use lock: an overwrite of a file bound to a running session is
+        // refused with a clear message listing the sessions.
+        if overwrite {
+            let in_use = self
+                .env_service
+                .usage
+                .sessions_using(&name, source, agent_id.as_deref());
+            if !in_use.is_empty() {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.env.write.response",
+                    json!({
+                        "success": false,
+                        "error": format!(
+                            "This file is in use by session(s): {}. Stop the session or detach before editing.",
+                            in_use.join(", ")
+                        )
+                    }),
+                ));
+            }
+        }
+
+        let warnings = parse_env(&content).warnings;
+
+        let outcome = match source {
+            EnvSource::Server => self
+                .env_service
+                .store
+                .write(&name, &content, overwrite)
+                .await
+                .map_err(|e| e.to_string()),
+            EnvSource::Agent => match &agent_id {
+                Some(aid) => self
+                    .agent_command(
+                        aid,
+                        "server.env.write",
+                        json!({ "name": name, "content": content, "overwrite": overwrite }),
+                    )
+                    .await
+                    .map(|resp| {
+                        // Agent returns success=true on write, exists=true when
+                        // refused for lack of overwrite.
+                        resp.get("success").and_then(serde_json::Value::as_bool) == Some(true)
+                    }),
+                None => Err("agent_id is required for agent files".to_string()),
+            },
+        };
+
+        match outcome {
+            Ok(true) => Ok(reply_json(
+                &msg.id,
+                "client.env.write.response",
+                json!({ "success": true, "warnings": warnings }),
+            )),
+            Ok(false) => Ok(reply_json(
+                &msg.id,
+                "client.env.write.response",
+                json!({ "success": false, "exists": true }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.env.write.response",
+                json!({ "success": false, "error": e }),
+            )),
+        }
+    }
+
+    /// Handle `client.env.delete` — delete an env file (blocked if in use).
+    async fn handle_client_env_delete(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.delete.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let (name, source, agent_id) = parse_env_ref(&msg.payload);
+        if name.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.delete.response",
+                json!({ "success": false, "error": "name is required" }),
+            ));
+        }
+
+        let in_use = self
+            .env_service
+            .usage
+            .sessions_using(&name, source, agent_id.as_deref());
+        if !in_use.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.env.delete.response",
+                json!({
+                    "success": false,
+                    "error": format!(
+                        "This file is in use by session(s): {}. Stop the session or detach before deleting.",
+                        in_use.join(", ")
+                    )
+                }),
+            ));
+        }
+
+        let outcome = match source {
+            EnvSource::Server => self
+                .env_service
+                .store
+                .delete(&name)
+                .await
+                .map_err(|e| e.to_string()),
+            EnvSource::Agent => match &agent_id {
+                Some(aid) => self
+                    .agent_command(aid, "server.env.delete", json!({ "name": name }))
+                    .await
+                    .and_then(|resp| {
+                        if resp.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
+                            Ok(())
+                        } else {
+                            Err(resp
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("delete failed")
+                                .to_string())
+                        }
+                    }),
+                None => Err("agent_id is required for agent files".to_string()),
+            },
+        };
+
+        match outcome {
+            Ok(()) => Ok(reply_json(
+                &msg.id,
+                "client.env.delete.response",
+                json!({ "success": true }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.env.delete.response",
+                json!({ "success": false, "error": e }),
+            )),
+        }
+    }
+
+    /// Resolve a set of env-file references into snapshots, capturing content at
+    /// this moment (snapshot semantics). Server files are read locally; agent
+    /// files are fetched from the owning agent. Missing files produce an error.
+    async fn resolve_snapshots(
+        &self,
+        agent_id: &str,
+        refs: &[EnvFileRef],
+    ) -> Result<Vec<EnvSnapshot>, String> {
+        let mut snapshots = Vec::new();
+        for r in refs {
+            let content = match r.source {
+                EnvSource::Server => self.env_service.store.read(&r.name).await.map_err(|_| {
+                    format!("Env file not found. It may have been deleted: {}", r.name)
+                })?,
+                EnvSource::Agent => {
+                    // Agent files are read from the file's owning agent (which is
+                    // normally the same agent hosting the session).
+                    let owner = r.agent_id.as_deref().unwrap_or(agent_id);
+                    let resp = self
+                        .agent_command(owner, "server.env.get", json!({ "name": r.name }))
+                        .await?;
+                    if resp.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+                        return Err(format!(
+                            "Env file not found. It may have been deleted: {}",
+                            r.name
+                        ));
+                    }
+                    resp.get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                }
+            };
+            let parsed = parse_env(&content);
+            snapshots.push(EnvSnapshot {
+                name: r.name.clone(),
+                source: r.source,
+                agent_id: r.agent_id.clone(),
+                vars: parsed.vars,
+                warnings: parsed.warnings,
+            });
+        }
+        Ok(snapshots)
+    }
+
+    /// Handle `client.session.env.apply` — apply env files to a running session.
+    async fn handle_client_session_env_apply(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.apply.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let refs: Vec<EnvFileRef> = msg
+            .payload
+            .get("env_files")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.apply.response",
+                json!({ "success": false, "error": "Invalid session_id" }),
+            ));
+        };
+        let agent_id = agent_id.to_string();
+        let session_name = session_name.to_string();
+
+        let snapshots = match self.resolve_snapshots(&agent_id, &refs).await {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.env.apply.response",
+                    json!({ "success": false, "error": e }),
+                ));
+            }
+        };
+
+        let warnings: Vec<String> = snapshots.iter().flat_map(|s| s.warnings.clone()).collect();
+
+        let resp = self
+            .agent_command(
+                &agent_id,
+                "server.session.env.apply",
+                json!({ "name": session_name, "snapshots": snapshots }),
+            )
+            .await;
+
+        match resp {
+            Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
+                self.env_service
+                    .usage
+                    .record_attach(&session_id, &refs, None);
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.env.apply.response",
+                    json!({ "success": true, "warnings": warnings }),
+                ))
+            }
+            Ok(r) => Ok(reply_json(
+                &msg.id,
+                "client.session.env.apply.response",
+                json!({
+                    "success": false,
+                    "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("apply failed")
+                }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.session.env.apply.response",
+                json!({ "success": false, "error": e }),
+            )),
+        }
+    }
+
+    /// Handle `client.session.env.unset` — remove attach-time env files from a
+    /// running session (on detach).
+    async fn handle_client_session_env_unset(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.unset.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let refs: Vec<EnvFileRef> = msg
+            .payload
+            .get("env_files")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.unset.response",
+                json!({ "success": false, "error": "Invalid session_id" }),
+            ));
+        };
+        let agent_id = agent_id.to_string();
+        let session_name = session_name.to_string();
+
+        // Resolve the keys to unset from the current file content. Best-effort:
+        // if a file is now missing, skip it rather than failing the detach.
+        let snapshots = self
+            .resolve_snapshots(&agent_id, &refs)
+            .await
+            .unwrap_or_default();
+        let keys: Vec<String> = snapshots
+            .iter()
+            .flat_map(|s| s.vars.iter().map(|(k, _)| k.clone()))
+            .collect();
+
+        let resp = self
+            .agent_command(
+                &agent_id,
+                "server.session.env.unset",
+                json!({ "name": session_name, "keys": keys }),
+            )
+            .await;
+
+        // Release the usage regardless of the agent's reply — the client's
+        // intent to detach is authoritative for lock purposes.
+        self.env_service
+            .usage
+            .remove_attach(&session_id, &refs, None);
+
+        match resp {
+            Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.env.unset.response",
+                    json!({ "success": true }),
+                ))
+            }
+            Ok(r) => Ok(reply_json(
+                &msg.id,
+                "client.session.env.unset.response",
+                json!({
+                    "success": false,
+                    "error": r.get("error").and_then(|v| v.as_str()).unwrap_or("unset failed")
+                }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.session.env.unset.response",
+                json!({ "success": false, "error": e }),
+            )),
+        }
+    }
+
+    /// Handle `client.session.env.active` — list env files active on a session.
+    async fn handle_client_session_env_active(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.active.response",
+                json!({ "active": [], "error": "Not authenticated" }),
+            ));
+        }
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let active = self.env_service.usage.active_for(session_id);
+        Ok(reply_json(
+            &msg.id,
+            "client.session.env.active.response",
+            json!({ "active": active }),
+        ))
+    }
+}
+
+/// Build a `HandlerAction::Reply` with a standard protocol envelope.
+fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
+    HandlerAction::Reply(Some(Message::Text(
+        json!({
+            "msg_type": msg_type,
+            "id": id,
+            "timestamp": current_timestamp(),
+            "payload": payload,
+        })
+        .to_string(),
+    )))
+}
+
+/// Extract (name, source, agent_id) from an env-file reference payload.
+fn parse_env_ref(payload: &serde_json::Value) -> (String, EnvSource, Option<String>) {
+    let name = payload
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source = match payload.get("source").and_then(|v| v.as_str()) {
+        Some("agent") => EnvSource::Agent,
+        _ => EnvSource::Server,
+    };
+    let agent_id = payload
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    (name, source, agent_id)
 }
 
 fn current_timestamp() -> u64 {

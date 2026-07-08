@@ -131,7 +131,7 @@ async fn integration_client_attach_creates_pty() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_attach";
-    tmux.create_session(session_name, 80, 24, "/tmp")
+    tmux.create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -168,7 +168,7 @@ async fn integration_terminal_io_flow() {
 
     let tmux = TmuxManager::new();
     let session_name = "integration_io";
-    tmux.create_session(session_name, 80, 24, "/tmp")
+    tmux.create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -320,7 +320,7 @@ async fn integration_web_ui_session_kill() {
 
     // Create a session first.
     let tmux = TmuxManager::new();
-    tmux.create_session("webui_test_kill", 80, 24, "/tmp")
+    tmux.create_session("webui_test_kill", 80, 24, "/tmp", &[])
         .await
         .unwrap();
 

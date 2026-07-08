@@ -14,8 +14,9 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
-    AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
-    Message, ProtocolMessage,
+    AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus, EnvSnapshot,
+    HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
+    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +28,7 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, info, warn};
 
+use crate::env::EnvStore;
 use crate::tmux::manager::TmuxManager;
 
 /// Type alias for the WebSocket stream.
@@ -99,6 +101,8 @@ pub struct ServerClient {
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
     tmux: Arc<TmuxManager>,
+    /// Store for agent-local env files under `~/.nession/agent/envs`.
+    env_store: EnvStore,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -224,6 +228,8 @@ impl ServerClient {
         tmux: Arc<TmuxManager>,
         default_working_dir: String,
     ) -> Self {
+        let env_root = nession_common::paths::agent_envs_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
         Self {
             server_url: server_url.into(),
             auth_token: auth_token.into(),
@@ -235,6 +241,7 @@ impl ServerClient {
             default_working_dir,
             metadata,
             tmux,
+            env_store: EnvStore::new(env_root),
         }
     }
 
@@ -500,41 +507,35 @@ impl ServerClient {
                 debug!("Heartbeat acknowledged by server");
             }
             "server.session.create" => {
-                let request_id = msg
-                    .payload
-                    .get("request_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let name = msg
-                    .payload
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let width = u16::try_from(
-                    msg.payload
-                        .get("width")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(80),
-                )
-                .unwrap_or(80);
-                let height = u16::try_from(
-                    msg.payload
-                        .get("height")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(24),
-                )
-                .unwrap_or(24);
+                let payload: ServerSessionCreatePayload =
+                    match serde_json::from_value(msg.payload.clone()) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!("Invalid server.session.create payload: {e}");
+                            return Ok(());
+                        }
+                    };
+                let request_id = payload.request_id.clone();
+                let name = payload.name.clone();
+                let env = flatten_snapshots(&payload.env_snapshots);
 
                 info!(
-                    "Server requested session create: name={}, width={}, height={}",
-                    name, width, height
+                    "Server requested session create: name={}, width={}, height={}, env_files={}",
+                    name,
+                    payload.width,
+                    payload.height,
+                    payload.env_snapshots.len()
                 );
 
                 let (success, error, session_name) = match self
                     .tmux
-                    .create_session(&name, width, height, &self.default_working_dir)
+                    .create_session(
+                        &name,
+                        payload.width,
+                        payload.height,
+                        &self.default_working_dir,
+                        &env,
+                    )
                     .await
                 {
                     Ok(()) => (true, None, Some(name.clone())),
@@ -551,6 +552,163 @@ impl ServerClient {
                         "success": success,
                         "error": error,
                         "session_name": session_name,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.env.list" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let files = self
+                    .env_store
+                    .list(&self.agent_id)
+                    .await
+                    .unwrap_or_default();
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "env.list",
+                        "success": true,
+                        "files": files,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.env.get" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let name = str_field(&msg.payload, "name");
+                let (success, content, error) = match self.env_store.read(&name).await {
+                    Ok(c) => (true, Some(c), None),
+                    Err(e) => (false, None, Some(e.to_string())),
+                };
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "env.get",
+                        "success": success,
+                        "content": content,
+                        "error": error,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.env.write" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let name = str_field(&msg.payload, "name");
+                let content = str_field(&msg.payload, "content");
+                let overwrite = msg
+                    .payload
+                    .get("overwrite")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let (success, exists, error) =
+                    match self.env_store.write(&name, &content, overwrite).await {
+                        Ok(true) => (true, false, None),
+                        Ok(false) => (false, true, None),
+                        Err(e) => (false, false, Some(e.to_string())),
+                    };
+                let warnings = nession_common::env_file::parse_env(&content).warnings;
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "env.write",
+                        "success": success,
+                        "exists": exists,
+                        "error": error,
+                        "warnings": warnings,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.env.delete" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let name = str_field(&msg.payload, "name");
+                let (success, error) = match self.env_store.delete(&name).await {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e.to_string())),
+                };
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "env.delete",
+                        "success": success,
+                        "error": error,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.session.env.apply" => {
+                let payload: ServerSessionEnvApplyPayload =
+                    match serde_json::from_value(msg.payload.clone()) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!("Invalid server.session.env.apply payload: {e}");
+                            return Ok(());
+                        }
+                    };
+                // One source script per snapshot (env file), sent via send-keys
+                // to the session. Each command is hidden from view with tput.
+                let mut error: Option<String> = None;
+                for snap in &payload.snapshots {
+                    if let Err(e) = self
+                        .tmux
+                        .source_env(&payload.name, &snap.name, &snap.vars)
+                        .await
+                    {
+                        error = Some(e.to_string());
+                        break;
+                    }
+                }
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": payload.request_id,
+                        "command": "session.env.apply",
+                        "success": error.is_none(),
+                        "error": error,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            "server.session.env.unset" => {
+                let payload: ServerSessionEnvUnsetPayload =
+                    match serde_json::from_value(msg.payload.clone()) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!("Invalid server.session.env.unset payload: {e}");
+                            return Ok(());
+                        }
+                    };
+                let mut error: Option<String> = None;
+                if let Err(e) = self
+                    .tmux
+                    .unsource_env(&payload.name, "all", &payload.keys)
+                    .await
+                {
+                    error = Some(e.to_string());
+                }
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": payload.request_id,
+                        "command": "session.env.unset",
+                        "success": error.is_none(),
+                        "error": error,
                     }
                 });
                 sink.send(WsMessage::Text(response.to_string())).await?;
@@ -617,6 +775,36 @@ fn new_message<P: Serialize>(msg_type: &str, payload: P) -> ProtocolMessage<P> {
         timestamp: chrono::Utc::now().timestamp().unsigned_abs(),
         payload,
     }
+}
+
+/// Extract a string field from a JSON payload, defaulting to empty.
+fn str_field(payload: &serde_json::Value, key: &str) -> String {
+    payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Flatten multiple env-file snapshots into a single ordered variable list.
+///
+/// Files are applied in order; within the merged result the last occurrence of
+/// a key wins (later files override earlier ones), while first-seen position is
+/// preserved for stable ordering.
+fn flatten_snapshots(snapshots: &[EnvSnapshot]) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = Vec::new();
+    let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for snap in snapshots {
+        for (key, value) in &snap.vars {
+            if let Some(slot) = index.get(key).and_then(|&i| vars.get_mut(i)) {
+                slot.1 = value.clone();
+            } else {
+                index.insert(key.clone(), vars.len());
+                vars.push((key.clone(), value.clone()));
+            }
+        }
+    }
+    vars
 }
 
 // ---------------------------------------------------------------------------
@@ -1100,7 +1288,7 @@ mod tests {
                 // First create a session to kill.
                 let tmux = TmuxManager::new();
                 let _ = tmux
-                    .create_session("test-session-kill", 80, 24, "/tmp")
+                    .create_session("test-session-kill", 80, 24, "/tmp", &[])
                     .await;
 
                 // Send session kill command.

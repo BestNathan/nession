@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
 import type { AttachInfo } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
+import { EnvPanel } from './env/EnvPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 import { useP2PConnection } from '../hooks/useP2PConnection';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
@@ -29,6 +31,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const isP2P = attachInfo.mode === 'p2p';
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
+  const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
 
   const p2pConnection = useP2PConnection(
     isP2P && attachInfo.agent_address
@@ -64,6 +67,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       onDisconnect={onDisconnect}
       onError={onError}
       onBannerChange={setToolbarDisabled}
+      onCtrlD={onBack}
     />
   );
 
@@ -89,16 +93,81 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             terminalElement={
               <div className="flex-1 min-h-0 flex flex-col">
                 <div className="flex-1 min-h-0">{terminalElement}</div>
-                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} disabled={toolbarDisabled} />
+                <BottomBar
+                  activeTab={bottomTab}
+                  onTabChange={setBottomTab}
+                  envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+                  commandsPanel={
+                    <TerminalToolbar
+                      sendText={(text) => terminalRef.current?.sendText(text)}
+                      disabled={toolbarDisabled}
+                    />
+                  }
+                />
               </div>
             }
           />
         ) : (
           <>
             <div className="flex-1 min-h-0">{terminalElement}</div>
-            <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+            <BottomBar
+              activeTab={bottomTab}
+              onTabChange={setBottomTab}
+              envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+              commandsPanel={
+                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+              }
+            />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Bottom bar: tabbed Env Files / Quick Commands ────────────────────────
+
+function BottomBar({
+  activeTab,
+  onTabChange,
+  envPanel,
+  commandsPanel,
+}: {
+  activeTab: 'commands' | 'env';
+  onTabChange: (tab: 'commands' | 'env') => void;
+  envPanel: React.ReactNode;
+  commandsPanel: React.ReactNode;
+}) {
+  return (
+    <div className="border-t flex-shrink-0 flex flex-col h-[116px]">
+      <div className="flex border-b">
+        <button
+          type="button"
+          onClick={() => onTabChange('commands')}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+            activeTab === 'commands'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <TerminalIcon className="w-3 h-3" /> Commands
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange('env')}
+          className={cn(
+            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+            activeTab === 'env'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Package className="w-3 h-3" /> Env
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
   );

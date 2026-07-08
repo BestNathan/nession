@@ -1,4 +1,5 @@
 use nession_server::db::Database;
+use nession_server::env::EnvService;
 use nession_server::registry::{AgentRegistry, SessionRegistry};
 use nession_server::server::command_broker::CommandBroker;
 use nession_server::server::{ConnectionHandler, HandlerAction};
@@ -10,10 +11,12 @@ async fn make_handler() -> ConnectionHandler {
     let agent_registry = Arc::new(AgentRegistry::new(30)); // 30 second heartbeat timeout
     let session_registry = Arc::new(SessionRegistry::new(db));
     let command_broker = Arc::new(CommandBroker::new());
+    let env_service = EnvService::new(std::env::temp_dir().join("nession-test-envs"));
     ConnectionHandler::new(
         agent_registry,
         session_registry,
         command_broker,
+        env_service,
         "test_token".to_string(),
         30,
     )

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useState } from 'react';
 import { Terminal as XTerm, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import throttle from 'lodash.throttle';
 import '@xterm/xterm/css/xterm.css';
 import type { WebSocketService } from '../services/websocket';
@@ -64,6 +65,8 @@ export interface TerminalProps {
   onError?: (error: Error) => void;
   /** Called when the reconnection banner state changes (so parent can disable toolbar) */
   onBannerChange?: (blocked: boolean) => void;
+  /** Called when Ctrl+D is pressed — should detach from the session */
+  onCtrlD?: () => void;
 }
 
 /**
@@ -87,6 +90,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onDisconnect,
     onError,
     onBannerChange,
+    onCtrlD,
   },
   ref,
 ) {
@@ -390,6 +394,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrollback: 10000,
     });
 
+    const canvasAddon = new CanvasAddon();
+    term.loadAddon(canvasAddon);
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
@@ -605,6 +611,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Forward keyboard input from xterm to the server.
       relayInputDisposable = term.onData((data) => {
+        if (data === '\x04') { onCtrlD?.(); return; }
         sendData(data);
       });
 
@@ -638,10 +645,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // 3. Forward keyboard input (P2P mode – relay mode handled above)
     // ---------------------------------------------------------------------------
     dataDisposable = term.onData((data) => {
-      // Relay mode is wired separately above; only forward P2P keystrokes here.
-      if (mode === 'p2p') {
-        sendData(data);
-      }
+      if (mode !== 'p2p') { return; }
+      if (data === '\x04') { onCtrlD?.(); return; }
+      sendData(data);
     });
 
     // ---------------------------------------------------------------------------
@@ -662,8 +668,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     window.addEventListener('resize', handleWindowResize);
 
-    // Give the terminal focus so the user can start typing immediately.
-    term.focus();
+    // Let xterm handle focus through its internal hidden textarea.
+    // Don't call term.focus() — it clears the text selection.
 
     // ---------------------------------------------------------------------------
     // 5. Cleanup on unmount (or on prop changes that re-trigger the effect)

@@ -562,4 +562,85 @@ describe('WebSocketService', () => {
       expect(() => ws.sendTerminalResize('s', 80, 24)).toThrow('WebSocket not connected');
     });
   });
+
+  describe('env file management', () => {
+    it('listEnvFiles returns files', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.listEnvFiles();
+      const id = JSON.parse(findSendCall(last(), 'client.env.list')!).id;
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { files: [{ name: 'a.env', source: 'server', size: 3, modified: 0, var_count: 1 }] } }),
+      }));
+      const result = await p;
+      expect(result.files).toHaveLength(1);
+      expect(result.files[0].name).toBe('a.env');
+    });
+
+    it('getEnvFile sends name and source', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.getEnvFile({ name: 'a.env', source: 'agent', agent_id: 'h1' });
+      const raw = findSendCall(last(), 'client.env.get')!;
+      const sent = JSON.parse(raw);
+      expect(sent.payload).toMatchObject({ name: 'a.env', source: 'agent', agent_id: 'h1' });
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true, content: 'X=1', in_use_by: [] } }),
+      }));
+      const result = await p;
+      expect(result.content).toBe('X=1');
+    });
+
+    it('writeEnvFile passes overwrite flag', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.writeEnvFile({ name: 'a.env', source: 'server' }, 'K=V', true);
+      const sent = JSON.parse(findSendCall(last(), 'client.env.write')!);
+      expect(sent.payload).toMatchObject({ name: 'a.env', content: 'K=V', overwrite: true });
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true } }),
+      }));
+      expect((await p).success).toBe(true);
+    });
+
+    it('deleteEnvFile resolves', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.deleteEnvFile({ name: 'a.env', source: 'server' });
+      const id = JSON.parse(findSendCall(last(), 'client.env.delete')!).id;
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { success: true } }),
+      }));
+      expect((await p).success).toBe(true);
+    });
+
+    it('applySessionEnv sends session and files', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.applySessionEnv('agent:s', [{ name: 'a.env', source: 'server' }]);
+      const sent = JSON.parse(findSendCall(last(), 'client.session.env.apply')!);
+      expect(sent.payload.session_id).toBe('agent:s');
+      expect(sent.payload.env_files).toHaveLength(1);
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true, warnings: [] } }),
+      }));
+      expect((await p).success).toBe(true);
+    });
+
+    it('unsetSessionEnv resolves', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await connectAndAuth(ws);
+      const p = ws.unsetSessionEnv('agent:s', [{ name: 'a.env', source: 'server' }]);
+      const id = JSON.parse(findSendCall(last(), 'client.session.env.unset')!).id;
+      last().onmessage!(new MessageEvent('message', {
+        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { success: true } }),
+      }));
+      expect((await p).success).toBe(true);
+    });
+
+    it('env methods throw when not authenticated', async () => {
+      const ws = new WebSocketService('ws://localhost/ws', 'token');
+      await expect(ws.listEnvFiles()).rejects.toThrow('Not authenticated');
+    });
+  });
 });

@@ -35,6 +35,14 @@ export interface AttachInfo {
   connection_token?: string;
 }
 
+/**
+ * Connection mode the user requests when attaching.
+ * - 'auto': try P2P, fall back to relay (default)
+ * - 'p2p': force direct agent connection (error if unavailable)
+ * - 'relay': force proxy through the server
+ */
+export type AttachMode = 'auto' | 'p2p' | 'relay';
+
 export interface WebSocketMessage {
   msg_type: string;
   id: string;
@@ -66,4 +74,63 @@ export interface CreateSessionResponse {
 export interface KillSessionResponse {
   success: boolean;
   error?: string;
+}
+
+// --- Environment-variable file management ---
+
+export type EnvSource = 'server' | 'agent';
+
+export interface EnvFileInfo {
+  name: string;
+  source: EnvSource;
+  agent_id?: string;
+  size: number;
+  modified: number; // unix seconds
+  var_count: number;
+}
+
+export interface EnvFileRef {
+  name: string;
+  source: EnvSource;
+  agent_id?: string;
+}
+
+export interface EnvListResponse {
+  files: EnvFileInfo[];
+  error?: string;
+}
+
+export interface EnvGetResponse {
+  success: boolean;
+  content?: string;
+  in_use_by?: string[];
+  error?: string;
+}
+
+export interface EnvWriteResponse {
+  success: boolean;
+  exists?: boolean;
+  error?: string;
+  warnings?: string[];
+}
+
+export interface EnvDeleteResponse {
+  success: boolean;
+  error?: string;
+}
+
+export interface ActiveEnvFile {
+  name: string;
+  source: EnvSource;
+  agent_id?: string;
+  phase: string; // "create" | "attach"
+}
+
+export interface SessionEnvActiveResponse {
+  active: ActiveEnvFile[];
+}
+export interface SessionEnvResponse {
+  success: boolean;
+  error?: string;
+  warnings?: string[];
 }

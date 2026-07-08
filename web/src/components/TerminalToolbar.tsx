@@ -1,10 +1,7 @@
 import { useState } from 'react';
-import { ChevronDown, Plus, X } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { Plus, X, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
-import { cn } from '@/lib/utils';
 import {
   PRESETS,
   loadUserCommands,
@@ -17,42 +14,7 @@ export interface TerminalToolbarProps {
   disabled?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-interface AddCommandFormProps {
-  newLabel: string;
-  newCommand: string;
-  disabled: boolean;
-  onLabelChange: (v: string) => void;
-  onCommandChange: (v: string) => void;
-  onAdd: () => void;
-  onCancel: () => void;
-}
-
-function AddCommandForm({
-  newLabel, newCommand, disabled,
-  onLabelChange, onCommandChange, onAdd, onCancel,
-}: AddCommandFormProps) {
-  return (
-    <div className="flex items-center gap-1 w-full mt-1">
-      <Input placeholder="Label" value={newLabel} onChange={(e) => onLabelChange(e.target.value)}
-        className="h-7 text-xs flex-1 min-w-0" disabled={disabled} />
-      <Input placeholder="Command" value={newCommand} onChange={(e) => onCommandChange(e.target.value)}
-        className="h-7 text-xs flex-1 min-w-0" disabled={disabled} />
-      <Button size="sm" className="h-7 text-xs" disabled={disabled} onClick={onAdd}>Add</Button>
-      <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={disabled} onClick={onCancel}>Cancel</Button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarProps) {
-  const [isOpen, setIsOpen] = useState(true);
   const [userCommands, setUserCommands] = useState<QuickCommand[]>(() => loadUserCommands());
   const [showAddForm, setShowAddForm] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -72,7 +34,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
   const addUserCommand = () => {
     const label = newLabel.trim();
     const command = newCommand.trim();
-    if (!label || !command) {return;}
+    if (!label || !command) { return; }
     const id = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const next = [...userCommands, { id, label, command }];
     setUserCommands(next);
@@ -82,60 +44,69 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
     setShowAddForm(false);
   };
 
-  const cancelAddForm = () => { setNewLabel(''); setNewCommand(''); setShowAddForm(false); };
-
   const sendInput = () => {
     const text = inputValue.trim();
-    if (!text) {return;}
+    if (!text) { return; }
     sendText(text + '\r');
     setInputValue('');
   };
 
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendInput(); }
-  };
-
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border-t bg-muted/30 flex-shrink-0">
-      <div className="flex items-center justify-between px-3 py-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Commands</h3>
-        <CollapsibleTrigger className="flex items-center justify-center h-6 w-6 rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer">
-          <ChevronDown className={cn('h-4 w-4 transition-transform', !isOpen && '-rotate-90')} />
-        </CollapsibleTrigger>
+    <div className="flex flex-col h-full">
+      {/* Quick command buttons — compact, scrollable row */}
+      <div className="flex flex-wrap gap-1 content-start overflow-y-auto flex-1 min-h-0 p-2 pb-0">
+        {PRESETS.map((cmd) => (
+          <Button key={cmd.id} variant="outline" size="sm"
+            className="h-6 text-[11px] px-2" disabled={disabled}
+            onClick={() => runCommand(cmd)}>{cmd.label}</Button>
+        ))}
+        {userCommands.map((cmd) => (
+          <div key={cmd.id} className="flex items-center h-6">
+            <Button variant="outline" size="sm"
+              className="h-6 text-[11px] px-2 rounded-r-none" disabled={disabled}
+              onClick={() => runCommand(cmd)}>{cmd.label}</Button>
+            <Button variant="ghost" size="icon" className="h-6 w-5 rounded-l-none"
+              disabled={disabled} onClick={() => deleteUserCommand(cmd.id)} title="Delete">
+              <X className="h-3 w-3" /></Button>
+          </div>
+        ))}
+        {showAddForm ? (
+          <div className="flex items-center gap-1 w-full">
+            <Input placeholder="Label" value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              className="h-6 text-[11px] flex-1 min-w-0" disabled={disabled} />
+            <Input placeholder="Command" value={newCommand}
+              onChange={(e) => setNewCommand(e.target.value)}
+              className="h-6 text-[11px] flex-1 min-w-0" disabled={disabled} />
+            <Button size="sm" className="h-6 text-[11px] px-2" disabled={disabled}
+              onClick={addUserCommand}>Add</Button>
+            <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" disabled={disabled}
+              onClick={() => setShowAddForm(false)}>✕</Button>
+          </div>
+        ) : (
+          <Button variant="ghost" size="sm" className="h-6 text-[11px] px-2"
+            disabled={disabled} onClick={() => setShowAddForm(true)}>
+            <Plus className="h-3 w-3 mr-1" /> Add</Button>
+        )}
       </div>
-      <CollapsibleContent>
-        <div className="px-3 pb-3 space-y-3">
-          <div className="flex flex-wrap gap-1">
-            {PRESETS.map((cmd) => (
-              <Button key={cmd.id} variant="outline" size="sm" className="font-mono text-xs"
-                disabled={disabled} onClick={() => runCommand(cmd)}>{cmd.label}</Button>
-            ))}
-            {userCommands.map((cmd) => (
-              <div key={cmd.id} className="flex items-center">
-                <Button variant="outline" size="sm" className="font-mono text-xs rounded-r-none"
-                  disabled={disabled} onClick={() => runCommand(cmd)}>{cmd.label}</Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 rounded-l-none"
-                  disabled={disabled} onClick={() => deleteUserCommand(cmd.id)} title="Delete command">
-                  <X className="h-3 w-3" /></Button>
-              </div>
-            ))}
-            {showAddForm ? (
-              <AddCommandForm newLabel={newLabel} newCommand={newCommand} disabled={disabled}
-                onLabelChange={setNewLabel} onCommandChange={setNewCommand}
-                onAdd={addUserCommand} onCancel={cancelAddForm} />
-            ) : (
-              <Button variant="ghost" size="sm" className="text-xs" disabled={disabled}
-                onClick={() => setShowAddForm(true)}><Plus className="h-3 w-3 mr-1" /> Add command</Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Textarea rows={2} placeholder="Type text to send… (Enter to send, Shift+Enter for newline)"
-              value={inputValue} onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleInputKeyDown} className="flex-1 font-mono text-sm resize-none" disabled={disabled} />
-            <Button onClick={sendInput} size="sm" className="self-end" disabled={disabled}>Send</Button>
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+
+      {/* Input row — pinned to bottom */}
+      <div className="flex gap-1.5 flex-shrink-0 p-2 pt-1 border-t">
+        <Input placeholder="Type to send… (Enter to submit)"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendInput();
+            }
+          }}
+          className="h-7 text-xs flex-1" disabled={disabled} />
+        <Button variant="outline" size="icon" className="h-7 w-7 flex-shrink-0" title="Send"
+          onClick={sendInput} disabled={disabled}>
+          <SendHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
   );
 }

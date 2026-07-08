@@ -16,7 +16,7 @@ async fn test_create_and_kill_session() {
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp")
+        .create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -39,7 +39,7 @@ async fn test_send_keys() {
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp")
+        .create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -83,12 +83,14 @@ async fn test_create_duplicate_session() {
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp")
+        .create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
     // Creating the same session again should fail
-    let result = manager.create_session(session_name, 80, 24, "/tmp").await;
+    let result = manager
+        .create_session(session_name, 80, 24, "/tmp", &[])
+        .await;
     assert!(result.is_err());
 
     // Clean up

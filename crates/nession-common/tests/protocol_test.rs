@@ -152,6 +152,7 @@ fn test_server_session_create_payload() {
         name: "my-session".to_string(),
         width: 120,
         height: 40,
+        env_snapshots: Vec::new(),
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
