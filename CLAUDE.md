@@ -285,7 +285,13 @@ For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skill
 
 ### Worktree Convention
 
-Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code can create these automatically via `EnterWorktree`. Branch naming: `worktree-<feature-slug>`.
+Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code can create these automatically via `EnterWorktree`.
+
+**Branch naming must follow the standard prefix convention** (`feat/` or `fix/`) so CI triggers correctly:
+- `feat/<slug>` — new features
+- `fix/<slug>` — bug fixes
+
+When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "feat/<slug>"`.
 
 ### Commit Convention
 
