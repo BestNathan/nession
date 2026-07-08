@@ -209,11 +209,45 @@ git branch -d worktree/<slug>
 
 ### PR Workflow
 
-Before creating a PR, **always check** whether the current branch already has an open PR:
+Before pushing, **always check** the PR state for the current branch:
 
 ```bash
-# List open PRs for the current branch
-gh pr list --head "$(git branch --show-current)" --state open --json number,title,url
+# Check ALL PRs for this branch (open + merged)
+gh pr list --head "$(git branch --show-current)" --state all --json number,state,title,url
+```
+
+Then follow the decision tree:
+
+```
+当前分支的 PR 状态?
+├─ 没有 PR → git push + gh pr create（正常流程）
+├─ 有 OPEN PR → gh pr edit 更新同一个 PR（继续迭代）
+└─ 有 MERGED PR → ⛔ 分支已死！新建分支 + 新 PR
+```
+
+| PR 状态 | 操作 | 原因 |
+|---------|------|------|
+| **无 PR** | `git push` + `gh pr create` | 正常新功能 |
+| **OPEN** (未合并) | `gh pr edit` 更新已有 PR | 同一个 PR 继续 review |
+| **MERGED** (已合并) | ⛔ 新建 branch/worktree + 新 PR | 已合并的分支已死，不能再推 commit |
+
+**⚠ 常见错误：PR 已合并后继续 `gh pr edit` 往同一个 PR 推 commit**
+
+已合并的 PR 无法通过 `gh pr edit` 追加 commit。GitHub 不会自动重新打开它。正确做法：
+
+```bash
+# ❌ 错误 — PR 已合并，再推 commit 也进不了同一个 PR
+git commit -m "more changes"
+git push                    # commit 推到了已死的远程分支
+gh pr edit <old-pr> --body "..."  # 这个 PR 已经合并了！
+
+# ✅ 正确 — 从最新 main 新建分支，创建全新 PR
+git checkout main && git pull
+git worktree add -b worktree/<new-slug> ../nession-<new-slug> main
+cd ../nession-<new-slug>
+# ... 开发 ...
+git push -u origin worktree/<new-slug>
+gh pr create --title "..." --body "..."
 ```
 
 **If an open PR already exists** → update it with `gh pr edit`:
@@ -301,6 +335,8 @@ Place screenshots in the PR body under **核心功能截图** using markdown ima
 | Start UI dev | `cd web && npm run dev` |
 | Version bump | Edit `Cargo.toml` + `web/package.json` |
 | Cleanup worktree | `git worktree remove <path> && git worktree prune` |
+| Check PR state | `gh pr list --head $(git branch --show-current) --state all` |
+| Update existing PR | `gh pr edit <N> --title "..." --body "..."` |
 | Create PR | `gh pr create --title "feat: ..." --body "..."` |
 
 ## Common Mistakes
@@ -310,6 +346,7 @@ Place screenshots in the PR body under **核心功能截图** using markdown ima
 | **Committing on `main` directly** | **FORBIDDEN.** main 是只读的。所有开发必须在 worktree 中进行。 |
 | **在 main 目录中切分支开发** | **FORBIDDEN.** 不要在 main 的 git 目录里 checkout 分支。使用 `EnterWorktree` 或 `git worktree add` 创建隔离的工作目录。 |
 | **PR 合并后继续往旧分支推 commit** | **FORBIDDEN.** PR 合并 = worktree/分支已死。任何后续修改都必须从最新 main 创建新 worktree。 |
+| **PR 已合并还用 `gh pr edit` 更新** | **FORBIDDEN.** 已合并的 PR 不能追加 commit。必须新建分支 + 新 PR。 |
 | `docker build` for Nession | **Forbidden.** CI does that. |
 | Pushing to main directly | Always use a feature branch + PR. |
 | Reusing a merged branch/worktree | **DEAD.** PR merged = branch/worktree dead. Always create a new worktree from latest main. |

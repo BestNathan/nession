@@ -64,6 +64,17 @@ gh pr create --title "feat: description" --body "..."
 
 **Do NOT push directly to main.** All changes go through PRs.
 
+**PR 状态判断（详见 nession-development PR Workflow）：**
+
+```
+当前分支的 PR?
+├─ 没有 → git push + gh pr create
+├─ OPEN → gh pr edit 更新（继续迭代）
+└─ MERGED → ⛔ 分支已死，新建分支 + 新 PR
+```
+
+**⚠ 已合并的 PR 不能 `gh pr edit` 追加 commit。** 合并后分支即死，如需继续修改，必须从最新 main 创建新分支和新 PR。
+
 ### 4. Merge triggers CI
 
 When the PR is merged to main, GitHub Actions automatically:
@@ -140,6 +151,8 @@ git push to main
 | "I'll just patch the k8s image tag" | k8s is read-only for you. Fix the CI or roll back via GHCR tags. |
 | Building locally to "test the Docker image" | Test locally with `cargo run`. |
 | Major version bumps (1.x) | Nession is pre-1.0. Only minor and patch exist. |
+| **PR 已合并还往分支推 commit** | **FORBIDDEN.** 合并后分支已死。新建分支 + 新 PR。 |
+| **用 `gh pr edit` 更新已合并的 PR** | 没用的。已合并的 PR 不会因为新 commit 重新打开。 |
 
 ## Troubleshooting
 
