@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useCallback } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
 import type { AttachInfo } from '../types';
 import type { WebSocketService } from '../services/websocket';
@@ -138,34 +138,8 @@ function BottomBar({
   envPanel: React.ReactNode;
   commandsPanel: React.ReactNode;
 }) {
-  const [height, setHeight] = useState(160);
-  const resizing = useRef(false);
-
-  const startResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    resizing.current = true;
-    const startY = e.clientY;
-    const startH = height;
-    const onMove = (ev: MouseEvent) => {
-      if (!resizing.current) { return; }
-      setHeight(Math.max(80, Math.min(600, startH - (ev.clientY - startY))));
-    };
-    const onUp = () => {
-      resizing.current = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [height]);
-
   return (
-    <div className="border-t flex-shrink-0 flex flex-col" style={{ height }}>
-      {/* Drag handle */}
-      <div
-        className="h-1 -mt-px cursor-row-resize hover:bg-primary/30 transition-colors flex-shrink-0"
-        onMouseDown={startResize}
-      />
+    <div className="border-t flex-shrink-0 flex flex-col h-[116px]">
       <div className="flex border-b">
         <button
           type="button"

@@ -665,8 +665,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     window.addEventListener('resize', handleWindowResize);
 
-    // Give the terminal focus so the user can start typing immediately.
-    term.focus();
+    // Focus the terminal on click so the user can start typing. We don't
+    // auto-focus — it would steal focus after every re-render and break
+    // text selection (xterm clears the selection when focus changes).
+    const focusOnClick = () => term.focus();
+    container.addEventListener('click', focusOnClick);
 
     // ---------------------------------------------------------------------------
     // 5. Cleanup on unmount (or on prop changes that re-trigger the effect)
@@ -694,6 +697,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
 
       wheelCleanup?.();
+      container.removeEventListener('click', focusOnClick);
 
       // Dispose xterm event listeners (IDisposable objects)
       dataDisposable?.dispose();
