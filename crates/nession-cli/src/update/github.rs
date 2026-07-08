@@ -50,7 +50,7 @@ impl GitHubReleaseClient {
     }
 
     /// Build the full releases API URL from the base URL.
-    fn releases_url(&self) -> String {
+    pub(crate) fn releases_url(&self) -> String {
         format!("{}/repos/BestNathan/nession/releases", self.base_url)
     }
 
@@ -232,5 +232,84 @@ mod tests {
         };
         let err = client.find_platform_asset(&release).unwrap_err();
         assert!(matches!(err, UpdateError::AssetNotFound(_)));
+    }
+
+    #[test]
+    fn with_base_url_constructor() {
+        let client = GitHubReleaseClient::with_base_url("https://api.example.com".into()).unwrap();
+        let url = client.releases_url();
+        assert_eq!(
+            url,
+            "https://api.example.com/repos/BestNathan/nession/releases"
+        );
+    }
+
+    #[test]
+    fn releases_url_default() {
+        let client = GitHubReleaseClient::new().unwrap();
+        let url = client.releases_url();
+        assert_eq!(
+            url,
+            "https://api.github.com/repos/BestNathan/nession/releases"
+        );
+    }
+
+    #[test]
+    fn http_client_accessor() {
+        let client = GitHubReleaseClient::new().unwrap();
+        let _http = client.http_client(); // Should compile and return &Client
+    }
+
+    #[test]
+    fn find_platform_asset_with_many_assets() {
+        let platform = platform_string();
+        let client = GitHubReleaseClient::new().unwrap();
+        let release = ReleaseInfo {
+            tag_name: "v0.5.0".into(),
+            prerelease: false,
+            assets: vec![
+                AssetInfo {
+                    name: "checksums.txt".into(),
+                    browser_download_url: "https://example.com/checksums.txt".into(),
+                },
+                AssetInfo {
+                    name: format!("nession-0.5.0-{}.tar.gz", platform),
+                    browser_download_url: "https://example.com/tarball.tar.gz".into(),
+                },
+                AssetInfo {
+                    name: "nession-0.5.0-linux-amd64.tar.gz".into(),
+                    browser_download_url: "https://example.com/other.tar.gz".into(),
+                },
+            ],
+        };
+        let asset = client.find_platform_asset(&release).unwrap();
+        assert_eq!(asset.name, format!("nession-0.5.0-{}.tar.gz", platform));
+    }
+
+    #[test]
+    fn find_platform_asset_tag_without_v() {
+        let platform = platform_string();
+        let client = GitHubReleaseClient::new().unwrap();
+        let release = ReleaseInfo {
+            tag_name: "0.5.0".into(),
+            prerelease: false,
+            assets: vec![AssetInfo {
+                name: format!("nession-0.5.0-{}.tar.gz", platform),
+                browser_download_url: "https://example.com/tarball.tar.gz".into(),
+            }],
+        };
+        let asset = client.find_platform_asset(&release).unwrap();
+        assert_eq!(asset.name, format!("nession-0.5.0-{}.tar.gz", platform));
+    }
+
+    #[test]
+    fn platform_string_format() {
+        let p = platform_string();
+        // Should be "{os}-{arch}" format
+        assert!(p.contains('-'), "platform should have a '-' separator");
+        let parts: Vec<&str> = p.split('-').collect();
+        assert_eq!(parts.len(), 2, "platform should have exactly 2 parts");
+        assert!(!parts[0].is_empty(), "OS part should not be empty");
+        assert!(!parts[1].is_empty(), "arch part should not be empty");
     }
 }
