@@ -189,4 +189,66 @@ mod tests {
             "nession-agent should not be running during tests"
         );
     }
+
+    #[test]
+    fn cli_install_dir_returns_ok() {
+        let result = cli_install_dir();
+        assert!(result.is_ok(), "should find CLI install dir");
+    }
+
+    #[test]
+    fn quarantine_hint_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test");
+        fs::write(&path, b"x").unwrap();
+        maybe_print_quarantine_hint(&path); // should not panic
+    }
+
+    #[test]
+    fn locate_binary_searches_path() {
+        // 'ls' should exist on both macOS and Linux
+        let cli_dir = Path::new("/nonexistent-dir-xyz");
+        let found = locate_binary("ls", cli_dir);
+        assert!(found.is_some(), "should find 'ls' in PATH");
+    }
+
+    #[test]
+    fn locate_binary_in_cli_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("testbin");
+        fs::write(&bin, b"content").unwrap();
+        let found = locate_binary("testbin", dir.path());
+        assert_eq!(found, Some(bin));
+    }
+
+    #[test]
+    fn check_disk_space_happy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        // The temp dir should have at least 1 byte free
+        assert!(check_disk_space(dir.path(), 1).is_ok());
+    }
+
+    #[test]
+    fn set_executable_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test-exe");
+        fs::write(&path, b"content").unwrap();
+        set_executable(&path).unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(meta.permissions().mode() & 0o111 != 0);
+        }
+    }
+
+    #[test]
+    fn backup_binary_returns_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("test-bin");
+        fs::write(&original, b"content").unwrap();
+        let backup = backup_binary(&original).unwrap();
+        assert_eq!(backup, dir.path().join("test-bin.bak"));
+        assert!(backup.exists());
+    }
 }
