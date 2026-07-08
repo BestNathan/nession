@@ -107,4 +107,24 @@ mod tests {
     fn parse_unknown_marker_returns_none() {
         assert!(parse_semver("unknown").is_none());
     }
+
+    #[test]
+    fn compare_none_version_returns_dev() {
+        let latest = Version::new(0, 4, 2);
+        let status = compare_versions("unknown", &latest);
+        assert!(matches!(status, VersionStatus::DevelopmentVersion { .. }));
+    }
+
+    #[test]
+    fn compare_update_available_has_correct_values() {
+        let latest = Version::new(0, 5, 0);
+        let status = compare_versions("0.4.2", &latest);
+        match status {
+            VersionStatus::UpdateAvailable { current, latest: l } => {
+                assert_eq!(current.to_string(), "0.4.2");
+                assert_eq!(l.to_string(), "0.5.0");
+            }
+            other => panic!("expected UpdateAvailable, got {other:?}"),
+        }
+    }
 }
