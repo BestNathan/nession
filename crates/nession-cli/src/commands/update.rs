@@ -91,7 +91,12 @@ pub async fn run_update(
     let tmp_dir = download::temp_extract_dir()?;
     let tarball_path = tmp_dir.join(&asset.name);
 
-    download::download_to_file(&client.client, &asset.browser_download_url, &tarball_path).await?;
+    download::download_to_file(
+        client.http_client(),
+        &asset.browser_download_url,
+        &tarball_path,
+    )
+    .await?;
 
     let checksums = client.download_checksums(&release).await?;
     download::verify_checksum(&tarball_path, &checksums, &asset.name)?;

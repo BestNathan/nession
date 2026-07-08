@@ -8,7 +8,6 @@ use reqwest::Client;
 use semver::Version;
 use serde::Deserialize;
 
-const GITHUB_API: &str = "https://api.github.com/repos/BestNathan/nession/releases";
 const USER_AGENT: &str = "nession-cli-update-check/1.0";
 
 /// A single release asset from the GitHub API.
@@ -32,21 +31,37 @@ pub struct ReleaseInfo {
 /// Client for interacting with the GitHub Releases API.
 pub struct GitHubReleaseClient {
     pub client: Client,
+    base_url: String,
 }
 
 impl GitHubReleaseClient {
-    /// Create a new client with default settings.
+    /// Create a new client with default settings (GitHub API).
     pub fn new() -> Result<Self, reqwest::Error> {
+        Self::with_base_url("https://api.github.com".to_string())
+    }
+
+    /// Create a client with a custom base URL (e.g. for testing with a mock server).
+    pub fn with_base_url(base_url: String) -> Result<Self, reqwest::Error> {
         let client = Client::builder()
             .user_agent(USER_AGENT)
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
-        Ok(Self { client })
+        Ok(Self { client, base_url })
+    }
+
+    /// Build the full releases API URL from the base URL.
+    fn releases_url(&self) -> String {
+        format!("{}/repos/BestNathan/nession/releases", self.base_url)
+    }
+
+    /// Access the inner HTTP client (for downloading assets, etc.).
+    pub fn http_client(&self) -> &Client {
+        &self.client
     }
 
     /// Fetch the latest non-prerelease release.
     pub async fn fetch_latest(&self) -> Result<ReleaseInfo, UpdateError> {
-        let url = format!("{GITHUB_API}/latest");
+        let url = format!("{}/latest", self.releases_url());
         let resp = self.client.get(&url).send().await?;
 
         match resp.status().as_u16() {
@@ -65,7 +80,7 @@ impl GitHubReleaseClient {
     /// Fetch a specific release by tag name (with "v" prefix).
     pub async fn fetch_version(&self, version: &str) -> Result<ReleaseInfo, UpdateError> {
         let tag = format!("v{version}");
-        let url = format!("{GITHUB_API}/tags/{tag}");
+        let url = format!("{}/tags/{tag}", self.releases_url());
         let resp = self.client.get(&url).send().await?;
 
         match resp.status().as_u16() {
