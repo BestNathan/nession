@@ -93,6 +93,8 @@ mod tests {
         assert_eq!(read.latest_version, "0.5.0");
         assert_eq!(read.current_version, "0.4.2");
         assert!(read.update_available);
+        // Clean up to avoid interference with other tests.
+        let _ = std::fs::remove_file(cache_path().unwrap());
     }
 
     #[test]

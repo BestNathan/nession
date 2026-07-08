@@ -22,6 +22,7 @@ pub enum UpdateError {
     #[error("GitHub API rate limited. Try again later.")]
     RateLimited,
 
+    #[allow(dead_code)]
     #[error("No prebuilt binary for {0}-{1}")]
     UnsupportedPlatform(String, String),
 
@@ -37,9 +38,11 @@ pub enum UpdateError {
     #[error("No write permission for {0}")]
     PermissionDenied(PathBuf),
 
+    #[allow(dead_code)]
     #[error("Insufficient disk space: need {need} bytes, have {have} bytes")]
     InsufficientSpace { need: u64, have: u64 },
 
+    #[allow(dead_code)]
     #[error("Binary {name} is running (PID: {pid}). Stop it first.")]
     ProcessRunning { name: String, pid: u32 },
 
@@ -68,6 +71,7 @@ pub enum BinaryStatus {
 }
 
 impl BinaryStatus {
+    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         match self {
             BinaryStatus::Replaced(_) => "replaced",

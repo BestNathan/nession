@@ -51,6 +51,7 @@ pub fn check_write_permission(path: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn check_disk_space(path: &Path, needed: u64) -> Result<(), UpdateError> {
     let dir = if path.is_dir() {
         path

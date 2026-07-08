@@ -22,6 +22,7 @@ pub struct AssetInfo {
 #[derive(Debug, Deserialize)]
 pub struct ReleaseInfo {
     pub tag_name: String,
+    #[allow(dead_code)]
     #[serde(default)]
     pub prerelease: bool,
     #[serde(default)]
