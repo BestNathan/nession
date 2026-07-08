@@ -212,4 +212,81 @@ mod tests {
         let err = parse_checksum_line(content, "nession-0.5.0-linux-amd64.tar.gz").unwrap_err();
         assert!(matches!(err, UpdateError::AssetNotFound(_)));
     }
+
+    #[test]
+    fn parse_checksum_with_tab() {
+        let content = "abc123\tnession-0.5.0-linux-amd64.tar.gz\n";
+        let hash = parse_checksum_line(content, "nession-0.5.0-linux-amd64.tar.gz").unwrap();
+        assert_eq!(hash, "abc123");
+    }
+
+    #[test]
+    fn parse_checksum_empty_content() {
+        let err = parse_checksum_line("", "nession.tar.gz").unwrap_err();
+        assert!(matches!(err, UpdateError::AssetNotFound(_)));
+    }
+
+    #[test]
+    fn parse_checksum_skips_empty_lines() {
+        let content = "\n\n\nabc123  nession-0.5.0-linux-amd64.tar.gz\n";
+        let hash = parse_checksum_line(content, "nession-0.5.0-linux-amd64.tar.gz").unwrap();
+        assert_eq!(hash, "abc123");
+    }
+
+    #[test]
+    fn parse_checksum_malformed_line() {
+        let content = "this-is-not-a-valid-checksum-line\n";
+        let err = parse_checksum_line(content, "nession.tar.gz").unwrap_err();
+        assert!(matches!(err, UpdateError::ExtractionFailed(_)));
+    }
+
+    #[test]
+    fn temp_extract_dir_creates_directory() {
+        let dir = temp_extract_dir().unwrap();
+        assert!(dir.exists());
+        assert!(dir.to_string_lossy().contains("nession-update-"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn extract_empty_tarball() {
+        let dir = tempfile::tempdir().unwrap();
+        let tarball = dir.path().join("empty.tar.gz");
+        let file = fs::File::create(&tarball).unwrap();
+        let encoder = GzEncoder::new(file, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap();
+
+        let dest = dir.path().join("extract");
+        fs::create_dir(&dest).unwrap();
+        let names = extract_binaries(&tarball, &dest).unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tarball_with_no_matching_binaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let tarball = dir.path().join("test.tar.gz");
+        create_test_tarball(
+            &tarball,
+            &[
+                ("README.md", b"# nession\n"),
+                ("LICENSE", b"MIT\n"),
+                ("some-random-file", b"data"),
+            ],
+        );
+        let dest = dir.path().join("extract");
+        fs::create_dir(&dest).unwrap();
+        let names = extract_binaries(&tarball, &dest).unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn parse_checksum_multiple_lines_finds_correct() {
+        let content =
+            "aaa  file1.tar.gz\nbbb  nession-0.5.0-linux-amd64.tar.gz\nccc  file3.tar.gz\n";
+        let hash = parse_checksum_line(content, "nession-0.5.0-linux-amd64.tar.gz").unwrap();
+        assert_eq!(hash, "bbb");
+    }
 }
