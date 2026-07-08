@@ -254,7 +254,7 @@ mod tests {
         let tarball = dir.path().join("empty.tar.gz");
         let file = fs::File::create(&tarball).unwrap();
         let encoder = GzEncoder::new(file, flate2::Compression::default());
-        let mut archive = tar::Builder::new(encoder);
+        let archive = tar::Builder::new(encoder);
         let encoder = archive.into_inner().unwrap();
         encoder.finish().unwrap();
 

@@ -1,4 +1,7 @@
 use flate2::write::GzEncoder;
+use httptest::matchers::request;
+use httptest::{responders::status_code, Expectation, Server};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
 
@@ -122,4 +125,167 @@ fn extract_and_replace_simulation() {
         assert_eq!(content, format!("fake-{name}-content"));
     }
     assert!(install_dir.join("nession.bak").exists());
+}
+
+// ── httptest-based integration tests for async HTTP methods ──
+
+#[tokio::test]
+async fn fetch_latest_with_mock_server() {
+    use nession_cli::update::github::GitHubReleaseClient;
+
+    let server = Server::run();
+    let mock_json = json!({
+        "tag_name": "v0.5.0",
+        "prerelease": false,
+        "assets": [
+            {
+                "name": "nession-0.5.0-linux-amd64.tar.gz",
+                "browser_download_url": format!("{}/download/tarball", server.url("/")),
+            },
+            {
+                "name": "checksums.txt",
+                "browser_download_url": format!("{}/download/checksums", server.url("/")),
+            }
+        ]
+    });
+
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .respond_with(status_code(200).body(mock_json.to_string())),
+    );
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let release = client.fetch_latest().await.unwrap();
+
+    assert_eq!(release.tag_name, "v0.5.0");
+    assert!(!release.prerelease);
+    assert_eq!(release.assets.len(), 2);
+}
+
+#[tokio::test]
+async fn fetch_latest_rate_limited() {
+    use nession_cli::update::github::GitHubReleaseClient;
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(429)));
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let err = client.fetch_latest().await.unwrap_err();
+    assert!(matches!(err, UpdateError::RateLimited));
+}
+
+#[tokio::test]
+async fn fetch_version_with_mock_server() {
+    use nession_cli::update::github::GitHubReleaseClient;
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method("GET")).respond_with(
+            status_code(200).body(
+                json!({
+                    "tag_name": "v0.3.5",
+                    "prerelease": false,
+                    "assets": []
+                })
+                .to_string(),
+            ),
+        ),
+    );
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let release = client.fetch_version("0.3.5").await.unwrap();
+    assert_eq!(release.tag_name, "v0.3.5");
+}
+
+#[tokio::test]
+async fn fetch_version_not_found() {
+    use nession_cli::update::github::GitHubReleaseClient;
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(404)));
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let err = client.fetch_version("99.99.99").await.unwrap_err();
+    assert!(matches!(err, UpdateError::ReleaseNotFound(_)));
+}
+
+#[tokio::test]
+async fn download_checksums_with_mock_server() {
+    use nession_cli::update::github::{AssetInfo, GitHubReleaseClient, ReleaseInfo};
+
+    let server = Server::run();
+    let checksum_content = "abc123  nession-0.5.0-linux-amd64.tar.gz\n";
+
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .respond_with(status_code(200).body(checksum_content)),
+    );
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let release = ReleaseInfo {
+        tag_name: "v0.5.0".into(),
+        prerelease: false,
+        assets: vec![AssetInfo {
+            name: "checksums.txt".into(),
+            browser_download_url: server.url("/").to_string(),
+        }],
+    };
+
+    let result = client.download_checksums(&release).await.unwrap();
+    assert_eq!(result, checksum_content);
+}
+
+#[tokio::test]
+async fn download_to_file_with_mock_server() {
+    use nession_cli::update::download;
+
+    let server = Server::run();
+    let file_content = b"fake-tarball-bytes";
+
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .respond_with(status_code(200).body(file_content.to_vec())),
+    );
+
+    let reqwest_client = reqwest::Client::new();
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("downloaded.tar.gz");
+
+    let bytes = download::download_to_file(&reqwest_client, &server.url("/").to_string(), &dest)
+        .await
+        .unwrap();
+
+    assert_eq!(bytes, file_content.len() as u64);
+    assert_eq!(fs::read(&dest).unwrap(), file_content);
+}
+
+#[tokio::test]
+async fn background_check_with_fresh_cache() {
+    use chrono::Utc;
+    use nession_cli::update::cache::{self, UpdateCache};
+
+    // Write a fresh cache with update_available = true.
+    let cache_data = UpdateCache {
+        checked_at: Utc::now(),
+        latest_version: "0.5.0".into(),
+        current_version: "0.4.2".into(),
+        update_available: true,
+    };
+    cache::write_cache(&cache_data).unwrap();
+
+    let result = nession_cli::update::check::background_check().await;
+    assert!(result.is_some());
+    let msg = result.unwrap();
+    assert!(msg.contains("Update available"));
+    assert!(msg.contains("0.4.2"));
+    assert!(msg.contains("0.5.0"));
+
+    // Clean up.
+    let _ = std::fs::remove_file(
+        nession_common::paths::nession_home()
+            .unwrap()
+            .join("update-check.json"),
+    );
 }
