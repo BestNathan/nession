@@ -73,6 +73,10 @@ fn checksum_mismatch_detected() {
 #[test]
 fn cache_roundtrip_integration() {
     use nession_cli::update::cache;
+    let cache_path = nession_common::paths::nession_home()
+        .unwrap()
+        .join("update-check.json");
+    let _ = std::fs::remove_file(&cache_path);
     let cache_data = cache::UpdateCache {
         checked_at: chrono::Utc::now(),
         latest_version: "0.5.0".into(),
@@ -83,12 +87,7 @@ fn cache_roundtrip_integration() {
     let read = cache::read_cache().unwrap();
     assert_eq!(read.latest_version, "0.5.0");
     assert!(read.update_available);
-    // Clean up
-    let _ = std::fs::remove_file(
-        nession_common::paths::nession_home()
-            .unwrap()
-            .join("update-check.json"),
-    );
+    let _ = std::fs::remove_file(&cache_path);
 }
 
 #[test]
@@ -262,30 +261,135 @@ async fn download_to_file_with_mock_server() {
 }
 
 #[tokio::test]
-async fn background_check_with_fresh_cache() {
-    use chrono::Utc;
+async fn background_check_all_scenarios() {
+    use chrono::{Duration, Utc};
     use nession_cli::update::cache::{self, UpdateCache};
 
-    // Write a fresh cache with update_available = true.
-    let cache_data = UpdateCache {
+    let cache_path = nession_common::paths::nession_home()
+        .unwrap()
+        .join("update-check.json");
+    let _ = std::fs::remove_file(&cache_path);
+
+    // Scenario 1: Fresh cache with update available
+    cache::write_cache(&UpdateCache {
         checked_at: Utc::now(),
         latest_version: "0.5.0".into(),
         current_version: "0.4.2".into(),
         update_available: true,
-    };
-    cache::write_cache(&cache_data).unwrap();
-
-    let result = nession_cli::update::check::background_check().await;
-    assert!(result.is_some());
-    let msg = result.unwrap();
+    })
+    .unwrap();
+    let msg = nession_cli::update::check::background_check()
+        .await
+        .expect("fresh cache should return update message");
     assert!(msg.contains("Update available"));
-    assert!(msg.contains("0.4.2"));
     assert!(msg.contains("0.5.0"));
 
-    // Clean up.
-    let _ = std::fs::remove_file(
-        nession_common::paths::nession_home()
-            .unwrap()
-            .join("update-check.json"),
+    // Scenario 2: Stale cache, no network → returns None
+    cache::write_cache(&UpdateCache {
+        checked_at: Utc::now() - Duration::minutes(60),
+        latest_version: "0.6.0".into(),
+        current_version: "0.4.2".into(),
+        update_available: true,
+    })
+    .unwrap();
+    assert!(
+        nession_cli::update::check::background_check()
+            .await
+            .is_none(),
+        "stale cache + no network should return None"
     );
+
+    // Scenario 3: Mock API, stale cache → fetches latest
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method("GET")).respond_with(
+            status_code(200)
+                .body(json!({"tag_name":"v99.99.99","prerelease":false,"assets":[]}).to_string()),
+        ),
+    );
+    cache::write_cache(&UpdateCache {
+        checked_at: Utc::now() - Duration::minutes(60),
+        latest_version: "0.1.0".into(),
+        current_version: "0.4.2".into(),
+        update_available: false,
+    })
+    .unwrap();
+    // Trim trailing slash so releases_url() appends cleanly.
+    let api_url = server.url("/").to_string();
+    let api_url = api_url.strip_suffix('/').unwrap_or(&api_url);
+    std::env::set_var("NESSION_UPDATE_API_URL", api_url);
+    let msg = nession_cli::update::check::background_check()
+        .await
+        .expect("mock API should return update available");
+    std::env::remove_var("NESSION_UPDATE_API_URL");
+    assert!(msg.contains("Update available"));
+    assert!(msg.contains("99.99.99"));
+
+    let _ = std::fs::remove_file(&cache_path);
+}
+
+#[tokio::test]
+async fn download_to_file_error_status() {
+    use nession_cli::update::download;
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+
+    let reqwest_client = reqwest::Client::new();
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("error.tar.gz");
+
+    let err = download::download_to_file(&reqwest_client, &server.url("/").to_string(), &dest)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UpdateError::Network(_)));
+}
+
+#[tokio::test]
+async fn fetch_latest_server_error() {
+    use nession_cli::update::github::GitHubReleaseClient;
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let err = client.fetch_latest().await.unwrap_err();
+    assert!(matches!(err, UpdateError::Network(_)));
+}
+
+#[tokio::test]
+async fn download_checksums_http_error() {
+    use nession_cli::update::github::{AssetInfo, GitHubReleaseClient, ReleaseInfo};
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let release = ReleaseInfo {
+        tag_name: "v0.5.0".into(),
+        prerelease: false,
+        assets: vec![AssetInfo {
+            name: "checksums.txt".into(),
+            browser_download_url: server.url("/").to_string(),
+        }],
+    };
+
+    let err = client.download_checksums(&release).await.unwrap_err();
+    assert!(matches!(err, UpdateError::Network(_)));
+}
+
+#[tokio::test]
+async fn fetch_latest_403_rate_limited() {
+    use nession_cli::update::github::GitHubReleaseClient;
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(403)));
+
+    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let err = client.fetch_latest().await.unwrap_err();
+    assert!(matches!(err, UpdateError::RateLimited));
 }
