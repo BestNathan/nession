@@ -58,6 +58,11 @@ enum Commands {
         #[command(subcommand)]
         action: SessionsAction,
     },
+    /// Manage agent or server configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// Self-update nession to the latest version
     Update {
         /// Only check for updates (don't install)
@@ -82,9 +87,9 @@ enum Commands {
 enum AgentAction {
     /// Start the agent
     Start {
-        /// Path to configuration file
-        #[arg(short, long, default_value = "agent-config.toml")]
-        config: String,
+        /// Path to configuration file (default: ~/.nession/agent-config.toml)
+        #[arg(short, long)]
+        config: Option<String>,
 
         /// Run in foreground instead of background
         #[arg(short, long)]
@@ -112,9 +117,9 @@ enum AgentAction {
 enum ServerAction {
     /// Start the server
     Start {
-        /// Path to configuration file
-        #[arg(short, long, default_value = "server-config.toml")]
-        config: String,
+        /// Path to configuration file (default: ~/.nession/server-config.toml)
+        #[arg(short, long)]
+        config: Option<String>,
 
         /// Run in foreground instead of background
         #[arg(short, long)]
@@ -192,6 +197,39 @@ enum SessionsAction {
     },
 }
 
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Manage agent configuration
+    Agent {
+        #[command(subcommand)]
+        action: ConfigSubAction,
+    },
+    /// Manage server configuration
+    Server {
+        #[command(subcommand)]
+        action: ConfigSubAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigSubAction {
+    /// Initialize default configuration file
+    Init {
+        /// Overwrite existing config file if present
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Show current configuration
+    Show,
+    /// Set a configuration value
+    Set {
+        /// Configuration key to set
+        key: String,
+        /// New value (use "" or "none" to clear optional fields)
+        value: String,
+    },
+}
+
 /// Resolve the effective server URL from CLI flag, env, or default.
 fn resolve_server_url(cli_url: Option<String>) -> String {
     cli_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
@@ -239,13 +277,20 @@ async fn main() -> Result<()> {
                 foreground,
                 pid_file,
             } => {
+                let config = config.unwrap_or_else(|| {
+                    nession_common::paths::agent_config_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent-config.toml"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::agent_pid_path()
                         .unwrap_or_else(|_| std::path::PathBuf::from("agent.pid"))
                         .to_string_lossy()
                         .into_owned()
                 });
-                commands::agent::start(config, foreground, pid_file).await?
+                commands::agent::start(config, foreground, pid_file, cli.server_url, cli.auth_token)
+                    .await?
             }
             AgentAction::Stop { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
@@ -272,6 +317,12 @@ async fn main() -> Result<()> {
                 foreground,
                 pid_file,
             } => {
+                let config = config.unwrap_or_else(|| {
+                    nession_common::paths::server_config_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server-config.toml"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::server_pid_path()
                         .unwrap_or_else(|_| std::path::PathBuf::from("server.pid"))
@@ -361,6 +412,30 @@ async fn main() -> Result<()> {
                 let auth_token = resolve_auth_token(cli.auth_token);
                 commands::client::kill_session(&server_url, &auth_token, &session_id).await?;
             }
+        },
+        Commands::Config { action } => match action {
+            ConfigAction::Agent { action } => match action {
+                ConfigSubAction::Init { force } => {
+                    commands::config::init(commands::config::ConfigTarget::Agent, force)?;
+                }
+                ConfigSubAction::Show => {
+                    commands::config::show(commands::config::ConfigTarget::Agent)?;
+                }
+                ConfigSubAction::Set { key, value } => {
+                    commands::config::set(commands::config::ConfigTarget::Agent, &key, &value)?;
+                }
+            },
+            ConfigAction::Server { action } => match action {
+                ConfigSubAction::Init { force } => {
+                    commands::config::init(commands::config::ConfigTarget::Server, force)?;
+                }
+                ConfigSubAction::Show => {
+                    commands::config::show(commands::config::ConfigTarget::Server)?;
+                }
+                ConfigSubAction::Set { key, value } => {
+                    commands::config::set(commands::config::ConfigTarget::Server, &key, &value)?;
+                }
+            },
         },
         Commands::Update {
             check,

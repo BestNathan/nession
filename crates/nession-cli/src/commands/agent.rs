@@ -10,7 +10,13 @@ use std::time::Duration;
 use tracing::{error, info};
 
 /// Start the agent process.
-pub async fn start(config_path: String, foreground: bool, pid_file: String) -> Result<()> {
+pub async fn start(
+    config_path: String,
+    foreground: bool,
+    pid_file: String,
+    server_url_override: Option<String>,
+    auth_token_override: Option<String>,
+) -> Result<()> {
     // Ensure component directories exist before any file operations (PID file)
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
@@ -25,8 +31,8 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
         }
     }
 
-    // Load configuration
-    let config = load_agent_config(&config_path)?;
+    // Load configuration (CLI/env overrides take precedence over file/defaults)
+    let config = load_agent_config(&config_path, &server_url_override, &auth_token_override)?;
 
     if foreground {
         // Run in foreground
@@ -55,7 +61,23 @@ pub async fn start(config_path: String, foreground: bool, pid_file: String) -> R
 
         // Spawn the agent process with proper daemonization on Unix
         let mut cmd = Command::new(&exe);
-        cmd.args(["agent", "start", "--config", &config_path, "--foreground"])
+        let mut child_args: Vec<String> = vec![
+            "agent".to_string(),
+            "start".to_string(),
+            "--config".to_string(),
+            config_path.clone(),
+            "--foreground".to_string(),
+        ];
+        // Forward CLI/env overrides to the child process so it uses the same values
+        if let Some(ref url) = server_url_override {
+            child_args.push("--server-url".to_string());
+            child_args.push(url.clone());
+        }
+        if let Some(ref token) = auth_token_override {
+            child_args.push("--auth-token".to_string());
+            child_args.push(token.clone());
+        }
+        cmd.args(&child_args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -202,7 +224,10 @@ pub async fn status(pid_file: String) -> Result<()> {
     }
 
     // Try to load config to show additional info
-    if let Ok(config) = load_agent_config("agent-config.toml") {
+    let default_config_path = nession_common::paths::agent_config_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from("agent-config.toml"));
+    let default_config_path = default_config_path.to_string_lossy();
+    if let Ok(config) = load_agent_config(&default_config_path, &None, &None) {
         println!("Agent ID: {}", config.agent_id);
         println!("Server URL: {}", config.server_url);
         println!("Listen address: {}", config.listen_address);
@@ -212,17 +237,31 @@ pub async fn status(pid_file: String) -> Result<()> {
 }
 
 /// Load agent configuration from file or use defaults.
-fn load_agent_config(path: &str) -> Result<AgentConfig> {
-    if Path::new(path).exists() {
+/// CLI flags and env vars (passed as overrides) take precedence over config file values.
+fn load_agent_config(
+    path: &str,
+    server_url_override: &Option<String>,
+    auth_token_override: &Option<String>,
+) -> Result<AgentConfig> {
+    let mut config = if Path::new(path).exists() {
         let config_str = fs::read_to_string(path)
             .with_context(|| format!("failed to read config file: {path}"))?;
-        let config: AgentConfig = toml::from_str(&config_str)
-            .with_context(|| format!("failed to parse config file: {path}"))?;
-        Ok(config)
+        toml::from_str::<AgentConfig>(&config_str)
+            .with_context(|| format!("failed to parse config file: {path}"))?
     } else {
         info!("No config file found at '{}', using defaults", path);
-        Ok(AgentConfig::default())
+        AgentConfig::default()
+    };
+
+    // Apply CLI/env overrides (they take precedence over config file)
+    if let Some(url) = server_url_override {
+        config.server_url = url.clone();
     }
+    if let Some(token) = auth_token_override {
+        config.auth_token = token.clone();
+    }
+
+    Ok(config)
 }
 
 /// Run the agent in foreground mode (blocks until shutdown).
