@@ -418,7 +418,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let relayUnsubOutput: (() => void) | null = null;
     let relayInputDisposable: IDisposable | null = null;
     let dataDisposable: IDisposable | null = null;
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let mountTimer: ReturnType<typeof setTimeout> | null = null;
     let pingTimer: ReturnType<typeof setInterval> | null = null;
     let wheelCleanup: (() => void) | null = null;
@@ -609,15 +608,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // 4. Window resize handling (both modes)
     // ---------------------------------------------------------------------------
     const handleWindowResize = () => {
-      if (resizeTimer) {clearTimeout(resizeTimer);}
-      resizeTimer = setTimeout(() => {
-        if (!active) {return;}
-        try {
-          fitAddon.fit();
-        } catch {
-          // Ignore fit errors during rapid resize transitions.
-        }
-      }, 150);
+      if (!active) {return;}
+      try {
+        fitAddon.fit();
+      } catch {
+        // Ignore fit errors during rapid resize transitions.
+      }
     };
 
     window.addEventListener('resize', handleWindowResize);
@@ -637,11 +633,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       wasConnectedRef.current = false;
 
       window.removeEventListener('resize', handleWindowResize);
-
-      if (resizeTimer) {
-        clearTimeout(resizeTimer);
-        resizeTimer = null;
-      }
 
       sendMouseData.cancel();
 
