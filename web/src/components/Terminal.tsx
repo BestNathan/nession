@@ -99,9 +99,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // effect once the transport is established. Lets the imperative handle (and the
   // keystroke path) reuse one mode-aware sender. Null when not connected.
   const sendDataRef = useRef<((data: string) => void) | null>(null);
-  // Holds the "refit terminal + push new dimensions" closure, assigned inside
-  // the connection effect. Lets the imperative refit() reuse the effect's
-  // fitAddon + sendResize without duplicating the mode-aware resize logic.
+  // Holds the "refit terminal" closure, assigned inside the connection effect.
+  // Lets the imperative refit() reuse the effect's fitAddon without duplicating
+  // the mode-aware logic.
   const refitRef = useRef<(() => void) | null>(null);
 
   // Ref to latest p2pConnection so the main effect closure always accesses the
@@ -448,29 +448,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     term.element?.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     wheelCleanup = () => term.element?.removeEventListener('wheel', handleWheel, { capture: true });
 
-    /** Send the current terminal dimensions to the remote end. */
-    const sendResize = () => {
-      if (!active) {return;}
-      const { cols, rows } = term;
-      try {
-        if (mode === 'p2p') {
-          const conn = p2pConnRef.current;
-          if (conn && conn.connectionState === 'connected') {
-            conn.sendMessage({
-              msg_type: 'terminal.resize',
-              id: generateId(),
-              timestamp: Math.floor(Date.now() / 1000),
-              payload: { session_name: sessionName, width: cols, height: rows },
-            });
-          }
-        } else if (mode === 'relay' && serverConnection?.isConnected()) {
-          serverConnection.sendTerminalResize(sessionId, cols, rows);
-        }
-      } catch (err) {
-        reportError(err instanceof Error ? err : new Error(String(err)));
-      }
-    };
-
     /**
      * Actually send raw text to the remote session.
      * P2P: terminal.input with base64 data + session_name.
@@ -541,17 +518,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Expose the sender to the imperative handle for the lifetime of this effect.
     sendDataRef.current = sendData;
 
-    // Expose a refit closure: fit to the (now-visible) container, then push the
-    // updated dimensions to the remote session. Deferred to the next frame so
-    // the browser has applied the visibility change and laid out the container
-    // (fit() measures 0 while the element is still display:none).
+    // Expose a refit closure: fit to the (now-visible) container. Deferred to the
+    // next frame so the browser has applied the visibility change and laid out
+    // the container (fit() measures 0 while the element is still display:none).
     refitRef.current = () => {
       if (!active) {return;}
       requestAnimationFrame(() => {
         if (!active) {return;}
         try {
           fitAddon.fit();
-          sendResize();
         } catch {
           // Container may be zero-sized (still hidden) — ignore.
         }
@@ -635,8 +610,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       attachSentRef.current = true;
       wasConnectedRef.current = true;
 
-      // Send initial dimensions now that the terminal is open.
-      sendResize();
     }
 
     }, 50); // End of mountTimer setTimeout
@@ -659,7 +632,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (!active) {return;}
         try {
           fitAddon.fit();
-          sendResize();
         } catch {
           // Ignore fit errors during rapid resize transitions.
         }
