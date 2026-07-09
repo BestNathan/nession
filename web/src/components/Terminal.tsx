@@ -40,10 +40,9 @@ export interface TerminalHandle {
    */
   sendText: (text: string) => void;
   /**
-   * Refit the terminal to its container and push the new dimensions to the
-   * remote session. Call this after the terminal becomes visible again (e.g.
-   * switching back from a hidden tab), because xterm cannot measure itself
-   * while `display:none` and may have stale dimensions.
+   * Refit the terminal to its container. Call this after the terminal becomes
+   * visible again (e.g. switching back from a hidden tab), because xterm cannot
+   * measure itself while `display:none` and may have stale dimensions.
    */
   refit: () => void;
 }
@@ -418,7 +417,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let active = true;
     let relayUnsubOutput: (() => void) | null = null;
     let relayInputDisposable: IDisposable | null = null;
-    let relayResizeDisposable: IDisposable | null = null;
     let dataDisposable: IDisposable | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let mountTimer: ReturnType<typeof setTimeout> | null = null;
@@ -590,22 +588,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         sendData(data);
       });
 
-      // Forward terminal resize events, debounced to 150ms to avoid flooding
-      // the server during rapid window resizes or drag operations.
-      relayResizeDisposable = term.onResize(({ cols, rows }) => {
-        if (!active) {return;}
-        if (resizeTimer) {clearTimeout(resizeTimer);}
-        resizeTimer = setTimeout(() => {
-          try {
-            if (serverConnection?.isConnected()) {
-              serverConnection.sendTerminalResize(sessionId, cols, rows);
-            }
-          } catch (err) {
-            reportError(err instanceof Error ? err : new Error(String(err)));
-          }
-        }, 150);
-      });
-
       // Mark as attached so relay reconnection logic knows to re-attach.
       attachSentRef.current = true;
       wasConnectedRef.current = true;
@@ -673,7 +655,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Dispose xterm event listeners (IDisposable objects)
       dataDisposable?.dispose();
       relayInputDisposable?.dispose();
-      relayResizeDisposable?.dispose();
 
       // Unsubscribe relay-mode output listener or P2P message handler
       relayUnsubOutput?.();
