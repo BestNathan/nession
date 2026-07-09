@@ -706,7 +706,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   isBlockedRef.current = isCurrentlyBlocked;
 
   return (
-    <div className="flex-1 min-w-0 h-full relative">
+    <div className="flex-1 min-w-0 min-h-0 relative">
       {/* Reconnection banner overlay */}
       {banner !== 'none' && (
         <div
