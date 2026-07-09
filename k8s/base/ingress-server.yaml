@@ -3,13 +3,23 @@ kind: Ingress
 metadata:
   name: nession-server
   annotations:
-    higress.io/domain: "nession.nhome.local"
+    higress.io/domain: "nession.nhome.local nession.bestnathan.top"
     higress.io/upstream-read-timeout: "86400"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: higress
   rules:
     - host: nession.nhome.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-server
+                port:
+                  number: 10080
+    - host: nession.bestnathan.top
       http:
         paths:
           - path: /
