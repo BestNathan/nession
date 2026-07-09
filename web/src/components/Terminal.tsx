@@ -40,10 +40,9 @@ export interface TerminalHandle {
    */
   sendText: (text: string) => void;
   /**
-   * Refit the terminal to its container and push the new dimensions to the
-   * remote session. Call this after the terminal becomes visible again (e.g.
-   * switching back from a hidden tab), because xterm cannot measure itself
-   * while `display:none` and may have stale dimensions.
+   * Refit the terminal to its container. Call this after the terminal becomes
+   * visible again (e.g. switching back from a hidden tab), because xterm cannot
+   * measure itself while `display:none` and may have stale dimensions.
    */
   refit: () => void;
 }
@@ -99,9 +98,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // effect once the transport is established. Lets the imperative handle (and the
   // keystroke path) reuse one mode-aware sender. Null when not connected.
   const sendDataRef = useRef<((data: string) => void) | null>(null);
-  // Holds the "refit terminal + push new dimensions" closure, assigned inside
-  // the connection effect. Lets the imperative refit() reuse the effect's
-  // fitAddon + sendResize without duplicating the mode-aware resize logic.
+  // Holds the "refit terminal" closure, assigned inside the connection effect.
+  // Lets the imperative refit() reuse the effect's fitAddon without duplicating
+  // the refit logic.
   const refitRef = useRef<(() => void) | null>(null);
 
   // Ref to latest p2pConnection so the main effect closure always accesses the
@@ -233,8 +232,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       timestamp: Math.floor(Date.now() / 1000),
       payload: {
         session_name: name,
-        width: term.cols,
-        height: term.rows,
       },
     });
 
@@ -402,11 +399,42 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // -------------------------------------------------------------------------
+    // Font scaling — adapt font size to the container width so the terminal
+    // can display enough columns even on narrow viewports.  Since the WebUI no
+    // longer reports its dimensions to tmux (passive observer), we compensate
+    // by shrinking the font when the viewport is small and growing it back
+    // when the viewport widens.
+    // -------------------------------------------------------------------------
+    const FONT_MIN = 9;
+    const FONT_MAX = 14;
+    const TARGET_COLS = 80;
+
+    /** Fit the terminal to the container, then adjust font size so the
+     *  column count stays as close to TARGET_COLS as possible. */
+    const fitAndScaleFont = () => {
+      fitAddon.fit();
+      const currentFont = term.options.fontSize ?? FONT_MAX;
+      // Natural font size that would yield ~TARGET_COLS at this container width.
+      // Relationship is linear: halving font size ≈ doubling columns.
+      const natural = Math.round(currentFont * term.cols / TARGET_COLS);
+      const clamped = Math.max(FONT_MIN, Math.min(FONT_MAX, natural));
+      if (clamped !== currentFont) {
+        term.options.fontSize = clamped;
+        // Defer re-fit to the next animation frame so the browser has time
+        // to apply the font change and reflow the terminal element; otherwise
+        // FitAddon measures stale character-cell dimensions and leaves gaps.
+        requestAnimationFrame(() => {
+          fitAddon.fit();
+        });
+      }
+    };
+
     // Let the browser paint once so the container has its final size,
     // then fit the terminal to the available space.
     requestAnimationFrame(() => {
       try {
-        fitAddon.fit();
+        fitAndScaleFont();
       } catch {
         // Container may still be zero-sized in edge cases – ignore.
       }
@@ -418,7 +446,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     let active = true;
     let relayUnsubOutput: (() => void) | null = null;
     let relayInputDisposable: IDisposable | null = null;
-    let relayResizeDisposable: IDisposable | null = null;
     let dataDisposable: IDisposable | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let mountTimer: ReturnType<typeof setTimeout> | null = null;
@@ -447,29 +474,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // terminal element, so we need useCapture to intercept before xterm.
     term.element?.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     wheelCleanup = () => term.element?.removeEventListener('wheel', handleWheel, { capture: true });
-
-    /** Send the current terminal dimensions to the remote end. */
-    const sendResize = () => {
-      if (!active) {return;}
-      const { cols, rows } = term;
-      try {
-        if (mode === 'p2p') {
-          const conn = p2pConnRef.current;
-          if (conn && conn.connectionState === 'connected') {
-            conn.sendMessage({
-              msg_type: 'terminal.resize',
-              id: generateId(),
-              timestamp: Math.floor(Date.now() / 1000),
-              payload: { session_name: sessionName, width: cols, height: rows },
-            });
-          }
-        } else if (mode === 'relay' && serverConnection?.isConnected()) {
-          serverConnection.sendTerminalResize(sessionId, cols, rows);
-        }
-      } catch (err) {
-        reportError(err instanceof Error ? err : new Error(String(err)));
-      }
-    };
 
     /**
      * Actually send raw text to the remote session.
@@ -541,17 +545,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Expose the sender to the imperative handle for the lifetime of this effect.
     sendDataRef.current = sendData;
 
-    // Expose a refit closure: fit to the (now-visible) container, then push the
-    // updated dimensions to the remote session. Deferred to the next frame so
-    // the browser has applied the visibility change and laid out the container
-    // (fit() measures 0 while the element is still display:none).
+    // Expose a refit closure: fit to the (now-visible) container. Deferred to the
+    // next frame so the browser has applied the visibility change and laid out the
+    // container (fit() measures 0 while the element is still display:none).
     refitRef.current = () => {
       if (!active) {return;}
       requestAnimationFrame(() => {
         if (!active) {return;}
         try {
-          fitAddon.fit();
-          sendResize();
+          fitAndScaleFont();
         } catch {
           // Container may be zero-sized (still hidden) — ignore.
         }
@@ -615,28 +617,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         sendData(data);
       });
 
-      // Forward terminal resize events, debounced to 150ms to avoid flooding
-      // the server during rapid window resizes or drag operations.
-      relayResizeDisposable = term.onResize(({ cols, rows }) => {
-        if (!active) {return;}
-        if (resizeTimer) {clearTimeout(resizeTimer);}
-        resizeTimer = setTimeout(() => {
-          try {
-            if (serverConnection?.isConnected()) {
-              serverConnection.sendTerminalResize(sessionId, cols, rows);
-            }
-          } catch (err) {
-            reportError(err instanceof Error ? err : new Error(String(err)));
-          }
-        }, 150);
-      });
-
       // Mark as attached so relay reconnection logic knows to re-attach.
       attachSentRef.current = true;
       wasConnectedRef.current = true;
-
-      // Send initial dimensions now that the terminal is open.
-      sendResize();
     }
 
     }, 50); // End of mountTimer setTimeout
@@ -658,8 +641,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       resizeTimer = setTimeout(() => {
         if (!active) {return;}
         try {
-          fitAddon.fit();
-          sendResize();
+          fitAndScaleFont();
         } catch {
           // Ignore fit errors during rapid resize transitions.
         }
@@ -701,7 +683,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Dispose xterm event listeners (IDisposable objects)
       dataDisposable?.dispose();
       relayInputDisposable?.dispose();
-      relayResizeDisposable?.dispose();
 
       // Unsubscribe relay-mode output listener or P2P message handler
       relayUnsubOutput?.();
