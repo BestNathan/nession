@@ -399,11 +399,34 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // -------------------------------------------------------------------------
+    // Font scaling: shrink font on narrow viewports to maintain ~80 cols.
+    // Double rAF ensures the browser reflows after font change before re-fit.
+    // -------------------------------------------------------------------------
+    const FONT_MIN = 10;
+    const FONT_MAX = 14;
+    const TARGET_COLS = 80;
+
+    const fitAndScaleFont = () => {
+      fitAddon.fit();
+      const currentFont = term.options.fontSize ?? FONT_MAX;
+      if (term.cols >= TARGET_COLS || currentFont <= FONT_MIN) { return; }
+      const newFont = Math.max(FONT_MIN, Math.round(currentFont * term.cols / TARGET_COLS));
+      if (newFont >= currentFont) { return; }
+      term.options.fontSize = newFont;
+      // Double rAF: first frame applies the font change, second frame re-fits
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          fitAddon.fit();
+        });
+      });
+    };
+
     // Let the browser paint once so the container has its final size,
     // then fit the terminal to the available space.
     requestAnimationFrame(() => {
       try {
-        fitAddon.fit();
+        fitAndScaleFont();
       } catch {
         // Container may still be zero-sized in edge cases – ignore.
       }
@@ -522,7 +545,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       requestAnimationFrame(() => {
         if (!active) {return;}
         try {
-          fitAddon.fit();
+          fitAndScaleFont();
         } catch {
           // Container may be zero-sized (still hidden) — ignore.
         }
@@ -610,7 +633,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       resizeTimer = setTimeout(() => {
         if (!active) {return;}
         try {
-          fitAddon.fit();
+          fitAndScaleFont();
         } catch {
           // Ignore fit errors during rapid resize transitions.
         }
