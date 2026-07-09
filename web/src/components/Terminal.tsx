@@ -399,42 +399,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // -------------------------------------------------------------------------
-    // Font scaling — adapt font size to the container width so the terminal
-    // can display enough columns even on narrow viewports.  Since the WebUI no
-    // longer reports its dimensions to tmux (passive observer), we compensate
-    // by shrinking the font when the viewport is small and growing it back
-    // when the viewport widens.
-    // -------------------------------------------------------------------------
-    const FONT_MIN = 9;
-    const FONT_MAX = 14;
-    const TARGET_COLS = 80;
-
-    /** Fit the terminal to the container, then adjust font size so the
-     *  column count stays as close to TARGET_COLS as possible. */
-    const fitAndScaleFont = () => {
-      fitAddon.fit();
-      const currentFont = term.options.fontSize ?? FONT_MAX;
-      // Natural font size that would yield ~TARGET_COLS at this container width.
-      // Relationship is linear: halving font size ≈ doubling columns.
-      const natural = Math.round(currentFont * term.cols / TARGET_COLS);
-      const clamped = Math.max(FONT_MIN, Math.min(FONT_MAX, natural));
-      if (clamped !== currentFont) {
-        term.options.fontSize = clamped;
-        // Defer re-fit to the next animation frame so the browser has time
-        // to apply the font change and reflow the terminal element; otherwise
-        // FitAddon measures stale character-cell dimensions and leaves gaps.
-        requestAnimationFrame(() => {
-          fitAddon.fit();
-        });
-      }
-    };
-
     // Let the browser paint once so the container has its final size,
     // then fit the terminal to the available space.
     requestAnimationFrame(() => {
       try {
-        fitAndScaleFont();
+        fitAddon.fit();
       } catch {
         // Container may still be zero-sized in edge cases – ignore.
       }
@@ -545,15 +514,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Expose the sender to the imperative handle for the lifetime of this effect.
     sendDataRef.current = sendData;
 
-    // Expose a refit closure: fit to the (now-visible) container. Deferred to the
-    // next frame so the browser has applied the visibility change and laid out the
+    // Expose a refit closure: fit to the container. Deferred to the next frame
+    // so the browser has applied the visibility change and laid out the
     // container (fit() measures 0 while the element is still display:none).
     refitRef.current = () => {
       if (!active) {return;}
       requestAnimationFrame(() => {
         if (!active) {return;}
         try {
-          fitAndScaleFont();
+          fitAddon.fit();
         } catch {
           // Container may be zero-sized (still hidden) — ignore.
         }
@@ -641,7 +610,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       resizeTimer = setTimeout(() => {
         if (!active) {return;}
         try {
-          fitAndScaleFont();
+          fitAddon.fit();
         } catch {
           // Ignore fit errors during rapid resize transitions.
         }
