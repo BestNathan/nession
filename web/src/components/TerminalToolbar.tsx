@@ -53,9 +53,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-0">
       {/* Quick command buttons — compact, scrollable row */}
-      <div className="flex flex-wrap gap-1 content-start overflow-y-auto flex-1 min-h-0 p-2 pb-0">
+      <div className="flex flex-wrap gap-1 content-start overflow-y-auto min-h-0 p-2 pb-0">
         {PRESETS.map((cmd) => (
           <Button key={cmd.id} variant="outline" size="sm"
             className="h-6 text-[11px] px-2" disabled={disabled}

@@ -175,7 +175,7 @@ function BottomBar({
   commandsPanel: React.ReactNode;
 }) {
   return (
-    <div className="border-t flex-shrink-0 flex flex-col h-[116px]">
+    <div className="border-t flex-shrink-0 flex flex-col max-h-[40vh]">
       <div className="flex border-b">
         <button
           type="button"
@@ -202,7 +202,7 @@ function BottomBar({
           <Package className="w-3 h-3" /> Env
         </button>
       </div>
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
