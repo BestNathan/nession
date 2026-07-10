@@ -104,7 +104,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
               sendInput();
             }
           }}
-          className="text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
+          className="text-xs md:text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
           disabled={disabled}
         />
         <Button variant="outline" size="icon" className="h-7 w-7 flex-shrink-0" title="Send"
