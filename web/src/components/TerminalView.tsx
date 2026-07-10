@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
+import { ArrowLeft, TerminalIcon, Package, ChevronDown } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
@@ -49,6 +49,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // Multi-address P2P: connect the browser-tested best path (resolved in the
   // attach dialog), rotate on failure, fall back to relay.
@@ -99,7 +100,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
 
   return (
     <div className="h-screen flex flex-col bg-background">
-      <header className="border-b px-4 py-2 flex items-center gap-4 flex-shrink-0">
+      <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Back
         </Button>
@@ -132,6 +133,8 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
                 <BottomBar
                   activeTab={bottomTab}
                   onTabChange={setBottomTab}
+                  sheetOpen={sheetOpen}
+                  onSheetToggle={setSheetOpen}
                   envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
                   commandsPanel={
                     <TerminalToolbar
@@ -149,6 +152,8 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             <BottomBar
               activeTab={bottomTab}
               onTabChange={setBottomTab}
+              sheetOpen={sheetOpen}
+              onSheetToggle={setSheetOpen}
               envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
               commandsPanel={
                 <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
@@ -168,18 +173,28 @@ function BottomBar({
   onTabChange,
   envPanel,
   commandsPanel,
+  sheetOpen,
+  onSheetToggle,
 }: {
   activeTab: 'commands' | 'env';
   onTabChange: (tab: 'commands' | 'env') => void;
   envPanel: React.ReactNode;
   commandsPanel: React.ReactNode;
+  sheetOpen: boolean;
+  onSheetToggle: (open: boolean) => void;
 }) {
+  // Mobile: tapping a tab both selects it and opens the sheet.
+  const selectTab = (tab: 'commands' | 'env') => {
+    onTabChange(tab);
+    onSheetToggle(true);
+  };
+
   return (
-    <div className="border-t flex-shrink-0 flex flex-col max-h-[40vh]">
-      <div className="flex border-b">
+    <div className="border-t flex-shrink-0 flex flex-col max-h-[70vh] sm:max-h-[40vh]">
+      <div className="flex border-b items-center">
         <button
           type="button"
-          onClick={() => onTabChange('commands')}
+          onClick={() => selectTab('commands')}
           className={cn(
             'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
             activeTab === 'commands'
@@ -191,7 +206,7 @@ function BottomBar({
         </button>
         <button
           type="button"
-          onClick={() => onTabChange('env')}
+          onClick={() => selectTab('env')}
           className={cn(
             'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
             activeTab === 'env'
@@ -201,8 +216,25 @@ function BottomBar({
         >
           <Package className="w-3 h-3" /> Env
         </button>
+        {/* Mobile-only collapse control for the sheet */}
+        {sheetOpen && (
+          <button
+            type="button"
+            onClick={() => onSheetToggle(false)}
+            className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
+            title="Collapse"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      {/* Content: always shown at sm+; on mobile only when the sheet is open */}
+      <div
+        className={cn(
+          'flex-1 min-h-0 overflow-y-auto',
+          sheetOpen ? 'block' : 'hidden sm:block',
+        )}
+      >
         {activeTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
