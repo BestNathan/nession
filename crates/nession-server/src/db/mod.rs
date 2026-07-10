@@ -19,6 +19,27 @@ pub struct AgentRow {
     pub status: String,
     pub auth_token_hash: String,
     pub metadata: String,
+    /// Public WebSocket URL (nullable). Persisted so it survives restarts
+    /// (previously in-memory only — issue #43).
+    pub connect_url: Option<String>,
+    /// JSON-encoded `Vec<AgentAddress>` of advertised endpoints. Empty string
+    /// or "[]" when the agent advertised none.
+    pub addresses: String,
+}
+
+/// Borrowed parameters for [`Database::insert_agent`], grouped to keep the
+/// call signature small.
+#[derive(Debug, Clone, Copy)]
+pub struct AgentInsert<'a> {
+    pub agent_id: &'a str,
+    pub hostname: &'a str,
+    pub ip_address: &'a str,
+    pub port: u16,
+    pub auth_token_hash: &'a str,
+    pub metadata: &'a str,
+    pub connect_url: Option<&'a str>,
+    /// JSON-encoded `Vec<AgentAddress>`.
+    pub addresses: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +70,9 @@ impl Database {
                 last_heartbeat INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 auth_token_hash TEXT NOT NULL,
-                metadata TEXT
+                metadata TEXT,
+                connect_url TEXT,
+                addresses TEXT
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -68,27 +91,51 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);",
         )?;
 
+        // Lightweight migrations for DBs created before these columns existed.
+        // There is no migration runner; `ADD COLUMN` on an existing column
+        // errors, so we add them best-effort and ignore the duplicate error.
+        Self::add_column_if_missing(&conn, "agents", "connect_url", "TEXT");
+        Self::add_column_if_missing(&conn, "agents", "addresses", "TEXT");
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    pub async fn insert_agent(
-        &self,
-        agent_id: &str,
-        hostname: &str,
-        ip_address: &str,
-        port: u16,
-        auth_token_hash: &str,
-        metadata: &str,
-    ) -> Result<()> {
+    /// Add a column to a table, ignoring the error SQLite raises when the
+    /// column already exists. Used for schema migrations on existing DBs.
+    fn add_column_if_missing(conn: &Connection, table: &str, column: &str, col_type: &str) {
+        let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {col_type}");
+        match conn.execute(&sql, []) {
+            Ok(_) => tracing::info!("Migrated {table}: added column {column}"),
+            Err(e) => {
+                // "duplicate column name" is expected on already-migrated DBs.
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    tracing::warn!("Migration ALTER TABLE {table} ADD {column} failed: {msg}");
+                }
+            }
+        }
+    }
+
+    pub async fn insert_agent(&self, agent: AgentInsert<'_>) -> Result<()> {
         let conn = self.conn.lock().await;
         let now = chrono::Utc::now().timestamp();
 
         conn.execute(
-            "INSERT OR REPLACE INTO agents (agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', ?6, ?7)",
-            rusqlite::params![agent_id, hostname, ip_address, port, now, auth_token_hash, metadata],
+            "INSERT OR REPLACE INTO agents (agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, connect_url, addresses)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                agent.agent_id,
+                agent.hostname,
+                agent.ip_address,
+                agent.port,
+                now,
+                agent.auth_token_hash,
+                agent.metadata,
+                agent.connect_url,
+                agent.addresses
+            ],
         )?;
 
         Ok(())
@@ -97,7 +144,7 @@ impl Database {
     pub async fn list_agents(&self) -> Result<Vec<AgentRow>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata FROM agents"
+            "SELECT agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, connect_url, addresses FROM agents"
         )?;
 
         let agents = stmt
@@ -112,6 +159,8 @@ impl Database {
                     status: row.get(6)?,
                     auth_token_hash: row.get(7)?,
                     metadata: row.get(8)?,
+                    connect_url: row.get(9)?,
+                    addresses: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
                 })
             })?
             .collect::<Result<Vec<_>>>()?;

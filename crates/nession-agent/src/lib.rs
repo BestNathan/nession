@@ -10,6 +10,7 @@ pub mod config;
 pub mod connection;
 pub mod env;
 pub mod fs;
+pub mod netdetect;
 pub mod server;
 pub mod sync;
 pub mod tmux;

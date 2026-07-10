@@ -1,0 +1,165 @@
+//! Local network-interface detection for agent address advertisement.
+//!
+//! Enumerates the host's non-loopback interfaces and turns each usable IP into
+//! an [`AgentAddress`], classifying it as LAN or VPN. This is a one-shot scan
+//! at startup (Non-Goal: dynamic refresh — restart the agent to re-detect).
+
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use nession_common::protocol::{AgentAddress, NetworkType};
+
+/// Classify an IP into a coarse [`NetworkType`] for labelling.
+///
+/// RFC 1918 / CGNAT / unique-local ranges map to LAN; other private-ish overlay
+/// ranges (notably the Tailscale 100.64/10 CGNAT block is common for VPNs, but
+/// we can't distinguish it reliably from carrier NAT) are treated as LAN too.
+/// Anything globally routable is LAN-labelled as well here because we can't
+/// know it's public without more context — the caller decides tunnels via
+/// config. In practice detected NIC addresses are LAN/VPN; genuine public
+/// endpoints come from `advertise_addresses`.
+fn classify(ip: IpAddr) -> NetworkType {
+    match ip {
+        IpAddr::V4(v4) => classify_v4(v4),
+        IpAddr::V6(v6) => classify_v6(v6),
+    }
+}
+
+fn classify_v4(ip: Ipv4Addr) -> NetworkType {
+    // RFC 1918 private ranges → LAN.
+    if ip.is_private() {
+        return NetworkType::Lan;
+    }
+    // CGNAT 100.64.0.0/10 is frequently a VPN overlay (e.g. Tailscale).
+    let octets = ip.octets();
+    if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+        return NetworkType::Vpn;
+    }
+    // Link-local 169.254/16 → LAN (rarely useful, filtered earlier anyway).
+    if ip.is_link_local() {
+        return NetworkType::Lan;
+    }
+    // Otherwise assume LAN — detected NIC addresses are, by construction, on a
+    // local interface. Genuinely public endpoints are declared via config.
+    NetworkType::Lan
+}
+
+fn classify_v6(ip: Ipv6Addr) -> NetworkType {
+    let segments = ip.segments();
+    // Unique-local fc00::/7 → LAN.
+    if (segments[0] & 0xfe00) == 0xfc00 {
+        return NetworkType::Lan;
+    }
+    // Link-local fe80::/10 → LAN.
+    if (segments[0] & 0xffc0) == 0xfe80 {
+        return NetworkType::Lan;
+    }
+    NetworkType::Lan
+}
+
+/// Whether an address is worth advertising. Skips loopback, link-local, and
+/// the IPv4 unspecified address; those never let a remote client connect.
+fn is_advertisable(ip: IpAddr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        return false;
+    }
+    match ip {
+        IpAddr::V4(v4) => !v4.is_link_local(),
+        // IPv6 link-local needs a scope id we don't carry in a URL, so skip it.
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80,
+    }
+}
+
+/// Format an IP + port into a WebSocket URL, bracketing IPv6 literals.
+fn ws_url(ip: IpAddr, port: u16) -> String {
+    match ip {
+        IpAddr::V4(_) => format!("ws://{ip}:{port}/ws"),
+        IpAddr::V6(_) => format!("ws://[{ip}]:{port}/ws"),
+    }
+}
+
+/// Detect all advertisable local addresses and turn them into [`AgentAddress`]
+/// entries using the given listen `port`.
+///
+/// Returns an empty vec on enumeration failure (logged by the caller) — the
+/// agent still registers and clients fall back to relay.
+#[must_use]
+pub fn detect_local_addresses(port: u16) -> Vec<AgentAddress> {
+    let interfaces = match if_addrs::get_if_addrs() {
+        Ok(ifs) => ifs,
+        Err(e) => {
+            tracing::warn!("failed to enumerate network interfaces: {e}");
+            return Vec::new();
+        }
+    };
+
+    interfaces
+        .into_iter()
+        .filter(|iface| !iface.is_loopback())
+        .map(|iface| {
+            let ip = iface.ip();
+            (iface.name, ip)
+        })
+        .filter(|(_, ip)| is_advertisable(*ip))
+        .map(|(name, ip)| {
+            let network_type = classify(ip);
+            AgentAddress {
+                url: ws_url(ip, port),
+                label: Some(label_for(&name, network_type)),
+                network_type,
+                priority: network_type.default_priority(),
+            }
+        })
+        .collect()
+}
+
+/// Build a short label combining the interface name and its category.
+fn label_for(iface_name: &str, network_type: NetworkType) -> String {
+    let type_label = match network_type {
+        NetworkType::Lan => "LAN",
+        NetworkType::Vpn => "VPN",
+        NetworkType::Tunnel => "Tunnel",
+        NetworkType::Public => "Public",
+        NetworkType::Custom => "Custom",
+    };
+    format!("{type_label} ({iface_name})")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_rfc1918_as_lan() {
+        assert_eq!(classify("192.168.1.5".parse().unwrap()), NetworkType::Lan);
+        assert_eq!(classify("10.0.0.9".parse().unwrap()), NetworkType::Lan);
+        assert_eq!(classify("172.16.4.1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn classifies_cgnat_as_vpn() {
+        assert_eq!(classify("100.64.1.2".parse().unwrap()), NetworkType::Vpn);
+        assert_eq!(classify("100.127.255.1".parse().unwrap()), NetworkType::Vpn);
+    }
+
+    #[test]
+    fn classifies_ula_v6_as_lan() {
+        assert_eq!(classify("fd00::1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn skips_loopback_and_link_local() {
+        assert!(!is_advertisable("127.0.0.1".parse().unwrap()));
+        assert!(!is_advertisable("::1".parse().unwrap()));
+        assert!(!is_advertisable("169.254.1.1".parse().unwrap()));
+        assert!(!is_advertisable("fe80::1".parse().unwrap()));
+        assert!(is_advertisable("192.168.1.5".parse().unwrap()));
+    }
+
+    #[test]
+    fn ws_url_brackets_ipv6() {
+        let v4: IpAddr = "192.168.1.5".parse().unwrap();
+        let v6: IpAddr = "fd00::1".parse().unwrap();
+        assert_eq!(ws_url(v4, 8080), "ws://192.168.1.5:8080/ws");
+        assert_eq!(ws_url(v6, 8080), "ws://[fd00::1]:8080/ws");
+    }
+}

@@ -136,12 +136,25 @@ impl ConnectionHandler {
             ))));
         }
 
+        let addresses = crate::registry::build_probed_addresses(
+            payload.addresses.clone(),
+            &payload.ip_address,
+            payload.port,
+            payload.connect_url.as_deref(),
+        );
+        info!(
+            "Agent {} advertised {} P2P address(es)",
+            payload.agent_id,
+            addresses.len()
+        );
+
         let agent_info = AgentInfo {
             agent_id: payload.agent_id.clone(),
             hostname: payload.hostname,
             ip_address: payload.ip_address,
             port: payload.port,
             connect_url: payload.connect_url.clone(),
+            addresses,
             registered_at: chrono::Utc::now(),
             last_heartbeat: chrono::Utc::now(),
             status: AgentStatus::Online,
@@ -586,20 +599,23 @@ impl ConnectionHandler {
             }
         };
 
-        // Prefer the agent's declared connect_url (k8s ingress / public hostname),
-        // falling back to a constructed URL for bare-metal / direct-access deployments.
-        // Both produce a complete URL (e.g. "ws://agent.example.com/ws" or "ws://10.0.0.1:19090/ws")
-        // so the frontend can use agent_address as-is without further splicing.
-        let agent_ws_url = agent
-            .connect_url
-            .clone()
+        // Legacy single endpoint for old clients: prefer a tunnel, then any
+        // reachable address, then the first. Falls back to the constructed
+        // URL when the agent advertised no addresses at all.
+        let agent_ws_url = crate::registry::legacy_agent_address(&agent.addresses)
+            .or_else(|| agent.connect_url.clone())
             .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
         let agent_address = agent_ws_url.clone();
         let connection_token = uuid::Uuid::new_v4().to_string();
+        // Serialise the full probed-address list for multi-address clients.
+        let addresses_json = serde_json::to_value(&agent.addresses).unwrap_or(json!([]));
 
         info!(
-            "Client requested attach to session {} (mode: {}), agent at {}",
-            session_id, preferred_mode, agent_ws_url
+            "Client requested attach to session {} (mode: {}), agent at {} ({} address(es))",
+            session_id,
+            preferred_mode,
+            agent_ws_url,
+            agent.addresses.len()
         );
 
         if preferred_mode == "relay" {
@@ -607,9 +623,9 @@ impl ConnectionHandler {
             // The handler loop must transition into relay mode.
             Ok(HandlerAction::Relay { agent_ws_url })
         } else {
-            // P2P mode: return the agent's public WebSocket URL so the client
-            // can connect directly. Uses connect_url when configured (k8s),
-            // or the raw IP:port otherwise.
+            // P2P mode: return the full candidate list (with probe status) plus
+            // the legacy single `agent_address` for backward compatibility. The
+            // client tests latency across `addresses` and falls back per-address.
             Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({
                     "msg_type": "client.session.attach.response",
@@ -619,6 +635,7 @@ impl ConnectionHandler {
                         "status": "success",
                         "mode": "p2p",
                         "agent_address": agent_address,
+                        "addresses": addresses_json,
                         "connection_token": connection_token,
                         "session_name": session_name
                     }

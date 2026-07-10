@@ -68,7 +68,8 @@ async fn integration_connection_to_mock_server() {
         "test-host",
         "127.0.0.1",
         8080,
-        None, // connect_url
+        None,   // connect_url
+        vec![], // addresses
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),
@@ -102,7 +103,8 @@ async fn integration_registration_message_format() {
         "my-hostname",
         "192.168.1.100",
         9090,
-        None, // connect_url
+        None,   // connect_url
+        vec![], // addresses
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),
@@ -161,7 +163,8 @@ async fn integration_heartbeat_message_format() {
         "test-host",
         "127.0.0.1",
         8080,
-        None, // connect_url
+        None,   // connect_url
+        vec![], // addresses
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),
@@ -230,7 +233,8 @@ async fn integration_session_update_message_format() {
         "test-host",
         "127.0.0.1",
         8080,
-        None, // connect_url
+        None,   // connect_url
+        vec![], // addresses
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),
@@ -293,7 +297,8 @@ async fn integration_reconnection_logic() {
         "test-host",
         "127.0.0.1",
         8080,
-        None, // connect_url
+        None,   // connect_url
+        vec![], // addresses
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),

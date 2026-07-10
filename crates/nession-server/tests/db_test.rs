@@ -23,14 +23,16 @@ async fn test_agent_persistence() {
     let db = Database::new(db_path).await.unwrap();
 
     // Insert agent
-    db.insert_agent(
-        "agent_123",
-        "dev-server",
-        "192.168.1.10",
-        8080,
-        "hashed_token",
-        r#"{"tmux_version": "3.3a"}"#,
-    )
+    db.insert_agent(nession_server::db::AgentInsert {
+        agent_id: "agent_123",
+        hostname: "dev-server",
+        ip_address: "192.168.1.10",
+        port: 8080,
+        auth_token_hash: "hashed_token",
+        metadata: r#"{"tmux_version": "3.3a"}"#,
+        connect_url: Some("wss://agent.example.com/ws"),
+        addresses: r#"[{"url":"wss://agent.example.com/ws","network_type":"tunnel","priority":30}]"#,
+    })
     .await
     .unwrap();
 
@@ -38,6 +40,11 @@ async fn test_agent_persistence() {
     let agents = db.list_agents().await.unwrap();
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0].agent_id, "agent_123");
+    assert_eq!(
+        agents[0].connect_url.as_deref(),
+        Some("wss://agent.example.com/ws")
+    );
+    assert!(agents[0].addresses.contains("tunnel"));
 }
 
 fn make_session_info(id: &str, agent: &str, name: &str) -> SessionInfo {

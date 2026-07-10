@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 async fn make_handler() -> ConnectionHandler {
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let agent_registry = Arc::new(AgentRegistry::new(30)); // 30 second heartbeat timeout
+    let agent_registry = Arc::new(AgentRegistry::new(30, Arc::clone(&db))); // 30 second heartbeat timeout
     let session_registry = Arc::new(SessionRegistry::new(db));
     let command_broker = Arc::new(CommandBroker::new());
     let env_service = EnvService::new(std::env::temp_dir().join("nession-test-envs"));

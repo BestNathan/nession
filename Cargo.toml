@@ -33,6 +33,7 @@ base64 = "0.21"
 portable-pty = "0.8"
 async-trait = "0.1"
 mime_guess = "2.0"
+if-addrs = "0.13"
 
 # ── Workspace Lints (based on openai/codex codex-rs) ────────────────────
 [workspace.lints]

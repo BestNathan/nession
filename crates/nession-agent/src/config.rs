@@ -1,5 +1,6 @@
 //! Agent configuration.
 
+use nession_common::protocol::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
 
 /// Default listen address for the agent WebSocket server.
@@ -21,6 +22,45 @@ fn default_session_poll_interval() -> u64 {
 /// When not set, defaults to $HOME.
 fn default_working_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+}
+
+/// A config-declared advertised address (tunnel/ingress/custom endpoint).
+///
+/// These are merged with the addresses the agent auto-detects from its network
+/// interfaces. Declared explicitly in the TOML config because tunnels can't be
+/// discovered from local interfaces (Non-Goal: tunnel process discovery).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvertiseAddress {
+    /// Complete WebSocket URL, e.g. `wss://agent.example.com/ws`.
+    pub url: String,
+    /// Optional human-readable label for the UI.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Network category; defaults to `tunnel` since config-declared addresses
+    /// are typically ingress/tunnel endpoints.
+    #[serde(default = "default_network_type")]
+    pub network_type: NetworkType,
+    /// Optional explicit priority (lower connects first). When 0/omitted the
+    /// server fills in the network-type default.
+    #[serde(default)]
+    pub priority: i32,
+}
+
+fn default_network_type() -> NetworkType {
+    NetworkType::Tunnel
+}
+
+impl AdvertiseAddress {
+    /// Convert to the protocol wire type.
+    #[must_use]
+    pub fn into_agent_address(self) -> AgentAddress {
+        AgentAddress {
+            url: self.url,
+            label: self.label,
+            network_type: self.network_type,
+            priority: self.priority,
+        }
+    }
 }
 
 /// Agent configuration loaded from a TOML file.
@@ -47,17 +87,29 @@ pub struct AgentConfig {
     /// Session poll interval in seconds.
     #[serde(default = "default_session_poll_interval")]
     pub session_poll_interval_secs: u64,
-    /// Address advertised to clients for P2P connections (optional).
+    /// Address advertised to clients for P2P connections (optional, legacy).
     /// If not set, the agent auto-detects its IP. Useful for NAT/VPN setups.
+    /// Superseded by `advertise_addresses`; kept for backward compatibility.
     #[serde(default)]
     pub advertise_address: Option<String>,
-    /// Public WebSocket URL that clients use to connect to this agent.
+    /// Public WebSocket URL that clients use to connect to this agent (legacy).
     /// Must be a complete URL including protocol and `/ws` path
     /// (e.g. "wss://agent.nession.nhome.local/ws").
     /// When set, the server returns this URL verbatim to clients during session
     /// attach instead of constructing one from the agent's IP and port.
+    /// Superseded by `advertise_addresses`; kept for backward compatibility.
     #[serde(default)]
     pub connect_url: Option<String>,
+    /// Explicitly declared advertised endpoints (tunnels, ingress, custom).
+    /// Merged with auto-detected NIC addresses, de-duplicated by URL. Prefer
+    /// this over `advertise_address`/`connect_url` for multi-path setups.
+    #[serde(default)]
+    pub advertise_addresses: Vec<AdvertiseAddress>,
+    /// Skip auto-detecting local network interfaces. When true, only
+    /// `advertise_addresses` (and legacy fields) are advertised. Useful when
+    /// the node's only reachable path is a tunnel and LAN IPs would mislead.
+    #[serde(default)]
+    pub disable_address_autodetect: bool,
 
     /// Default working directory for new tmux sessions.
     /// When not set, defaults to $HOME.
@@ -84,6 +136,8 @@ impl Default for AgentConfig {
             session_poll_interval_secs: default_session_poll_interval(),
             advertise_address: None,
             connect_url: None,
+            advertise_addresses: Vec::new(),
+            disable_address_autodetect: false,
             default_working_dir: default_working_dir(),
             file_root: None,
         }

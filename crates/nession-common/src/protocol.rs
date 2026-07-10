@@ -34,6 +34,110 @@ pub struct AgentRegisterPayload {
     /// When empty, the server constructs a URL from ip_address:port with `/ws` path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_url: Option<String>,
+    /// All reachable WebSocket endpoints for this agent, in priority order.
+    /// Newer agents populate this from NIC detection + config-declared tunnels.
+    /// Older agents omit it; the server then synthesises a single-entry list
+    /// from `ip_address`/`port`/`connect_url` for backward compatibility.
+    #[serde(default)]
+    pub addresses: Vec<AgentAddress>,
+}
+
+/// Network category of an advertised agent address.
+///
+/// Used to label endpoints in the UI and to break ties when the server must
+/// pick a single legacy `agent_address` for old clients (tunnels win).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkType {
+    /// RFC 1918 / link-local address on a physical or virtual LAN.
+    Lan,
+    /// Address that reaches the node over a VPN overlay.
+    Vpn,
+    /// Reverse tunnel / ingress hostname (frp, ngrok, cloudflared, k8s ingress).
+    Tunnel,
+    /// Routable public address.
+    Public,
+    /// User-declared address that doesn't fit the other categories.
+    Custom,
+}
+
+impl NetworkType {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NetworkType::Lan => "lan",
+            NetworkType::Vpn => "vpn",
+            NetworkType::Tunnel => "tunnel",
+            NetworkType::Public => "public",
+            NetworkType::Custom => "custom",
+        }
+    }
+
+    /// Default priority for auto-detected addresses of this type (lower connects
+    /// first). Tunnels are most likely reachable from anywhere, LAN is fastest
+    /// when co-located, so we bias LAN highest then tunnel then the rest.
+    #[must_use]
+    pub fn default_priority(&self) -> i32 {
+        match self {
+            NetworkType::Lan => 10,
+            NetworkType::Vpn => 20,
+            NetworkType::Tunnel => 30,
+            NetworkType::Public => 40,
+            NetworkType::Custom => 50,
+        }
+    }
+}
+
+/// A single advertised way to reach an agent over WebSocket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentAddress {
+    /// Complete WebSocket URL, e.g. `ws://192.168.1.5:8080/ws`.
+    pub url: String,
+    /// Human-readable label for the UI (e.g. "LAN", "Tunnel"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// How this address reaches the node.
+    pub network_type: NetworkType,
+    /// Connection preference; lower connects first. Defaults from
+    /// `NetworkType::default_priority` when not explicitly set.
+    #[serde(default)]
+    pub priority: i32,
+}
+
+/// Result of the server's TCP reachability probe for an address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AddressStatus {
+    /// Not yet probed (e.g. right after server restart).
+    Unknown,
+    /// Last TCP dial succeeded within the timeout.
+    Reachable,
+    /// Last TCP dial failed or timed out.
+    Unreachable,
+}
+
+impl AddressStatus {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AddressStatus::Unknown => "unknown",
+            AddressStatus::Reachable => "reachable",
+            AddressStatus::Unreachable => "unreachable",
+        }
+    }
+}
+
+/// An advertised address annotated with the server's latest probe result.
+/// Sent to clients in the attach response so they can prioritise reachable
+/// endpoints and skip known-dead ones.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbedAddress {
+    #[serde(flatten)]
+    pub address: AgentAddress,
+    pub status: AddressStatus,
+    /// Round-trip time of the last successful probe, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtt_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +265,46 @@ pub struct ClientSessionCreateResponsePayload {
 pub struct ClientSessionKillResponsePayload {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// --- Client ↔ Server session attach ---
+
+/// `client.session.attach` — request to attach to a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionAttachPayload {
+    pub session_id: String,
+    /// "auto" | "p2p" | "relay". The client resolves "auto" itself by first
+    /// asking for "p2p" and falling back to "relay", so the server only ever
+    /// sees "p2p" or "relay" in practice.
+    #[serde(default = "default_attach_mode")]
+    pub preferred_mode: String,
+}
+
+fn default_attach_mode() -> String {
+    "p2p".to_string()
+}
+
+/// Server → Client response to `client.session.attach`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionAttachResponsePayload {
+    /// "success" or "error".
+    pub status: String,
+    /// "p2p" or "relay".
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    /// Legacy single endpoint (first/preferred address). Kept so old clients
+    /// that only read `agent_address` keep working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_address: Option<String>,
+    /// Full list of candidate endpoints with probe status, priority order.
+    /// Clients test latency across these and fall back address-by-address.
+    #[serde(default)]
+    pub addresses: Vec<ProbedAddress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 

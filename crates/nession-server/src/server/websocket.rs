@@ -24,11 +24,16 @@ pub struct WebSocketServer {
 impl WebSocketServer {
     pub async fn new(config: ServerConfig, db: Arc<Database>) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(&config.listen_address).await?;
-        let agent_registry = Arc::new(AgentRegistry::new(config.heartbeat_timeout_secs));
+        let agent_registry = Arc::new(AgentRegistry::new(
+            config.heartbeat_timeout_secs,
+            Arc::clone(&db),
+        ));
         let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
 
-        // Load persisted sessions from the database. They will be shown as
+        // Load persisted agents + sessions from the database. Agents come back
+        // Offline (probe status Unknown) until they reconnect; sessions show as
         // "recovering" until their agent reconnects and confirms them.
+        agent_registry.load_from_db().await;
         session_registry.load_from_db().await;
 
         let command_broker = Arc::new(CommandBroker::new());
@@ -147,6 +152,11 @@ impl WebSocketServer {
                 }
             });
         }
+
+        // Background probe: periodically TCP-dial every agent's advertised P2P
+        // addresses (issue #43) so the attach response carries fresh
+        // reachability, letting clients skip dead endpoints.
+        crate::probe::spawn_probe_task(Arc::clone(&self.agent_registry));
 
         loop {
             let (tcp_stream, addr) = listener.accept().await?;
