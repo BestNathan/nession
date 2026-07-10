@@ -134,6 +134,39 @@ Or use `/plugin` in Claude Code, search for "superpowers" and "superpowersexy".
 ls ~/.claude/plugins/cache/
 ```
 
+### MCP Servers
+
+| Server | Purpose | Required for |
+|--------|---------|-------------|
+| Playwright | Browser automation for UI functional verification | WebUI development |
+
+**Playwright MCP** is required for any developer working on the WebUI. It enables automated browser verification of UI changes — navigating pages, inspecting elements, taking screenshots, and testing responsive behavior.
+
+Install via Claude Code:
+```
+/install-mcp
+```
+
+Or manually add to `~/.claude/mcp.json` or `.claude/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
+**Verify Playwright MCP is available:**
+```bash
+# In Claude Code, the mcp__playwright__browser_navigate tool should be listed
+# If not, check MCP server status in Claude Code settings
+```
+
+**⚠ Without Playwright MCP, UI changes cannot be functionally verified.** See `nession-development` skill for the full verification workflow.
+
 ## 4. One-Shot Environment Setup
 
 For a new machine, run these in order:
@@ -161,6 +194,11 @@ cd web && npm install && npm run build
 # 6. Claude plugins — install from GitHub:
 claude plugins install https://github.com/obra/superpowers
 claude plugins install https://github.com/BestNathan/superpowersexy
+
+# 6.5. Playwright MCP (required for WebUI development)
+# In Claude Code, run: /install-mcp
+# Or manually add to ~/.claude/mcp.json:
+# { "mcpServers": { "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] } } }
 
 # 7. Verify
 rustc --version && cargo --version
@@ -202,6 +240,20 @@ The ESLint flat config (`eslint.config.js`) requires the `typescript-eslint` umb
 cd web && npm install --save-dev typescript-eslint
 ```
 This is already in `web/package.json` — only needed if working from a stale checkout or partial install.
+
+### `mcp__playwright__browser_navigate` tool not available
+Playwright MCP server not configured. This is required for WebUI functional verification. Install via `/install-mcp` in Claude Code, or manually add the Playwright server to `~/.claude/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
+```
+Restart Claude Code after adding. Verify with: `ls ~/.claude/mcp.json` or `.claude/mcp.json`.
 
 ### Vite dev server won't start
 Check port 13000 not in use: `lsof -i :13000`. Check `web/vite.config.ts` for correct proxy target.

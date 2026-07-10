@@ -9,6 +9,8 @@ description: Use when developing Nession features, writing or running tests, dec
 
 Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`, version bump in `Cargo.toml` + `web/package.json`, submit changes via PR. Never build Docker images locally — CI handles that.
 
+**⚠ UI/交互改动必须用 Playwright 验证**：任何涉及 WebUI 视觉、交互、布局、终端行为的改动，必须在本地运行完整栈（server + agent + web），通过 Playwright MCP 在浏览器中验证功能正确后才算完成。仅靠单元测试和类型检查不够。
+
 ## ⛔ Iron Law: Never Touch Main
 
 ```
@@ -192,6 +194,11 @@ cargo clippy -- -D warnings
 cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
+# STEP 3.5: Playwright verification (MANDATORY for UI/interaction changes)
+# Start the full local stack and use Playwright MCP browser tools
+# to functionally verify the change in a real browser.
+# See "Playwright Functional Verification" section above.
+
 # STEP 4: Push and create PR
 git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
@@ -289,36 +296,87 @@ Every PR must include these three sections:
 
 CI triggers on merge to main — builds multi-arch Docker images, pushes tags, updates k8s manifests. No manual steps after merge.
 
-### Screenshot Collection (Playwright MCP)
+### Playwright Functional Verification
 
-**Mandatory after any functional UI change.** Use Playwright MCP browser tools to capture before/after screenshots for the PR body.
+**⚠ CRITICAL: Any change involving WebUI interaction, layout, terminal behavior, or visual appearance MUST be verified in a real browser via Playwright MCP before the change is considered complete.** Tests and type checks catch logic errors but cannot verify visual correctness, interaction flows, or terminal rendering — only a real browser can.
+
+This is NOT optional. This is NOT just for screenshots. This is functional verification.
+
+**When Playwright verification is required:**
+
+| Change type | Example | Must verify? |
+|-------------|---------|-------------|
+| Terminal behavior | Font scaling, resize, input handling, ANSI rendering | ✅ YES |
+| UI layout/styling | CSS changes, responsive breakpoints, component sizing | ✅ YES |
+| User interaction | Button clicks, form submissions, modal dialogs, keyboard shortcuts | ✅ YES |
+| Connection/state | Login flow, reconnection banner, error states | ✅ YES |
+| New components | Any new React component | ✅ YES |
+| Pure logic (no UI surface) | websocket.ts protocol parsing, utility functions | ❌ No (tests suffice) |
+| Config/CI changes | package.json, vite.config.ts, GitHub Actions | ❌ No |
+
+**Setup — start the full local stack:**
 
 ```bash
-# 1. Start the full stack locally (3 terminals)
-cargo run -p nession-server &          # WebSocket :19090, HTTP :10080
-cargo run -p nession-agent &            # needs tmux on host
-cd web && npm run dev                   # Vite :13000, proxies /ws → :19090
+# Use isolated HOME so env/DB files don't pollute ~/.nession
+# Terminal 1 — server (WebSocket :19090, HTTP :10080)
+HOME=/tmp/nession-demo cargo run -p nession-server
+
+# Terminal 2 — agent (needs tmux)
+HOME=/tmp/nession-demo cargo run -p nession-agent -- agent-config.toml
+
+# Terminal 3 — web (Vite :13000, proxies /ws → :19090)
+cd web && npm run dev
 ```
 
-Then use Playwright MCP tools:
+**Verification workflow:**
 
-| Step | Tool | Purpose |
-|------|------|---------|
-| Open app | `mcp__playwright__browser_navigate` → `http://localhost:13000` | Load the web UI |
-| Inspect page | `mcp__playwright__browser_snapshot` | Find elements to interact with |
-| Type text | `mcp__playwright__browser_type` | Fill search inputs, forms |
-| Click elements | `mcp__playwright__browser_click` | Simulate button clicks, navigation |
-| Fill forms | `mcp__playwright__browser_fill_form` | Batch form interactions |
-| Screenshot | `mcp__playwright__browser_take_screenshot` | Capture page as PNG |
+```
+代码改动 → 启动本地栈 → Playwright 浏览器验证 → 通过 → 继续
+                                      ↓ 失败
+                                   修复 → 重新验证
+```
 
-**What to screenshot:**
+**Playwright MCP tool reference:**
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `mcp__playwright__browser_navigate` | Open a URL | `http://localhost:13000` |
+| `mcp__playwright__browser_snapshot` | Inspect page structure (acc tree) | Find elements, check text content |
+| `mcp__playwright__browser_take_screenshot` | Capture visual state | Before/after comparisons |
+| `mcp__playwright__browser_click` | Click elements | Buttons, links, toggles |
+| `mcp__playwright__browser_type` | Type into fields | Form inputs, terminal text |
+| `mcp__playwright__browser_fill_form` | Batch form fill | Login form |
+| `mcp__playwright__browser_resize` | Resize viewport | Test responsive behavior |
+| `mcp__playwright__browser_press_key` | Press keyboard keys | Test keyboard shortcuts |
+| `mcp__playwright__browser_evaluate` | Run JS in page | `localStorage.clear()` |
+| `mcp__playwright__browser_console_messages` | Read browser console | Check for JS errors |
+| `mcp__playwright__browser_network_requests` | Inspect network traffic | Verify WebSocket messages |
+
+**What to verify (checklist):**
+
+- [ ] **正常流程** — 核心功能在浏览器中按预期工作
+- [ ] **交互状态** — 按钮、输入框、模态框有正确的 hover/focus/active 状态
+- [ ] **响应式** — `browser_resize` 切换不同视口宽度（375px 手机 / 768px 平板 / 1280px 桌面），布局不出错
+- [ ] **终端渲染** — ANSI 颜色、光标、滚动均正常
+- [ ] **连接状态** — 断开/重连 banner 显示正确
+- [ ] **控制台** — 浏览器 console 无 error/warning（`browser_console_messages`）
+- [ ] **网络** — WebSocket 消息类型符合预期，无不必要的消息
+
+**Collecting screenshots for PR body:**
+
+After functional verification passes, take screenshots of key states for the PR body:
+
 - Before/after state for each changed feature
 - Empty states (no data, no results)
 - Loading states (skeletons, spinners)
 - Error states (error banners, toasts)
-- Key interactions (search, filter, modal open/close, sort toggle)
+- Key interactions (modal open/close, terminal output)
 
-Place screenshots in the PR body under **核心功能截图** using markdown image syntax.
+Save to `.playwright-mcp/screenshots/` (gitignored). Reference in PR body under **核心功能截图** using repo-relative paths:
+
+```markdown
+![feature-name](.playwright-mcp/screenshots/feature-after.png)
+```
 
 ## Quick Reference
 
@@ -354,4 +412,5 @@ Place screenshots in the PR body under **核心功能截图** using markdown ima
 | Forgetting `cargo fmt`/`cargo clippy` before push | CI may reject the PR. |
 | Integration tests leaving temp DB files | Each test must clean up its own DB. |
 | PR missing test report or screenshots | All three sections are required. Screenshots MUST be collected via Playwright MCP (not manual screenshots). |
+| **Skipping Playwright verification for UI changes** | **FORBIDDEN.** Any UI/interaction change MUST be verified in a real browser with Playwright MCP before pushing. Tests alone are not enough for visual correctness. |
 | `#[allow(clippy::*)]` in Rust | **FORBIDDEN.** Every clippy lint must be fixed properly. |
