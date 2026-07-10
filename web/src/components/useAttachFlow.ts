@@ -27,6 +27,7 @@ export function useAttachFlow(fetchSessions: () => void) {
       sessionName: session.session_name,
       attachInfo: choice.attachInfo,
       orderedUrls: choice.orderedUrls,
+      latencies: choice.latencies,
       selectedAddress: choice.selectedUrl ?? undefined,
     });
     setView('terminal');

@@ -109,7 +109,15 @@ describe('AttachDialog', () => {
     await user.click(attachBtn);
     expect(onConfirm).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ selectedUrl: 'ws://vpn/ws' }),
+      expect.objectContaining({
+        selectedUrl: 'ws://vpn/ws',
+        // The browser's own latency measurements are handed to the terminal
+        // (not the server's probe status).
+        latencies: expect.arrayContaining([
+          expect.objectContaining({ url: 'ws://lan/ws', latencyMs: 10 }),
+          expect.objectContaining({ url: 'ws://vpn/ws', latencyMs: 20 }),
+        ]),
+      }),
     );
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
-import type { AttachInfo } from '../types';
+import type { AttachInfo, AddressLatency } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
@@ -24,6 +24,12 @@ export interface AttachedSession {
    */
   orderedUrls?: string[];
   /**
+   * Per-URL latency the BROWSER measured at attach time. Used to render the
+   * runtime path selector with the browser's own numbers (not the server's
+   * probe results, which are a different vantage point).
+   */
+  latencies?: AddressLatency[];
+  /**
    * User-selected P2P address (manual override). When set, auto latency
    * selection is skipped and this exact URL is used (no address rotation).
    */
@@ -39,7 +45,7 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls } = session;
+  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
@@ -107,6 +113,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
         {attachInfo.mode === 'p2p' && !forcedRelay && attachInfo.addresses ? (
           <AddressSelector
             addresses={attachInfo.addresses}
+            latencies={latencies ?? []}
             activeUrl={activeUrl ?? null}
             isAuto={manualOverride === null}
             onSelect={setManualOverride}

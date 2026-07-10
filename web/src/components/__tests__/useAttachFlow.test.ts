@@ -18,7 +18,14 @@ function session(): Session {
 
 function choice(mode: 'auto' | 'p2p', overrides: Partial<AttachChoice> = {}): AttachChoice {
   const attachInfo: AttachInfo = { mode: 'p2p', session_id: 'agent-1:dev', session_name: 'dev' };
-  return { mode, attachInfo, orderedUrls: ['ws://a/ws'], selectedUrl: null, ...overrides };
+  return {
+    mode,
+    attachInfo,
+    orderedUrls: ['ws://a/ws'],
+    latencies: [{ url: 'ws://a/ws', latencyMs: 10 }],
+    selectedUrl: null,
+    ...overrides,
+  };
 }
 
 describe('useAttachFlow', () => {
