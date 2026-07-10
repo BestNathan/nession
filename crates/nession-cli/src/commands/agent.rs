@@ -320,6 +320,14 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     let hostname = get_hostname();
     let ip_address = get_ip_address();
     let port = extract_port(&config.listen_address);
+    // Advertise all non-loopback NIC addresses so clients can pick the best
+    // P2P path; falls back to the legacy ip/port if detection finds nothing.
+    let addresses = {
+        let (finalised, _dropped) = nession_common::address::finalize_addresses(
+            nession_agent::netdetect::detect_local_addresses(port),
+        );
+        finalised
+    };
     let tmux_version = get_tmux_version().await;
     let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
 
@@ -337,6 +345,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         &ip_address,
         port,
         None, // connect_url — not used in CLI bare-metal agent mode
+        addresses,
         metadata,
         Arc::new(TmuxManager::new()),
         config.default_working_dir.clone(),

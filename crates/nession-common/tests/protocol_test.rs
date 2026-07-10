@@ -1,8 +1,8 @@
 use nession_common::protocol::{
-    AgentCommandResponsePayload, AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload,
-    AgentRegisterResponsePayload, AgentStatus, ClientSessionCreatePayload,
+    AgentAddress, AgentCommandResponsePayload, AgentHeartbeatPayload, AgentMetadata,
+    AgentRegisterPayload, AgentRegisterResponsePayload, AgentStatus, ClientSessionCreatePayload,
     ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    HeartbeatMetadata, Message, ProtocolMessage, ServerHeartbeatAckPayload,
+    HeartbeatMetadata, Message, NetworkType, ProtocolMessage, ServerHeartbeatAckPayload,
     ServerSessionCreatePayload, ServerSessionKillPayload,
 };
 
@@ -35,6 +35,7 @@ fn test_agent_register_payload_serialization() {
         },
         protocol_version: "1.0".to_string(),
         connect_url: Some("wss://agent.example.com/ws".to_string()),
+        addresses: vec![],
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -43,6 +44,81 @@ fn test_agent_register_payload_serialization() {
     assert_eq!(decoded.hostname, "server1");
     assert_eq!(decoded.port, 9090);
     assert_eq!(decoded.connect_url.unwrap(), "wss://agent.example.com/ws");
+}
+
+#[test]
+fn test_agent_register_payload_with_addresses_roundtrip() {
+    let payload = AgentRegisterPayload {
+        agent_id: "agent-multi".to_string(),
+        hostname: "node1".to_string(),
+        ip_address: "192.168.1.5".to_string(),
+        port: 8080,
+        auth_token: "secret".to_string(),
+        metadata: AgentMetadata {
+            tmux_version: "3.3a".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.5.1".to_string(),
+        },
+        protocol_version: "1.0".to_string(),
+        connect_url: None,
+        addresses: vec![
+            AgentAddress {
+                url: "ws://192.168.1.5:8080/ws".to_string(),
+                label: Some("LAN".to_string()),
+                network_type: NetworkType::Lan,
+                priority: 10,
+            },
+            AgentAddress {
+                url: "wss://agent.example.com/ws".to_string(),
+                label: Some("Tunnel".to_string()),
+                network_type: NetworkType::Tunnel,
+                priority: 30,
+            },
+        ],
+    };
+
+    let json = serde_json::to_string(&payload).unwrap();
+    let decoded: AgentRegisterPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.addresses.len(), 2);
+    assert_eq!(
+        decoded.addresses.first().unwrap().network_type,
+        NetworkType::Lan
+    );
+    assert_eq!(
+        decoded.addresses.get(1).unwrap().url,
+        "wss://agent.example.com/ws"
+    );
+    // network_type serialises lowercase.
+    assert!(json.contains("\"network_type\":\"lan\""));
+}
+
+#[test]
+fn test_agent_register_payload_legacy_json_defaults_addresses() {
+    // An old agent that predates the `addresses` field omits it entirely.
+    let legacy = r#"{
+        "agent_id": "old-agent",
+        "hostname": "legacy",
+        "ip_address": "10.0.0.9",
+        "port": 8080,
+        "auth_token": "tok",
+        "metadata": {"tmux_version":"3.2","os_version":"Linux","nession_version":"0.4.0"},
+        "protocol_version": "1.0"
+    }"#;
+    let decoded: AgentRegisterPayload = serde_json::from_str(legacy).unwrap();
+    assert!(decoded.addresses.is_empty());
+    assert!(decoded.connect_url.is_none());
+    assert_eq!(decoded.ip_address, "10.0.0.9");
+}
+
+#[test]
+fn test_agent_address_priority_defaults_to_zero_when_absent() {
+    // `priority` has serde(default); absent → 0 (the "unset" sentinel that
+    // finalize_addresses later replaces with the type default).
+    let json = r#"{"url":"ws://h:9/ws","network_type":"custom"}"#;
+    let decoded: AgentAddress = serde_json::from_str(json).unwrap();
+    assert_eq!(decoded.priority, 0);
+    assert!(decoded.label.is_none());
+    assert_eq!(decoded.network_type, NetworkType::Custom);
 }
 
 #[test]
@@ -60,6 +136,7 @@ fn test_agent_register_payload_without_connect_url() {
         },
         protocol_version: "1.0".to_string(),
         connect_url: None,
+        addresses: vec![],
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -278,6 +355,7 @@ fn test_message_wrapped_in_protocol_envelope() {
             },
             protocol_version: "1.0".to_string(),
             connect_url: None,
+            addresses: vec![],
         },
     };
 

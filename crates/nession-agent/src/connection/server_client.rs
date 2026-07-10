@@ -14,8 +14,8 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
-    AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus, EnvSnapshot,
-    HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
+    AgentAddress, AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus,
+    EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
     ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,9 @@ pub struct ServerClient {
     /// Public WebSocket URL for clients (e.g. "wss://agent.example.com/ws").
     /// When set, the server returns this to clients on session attach.
     connect_url: Option<String>,
+    /// All advertised endpoints (detected NICs + config-declared), finalised
+    /// (deduped, priority-ordered, capped). Sent in the register payload.
+    addresses: Vec<AgentAddress>,
     /// Default working directory for new tmux sessions.
     default_working_dir: String,
     /// Agent metadata.
@@ -212,6 +215,7 @@ impl ServerClient {
     /// * `ip_address` - IP address of the agent
     /// * `port` - Port where the agent's WebSocket server is listening
     /// * `connect_url` - Public WebSocket URL for P2P client connections
+    /// * `addresses` - Finalised advertised endpoints (detected + declared)
     /// * `metadata` - Agent metadata (tmux version, OS version, etc.)
     /// * `tmux` - Tmux manager for handling session commands
     /// * `default_working_dir` - Default working directory for new tmux sessions
@@ -224,6 +228,7 @@ impl ServerClient {
         ip_address: impl Into<String>,
         port: u16,
         connect_url: Option<String>,
+        addresses: Vec<AgentAddress>,
         metadata: AgentMetadata,
         tmux: Arc<TmuxManager>,
         default_working_dir: String,
@@ -238,6 +243,7 @@ impl ServerClient {
             ip_address: ip_address.into(),
             port,
             connect_url,
+            addresses,
             default_working_dir,
             metadata,
             tmux,
@@ -381,6 +387,7 @@ impl ServerClient {
             metadata: self.metadata.clone(),
             protocol_version: "1.0".to_string(),
             connect_url: self.connect_url.clone(),
+            addresses: self.addresses.clone(),
         };
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;
@@ -874,7 +881,8 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
-            None, // connect_url
+            None,   // connect_url
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -917,7 +925,8 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
-            None, // connect_url
+            None,   // connect_url
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -970,7 +979,8 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
-            None, // connect_url
+            None,   // connect_url
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1051,7 +1061,8 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
-            None, // connect_url
+            None,   // connect_url
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1127,7 +1138,8 @@ mod tests {
             "test-host",
             "127.0.0.1",
             8080,
-            None, // connect_url
+            None,   // connect_url
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1228,6 +1240,7 @@ mod tests {
             "127.0.0.1",
             8080,
             None,
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1335,6 +1348,7 @@ mod tests {
             "127.0.0.1",
             8080,
             None,
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1424,6 +1438,7 @@ mod tests {
             "127.0.0.1",
             8080,
             None,
+            vec![], // addresses
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),

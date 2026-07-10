@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, TerminalIcon, Package } from 'lucide-react';
-import type { AttachInfo } from '../types';
+import type { AttachInfo, AddressLatency } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
@@ -8,14 +8,32 @@ import { EnvPanel } from './env/EnvPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
-import { useP2PConnection } from '../hooks/useP2PConnection';
+import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
+import { AddressSelector } from './AddressSelector';
 
 export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
   sessionName: string;
+  /**
+   * Browser-tested candidate URLs, best-first, resolved in the attach dialog.
+   * The connection layer uses these directly (no re-testing) and rotates
+   * through them on failure. Empty → straight to relay.
+   */
+  orderedUrls?: string[];
+  /**
+   * Per-URL latency the BROWSER measured at attach time. Used to render the
+   * runtime path selector with the browser's own numbers (not the server's
+   * probe results, which are a different vantage point).
+   */
+  latencies?: AddressLatency[];
+  /**
+   * User-selected P2P address (manual override). When set, auto latency
+   * selection is skipped and this exact URL is used (no address rotation).
+   */
+  selectedAddress?: string;
 }
 
 interface TerminalViewProps {
@@ -27,17 +45,25 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName } = session;
-  const isP2P = attachInfo.mode === 'p2p';
+  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
 
-  const p2pConnection = useP2PConnection(
-    isP2P && attachInfo.agent_address
-      ? { agentUrl: attachInfo.agent_address, connectionToken: attachInfo.connection_token, sessionName }
-      : null,
-  );
+  // Multi-address P2P: connect the browser-tested best path (resolved in the
+  // attach dialog), rotate on failure, fall back to relay.
+  const {
+    p2pConnection,
+    effectiveMode,
+    activeUrl,
+    forcedRelay,
+    manualOverride,
+    setManualOverride,
+  } = useP2PWithFallback(attachInfo, sessionName, {
+    orderedUrls: orderedUrls ?? null,
+    initialSelectedAddress: selectedAddress ?? null,
+  });
+  const isP2P = effectiveMode === 'p2p';
 
   // Stable across re-renders. The hook returns a fresh object literal each
   // render, but its transport methods are useCallback-stable for the
@@ -61,7 +87,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       ref={terminalRef}
       sessionId={sessionId}
       sessionName={sessionName}
-      mode={attachInfo.mode}
+      mode={effectiveMode}
       p2pConnection={isP2P ? p2pConnection : undefined}
       serverConnection={!isP2P ? wsService : undefined}
       onDisconnect={onDisconnect}
@@ -80,9 +106,19 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
         <span className="text-sm text-muted-foreground">
           Session: <strong className="text-foreground">{sessionName}</strong>
         </span>
-        <Badge variant={attachInfo.mode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
-          {attachInfo.mode.toUpperCase()}
+        <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
+          {effectiveMode.toUpperCase()}
+          {forcedRelay && attachInfo.mode === 'p2p' ? ' (fallback)' : ''}
         </Badge>
+        {attachInfo.mode === 'p2p' && !forcedRelay && attachInfo.addresses ? (
+          <AddressSelector
+            addresses={attachInfo.addresses}
+            latencies={latencies ?? []}
+            activeUrl={activeUrl ?? null}
+            isAuto={manualOverride === null}
+            onSelect={setManualOverride}
+          />
+        ) : null}
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col">

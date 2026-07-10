@@ -1,10 +1,22 @@
 use chrono::Utc;
 use nession_common::protocol::AgentMetadata;
+use nession_server::db::Database;
 use nession_server::registry::agent::{AgentInfo, AgentRegistry, AgentStatus};
+use std::sync::Arc;
+use tempfile::NamedTempFile;
+
+/// Build an `AgentRegistry` backed by a throwaway on-disk SQLite DB. The temp
+/// file guard must be kept alive for the registry's lifetime.
+async fn test_registry(timeout_secs: u64) -> (AgentRegistry, NamedTempFile) {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap().to_string();
+    let db = Database::new(&db_path).await.unwrap();
+    (AgentRegistry::new(timeout_secs, Arc::new(db)), temp_file)
+}
 
 #[tokio::test]
 async fn test_agent_registration() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
 
     let agent = AgentInfo {
         agent_id: "agent_123".to_string(),
@@ -12,6 +24,7 @@ async fn test_agent_registration() {
         ip_address: "192.168.1.10".to_string(),
         port: 8080,
         connect_url: None,
+        addresses: vec![],
         registered_at: Utc::now(),
         last_heartbeat: Utc::now(),
         status: AgentStatus::Online,
@@ -33,7 +46,7 @@ async fn test_agent_registration() {
 
 #[tokio::test]
 async fn test_agent_heartbeat_update() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
 
     let agent = AgentInfo {
         agent_id: "agent_123".to_string(),
@@ -41,6 +54,7 @@ async fn test_agent_heartbeat_update() {
         ip_address: "192.168.1.10".to_string(),
         port: 8080,
         connect_url: None,
+        addresses: vec![],
         registered_at: Utc::now(),
         last_heartbeat: Utc::now(),
         status: AgentStatus::Online,
@@ -65,7 +79,7 @@ async fn test_agent_heartbeat_update() {
 
 #[tokio::test]
 async fn test_agent_list_all() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
     registry
         .register(AgentInfo {
             agent_id: "a1".to_string(),
@@ -73,6 +87,7 @@ async fn test_agent_list_all() {
             ip_address: "10.0.0.1".to_string(),
             port: 8080,
             connect_url: None,
+            addresses: vec![],
             registered_at: Utc::now(),
             last_heartbeat: Utc::now(),
             status: AgentStatus::Online,
@@ -92,6 +107,7 @@ async fn test_agent_list_all() {
             ip_address: "10.0.0.2".to_string(),
             port: 8080,
             connect_url: None,
+            addresses: vec![],
             registered_at: Utc::now(),
             last_heartbeat: Utc::now(),
             status: AgentStatus::Online,
@@ -111,7 +127,7 @@ async fn test_agent_list_all() {
 
 #[tokio::test]
 async fn test_agent_unregister() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
     registry
         .register(AgentInfo {
             agent_id: "to_remove".to_string(),
@@ -119,6 +135,7 @@ async fn test_agent_unregister() {
             ip_address: "10.0.0.1".to_string(),
             port: 8080,
             connect_url: None,
+            addresses: vec![],
             registered_at: Utc::now(),
             last_heartbeat: Utc::now(),
             status: AgentStatus::Online,
@@ -139,7 +156,7 @@ async fn test_agent_unregister() {
 
 #[tokio::test]
 async fn test_agent_check_offline() {
-    let registry = AgentRegistry::new(1); // 1-second timeout
+    let (registry, _db_guard) = test_registry(1).await;
 
     let agent = AgentInfo {
         agent_id: "stale".to_string(),
@@ -147,6 +164,7 @@ async fn test_agent_check_offline() {
         ip_address: "10.0.0.99".to_string(),
         port: 8080,
         connect_url: None,
+        addresses: vec![],
         registered_at: Utc::now(),
         last_heartbeat: Utc::now() - chrono::Duration::seconds(5), // 5 seconds ago
         status: AgentStatus::Online,
@@ -169,7 +187,7 @@ async fn test_agent_check_offline() {
 
 #[tokio::test]
 async fn test_agent_check_offline_skips_already_offline() {
-    let registry = AgentRegistry::new(1);
+    let (registry, _db_guard) = test_registry(1).await;
 
     let agent = AgentInfo {
         agent_id: "already_off".to_string(),
@@ -177,6 +195,7 @@ async fn test_agent_check_offline_skips_already_offline() {
         ip_address: "10.0.0.1".to_string(),
         port: 8080,
         connect_url: None,
+        addresses: vec![],
         registered_at: Utc::now(),
         last_heartbeat: Utc::now() - chrono::Duration::seconds(100),
         status: AgentStatus::Offline,
@@ -197,13 +216,13 @@ async fn test_agent_check_offline_skips_already_offline() {
 
 #[tokio::test]
 async fn test_update_heartbeat_nonexistent_agent_is_noop() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
     // Should not panic
     registry.update_heartbeat("nonexistent", 0, 0).await;
 }
 
 #[tokio::test]
 async fn test_get_nonexistent_agent_returns_none() {
-    let registry = AgentRegistry::new(30);
+    let (registry, _db_guard) = test_registry(30).await;
     assert!(registry.get("ghost").await.is_none());
 }
