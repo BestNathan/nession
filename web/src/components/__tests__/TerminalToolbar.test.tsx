@@ -63,7 +63,7 @@ describe('TerminalToolbar', () => {
     expect(screen.queryByRole('button', { name: 'Delete Me' })).not.toBeInTheDocument();
   });
 
-  it('sends text from input on Enter', async () => {
+  it('sends text from textarea on Enter', async () => {
     const user = userEvent.setup();
     const { sendText } = renderToolbar();
     const input = screen.getByPlaceholderText(/Type to send/);
@@ -80,6 +80,24 @@ describe('TerminalToolbar', () => {
     expect(sendText).toHaveBeenCalledWith('pwd\r');
   });
 
+  it('Shift+Enter inserts a newline and does not send', async () => {
+    const user = userEvent.setup();
+    const { sendText } = renderToolbar();
+    const input = screen.getByPlaceholderText(/Type to send/) as HTMLTextAreaElement;
+    await user.type(input, 'line1');
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    expect(sendText).not.toHaveBeenCalled();
+    expect(input.value).toBe('line1\n');
+  });
+
+  it('sends a multi-line block as literal text plus trailing CR', async () => {
+    const user = userEvent.setup();
+    const { sendText } = renderToolbar();
+    const input = screen.getByPlaceholderText(/Type to send/);
+    await user.type(input, 'cd /tmp{Shift>}{Enter}{/Shift}ls{Enter}');
+    expect(sendText).toHaveBeenCalledWith('cd /tmp\nls\r');
+  });
+
   it('disables functional buttons when disabled prop is true', () => {
     renderToolbar({ disabled: true });
     expect(screen.getByRole('button', { name: 'clear' })).toBeDisabled();
@@ -88,7 +106,7 @@ describe('TerminalToolbar', () => {
     expect(screen.getByTitle('Send')).toBeDisabled();
   });
 
-  it('disables input when disabled prop is true', () => {
+  it('disables textarea when disabled prop is true', () => {
     renderToolbar({ disabled: true });
     const input = screen.getByPlaceholderText(/Type to send/);
     expect(input).toBeDisabled();
@@ -113,12 +131,4 @@ describe('TerminalToolbar', () => {
     expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
   });
 
-  it('Shift+Enter does not send in input', async () => {
-    const user = userEvent.setup();
-    const { sendText } = renderToolbar();
-    const input = screen.getByPlaceholderText(/Type to send/);
-    await user.type(input, 'line1');
-    await user.keyboard('{Shift>}{Enter}{/Shift}');
-    expect(sendText).not.toHaveBeenCalled();
-  });
 });
