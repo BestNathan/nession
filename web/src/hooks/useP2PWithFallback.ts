@@ -18,11 +18,21 @@ export interface P2PFallbackResult {
   setManualOverride: (url: string | null) => void;
 }
 
+interface UseP2PWithFallbackOptions {
+  /**
+   * Browser-tested candidate URLs from the attach dialog, best-first. Used
+   * verbatim (no re-testing). `null` → resolve inside useAddressPlan.
+   */
+  orderedUrls: string[] | null;
+  /** Initial manual address override (null = automatic). */
+  initialSelectedAddress: string | null;
+}
+
 /**
  * Drive P2P connection with multi-address selection and fallback (issue #43):
  *
- * 1. Resolve an ordered list of candidate endpoints (auto latency test, or a
- *    manual override).
+ * 1. Use the ordered candidate endpoints resolved by the attach dialog's
+ *    browser latency test (or a manual override).
  * 2. Connect to the best candidate; on permanent disconnect, rotate to the
  *    next candidate.
  * 3. When all candidates are exhausted, fall back to relay so the session
@@ -34,12 +44,14 @@ export interface P2PFallbackResult {
 export function useP2PWithFallback(
   attachInfo: AttachInfo,
   sessionName: string,
-  initialSelectedAddress: string | null,
+  { orderedUrls, initialSelectedAddress }: UseP2PWithFallbackOptions,
 ): P2PFallbackResult {
   const [manualOverride, setManualOverride] = useState<string | null>(
     initialSelectedAddress,
   );
-  const plan = useAddressPlan(attachInfo, manualOverride);
+  // When a manual override is active it wins; otherwise use the dialog's
+  // browser-tested order.
+  const plan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
   const [addressIndex, setAddressIndex] = useState(0);
   const [forcedRelay, setForcedRelay] = useState(false);
 

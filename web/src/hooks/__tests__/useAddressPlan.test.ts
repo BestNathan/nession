@@ -3,12 +3,11 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useAddressPlan } from '../useAddressPlan';
 import type { AttachInfo, ProbedAddress } from '../../types';
 
-// Mock the latency ordering so the hook test is deterministic.
+// Mock the latency ordering so the hook test is deterministic. The real
+// implementation tests ALL addresses from the browser and never filters on
+// server-side status; the mock returns every url in input order.
 vi.mock('../../services/addressSelection', () => ({
-  orderAddressesByLatency: vi.fn(async (addrs: ProbedAddress[]) =>
-    // Return reachable-first, dropping unreachable — mirrors real behaviour.
-    addrs.filter((a) => a.status !== 'unreachable').map((a) => a.url),
-  ),
+  orderAddressesByLatency: vi.fn(async (addrs: ProbedAddress[]) => addrs.map((a) => a.url)),
 }));
 
 function attach(overrides: Partial<AttachInfo>): AttachInfo {
@@ -37,31 +36,48 @@ describe('useAddressPlan', () => {
     const info = attach({
       addresses: [probed('ws://a/ws'), probed('ws://b/ws')],
     });
-    const { result } = renderHook(() => useAddressPlan(info, 'ws://b/ws'));
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: 'ws://b/ws' }),
+    );
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.urls).toEqual(['ws://b/ws']);
   });
 
+  it('uses pre-resolved orderedUrls verbatim (no re-testing)', async () => {
+    const info = attach({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: ['ws://b/ws', 'ws://a/ws'], manualUrl: null }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.urls).toEqual(['ws://b/ws', 'ws://a/ws']);
+  });
+
   it('falls back to the legacy agent_address when no address list is present', async () => {
     const info = attach({ agent_address: 'ws://legacy/ws', addresses: [] });
-    const { result } = renderHook(() => useAddressPlan(info, null));
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
+    );
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.urls).toEqual(['ws://legacy/ws']);
   });
 
-  it('auto-orders the candidate list by latency', async () => {
+  it('auto-orders the candidate list by latency when not pre-resolved', async () => {
     const info = attach({
       addresses: [probed('ws://a/ws'), probed('ws://dead/ws', 'unreachable')],
     });
-    const { result } = renderHook(() => useAddressPlan(info, null));
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
+    );
     await waitFor(() => expect(result.current.ready).toBe(true));
-    // Mocked ordering drops the unreachable one.
-    expect(result.current.urls).toEqual(['ws://a/ws']);
+    // Browser tests all addresses; server 'unreachable' is NOT a filter.
+    expect(result.current.urls).toEqual(['ws://a/ws', 'ws://dead/ws']);
   });
 
   it('is immediately ready with no urls for relay attaches', async () => {
     const info = attach({ mode: 'relay' });
-    const { result } = renderHook(() => useAddressPlan(info, null));
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: null, manualUrl: null }),
+    );
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.urls).toEqual([]);
   });

@@ -18,6 +18,12 @@ export interface AttachedSession {
   sessionId: string;
   sessionName: string;
   /**
+   * Browser-tested candidate URLs, best-first, resolved in the attach dialog.
+   * The connection layer uses these directly (no re-testing) and rotates
+   * through them on failure. Empty → straight to relay.
+   */
+  orderedUrls?: string[];
+  /**
    * User-selected P2P address (manual override). When set, auto latency
    * selection is skipped and this exact URL is used (no address rotation).
    */
@@ -33,12 +39,13 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName, selectedAddress } = session;
+  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
 
-  // Multi-address P2P: latency-select, rotate on failure, fall back to relay.
+  // Multi-address P2P: connect the browser-tested best path (resolved in the
+  // attach dialog), rotate on failure, fall back to relay.
   const {
     p2pConnection,
     effectiveMode,
@@ -46,9 +53,11 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
     forcedRelay,
     manualOverride,
     setManualOverride,
-  } = useP2PWithFallback(attachInfo, sessionName, selectedAddress ?? null);
+  } = useP2PWithFallback(attachInfo, sessionName, {
+    orderedUrls: orderedUrls ?? null,
+    initialSelectedAddress: selectedAddress ?? null,
+  });
   const isP2P = effectiveMode === 'p2p';
-
 
   // Stable across re-renders. The hook returns a fresh object literal each
   // render, but its transport methods are useCallback-stable for the

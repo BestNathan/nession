@@ -87,16 +87,21 @@ describe('measureLatency', () => {
 });
 
 describe('orderAddressesByLatency', () => {
-  it('drops server-probed unreachable addresses', async () => {
+  it('keeps a browser-reachable address even if server marked it unreachable', async () => {
+    // The server's probe is a different vantage point; the browser is the
+    // authority. An address the server called unreachable but the browser CAN
+    // reach must still be offered (and ranked by its browser latency).
     const addrs = [
-      probed('ws://dead/ws', 'unreachable'),
+      probed('ws://server-dead-browser-ok/ws', 'unreachable'),
       probed('ws://live/ws', 'reachable'),
     ];
-    behavior['ws://live/ws'] = { openDelayMs: 1 };
+    behavior['ws://server-dead-browser-ok/ws'] = { openDelayMs: 1 };
+    behavior['ws://live/ws'] = { openDelayMs: 20 };
     const p = orderAddressesByLatency(addrs);
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(50);
     const urls = await p;
-    expect(urls).toEqual(['ws://live/ws']);
+    // Both reachable from the browser; the faster one (server-"dead") wins.
+    expect(urls).toEqual(['ws://server-dead-browser-ok/ws', 'ws://live/ws']);
   });
 
   it('orders reachable addresses by measured latency', async () => {
@@ -127,9 +132,23 @@ describe('orderAddressesByLatency', () => {
     expect(urls).toContain('ws://flaky/ws');
   });
 
-  it('returns empty when every address is unreachable', async () => {
-    const addrs = [probed('ws://x/ws', 'unreachable'), probed('ws://y/ws', 'unreachable')];
-    const urls = await orderAddressesByLatency(addrs);
+  it('still returns browser-failed addresses as last-resort attempts', async () => {
+    // Even when the browser handshake fails for all, they are returned (not
+    // dropped) so the connection layer can still try them before relay — a
+    // handshake probe can fail transiently. Server status is never consulted.
+    const addrs = [probed('ws://x/ws', 'reachable'), probed('ws://y/ws', 'reachable')];
+    behavior['ws://x/ws'] = { fail: true };
+    behavior['ws://y/ws'] = { fail: true };
+    const p = orderAddressesByLatency(addrs);
+    await vi.advanceTimersByTimeAsync(10);
+    const urls = await p;
+    expect(urls).toHaveLength(2);
+    expect(urls).toContain('ws://x/ws');
+    expect(urls).toContain('ws://y/ws');
+  });
+
+  it('returns empty only for an empty candidate list', async () => {
+    const urls = await orderAddressesByLatency([]);
     expect(urls).toEqual([]);
   });
 });

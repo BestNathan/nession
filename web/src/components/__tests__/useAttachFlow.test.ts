@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useAttachFlow } from '../useAttachFlow';
-import type { Session, AttachMode } from '../../types';
-import type { AttachedSession } from '../TerminalView';
+import type { Session, AttachInfo } from '../../types';
+import type { AttachChoice } from '../env/AttachDialog';
 
 function session(): Session {
   return {
@@ -16,21 +16,9 @@ function session(): Session {
   };
 }
 
-/** A handleAttach stub that records the mode and stashes _attached. */
-function makeHandleAttach(): {
-  fn: (s: Session, mode?: AttachMode) => Promise<void>;
-  calls: AttachMode[];
-} {
-  const calls: AttachMode[] = [];
-  const fn = vi.fn(async (s: Session, mode: AttachMode = 'auto') => {
-    calls.push(mode);
-    (fn as unknown as { _attached?: AttachedSession })._attached = {
-      sessionId: s.session_id,
-      sessionName: s.session_name,
-      attachInfo: { mode: 'relay', session_id: s.session_id },
-    };
-  });
-  return { fn: fn as unknown as (s: Session, mode?: AttachMode) => Promise<void>, calls };
+function choice(mode: 'auto' | 'p2p', overrides: Partial<AttachChoice> = {}): AttachChoice {
+  const attachInfo: AttachInfo = { mode: 'p2p', session_id: 'agent-1:dev', session_name: 'dev' };
+  return { mode, attachInfo, orderedUrls: ['ws://a/ws'], selectedUrl: null, ...overrides };
 }
 
 describe('useAttachFlow', () => {
@@ -40,42 +28,43 @@ describe('useAttachFlow', () => {
   });
 
   it('onAttach opens the dialog (does not attach immediately)', () => {
-    const { fn } = makeHandleAttach();
-    const { result } = renderHook(() => useAttachFlow(fn, vi.fn()));
+    const { result } = renderHook(() => useAttachFlow(vi.fn()));
     act(() => result.current.onAttach(session()));
     expect(result.current.attachDialogSession).not.toBeNull();
     expect(result.current.view).toBe('dashboard');
   });
 
-  it('confirmAttach with p2p mode switches to terminal', async () => {
-    const { fn, calls } = makeHandleAttach();
-    const { result } = renderHook(() => useAttachFlow(fn, vi.fn()));
+  it('confirmAttach switches to terminal with the resolved choice', async () => {
+    const { result } = renderHook(() => useAttachFlow(vi.fn()));
     await act(async () => {
-      result.current.confirmAttach(session(), 'p2p');
+      result.current.confirmAttach(session(), choice('p2p'));
     });
     await waitFor(() => expect(result.current.view).toBe('terminal'));
-    expect(calls).toEqual(['p2p']);
+    expect(result.current.attachedSession?.orderedUrls).toEqual(['ws://a/ws']);
   });
 
   it('persists mode prefs on attach', async () => {
-    const { fn } = makeHandleAttach();
-    const { result } = renderHook(() => useAttachFlow(fn, vi.fn()));
+    const { result } = renderHook(() => useAttachFlow(vi.fn()));
     await act(async () => {
-      result.current.confirmAttach(session(), 'auto');
+      result.current.confirmAttach(session(), choice('auto'));
     });
     await waitFor(() => expect(result.current.view).toBe('terminal'));
     const saved = JSON.parse(localStorage.getItem('nession_attach_prefs') ?? '{}');
     expect(saved.mode).toBe('auto');
   });
 
+  it('carries a manual address override through to the attached session', async () => {
+    const { result } = renderHook(() => useAttachFlow(vi.fn()));
+    await act(async () => {
+      result.current.confirmAttach(session(), choice('p2p', { selectedUrl: 'ws://vpn/ws' }));
+    });
+    await waitFor(() => expect(result.current.view).toBe('terminal'));
+    expect(result.current.attachedSession?.selectedAddress).toBe('ws://vpn/ws');
+  });
+
   it('backToDashboard resets view and fetches sessions', () => {
     const fetchSessions = vi.fn();
-    const { fn } = makeHandleAttach();
-    const { result } = renderHook(() => useAttachFlow(fn, fetchSessions));
-    // Manually set terminal state to simulate an active attach.
-    act(() => {
-      result.current.attachDialogSession = session();
-    });
+    const { result } = renderHook(() => useAttachFlow(fetchSessions));
     act(() => result.current.backToDashboard());
     expect(result.current.view).toBe('dashboard');
     expect(fetchSessions).toHaveBeenCalled();
