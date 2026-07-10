@@ -19,8 +19,6 @@ export class TerminalView {
   readonly terminal: Terminal;
 
   private addons: AddonManager;
-  private renderer: Renderer;
-  private theme: ThemeManager;
   private viewport: ViewportManager;
   private input: InputManager;
   private connection: ConnectionManager;
@@ -47,9 +45,9 @@ export class TerminalView {
     // 2. Create managers.
     this.addons = new AddonManager(this.terminal);
 
-    this.renderer = new Renderer(this.terminal, options.rendererType);
-
-    this.theme = new ThemeManager(this.terminal, options.theme);
+    // Renderer and ThemeManager are created for their constructor side-effects.
+    new Renderer(this.terminal, options.rendererType);
+    new ThemeManager(this.terminal, options.theme);
 
     const fitAddon = this.addons.register(new FitAddon());
     this.viewport = new ViewportManager(

@@ -27,7 +27,6 @@ export class ConnectionManager {
   private p2pConnection?: ConnectionOptions['p2pConnection'];
   private serverConnection?: ConnectionOptions['serverConnection'];
 
-  private state: ConnectionState = 'connected';
   private reconnectAttempt = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
@@ -176,7 +175,6 @@ export class ConnectionManager {
   }
 
   private setState(state: ConnectionState, attempt: number): void {
-    this.state = state;
     this.reconnectAttempt = attempt;
     this.onStateChange?.(state, attempt);
     if (state === 'lost') {
