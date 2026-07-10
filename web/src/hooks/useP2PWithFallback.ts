@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AttachInfo } from '../types';
 import { useP2PConnection, type P2PConnection } from './useP2PConnection';
 import { useAddressPlan } from './useAddressPlan';
@@ -69,19 +69,36 @@ export function useP2PWithFallback(
 
   // Fallback driver: when the active P2P endpoint gives up, advance to the next
   // candidate; when none remain, switch to relay.
+  //
+  // `useP2PConnection` initialises its state to 'disconnected' when first
+  // rendered with null options (before the address plan resolves). Guard
+  // against that stale value: only treat 'disconnected' as failure once the
+  // connection for the *current* address has actually gone live (reached
+  // 'connecting'/'connected'/'reconnecting'). `startedRef` is keyed by the
+  // active URL + index so each new candidate re-arms the guard.
   const p2pState = p2pConnection?.connectionState;
+  const startedRef = useRef<string | null>(null);
+  const attemptKey = `${addressIndex}:${activeUrl ?? ''}`;
   useEffect(() => {
-    if (!isP2P || !plan.ready || p2pState !== 'disconnected') {
+    if (!isP2P || !plan.ready || !activeUrl) {
       return;
     }
-    if (addressIndex + 1 < plan.urls.length) {
-      console.log(`[P2P] Address ${plan.urls[addressIndex]} failed; trying next candidate`);
-      setAddressIndex((i) => i + 1);
-    } else {
-      console.log('[P2P] All addresses exhausted; falling back to relay');
-      setForcedRelay(true);
+    if (p2pState && p2pState !== 'disconnected') {
+      startedRef.current = attemptKey;
+      return;
     }
-  }, [isP2P, plan, p2pState, addressIndex]);
+    // p2pState === 'disconnected': only a real failure if this attempt was
+    // already observed live. Otherwise it's the pre-connect stale state.
+    if (p2pState === 'disconnected' && startedRef.current === attemptKey) {
+      if (addressIndex + 1 < plan.urls.length) {
+        console.log(`[P2P] Address ${plan.urls[addressIndex]} failed; trying next candidate`);
+        setAddressIndex((i) => i + 1);
+      } else {
+        console.log('[P2P] All addresses exhausted; falling back to relay');
+        setForcedRelay(true);
+      }
+    }
+  }, [isP2P, plan, activeUrl, attemptKey, p2pState, addressIndex]);
 
   return {
     p2pConnection,
