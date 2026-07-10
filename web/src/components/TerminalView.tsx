@@ -8,14 +8,20 @@ import { EnvPanel } from './env/EnvPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
-import { useP2PConnection } from '../hooks/useP2PConnection';
+import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
+import { AddressSelector } from './AddressSelector';
 
 export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
   sessionName: string;
+  /**
+   * User-selected P2P address (manual override). When set, auto latency
+   * selection is skipped and this exact URL is used (no address rotation).
+   */
+  selectedAddress?: string;
 }
 
 interface TerminalViewProps {
@@ -27,17 +33,22 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName } = session;
-  const isP2P = attachInfo.mode === 'p2p';
+  const { attachInfo, sessionId, sessionName, selectedAddress } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
 
-  const p2pConnection = useP2PConnection(
-    isP2P && attachInfo.agent_address
-      ? { agentUrl: attachInfo.agent_address, connectionToken: attachInfo.connection_token, sessionName }
-      : null,
-  );
+  // Multi-address P2P: latency-select, rotate on failure, fall back to relay.
+  const {
+    p2pConnection,
+    effectiveMode,
+    activeUrl,
+    forcedRelay,
+    manualOverride,
+    setManualOverride,
+  } = useP2PWithFallback(attachInfo, sessionName, selectedAddress ?? null);
+  const isP2P = effectiveMode === 'p2p';
+
 
   // Stable across re-renders. The hook returns a fresh object literal each
   // render, but its transport methods are useCallback-stable for the
@@ -61,7 +72,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       ref={terminalRef}
       sessionId={sessionId}
       sessionName={sessionName}
-      mode={attachInfo.mode}
+      mode={effectiveMode}
       p2pConnection={isP2P ? p2pConnection : undefined}
       serverConnection={!isP2P ? wsService : undefined}
       onDisconnect={onDisconnect}
@@ -80,9 +91,18 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
         <span className="text-sm text-muted-foreground">
           Session: <strong className="text-foreground">{sessionName}</strong>
         </span>
-        <Badge variant={attachInfo.mode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
-          {attachInfo.mode.toUpperCase()}
+        <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
+          {effectiveMode.toUpperCase()}
+          {forcedRelay && attachInfo.mode === 'p2p' ? ' (fallback)' : ''}
         </Badge>
+        {attachInfo.mode === 'p2p' && !forcedRelay && attachInfo.addresses ? (
+          <AddressSelector
+            addresses={attachInfo.addresses}
+            activeUrl={activeUrl ?? null}
+            isAuto={manualOverride === null}
+            onSelect={setManualOverride}
+          />
+        ) : null}
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col">

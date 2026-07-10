@@ -26,13 +26,44 @@ export interface Session {
   last_activity: string; // ISO 8601 timestamp
 }
 
+/**
+ * Network category of an advertised agent address (mirrors the Rust
+ * `NetworkType` enum). Used for UI labelling and ordering.
+ */
+export type NetworkType = 'lan' | 'vpn' | 'tunnel' | 'public' | 'custom';
+
+/** Server's latest TCP reachability probe result for an address. */
+export type AddressStatus = 'unknown' | 'reachable' | 'unreachable';
+
+/**
+ * A single candidate P2P endpoint with the server's probe status. Flattened
+ * wire shape: address fields + status/rtt at the top level.
+ */
+export interface ProbedAddress {
+  url: string; // Complete WebSocket URL (e.g. "ws://192.168.1.5:8080/ws")
+  label?: string;
+  network_type: NetworkType;
+  priority: number;
+  status: AddressStatus;
+  rtt_ms?: number; // Last successful probe round-trip, milliseconds
+}
+
+/** Result of the client's own latency test against one address. */
+export interface AddressLatency {
+  url: string;
+  /** Handshake RTT in ms, or null when the test failed/timed out. */
+  latencyMs: number | null;
+}
+
 export interface AttachInfo {
   mode: 'p2p' | 'relay';
   session_id: string;
   session_name?: string;
   // For P2P mode:
-  agent_address?: string; // Complete WebSocket URL (e.g. "ws://agent.example.com/ws")
+  agent_address?: string; // Legacy single URL (first/tunnel-preferred address)
   connection_token?: string;
+  /** Full candidate list with probe status (issue #43). Empty for relay. */
+  addresses?: ProbedAddress[];
 }
 
 /**
