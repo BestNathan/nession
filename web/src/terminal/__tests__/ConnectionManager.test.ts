@@ -1,0 +1,105 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ConnectionManager } from '../ConnectionManager';
+import type { P2PConnection } from '../../hooks/useP2PConnection';
+import type { WebSocketService } from '../../services/websocket';
+
+function makeMockP2P(): P2PConnection {
+  return {
+    connectionState: 'connected',
+    reconnectAttempt: 0,
+    sendMessage: vi.fn(),
+    onMessage: () => () => {},
+    close: vi.fn(),
+    waitForConnection: () => Promise.resolve(),
+  };
+}
+
+function makeMockWs(): WebSocketService {
+  return {
+    sendTerminalInput: vi.fn(),
+    onTerminalOutput: vi.fn().mockReturnValue(() => {}),
+    onConnectionChange: vi.fn().mockReturnValue(() => {}),
+    requestAttach: vi.fn().mockResolvedValue({ mode: 'relay' }),
+    isConnected: () => true,
+  } as unknown as WebSocketService;
+}
+
+describe('ConnectionManager', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('P2P mode', () => {
+    it('send routes data as terminal.input message with base64 encoding', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.send('hello');
+      expect(p2p.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          msg_type: 'terminal.input',
+          payload: expect.objectContaining({ session_name: 'test', data: expect.any(String) }),
+        }),
+      );
+      cm.dispose();
+    });
+
+    it('send is a no-op after dispose', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.dispose();
+      cm.send('hello');
+      expect(p2p.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('keepalive pings are sent every 30 seconds', () => {
+      const p2p = makeMockP2P();
+      new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      vi.advanceTimersByTime(30_000);
+      expect(p2p.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ msg_type: 'keepalive.ping' }),
+      );
+    });
+
+    it('keepalive stops after dispose', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.dispose();
+      const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length;
+      vi.advanceTimersByTime(60_000);
+      expect((p2p.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(calls);
+    });
+  });
+
+  describe('Relay mode', () => {
+    it('send routes data via serverConnection.sendTerminalInput', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+      cm.send('hello');
+      expect(ws.sendTerminalInput).toHaveBeenCalledWith('a:test', 'hello');
+      cm.dispose();
+    });
+
+    it('subscribes to terminal output on construction', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+      expect(ws.onTerminalOutput).toHaveBeenCalledWith('a:test', expect.any(Function));
+      cm.dispose();
+    });
+  });
+});
