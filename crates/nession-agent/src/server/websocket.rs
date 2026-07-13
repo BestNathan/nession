@@ -1443,6 +1443,13 @@ mod tests {
         let (addr, handle) = start_test_server_on(18082).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
+        // Pre-clean any session left over from a previous crashed/aborted run
+        // so the create below doesn't hit a duplicate-name failure.
+        TmuxManager::new()
+            .kill_session("server_test_create_kill")
+            .await
+            .ok();
+
         // Create a session.
         let create_payload = SessionCreatePayload {
             name: "server_test_create_kill".to_string(),
@@ -1479,6 +1486,9 @@ mod tests {
         // connect to.
         let tmux = TmuxManager::new();
         let session_name = "server_test_attach";
+        // Pre-clean any session left over from a previous crashed/aborted run
+        // so the test is re-entrant (tmux rejects a duplicate session name).
+        tmux.kill_session(session_name).await.ok();
         tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
@@ -1519,6 +1529,7 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_io";
+        tmux.kill_session(session_name).await.ok();
         tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
@@ -1972,6 +1983,7 @@ mod tests {
 
         let tmux = TmuxManager::new();
         let session_name = "server_test_invalid_b64";
+        tmux.kill_session(session_name).await.ok();
         tmux.create_session(session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
