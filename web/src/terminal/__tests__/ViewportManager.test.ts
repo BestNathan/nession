@@ -89,22 +89,16 @@ describe('ViewportManager', () => {
     manager.dispose();
   });
 
-  it('paints the container background and centers content (hides sub-row remainder)', () => {
-    // FitAddon floors rows, leaving a few unpainted px below the canvas that
-    // otherwise expose the page background as a light line. The container is
-    // painted with the terminal colour and centers its child so the remainder
-    // is the terminal's own colour, split evenly top/bottom.
-    const manager = new ViewportManager(term, fitAddon, container, { background: '#1e1e2e' });
-    expect(container.style.backgroundColor).toBe('rgb(30, 30, 46)');
-    expect(container.style.display).toBe('flex');
-    expect(container.style.justifyContent).toBe('center');
-    manager.dispose();
-  });
-
-  it('still centers content when no background is provided', () => {
+  it('does not mutate the container box model (avoids renderer-init race)', () => {
+    // Regression guard: setting display/flex on the mount container in the
+    // constructor (before terminal.open()) races with xterm's renderer init
+    // and crashes Viewport.syncScrollArea on slower renderers. The sub-row
+    // remainder is hidden via a static background in Terminal.tsx instead, so
+    // ViewportManager must leave the container's layout untouched.
     const manager = new ViewportManager(term, fitAddon, container);
-    expect(container.style.display).toBe('flex');
-    expect(container.style.justifyContent).toBe('center');
+    expect(container.style.display).toBe('');
+    expect(container.style.flexDirection).toBe('');
+    expect(container.style.justifyContent).toBe('');
     manager.dispose();
   });
 

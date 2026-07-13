@@ -10,8 +10,6 @@ const DEFAULT_TARGET_COLS = 80;
 /** Optional construction settings for {@link ViewportManager}. */
 export interface ViewportOptions {
   profile?: DeviceProfile;
-  /** Terminal background colour, painted on the mount container (see below). */
-  background?: string;
 }
 
 export class ViewportManager {
@@ -31,22 +29,13 @@ export class ViewportManager {
     this.targetCols = DEFAULT_TARGET_COLS;
     this.applyProfile();
 
-    // FitAddon computes rows with Math.floor(containerHeight / cellHeight), so
-    // it always discards the sub-row remainder (containerHeight mod cellHeight).
-    // With a fractional cell height that remainder is a few pixels the terminal
-    // never paints, exposing the page background as a thin light line below the
-    // canvas. Two defences (both work regardless of xterm internals):
-    //   1. paint the mount container with the terminal background so any
-    //      remainder is the terminal's own colour, not the page's, and
-    //   2. center the xterm element vertically so the remainder is split evenly
-    //      top/bottom instead of pooling as one visible strip at the bottom.
-    if (options.background) {
-      this.container.style.backgroundColor = options.background;
-    }
-    this.container.style.display = 'flex';
-    this.container.style.flexDirection = 'column';
-    this.container.style.justifyContent = 'center';
-
+    // NOTE: do NOT mutate container layout (display/flex) here. This runs
+    // before TerminalView calls terminal.open(), and changing the box model
+    // races with the renderer's initialisation: the ResizeObserver below fires
+    // during open() while xterm's _renderService is still undefined, crashing
+    // Viewport.syncScrollArea. The sub-row remainder is hidden instead by a
+    // static terminal-coloured background on the mount container in
+    // Terminal.tsx, which doesn't touch the box model and so can't race.
     this.observer = new ResizeObserver(() => {
       if (this.disposed) {
         return;
