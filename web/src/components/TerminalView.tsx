@@ -128,8 +128,8 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             fileOps={fileOps}
             onTerminalReveal={() => terminalRef.current?.refit()}
             terminalElement={
-              <div className="flex-1 min-h-0 flex flex-col">
-                <div className="flex-1 min-h-0">{terminalElement}</div>
+              <div className="h-full min-h-0 flex flex-col">
+                <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
                 <BottomBar
                   activeTab={bottomTab}
                   onTabChange={setBottomTab}
@@ -148,7 +148,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
           />
         ) : (
           <>
-            <div className="flex-1 min-h-0">{terminalElement}</div>
+            <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
             <BottomBar
               activeTab={bottomTab}
               onTabChange={setBottomTab}
