@@ -47,14 +47,17 @@ export class TerminalView {
 
     // Renderer and ThemeManager are created for their constructor side-effects.
     new Renderer(this.terminal, options.rendererType);
-    new ThemeManager(this.terminal, options.theme);
+    const themeManager = new ThemeManager(this.terminal, options.theme);
 
     const fitAddon = this.addons.register(new FitAddon());
     this.viewport = new ViewportManager(
       this.terminal,
       fitAddon,
       container,
-      options.deviceProfile,
+      {
+        profile: options.deviceProfile,
+        background: themeManager.getTheme().background,
+      },
     );
 
     this.input = new InputManager(this.terminal);

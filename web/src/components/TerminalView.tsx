@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, TerminalIcon, Package, ChevronDown } from 'lucide-react';
+import { ArrowLeft, TerminalIcon, Package, ChevronDown, ChevronUp } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
@@ -216,17 +216,17 @@ function BottomBar({
         >
           <Package className="w-3 h-3" /> Env
         </button>
-        {/* Mobile-only collapse control for the sheet */}
-        {sheetOpen && (
-          <button
-            type="button"
-            onClick={() => onSheetToggle(false)}
-            className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
-            title="Collapse"
-          >
-            <ChevronDown className="w-3.5 h-3.5" />
-          </button>
-        )}
+        {/* Mobile-only sheet toggle: expand when collapsed, collapse when open.
+            Rendered in both states (previously only when open, which left no way
+            to reopen the sheet after collapsing except re-tapping a tab). */}
+        <button
+          type="button"
+          onClick={() => onSheetToggle(!sheetOpen)}
+          className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
+          title={sheetOpen ? 'Collapse' : 'Expand'}
+        >
+          {sheetOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+        </button>
       </div>
       {/* Content: always shown at sm+; on mobile only when the sheet is open */}
       <div

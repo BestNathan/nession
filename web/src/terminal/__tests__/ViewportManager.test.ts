@@ -89,6 +89,25 @@ describe('ViewportManager', () => {
     manager.dispose();
   });
 
+  it('paints the container background and centers content (hides sub-row remainder)', () => {
+    // FitAddon floors rows, leaving a few unpainted px below the canvas that
+    // otherwise expose the page background as a light line. The container is
+    // painted with the terminal colour and centers its child so the remainder
+    // is the terminal's own colour, split evenly top/bottom.
+    const manager = new ViewportManager(term, fitAddon, container, { background: '#1e1e2e' });
+    expect(container.style.backgroundColor).toBe('rgb(30, 30, 46)');
+    expect(container.style.display).toBe('flex');
+    expect(container.style.justifyContent).toBe('center');
+    manager.dispose();
+  });
+
+  it('still centers content when no background is provided', () => {
+    const manager = new ViewportManager(term, fitAddon, container);
+    expect(container.style.display).toBe('flex');
+    expect(container.style.justifyContent).toBe('center');
+    manager.dispose();
+  });
+
   it('dispose cleans up without error', () => {
     const manager = new ViewportManager(term, fitAddon, container);
     expect(() => manager.dispose()).not.toThrow();
