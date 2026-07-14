@@ -2,15 +2,26 @@ import type { Terminal } from '@xterm/xterm';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebglAddon } from '@xterm/addon-webgl';
 
-export class Renderer {
-  readonly type: 'webgl' | 'canvas';
+/** Check whether the runtime supports WebGL rendering. */
+export function detectWebGLSupport(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
+  } catch {
+    return false;
+  }
+}
 
-  constructor(term: Terminal, preferred?: 'webgl' | 'canvas') {
-    if (preferred === 'webgl' && Renderer.supportsWebGL()) {
+export class Renderer {
+  type: 'webgl' | 'canvas';
+
+  constructor(private term: Terminal, preferred?: 'webgl' | 'canvas') {
+    if (preferred === 'webgl' && detectWebGLSupport()) {
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
           webgl.dispose();
+          this.fallbackToCanvas();
         });
         term.loadAddon(webgl);
         this.type = 'webgl';
@@ -23,13 +34,14 @@ export class Renderer {
     this.type = 'canvas';
   }
 
-  /** Check whether the runtime supports WebGL rendering. */
-  private static supportsWebGL(): boolean {
+  /** Load the Canvas renderer after a WebGL context loss so the terminal
+   *  keeps rendering instead of relying on xterm's implicit DOM fallback. */
+  private fallbackToCanvas(): void {
     try {
-      const canvas = document.createElement('canvas');
-      return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
+      this.term.loadAddon(new CanvasAddon());
+      this.type = 'canvas';
     } catch {
-      return false;
+      /* terminal disposed mid-loss — nothing to do */
     }
   }
 }
