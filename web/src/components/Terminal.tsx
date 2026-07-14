@@ -1,6 +1,7 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
+import { detectWebGLSupport } from '../terminal/Renderer';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -86,8 +87,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       : { mode: 'relay' as const, sessionName, sessionId, serverConnection };
 
     const profile = detectProfile(container.clientWidth || window.innerWidth);
+    // A stored renderer preference of 'webgl' must still be clamped when the
+    // current browser can't support it (e.g. headless server with software
+    // rasteriser). Otherwise the WebGL addon loads, _renderService stays
+    // undefined, and xterm's Viewport setTimeout crashes on syncScrollArea.
+    const rendererType: 'webgl' | 'canvas' =
+      renderer && detectWebGLSupport() ? renderer : 'canvas';
     const view = new TerminalView(container, {
-      rendererType: renderer ?? 'canvas',
+      rendererType,
       deviceProfile: profile,
       targetColumns: 80,
       connection: connOpts,
