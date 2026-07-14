@@ -1,6 +1,6 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
-import { TerminalView, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
+import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -25,6 +25,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onError,
     onBannerChange,
     onCtrlD,
+    renderer,
   },
   ref,
 ) {
@@ -84,8 +85,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       ? { mode: 'p2p' as const, sessionName, sessionId, p2pConnection: p2pConnection ?? undefined }
       : { mode: 'relay' as const, sessionName, sessionId, serverConnection };
 
+    const profile = detectProfile(container.clientWidth || window.innerWidth);
     const view = new TerminalView(container, {
-      rendererType: 'canvas',
+      rendererType: renderer ?? 'canvas',
+      deviceProfile: profile,
+      targetColumns: 80,
       connection: connOpts,
     });
 
@@ -103,7 +107,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       view.dispose();
       viewRef.current = null;
     };
-  }, [sessionId, sessionName, mode, p2pConnection, serverConnection]);
+  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer]);
 
   // Imperative handle for parent components.
   const isBlocked = banner !== 'none';

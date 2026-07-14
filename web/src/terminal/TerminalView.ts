@@ -56,6 +56,9 @@ export class TerminalView {
       container,
       { profile: options.deviceProfile },
     );
+    if (options.targetColumns) {
+      this.viewport.setTargetColumns(options.targetColumns);
+    }
 
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
