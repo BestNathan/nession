@@ -52,6 +52,29 @@ describe('useAddressPlan', () => {
     expect(result.current.urls).toEqual(['ws://b/ws', 'ws://a/ws']);
   });
 
+  // Regression (issue #51): an EMPTY orderedUrls (probe cache not yet populated
+  // / expired / transiently failed) must NOT resolve to a zero-URL plan. That
+  // left activeUrl null → P2P never started and relay fallback never fired
+  // (dead state: badge says P2P, nothing connects). Empty must fall through to
+  // browser-testing attachInfo.addresses instead.
+  it('does not treat an empty orderedUrls as a resolved plan — falls back to candidates', async () => {
+    const info = attach({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: [], manualUrl: null }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.urls).toEqual(['ws://a/ws', 'ws://b/ws']);
+  });
+
+  it('empty orderedUrls with no candidates falls back to legacy agent_address', async () => {
+    const info = attach({ agent_address: 'ws://legacy/ws', addresses: [] });
+    const { result } = renderHook(() =>
+      useAddressPlan(info, { orderedUrls: [], manualUrl: null }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.urls).toEqual(['ws://legacy/ws']);
+  });
+
   it('falls back to the legacy agent_address when no address list is present', async () => {
     const info = attach({ agent_address: 'ws://legacy/ws', addresses: [] });
     const { result } = renderHook(() =>

@@ -71,8 +71,15 @@ export function useAddressPlan(
       return;
     }
 
-    // 2. Pre-resolved order from the attach dialog's browser test.
-    if (inputs.orderedUrls) {
+    // 2. Pre-resolved order from the attach dialog's browser test. An EMPTY
+    //    array is NOT a valid pre-resolved plan — it means the dialog had no
+    //    cached probe yet (probe still racing, expired, or transiently failed).
+    //    Treating [] as authoritative would resolve to zero URLs → activeUrl
+    //    null → P2P never starts AND relay fallback never fires (it only
+    //    triggers on a 'disconnected' transition that can't happen with no
+    //    connection). Fall through to path 3 instead so we still derive
+    //    candidates from attachInfo.
+    if (inputs.orderedUrls && inputs.orderedUrls.length > 0) {
       setPlan({ urls: inputs.orderedUrls, ready: true });
       return;
     }

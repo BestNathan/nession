@@ -149,6 +149,39 @@ export function useP2PConnection(
   );
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
+  const agentUrl = options?.agentUrl;
+  const connectionToken = options?.connectionToken;
+  const onError = options?.onError;
+  const maxReconnectAttempts = options?.maxReconnectAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const reconnectBaseDelay = options?.reconnectBaseDelay ?? DEFAULT_BASE_DELAY;
+
+  // The useState initializer above only runs on the hook's FIRST render. In the
+  // real flow this hook is first rendered with null options (the address plan
+  // resolves asynchronously in useAddressPlan, so activeUrl is null on render
+  // 1) → state initialises to 'disconnected'. When agentUrl arrives on a later
+  // render, React keeps that stale 'disconnected'. Child components (e.g.
+  // FileBrowser) mount that same render and their effects run BEFORE this
+  // hook's connect effect, so a waitForConnection() issued then would read the
+  // stale 'disconnected' and reject "Connection lost" before the socket even
+  // starts.
+  //
+  // Fix: promote to 'connecting' DURING RENDER on the null→url (and url→url
+  // rotation) transition — React's supported "adjust state when a prop changes"
+  // pattern. React re-renders this component synchronously before committing,
+  // so the ref below ends at 'connecting' and children only ever mount with
+  // 'connecting' — they correctly wait. An effect would be too late (child
+  // effects run first). The prev-url guard means a genuine terminal
+  // 'disconnected' (max reconnects hit, same url) is NOT flipped back.
+  const prevAgentUrlRef = useRef<string | undefined>(undefined);
+  if (
+    agentUrl &&
+    agentUrl !== prevAgentUrlRef.current &&
+    connectionState === 'disconnected'
+  ) {
+    setConnectionState('connecting');
+  }
+  prevAgentUrlRef.current = agentUrl;
+
   // Mirror connectionState into a ref so waitForConnection can read live state
   // without being re-created (and without stale closures) on every transition.
   const connectionStateRef = useRef<ConnectionState>(connectionState);
@@ -162,12 +195,6 @@ export function useP2PConnection(
   // Pending waitForConnection() waiters, settled event-driven from the
   // connectionState effect below (no busy-polling — works under fake timers).
   const waitersRef = useRef<Set<{ resolve: () => void; reject: (e: Error) => void }>>(new Set());
-
-  const agentUrl = options?.agentUrl;
-  const connectionToken = options?.connectionToken;
-  const onError = options?.onError;
-  const maxReconnectAttempts = options?.maxReconnectAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  const reconnectBaseDelay = options?.reconnectBaseDelay ?? DEFAULT_BASE_DELAY;
 
   useEffect(() => {
     if (!agentUrl) {return;}
