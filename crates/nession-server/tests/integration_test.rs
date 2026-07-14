@@ -1004,6 +1004,15 @@ async fn test_client_agents_list_returns_registered_agents() {
     assert!(!agents.is_empty());
     assert_eq!(agents[0]["agent_id"], "list-agent");
     assert_eq!(agents[0]["status"], "online");
+
+    // agents.list now carries the probed address list (issue #51) so clients
+    // can latency-probe without an attach round-trip.
+    let addresses = agents[0]["addresses"].as_array().unwrap();
+    assert!(
+        !addresses.is_empty(),
+        "expected synthesized address from ip/port"
+    );
+    assert!(addresses[0]["url"].as_str().unwrap().contains("10.0.0.50"));
 }
 
 // ---------------------------------------------------------------------------

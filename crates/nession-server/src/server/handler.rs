@@ -399,6 +399,7 @@ impl ConnectionHandler {
                     "session_count": a.session_count,
                     "active_sessions": a.active_sessions,
                     "last_heartbeat": a.last_heartbeat.to_rfc3339(),
+                    "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
                     "metadata": {
                         "nession_version": a.metadata.nession_version,
                         "tmux_version": a.metadata.tmux_version,
