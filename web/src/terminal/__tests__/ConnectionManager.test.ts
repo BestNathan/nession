@@ -95,6 +95,18 @@ describe('ConnectionManager', () => {
       expect(types).not.toContain('terminal.input');
       cm.dispose();
     });
+
+    it('reattach re-sends client.attach', async () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      await cm.reattach();
+      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
+      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
+      expect(types).toContain('client.attach');
+      cm.dispose();
+    });
   });
 
   describe('Relay mode', () => {

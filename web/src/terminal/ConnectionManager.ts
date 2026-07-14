@@ -96,6 +96,11 @@ export class ConnectionManager {
     }
   }
 
+  /** Re-issue attach after a reconnect so tmux redraws the full screen. */
+  async reattach(): Promise<void> {
+    return this.attach();
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }

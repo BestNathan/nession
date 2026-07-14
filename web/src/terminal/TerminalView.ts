@@ -110,6 +110,22 @@ export class TerminalView {
     });
   }
 
+  /** Push a banner state from an external observer (e.g. React watching P2P). */
+  setExternalBanner(banner: 'none' | 'reconnecting' | 'failed', attempt: number): void {
+    if (this.isDisposed) { return; }
+    this.onStateChange?.({
+      banner,
+      reconnectAttempt: attempt,
+      isConnected: banner === 'none',
+    });
+  }
+
+  /** Re-issue attach (tmux redraw) after a transport reconnect. */
+  reattach(): void {
+    if (this.isDisposed) { return; }
+    this.connection.reattach().catch(() => {});
+  }
+
   dispose(): void {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
