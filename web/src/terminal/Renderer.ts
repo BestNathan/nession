@@ -3,21 +3,36 @@ import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebglAddon } from '@xterm/addon-webgl';
 
 /**
- * Check whether the runtime supports WebGL rendering with a real GPU.
+ * Check whether the runtime supports WebGL rendering backed by a real GPU.
  *
- * On headless servers the browser may expose a WebGL context backed by a
- * software rasteriser (SwiftShader, llvmpipe, etc.). xterm.js's WebGL addon
+ * On headless servers the browser may offer a WebGL context backed by a
+ * software rasteriser (SwiftShader, llvmpipe, etc.).  xterm.js's WebGL addon
  * activate() fails silently with these — it never sets _renderService — and
  * xterm's own Viewport constructor (which runs a setTimeout after open())
- * crashes on `_renderService.dimensions`. We refuse WebGL when the renderer
- * string indicates software-only, forcing Canvas which works everywhere.
+ * crashes on `_renderService.dimensions`.  We use two layers:
+ *
+ * 1. `failIfMajorPerformanceCaveat: true` — the standard WebGL context
+ *    creation attribute that makes `getContext` return `null` when the
+ *    implementation is software-only.  Works everywhere, no extension needed.
+ *
+ * 2. `WEBGL_debug_renderer_info` — a secondary string-based check for
+ *    environments where layer 1 is ignored (privacy-respecting user agents
+ *    that don't honour the hint but still expose the extension).
  */
 export function detectWebGLSupport(): boolean {
   try {
     const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+
+    // Layer 1 — standard: refuse contexts with major performance caveats
+    // (i.e. software rasterisers).  This is the primary defence.
+    const opts: WebGLContextAttributes = { failIfMajorPerformanceCaveat: true };
+    const gl =
+      canvas.getContext('webgl', opts) ||
+      canvas.getContext('webgl2', opts);
     if (!gl) { return false; }
 
+    // Layer 2 — backup: if the driver still reports a software rasteriser
+    // string, refuse it even when the UA didn't honour the hint above.
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
     if (debugInfo) {
       const renderer = String(
