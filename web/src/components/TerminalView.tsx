@@ -1,13 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, TerminalIcon, Package, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
+import { BottomBar, type BottomTab } from './BottomBar';
 import { EnvPanel } from './env/EnvPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { cn } from '@/lib/utils';
 import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
@@ -50,7 +50,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
-  const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
+  const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Multi-address P2P: connect the browser-tested best path (resolved in the
@@ -167,81 +167,6 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             />
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ── Bottom bar: tabbed Env Files / Quick Commands ────────────────────────
-
-function BottomBar({
-  activeTab,
-  onTabChange,
-  envPanel,
-  commandsPanel,
-  sheetOpen,
-  onSheetToggle,
-}: {
-  activeTab: 'commands' | 'env';
-  onTabChange: (tab: 'commands' | 'env') => void;
-  envPanel: React.ReactNode;
-  commandsPanel: React.ReactNode;
-  sheetOpen: boolean;
-  onSheetToggle: (open: boolean) => void;
-}) {
-  // Mobile: tapping a tab both selects it and opens the sheet.
-  const selectTab = (tab: 'commands' | 'env') => {
-    onTabChange(tab);
-    onSheetToggle(true);
-  };
-
-  return (
-    <div className="border-t flex-shrink-0 flex flex-col max-h-[70dvh] sm:max-h-[40dvh] pb-[env(safe-area-inset-bottom)]">
-      <div className="flex border-b items-center">
-        <button
-          type="button"
-          onClick={() => selectTab('commands')}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            activeTab === 'commands'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <TerminalIcon className="w-3 h-3" /> Commands
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab('env')}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            activeTab === 'env'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Package className="w-3 h-3" /> Env
-        </button>
-        {/* Mobile-only sheet toggle: expand when collapsed, collapse when open.
-            Rendered in both states (previously only when open, which left no way
-            to reopen the sheet after collapsing except re-tapping a tab). */}
-        <button
-          type="button"
-          onClick={() => onSheetToggle(!sheetOpen)}
-          className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
-          title={sheetOpen ? 'Collapse' : 'Expand'}
-        >
-          {sheetOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-        </button>
-      </div>
-      {/* Content: always shown at sm+; on mobile only when the sheet is open */}
-      <div
-        className={cn(
-          'flex-1 min-h-0 overflow-y-auto',
-          sheetOpen ? 'block' : 'hidden sm:block',
-        )}
-      >
-        {activeTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
   );
