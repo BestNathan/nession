@@ -26,6 +26,8 @@ export interface AttachChoice {
   latencies: AddressLatency[];
   /** Manual single-address override, or null for automatic (best) selection. */
   selectedUrl: string | null;
+  /** Renderer the user picked (webgl/canvas). */
+  renderer: 'webgl' | 'canvas';
 }
 
 interface AttachDialogProps {
@@ -134,7 +136,15 @@ export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm }:
     const manual = selectedUrl === AUTO_URL ? null : selectedUrl;
     // Auto mode with zero browser-reachable paths still hands over the order
     // (may be empty) — the connection layer then falls back to relay.
-    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual });
+    onConfirm(session, {
+      mode,
+      attachInfo,
+      orderedUrls,
+      latencies: results,
+      selectedUrl: manual,
+      // renderer selection UI added in a later task; temporary default
+      renderer: 'webgl',
+    });
   }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, onConfirm]);
 
   const latencyByUrl = new Map(results.map((r) => [r.url, r.latencyMs]));
