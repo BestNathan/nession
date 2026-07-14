@@ -21,7 +21,9 @@ export function useAttachFlow(fetchSessions: () => void) {
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachDialogSession(null);
-    saveAttachPrefs({ mode: choice.mode });
+    // NOTE: renderer finalized to choice.renderer in a later task once
+    // AttachChoice carries it; temporary default keeps types sound.
+    saveAttachPrefs({ mode: choice.mode, renderer: 'webgl' });
     setAttachedSession({
       sessionId: session.session_id,
       sessionName: session.session_name,
