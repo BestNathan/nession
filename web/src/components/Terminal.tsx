@@ -56,11 +56,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const p2pState = p2pConnection?.connectionState;
   const prevP2pStateRef = useRef(p2pState);
   useEffect(() => {
+    // Advance the tracked previous-state first, before any early return, so a
+    // transient null view (during a rebuild) can't desync reconnect detection.
+    const prev = prevP2pStateRef.current;
+    prevP2pStateRef.current = p2pState;
+
     if (mode !== 'p2p') { return; }
     const view = viewRef.current;
     if (!view) { return; }
-    const prev = prevP2pStateRef.current;
-    prevP2pStateRef.current = p2pState;
 
     if (p2pState === 'reconnecting') {
       view.setExternalBanner('reconnecting', p2pConnection?.reconnectAttempt ?? 0);
