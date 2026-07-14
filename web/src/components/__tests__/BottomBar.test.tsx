@@ -62,4 +62,11 @@ describe('BottomBar', () => {
     expect(root.className).toContain('max-h-[70dvh]');
     expect(root.className).not.toContain('max-h-[85dvh]');
   });
+
+  it('does not render the files panel when files is active but the tab is hidden', () => {
+    setup({ showFilesTab: false, activeTab: 'files' });
+    // Stale 'files' with the tab hidden falls back to commands — no files panel.
+    expect(screen.queryByTestId('files-panel')).toBeNull();
+    expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+  });
 });

@@ -33,8 +33,13 @@ export function BottomBar({
     onSheetToggle(true);
   };
 
+  // A stale 'files' tab (e.g. after a mobile→desktop resize, or if fileOps drops)
+  // must not render the files panel when the Files tab isn't shown — fall back
+  // to Commands so we never mount an orphan/duplicate FileBrowser.
+  const effectiveTab = activeTab === 'files' && !showFilesTab ? 'commands' : activeTab;
+
   // The Files browser needs more vertical room than the Commands grid / Env list.
-  const maxH = activeTab === 'files' ? 'max-h-[85dvh] sm:max-h-[40dvh]' : 'max-h-[70dvh] sm:max-h-[40dvh]';
+  const maxH = effectiveTab === 'files' ? 'max-h-[85dvh] sm:max-h-[40dvh]' : 'max-h-[70dvh] sm:max-h-[40dvh]';
 
   return (
     <div className={cn('border-t flex-shrink-0 flex flex-col pb-[env(safe-area-inset-bottom)]', maxH)}>
@@ -44,7 +49,7 @@ export function BottomBar({
           onClick={() => selectTab('commands')}
           className={cn(
             'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            activeTab === 'commands'
+            effectiveTab === 'commands'
               ? 'border-primary text-foreground'
               : 'border-transparent text-muted-foreground hover:text-foreground',
           )}
@@ -56,7 +61,7 @@ export function BottomBar({
           onClick={() => selectTab('env')}
           className={cn(
             'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            activeTab === 'env'
+            effectiveTab === 'env'
               ? 'border-primary text-foreground'
               : 'border-transparent text-muted-foreground hover:text-foreground',
           )}
@@ -69,7 +74,7 @@ export function BottomBar({
             onClick={() => selectTab('files')}
             className={cn(
               'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-              activeTab === 'files'
+              effectiveTab === 'files'
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
@@ -94,7 +99,7 @@ export function BottomBar({
           sheetOpen ? 'block' : 'hidden sm:block',
         )}
       >
-        {activeTab === 'files' ? filesPanel : activeTab === 'env' ? envPanel : commandsPanel}
+        {effectiveTab === 'files' ? filesPanel : effectiveTab === 'env' ? envPanel : commandsPanel}
       </div>
     </div>
   );
