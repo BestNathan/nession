@@ -189,10 +189,10 @@ function SessionsSection({
           Sessions
         </h2>
         <div className="flex gap-2">
-          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')}>
+          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-11 md:min-h-7">
             <Plus className="w-3.5 h-3.5 mr-1" /> Create
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions}>
+          <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0">
             <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
           </Button>
         </div>
