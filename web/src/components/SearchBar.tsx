@@ -69,7 +69,7 @@ export function SearchBar({
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div className="relative flex-1">
         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -79,7 +79,10 @@ export function SearchBar({
           className="pl-8"
         />
       </div>
-      <div className="flex items-center gap-1">
+      <div
+        data-testid="filter-row"
+        className="flex items-center gap-1 overflow-x-auto flex-nowrap sm:overflow-x-visible"
+      >
         {FILTERS.map((filter) => {
           const count = countForFilter(filter);
           const isActive = statusFilter === filter.key;
@@ -90,6 +93,7 @@ export function SearchBar({
               size="sm"
               onClick={() => setStatusFilter(filter.key)}
               aria-pressed={isActive}
+              className="min-h-11 sm:min-h-7 flex-shrink-0"
             >
               {filter.label}
               {count !== undefined && (
