@@ -102,7 +102,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
   );
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-[100dvh] flex flex-col bg-background">
       <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Back
@@ -196,7 +196,7 @@ function BottomBar({
   };
 
   return (
-    <div className="border-t flex-shrink-0 flex flex-col max-h-[70vh] sm:max-h-[40vh]">
+    <div className="border-t flex-shrink-0 flex flex-col max-h-[70dvh] sm:max-h-[40dvh] pb-[env(safe-area-inset-bottom)]">
       <div className="flex border-b items-center">
         <button
           type="button"
