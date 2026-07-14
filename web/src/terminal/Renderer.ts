@@ -2,11 +2,36 @@ import type { Terminal } from '@xterm/xterm';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebglAddon } from '@xterm/addon-webgl';
 
-/** Check whether the runtime supports WebGL rendering. */
+/**
+ * Check whether the runtime supports WebGL rendering with a real GPU.
+ *
+ * On headless servers the browser may expose a WebGL context backed by a
+ * software rasteriser (SwiftShader, llvmpipe, etc.). xterm.js's WebGL addon
+ * activate() fails silently with these — it never sets _renderService — and
+ * xterm's own Viewport constructor (which runs a setTimeout after open())
+ * crashes on `_renderService.dimensions`. We refuse WebGL when the renderer
+ * string indicates software-only, forcing Canvas which works everywhere.
+ */
 export function detectWebGLSupport(): boolean {
   try {
     const canvas = document.createElement('canvas');
-    return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
+    const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+    if (!gl) { return false; }
+
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (debugInfo) {
+      const renderer = String(
+        gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '',
+      );
+      if (
+        /swiftshader|llvmpipe|softpipe|software|microsoft basic render/i.test(
+          renderer,
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
   } catch {
     return false;
   }
