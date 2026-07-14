@@ -21,6 +21,16 @@ function makeFileOps(entries: FileEntry[]): FileOps {
 
 const FILE: FileEntry = { name: 'f.txt', path: 'f.txt', is_dir: false, size: 5, modified: 0 };
 
+// Bottom-bar props are required by FileTabs; tests don't exercise them here.
+const bottomBarProps = {
+  bottomTab: 'commands' as const,
+  onBottomTabChange: vi.fn(),
+  sheetOpen: false,
+  onSheetToggle: vi.fn(),
+  envPanel: null,
+  commandsPanel: null,
+};
+
 describe('FileTabs', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -30,6 +40,7 @@ describe('FileTabs', () => {
       <FileTabs
         fileOps={fileOps}
         terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
       />,
     );
 
@@ -58,6 +69,7 @@ describe('FileTabs', () => {
         fileOps={fileOps}
         onTerminalReveal={onTerminalReveal}
         terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
       />,
     );
 

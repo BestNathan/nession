@@ -130,22 +130,20 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
           <FileTabs
             fileOps={fileOps}
             onTerminalReveal={() => terminalRef.current?.refit()}
+            bottomTab={bottomTab}
+            onBottomTabChange={setBottomTab}
+            sheetOpen={sheetOpen}
+            onSheetToggle={setSheetOpen}
+            envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+            commandsPanel={
+              <TerminalToolbar
+                sendText={(text) => terminalRef.current?.sendText(text)}
+                disabled={toolbarDisabled}
+              />
+            }
             terminalElement={
               <div className="h-full min-h-0 flex flex-col">
                 <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
-                <BottomBar
-                  activeTab={bottomTab}
-                  onTabChange={setBottomTab}
-                  sheetOpen={sheetOpen}
-                  onSheetToggle={setSheetOpen}
-                  envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
-                  commandsPanel={
-                    <TerminalToolbar
-                      sendText={(text) => terminalRef.current?.sendText(text)}
-                      disabled={toolbarDisabled}
-                    />
-                  }
-                />
               </div>
             }
           />
@@ -155,6 +153,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             <BottomBar
               activeTab={bottomTab}
               onTabChange={setBottomTab}
+              showFilesTab={false}
               sheetOpen={sheetOpen}
               onSheetToggle={setSheetOpen}
               envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
