@@ -31,4 +31,11 @@ describe('Renderer', () => {
     expect(() => new Renderer(term, 'webgl')).not.toThrow();
     term.dispose();
   });
+
+  it('exports detectWebGLSupport returning a boolean', async () => {
+    const { detectWebGLSupport } = await import('../Renderer');
+    expect(typeof detectWebGLSupport()).toBe('boolean');
+    // jsdom has no WebGL context.
+    expect(detectWebGLSupport()).toBe(false);
+  });
 });

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Loader2, Wifi, WifiOff } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -13,7 +13,7 @@ import { Label } from '../ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { loadAttachPrefs } from '../../services/attachPrefs';
-import { testAddresses, orderByLatency } from '../../services/addressSelection';
+import { detectWebGLSupport } from '../../terminal/Renderer';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {
@@ -26,6 +26,8 @@ export interface AttachChoice {
   latencies: AddressLatency[];
   /** Manual single-address override, or null for automatic (best) selection. */
   selectedUrl: string | null;
+  /** Renderer the user picked (webgl/canvas). */
+  renderer: 'webgl' | 'canvas';
 }
 
 interface AttachDialogProps {
@@ -35,6 +37,8 @@ interface AttachDialogProps {
   wsService: WebSocketService;
   /** Called with the resolved attach choice; the flow shows the terminal. */
   onConfirm: (session: Session, choice: AttachChoice) => void;
+  /** Per-agent latency cache; supplies probe data without live testing. */
+  probeCache: import('../../hooks/useAddressProbeCache').AddressProbeCache;
 }
 
 // Relay is intentionally omitted as a forced mode: the server's relay attach
@@ -48,96 +52,74 @@ const MODES: { value: AttachMode; label: string; hint: string }[] = [
 const AUTO_URL = '__auto__';
 
 /**
- * Attach dialog: pick connection mode, then — for P2P — the server returns the
- * agent's candidate addresses which THIS BROWSER latency-tests directly (the
- * server's own probe is a different vantage point and only shown as a hint).
- * The user connects on the fastest browser-reachable path, or overrides it.
+ * Attach dialog: pick connection mode and (for P2P) a candidate address. Latency
+ * is read from the app-level address probe cache — not measured live here — so
+ * the dialog never blocks on probing. A "Re-test" control forces a fresh probe.
  */
-export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm }: AttachDialogProps) {
+export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm, probeCache }: AttachDialogProps) {
   const [mode, setMode] = useState<AttachMode>('auto');
-  // Attach info fetched for P2P so we can enumerate + test candidate addresses.
+  // Attach info fetched for P2P so we get the connection token + candidate list.
   const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [results, setResults] = useState<AddressLatency[]>([]);
   const [selectedUrl, setSelectedUrl] = useState<string>(AUTO_URL);
   const [error, setError] = useState<string | null>(null);
+  const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
 
-  // Reset per open, pre-filling the last-used mode.
+  const agentId = session?.agent_id ?? session?.session_id.split(':')[0] ?? null;
+  const webglSupported = detectWebGLSupport();
+
+  // Reset per open, pre-filling the last-used mode + renderer.
   useEffect(() => {
     if (!isOpen) {
       return;
     }
     const prefs = loadAttachPrefs();
     setMode(prefs.mode === 'relay' ? 'auto' : prefs.mode);
+    setRenderer(webglSupported ? prefs.renderer : 'canvas');
     setAttachInfo(null);
-    setResults([]);
     setSelectedUrl(AUTO_URL);
     setError(null);
-    setTesting(false);
-  }, [isOpen]);
+  }, [isOpen, webglSupported]);
 
-  // When P2P/Auto is chosen, fetch the address list and browser-test it. Relay
-  // needs no probing. Re-runs when the user toggles mode inside the dialog.
+  // Fetch attach info for the connection token + candidate list. No live probing
+  // here — latency comes from the address probe cache.
   useEffect(() => {
     if (!isOpen || !session) {
       return;
     }
     let cancelled = false;
     setError(null);
-    setResults([]);
     setAttachInfo(null);
-
     void (async () => {
       try {
-        setTesting(true);
-        // Ask for a P2P attach to learn the candidate addresses. (Auto also
-        // starts from P2P; it only differs by falling back to relay on failure.)
         const info = await wsService.requestAttach(session.session_id, 'p2p');
-        if (cancelled) {
-          return;
-        }
-        setAttachInfo(info);
-        const candidates = info.addresses ?? [];
-        if (candidates.length === 0) {
-          // Legacy single-address server: nothing to rank.
-          setResults(
-            info.agent_address ? [{ url: info.agent_address, latencyMs: null }] : [],
-          );
-          setTesting(false);
-          return;
-        }
-        const tested = await testAddresses(candidates);
         if (!cancelled) {
-          setResults(tested);
-          setTesting(false);
+          setAttachInfo(info);
         }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to query agent addresses');
-          setTesting(false);
         }
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, [isOpen, session, wsService]);
 
-  const orderedUrls = orderByLatency(results);
+  const cached = agentId ? probeCache.getProbe(agentId) : undefined;
+  const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);
+  const orderedUrls = useMemo<string[]>(() => cached?.orderedUrls ?? [], [cached]);
   const bestUrl = orderedUrls[0] ?? null;
+  const latencyByUrl = new Map(results.map((r) => [r.url, r.latencyMs]));
 
   const handleConfirm = useCallback(() => {
     if (!session || !attachInfo) {
       return;
     }
     const manual = selectedUrl === AUTO_URL ? null : selectedUrl;
-    // Auto mode with zero browser-reachable paths still hands over the order
-    // (may be empty) — the connection layer then falls back to relay.
-    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual });
-  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, onConfirm]);
+    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, renderer });
+  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm]);
 
-  const latencyByUrl = new Map(results.map((r) => [r.url, r.latencyMs]));
   const candidates = attachInfo?.addresses ?? [];
 
   return (
@@ -152,17 +134,19 @@ export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm }:
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
 
-          {/* Candidate address list with browser-measured latency. */}
+          {/* Candidate address list with cached browser-measured latency. */}
           {candidates.length > 1 ? (
             <PathList
               candidates={candidates}
               latencyByUrl={latencyByUrl}
               bestUrl={bestUrl}
-              testing={testing}
               selectedUrl={selectedUrl}
               onSelect={setSelectedUrl}
+              onRetest={agentId ? () => probeCache.refreshAgent(agentId) : undefined}
             />
           ) : null}
+
+          <RendererToggle renderer={renderer} onChange={setRenderer} webglSupported={webglSupported} />
 
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
@@ -170,8 +154,8 @@ export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm }:
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleConfirm} disabled={!attachInfo || testing}>
-            {testing ? 'Testing…' : 'Attach'}
+          <Button type="button" onClick={handleConfirm} disabled={!attachInfo}>
+            Attach
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -201,17 +185,63 @@ function ModeToggle({ mode, onChange }: { mode: AttachMode; onChange: (m: Attach
   );
 }
 
+/** Renderer selection: WebGL (GPU) vs Canvas (compatibility). */
+function RendererToggle({
+  renderer,
+  onChange,
+  webglSupported,
+}: {
+  renderer: 'webgl' | 'canvas';
+  onChange: (r: 'webgl' | 'canvas') => void;
+  webglSupported: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>Renderer</Label>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onChange('webgl')}
+          disabled={!webglSupported}
+          className={cn(
+            'flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors',
+            renderer === 'webgl' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
+            !webglSupported && 'opacity-50 cursor-not-allowed',
+          )}
+        >
+          <span className="text-sm font-medium">WebGL</span>
+          <span className="text-[10px] text-muted-foreground leading-tight">
+            {webglSupported ? 'GPU-accelerated' : 'not supported'}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange('canvas')}
+          className={cn(
+            'flex flex-col items-start rounded-md border px-3 py-2 text-left transition-colors',
+            renderer === 'canvas' ? 'border-primary bg-primary/10' : 'border-input hover:bg-accent/50',
+          )}
+        >
+          <span className="text-sm font-medium">Canvas</span>
+          <span className="text-[10px] text-muted-foreground leading-tight">compatibility</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface PathListProps {
   candidates: NonNullable<AttachInfo['addresses']>;
   latencyByUrl: Map<string, number | null>;
   bestUrl: string | null;
-  testing: boolean;
   selectedUrl: string;
   onSelect: (url: string) => void;
+  /** Force a fresh probe of the agent's addresses; hidden when unavailable. */
+  onRetest?: () => void;
 }
 
 /** The "Connection Path" section: Auto row + one row per candidate address. */
-function PathList({ candidates, latencyByUrl, bestUrl, testing, selectedUrl, onSelect }: PathListProps) {
+function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, onRetest }: PathListProps) {
   const bestLatency = bestUrl ? latencyByUrl.get(bestUrl) : undefined;
   const autoSublabel = bestUrl
     ? `fastest reachable path${bestLatency !== null && bestLatency !== undefined ? ` · ${bestLatency}ms` : ''}`
@@ -221,10 +251,14 @@ function PathList({ candidates, latencyByUrl, bestUrl, testing, selectedUrl, onS
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label>Connection Path</Label>
-        {testing ? (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Loader2 className="w-3 h-3 animate-spin" /> testing…
-          </span>
+        {onRetest ? (
+          <button
+            type="button"
+            onClick={onRetest}
+            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+          >
+            Re-test
+          </button>
         ) : null}
       </div>
       <div className="space-y-1 max-h-56 overflow-y-auto">
@@ -243,7 +277,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, testing, selectedUrl, onS
               label={addr.label ?? addr.network_type}
               badge={addr.network_type}
               sublabel={addr.url}
-              reachable={testing ? undefined : reachable}
+              reachable={reachable}
               latencyMs={latency ?? undefined}
               selected={selectedUrl === addr.url}
               onSelect={() => onSelect(addr.url)}
@@ -261,7 +295,7 @@ interface AddressRowProps {
   sublabel: string;
   selected: boolean;
   onSelect: () => void;
-  /** undefined = not yet tested; true/false = browser reachability. */
+  /** undefined = no cached probe; true/false = browser reachability. */
   reachable?: boolean;
   latencyMs?: number;
 }

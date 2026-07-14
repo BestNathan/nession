@@ -34,6 +34,8 @@ export interface AttachedSession {
    * selection is skipped and this exact URL is used (no address rotation).
    */
   selectedAddress?: string;
+  /** Renderer chosen in the attach dialog. */
+  renderer?: 'webgl' | 'canvas';
 }
 
 interface TerminalViewProps {
@@ -45,7 +47,7 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies } = session;
+  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer } = session;
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<'commands' | 'env'>('commands');
@@ -95,6 +97,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
       onError={onError}
       onBannerChange={setToolbarDisabled}
       onCtrlD={onBack}
+      renderer={renderer}
     />
   );
 
@@ -156,7 +159,10 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
               onSheetToggle={setSheetOpen}
               envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
               commandsPanel={
-                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+                <TerminalToolbar
+                  sendText={(text) => terminalRef.current?.sendText(text)}
+                  disabled={toolbarDisabled}
+                />
               }
             />
           </>

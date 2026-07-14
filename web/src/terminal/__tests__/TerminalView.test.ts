@@ -88,4 +88,14 @@ describe('TerminalView', () => {
     expect(view.onStateChange).toBeDefined();
     view.dispose();
   });
+
+  it('setExternalBanner forwards banner state to onStateChange', () => {
+    const view = new TerminalView(container, baseOptions);
+    const states: string[] = [];
+    view.onStateChange = (st) => states.push(st.banner);
+    view.setExternalBanner('reconnecting', 3);
+    view.setExternalBanner('none', 0);
+    expect(states).toEqual(['reconnecting', 'none']);
+    view.dispose();
+  });
 });

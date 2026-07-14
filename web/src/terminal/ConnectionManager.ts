@@ -20,6 +20,8 @@ function decodeB64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+const RELAY_MAX_ATTEMPTS = 10;
+
 export class ConnectionManager {
   private mode: 'p2p' | 'relay';
   private sessionName: string;
@@ -28,6 +30,7 @@ export class ConnectionManager {
   private serverConnection?: ConnectionOptions['serverConnection'];
 
   private reconnectAttempt = 0;
+  private relayLost = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
@@ -74,6 +77,19 @@ export class ConnectionManager {
   async attach(): Promise<void> {
     if (this.disposed) { return; }
     if (this.mode === 'p2p' && this.p2pConnection) {
+      // Wait for the socket to actually be OPEN before sending. The engine
+      // schedules attach() on a 50ms timer after terminal.open(), but a real
+      // network WebSocket handshake takes longer than that — sendMessage()
+      // silently no-ops while readyState !== OPEN, so firing immediately drops
+      // the client.attach frame and tmux never redraws (blank terminal). This
+      // mirrors fileOps.sendRequest, which already waits before sending.
+      try {
+        await this.p2pConnection.waitForConnection();
+      } catch (err) {
+        this.onError?.(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+      if (this.disposed) { return; }
       // A bare `client.attach` is enough: the agent's `tmux attach-session`
       // redraws the full screen on attach. We deliberately do NOT inject a
       // trailing `\r` — that executed an empty command in the shell, leaving a
@@ -91,6 +107,11 @@ export class ConnectionManager {
         this.onError?.(err instanceof Error ? err : new Error(String(err)));
       }
     }
+  }
+
+  /** Re-issue attach after a reconnect so tmux redraws the full screen. */
+  async reattach(): Promise<void> {
+    return this.attach();
   }
 
   dispose(): void {
@@ -162,8 +183,16 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'disconnected' || status === 'connecting') {
-        this.setState('reconnecting', this.reconnectAttempt + 1);
+        if (this.relayLost) { return; }
+        const next = this.reconnectAttempt + 1;
+        if (next > RELAY_MAX_ATTEMPTS) {
+          this.relayLost = true;
+          this.setState('lost', RELAY_MAX_ATTEMPTS);
+        } else {
+          this.setState('reconnecting', next);
+        }
       } else if (status === 'authenticated') {
+        this.relayLost = false;
         this.setState('connected', 0);
         this.attach().catch(() => {});
       }

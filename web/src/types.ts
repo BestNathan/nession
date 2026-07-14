@@ -14,6 +14,9 @@ export interface Agent {
     os_version: string;
     nession_version: string;
   };
+  /** Candidate P2P endpoints with server probe status (issue #51). Empty for
+   *  legacy servers that don't yet send them in agents.list. */
+  addresses?: ProbedAddress[];
 }
 
 export interface Session {

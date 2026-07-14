@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ViewportManager } from '../ViewportManager';
@@ -56,6 +56,7 @@ describe('ViewportManager', () => {
 
   it('fits the terminal on construction (deferred via rAF)', async () => {
     const manager = new ViewportManager(term, fitAddon, container);
+    manager.start();
     await new Promise((r) => requestAnimationFrame(r));
     expect(term.cols).toBeGreaterThan(0);
     expect(term.rows).toBeGreaterThan(0);
@@ -105,5 +106,30 @@ describe('ViewportManager', () => {
   it('dispose cleans up without error', () => {
     const manager = new ViewportManager(term, fitAddon, container);
     expect(() => manager.dispose()).not.toThrow();
+  });
+
+  it('debounces ResizeObserver callbacks via rAF (single fit per frame)', async () => {
+    const manager = new ViewportManager(term, fitAddon, container);
+    manager.start();
+    const fitSpy = vi.spyOn(fitAddon, 'fit');
+    fitSpy.mockClear();
+    const ro = (manager as unknown as { observer: { callback: ResizeObserverCallback } }).observer;
+    ro.callback?.([], {} as ResizeObserver);
+    ro.callback?.([], {} as ResizeObserver);
+    ro.callback?.([], {} as ResizeObserver);
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(fitSpy.mock.calls.length).toBeLessThanOrEqual(1);
+    manager.dispose();
+  });
+
+  it('restores font size upward when the container widens within a profile', () => {
+    const manager = new ViewportManager(term, fitAddon, container);
+    (manager as unknown as { profile: { fontSize: number } }).profile.fontSize = 14;
+    term.options.fontSize = 10;
+    Object.defineProperty(term, 'cols', { value: 120, configurable: true });
+    (manager as unknown as { targetCols: number }).targetCols = 80;
+    (manager as unknown as { scaleFont: () => void }).scaleFont();
+    expect(term.options.fontSize).toBe(14);
+    manager.dispose();
   });
 });

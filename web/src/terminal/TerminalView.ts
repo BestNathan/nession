@@ -56,6 +56,9 @@ export class TerminalView {
       container,
       { profile: options.deviceProfile },
     );
+    if (options.targetColumns) {
+      this.viewport.setTargetColumns(options.targetColumns);
+    }
 
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
@@ -90,6 +93,11 @@ export class TerminalView {
     // 4. Open terminal in DOM.
     this.terminal.open(container);
 
+    // 4b. Start viewport observation — MUST happen after open() so the
+    //     ResizeObserver never fires while the render service is uninitialised
+    //     (syncScrollArea crashes on undefined _renderService otherwise).
+    this.viewport.start();
+
     // 5. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
@@ -108,6 +116,22 @@ export class TerminalView {
     requestAnimationFrame(() => {
       if (!this.isDisposed) { this.viewport.fit(); }
     });
+  }
+
+  /** Push a banner state from an external observer (e.g. React watching P2P). */
+  setExternalBanner(banner: 'none' | 'reconnecting' | 'failed', attempt: number): void {
+    if (this.isDisposed) { return; }
+    this.onStateChange?.({
+      banner,
+      reconnectAttempt: attempt,
+      isConnected: banner === 'none',
+    });
+  }
+
+  /** Re-issue attach (tmux redraw) after a transport reconnect. */
+  reattach(): void {
+    if (this.isDisposed) { return; }
+    this.connection.reattach().catch(() => {});
   }
 
   dispose(): void {

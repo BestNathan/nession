@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { AttachDialog } from '../AttachDialog';
 import type { Session, AttachInfo } from '../../../types';
 import type { WebSocketService } from '../../../services/websocket';
+import type { AddressProbeCache } from '../../../hooks/useAddressProbeCache';
 
 function session(): Session {
   return {
@@ -34,17 +35,14 @@ function mockWs(info: AttachInfo): WebSocketService {
   } as unknown as WebSocketService;
 }
 
-// Mock the address test so the dialog resolves deterministically without
-// opening real sockets.
-vi.mock('../../../services/addressSelection', async (importActual) => {
-  const actual = await importActual<typeof import('../../../services/addressSelection')>();
+/** A no-op probe cache; override getProbe/refreshAgent per test as needed. */
+function mockProbeCache(overrides: Partial<AddressProbeCache> = {}): AddressProbeCache {
   return {
-    ...actual,
-    testAddresses: vi.fn(async (addrs: { url: string }[]) =>
-      addrs.map((a, i) => ({ url: a.url, latencyMs: (i + 1) * 10 })),
-    ),
+    getProbe: vi.fn().mockReturnValue(undefined),
+    refreshAgent: vi.fn(),
+    ...overrides,
   };
-});
+}
 
 const OriginalWebSocket = globalThis.WebSocket;
 
@@ -63,9 +61,16 @@ describe('AttachDialog', () => {
     const ws = mockWs(attachInfo());
     const user = userEvent.setup();
     render(
-      <AttachDialog isOpen onClose={vi.fn()} session={session()} wsService={ws} onConfirm={onConfirm} />,
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={onConfirm}
+        probeCache={mockProbeCache()}
+      />,
     );
-    // Attach button enables once the (empty) address list resolves.
+    // Attach button enables once attach info resolves.
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
     await waitFor(() => expect(attachBtn).toBeEnabled());
     await user.click(attachBtn);
@@ -79,14 +84,21 @@ describe('AttachDialog', () => {
   it('does not offer a forced Relay mode', () => {
     const ws = mockWs(attachInfo());
     render(
-      <AttachDialog isOpen onClose={vi.fn()} session={session()} wsService={ws} onConfirm={vi.fn()} />,
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={vi.fn()}
+        probeCache={mockProbeCache()}
+      />,
     );
     expect(screen.getByText('Auto')).toBeInTheDocument();
     expect(screen.getByText('P2P')).toBeInTheDocument();
     expect(screen.queryByText('Relay')).not.toBeInTheDocument();
   });
 
-  it('shows browser-tested candidate paths and lets the user pick one', async () => {
+  it('shows candidate paths and lets the user pick one', async () => {
     const onConfirm = vi.fn();
     const ws = mockWs(
       attachInfo([
@@ -94,15 +106,32 @@ describe('AttachDialog', () => {
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
+    const probeCache = mockProbeCache({
+      getProbe: vi.fn().mockReturnValue({
+        latencies: [
+          { url: 'ws://lan/ws', latencyMs: 10 },
+          { url: 'ws://vpn/ws', latencyMs: 20 },
+        ],
+        orderedUrls: ['ws://lan/ws', 'ws://vpn/ws'],
+        probedAt: Date.now(),
+      }),
+    });
     const user = userEvent.setup();
     render(
-      <AttachDialog isOpen onClose={vi.fn()} session={session()} wsService={ws} onConfirm={onConfirm} />,
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={onConfirm}
+        probeCache={probeCache}
+      />,
     );
-    // Both candidate labels appear once testing resolves.
+    // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
     expect(screen.getByText('VPN')).toBeInTheDocument();
-    // Pick the VPN path explicitly (even though server marked it unreachable —
-    // the browser is the authority; user override still allowed).
+    // Pick the VPN path explicitly (server marked it unreachable — user override
+    // still allowed).
     await user.click(screen.getByText('VPN'));
     const attachBtn = screen.getByRole('button', { name: /^Attach$/ });
     await waitFor(() => expect(attachBtn).toBeEnabled());
@@ -111,13 +140,82 @@ describe('AttachDialog', () => {
       expect.anything(),
       expect.objectContaining({
         selectedUrl: 'ws://vpn/ws',
-        // The browser's own latency measurements are handed to the terminal
-        // (not the server's probe status).
+        // Latencies come from the app-level probe cache, handed to the terminal.
         latencies: expect.arrayContaining([
           expect.objectContaining({ url: 'ws://lan/ws', latencyMs: 10 }),
           expect.objectContaining({ url: 'ws://vpn/ws', latencyMs: 20 }),
         ]),
       }),
     );
+  });
+
+  it('shows cached latency without live probing', async () => {
+    const ws = mockWs(
+      attachInfo([
+        { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
+        { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
+      ]),
+    );
+    const probeCache = mockProbeCache({
+      getProbe: vi.fn().mockReturnValue({
+        latencies: [{ url: 'ws://lan/ws', latencyMs: 12 }],
+        orderedUrls: ['ws://lan/ws'],
+        probedAt: Date.now(),
+      }),
+    });
+    render(
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={vi.fn()}
+        probeCache={probeCache}
+      />,
+    );
+    expect(await screen.findByText('12ms')).toBeInTheDocument();
+    expect(screen.queryByText(/Testing…/)).not.toBeInTheDocument();
+  });
+
+  it('re-test button calls refreshAgent with the agent id', async () => {
+    const refreshAgent = vi.fn();
+    const ws = mockWs(
+      attachInfo([
+        { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
+        { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
+      ]),
+    );
+    const probeCache = mockProbeCache({ refreshAgent });
+    const user = userEvent.setup();
+    render(
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={vi.fn()}
+        probeCache={probeCache}
+      />,
+    );
+    const retest = await screen.findByRole('button', { name: /Re-test/ });
+    await user.click(retest);
+    expect(refreshAgent).toHaveBeenCalledWith('agent-1');
+  });
+
+  it('renders a Renderer row with WebGL and Canvas options', () => {
+    const ws = mockWs(attachInfo());
+    render(
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={session()}
+        wsService={ws}
+        onConfirm={vi.fn()}
+        probeCache={mockProbeCache()}
+      />,
+    );
+    expect(screen.getByText('Renderer')).toBeInTheDocument();
+    expect(screen.getByText('WebGL')).toBeInTheDocument();
+    expect(screen.getByText('Canvas')).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ import { Skeleton } from './ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useDashboardHandlers } from './useDashboardHandlers';
 import { useAttachFlow } from './useAttachFlow';
+import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 
 interface DashboardProps {
   wsService: WebSocketService;
@@ -208,6 +209,8 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
     backToDashboard,
   } = useAttachFlow(fetchSessions);
 
+  const probeCache = useAddressProbeCache(agents);
+
   const handleTerminalDisconnect = useCallback(() => {
     toast.error('Terminal connection lost');
     backToDashboard();
@@ -300,6 +303,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
         session={attachDialogSession}
         wsService={wsService}
         onConfirm={confirmAttach}
+        probeCache={probeCache}
       />
     </div>
   );

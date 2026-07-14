@@ -95,6 +95,18 @@ describe('ConnectionManager', () => {
       expect(types).not.toContain('terminal.input');
       cm.dispose();
     });
+
+    it('reattach re-sends client.attach', async () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      await cm.reattach();
+      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
+      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
+      expect(types).toContain('client.attach');
+      cm.dispose();
+    });
   });
 
   describe('Relay mode', () => {
@@ -114,6 +126,30 @@ describe('ConnectionManager', () => {
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
       });
       expect(ws.onTerminalOutput).toHaveBeenCalledWith('a:test', expect.any(Function));
+      cm.dispose();
+    });
+
+    it('transitions to lost after RELAY_MAX_ATTEMPTS and fires onDisconnect exactly once', () => {
+      const ws = makeMockWs();
+      let stateCb: (status: string) => void = () => {};
+      (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
+        (cb: (status: string) => void) => { stateCb = cb; return () => {}; },
+      );
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+      const states: string[] = [];
+      const onDisconnect = vi.fn();
+      cm.onStateChange = (s) => states.push(s);
+      cm.onDisconnect = onDisconnect;
+
+      // 15 disconnect signals: attempts 1..10 reconnecting, then latched at lost.
+      for (let i = 0; i < 15; i++) { stateCb('disconnected'); }
+
+      expect(states.filter((s) => s === 'reconnecting').length).toBe(10);
+      expect(states.filter((s) => s === 'lost').length).toBe(1);
+      vi.advanceTimersByTime(3000);
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
       cm.dispose();
     });
   });

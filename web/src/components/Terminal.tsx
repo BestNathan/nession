@@ -1,6 +1,7 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
-import { TerminalView, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
+import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
+import { detectWebGLSupport } from '../terminal/Renderer';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -25,6 +26,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onError,
     onBannerChange,
     onCtrlD,
+    renderer,
   },
   ref,
 ) {
@@ -49,17 +51,66 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onBannerChangeRef.current?.(banner !== 'none');
   }, [banner]);
 
+  // Observe P2P transport reconnects. connectionState is a getter (no re-render
+  // on change), but this component re-renders whenever the owner does, and the
+  // owner (via useP2PWithFallback) re-renders on every P2P state transition —
+  // so reading it here in an effect keyed on the value tracks it correctly.
+  const p2pState = p2pConnection?.connectionState;
+  const prevP2pStateRef = useRef(p2pState);
+  useEffect(() => {
+    // Advance the tracked previous-state first, before any early return, so a
+    // transient null view (during a rebuild) can't desync reconnect detection.
+    const prev = prevP2pStateRef.current;
+    prevP2pStateRef.current = p2pState;
+
+    if (mode !== 'p2p') { return; }
+    const view = viewRef.current;
+    if (!view) { return; }
+
+    if (p2pState === 'reconnecting') {
+      view.setExternalBanner('reconnecting', p2pConnection?.reconnectAttempt ?? 0);
+    } else if (p2pState === 'connected' && prev === 'reconnecting') {
+      // Transport came back after a drop: clear banner and redraw tmux.
+      view.setExternalBanner('none', 0);
+      view.reattach();
+    }
+    // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
+  }, [mode, p2pState, p2pConnection]);
+
   // Create/dispose TerminalView — only rebuild on session/mode change.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) { return; }
 
+    // Do NOT build the xterm view in p2p mode until the connection object
+    // exists. On first render the address plan is still resolving, so
+    // useP2PWithFallback yields p2pConnection=null while effectiveMode is
+    // already 'p2p'. Building here would open() a connectionless terminal,
+    // and one render later — when the connection resolves and this prop flips
+    // null→object — the effect tears that view down. xterm's Viewport
+    // constructor schedules an un-cancellable `setTimeout(syncScrollArea)`
+    // during open(); if the view is disposed before that 0ms timer fires, the
+    // timer reads the now-disposed RenderService's `.dimensions` and crashes
+    // with "Cannot read properties of undefined (reading 'dimensions')"
+    // (issue #51). Gating on the connection removes the throwaway view
+    // entirely, so the view is built exactly once, with a live connection.
+    if (mode === 'p2p' && !p2pConnection) { return; }
+
     const connOpts = mode === 'p2p'
       ? { mode: 'p2p' as const, sessionName, sessionId, p2pConnection: p2pConnection ?? undefined }
       : { mode: 'relay' as const, sessionName, sessionId, serverConnection };
 
+    const profile = detectProfile(container.clientWidth || window.innerWidth);
+    // A stored renderer preference of 'webgl' must still be clamped when the
+    // current browser can't support it (e.g. headless server with software
+    // rasteriser). Otherwise the WebGL addon loads, _renderService stays
+    // undefined, and xterm's Viewport setTimeout crashes on syncScrollArea.
+    const rendererType: 'webgl' | 'canvas' =
+      renderer && detectWebGLSupport() ? renderer : 'canvas';
     const view = new TerminalView(container, {
-      rendererType: 'canvas',
+      rendererType,
+      deviceProfile: profile,
+      targetColumns: 80,
       connection: connOpts,
     });
 
@@ -77,7 +128,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       view.dispose();
       viewRef.current = null;
     };
-  }, [sessionId, sessionName, mode, p2pConnection, serverConnection]);
+  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer]);
 
   // Imperative handle for parent components.
   const isBlocked = banner !== 'none';

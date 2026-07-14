@@ -24,6 +24,7 @@ function choice(mode: 'auto' | 'p2p', overrides: Partial<AttachChoice> = {}): At
     orderedUrls: ['ws://a/ws'],
     latencies: [{ url: 'ws://a/ws', latencyMs: 10 }],
     selectedUrl: null,
+    renderer: 'webgl',
     ...overrides,
   };
 }

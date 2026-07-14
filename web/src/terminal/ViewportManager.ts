@@ -18,6 +18,7 @@ export class ViewportManager {
   private targetCols: number;
   private wheelCleanup: (() => void) | null = null;
   private disposed = false;
+  private rafHandle: number | null = null;
 
   constructor(
     private term: Terminal,
@@ -31,22 +32,44 @@ export class ViewportManager {
 
     // NOTE: do NOT mutate container layout (display/flex) here. This runs
     // before TerminalView calls terminal.open(), and changing the box model
-    // races with the renderer's initialisation: the ResizeObserver below fires
-    // during open() while xterm's _renderService is still undefined, crashing
-    // Viewport.syncScrollArea. The sub-row remainder is hidden instead by a
-    // static terminal-coloured background on the mount container in
-    // Terminal.tsx, which doesn't touch the box model and so can't race.
+    // races with the renderer's initialisation.
+    //
+    // Observation is deferred to start() (called after terminal.open()) so
+    // the ResizeObserver never fires while xterm's render service is still
+    // undefined — syncScrollArea crashes otherwise (issue #51).
     this.observer = new ResizeObserver(() => {
       if (this.disposed) {
         return;
       }
-      this.fit();
+      this.scheduleFit();
     });
-    this.observer.observe(container);
 
     this.installWheelIntercept();
+  }
 
-    requestAnimationFrame(() => {
+  /**
+   * Begin observing the container and perform the initial fit.
+   *
+   * Must be called AFTER {@link Terminal.open} — otherwise the ResizeObserver
+   * fires during open() while the render service is still undefined, crashing
+   * Viewport.syncScrollArea.
+   */
+  start(): void {
+    if (this.disposed) { return; }
+    this.observer.observe(this.container);
+    this.scheduleFit();
+  }
+
+  /**
+   * Coalesce bursts of fit requests (e.g. resize notifications during a drag)
+   * into a single fit per animation frame to avoid layout thrashing.
+   */
+  private scheduleFit(): void {
+    if (this.disposed || this.rafHandle !== null) {
+      return;
+    }
+    this.rafHandle = requestAnimationFrame(() => {
+      this.rafHandle = null;
       if (!this.disposed) {
         this.fit();
       }
@@ -82,6 +105,10 @@ export class ViewportManager {
   }
 
   dispose(): void {
+    if (this.rafHandle !== null) {
+      cancelAnimationFrame(this.rafHandle);
+      this.rafHandle = null;
+    }
     this.disposed = true;
     this.observer.disconnect();
     this.wheelCleanup?.();
@@ -104,16 +131,31 @@ export class ViewportManager {
   private scaleFont(): void {
     const currentFont = this.term.options.fontSize ?? FONT_MAX;
     const cols = this.term.cols;
-    if (cols >= this.targetCols || currentFont <= FONT_MIN) {
+    const profileFont = this.profile.fontSize;
+
+    // Wide enough to hit target columns: restore toward the profile font size.
+    if (cols >= this.targetCols) {
+      if (currentFont < profileFont) {
+        this.term.options.fontSize = profileFont;
+        this.reflowAfterFontChange();
+      }
       return;
     }
 
+    // Too narrow: shrink so more columns fit, down to FONT_MIN.
+    if (currentFont <= FONT_MIN) {
+      return;
+    }
     const newFont = Math.max(FONT_MIN, Math.round(currentFont * cols / this.targetCols));
     if (newFont >= currentFont) {
       return;
     }
-
     this.term.options.fontSize = newFont;
+    this.reflowAfterFontChange();
+  }
+
+  /** Re-fit after a font-size change, two rAFs out so xterm applies metrics. */
+  private reflowAfterFontChange(): void {
     requestAnimationFrame(() => {
       if (this.disposed) {
         return;

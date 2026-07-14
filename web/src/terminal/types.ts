@@ -57,4 +57,6 @@ export interface TerminalProps {
   onError?: (error: Error) => void;
   onBannerChange?: (blocked: boolean) => void;
   onCtrlD?: () => void;
+  /** Renderer chosen at attach; forced to 'canvas' if WebGL unsupported. */
+  renderer?: 'webgl' | 'canvas';
 }
