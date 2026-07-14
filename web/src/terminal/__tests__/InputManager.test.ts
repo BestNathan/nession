@@ -63,4 +63,27 @@ describe('InputManager', () => {
     expect(cb2).toHaveBeenCalledWith('b');
     manager.dispose();
   });
+
+  it('passes mouse button press through immediately (only motion is throttled)', () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new InputManager(term);
+      const received: string[] = [];
+      manager.onData((data) => received.push(data));
+
+      // A motion event (button code 35 = 32 motion bit set) consumes the
+      // throttle's leading edge and schedules only a trailing invocation.
+      term.input('\x1b[<35;5;5M');
+      received.length = 0;
+
+      // A button press (button 0, no motion bit) must bypass the throttle and
+      // arrive synchronously — without advancing any timers.
+      term.input('\x1b[<0;10;10M');
+      expect(received).toContain('\x1b[<0;10;10M');
+
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

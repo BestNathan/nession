@@ -6,8 +6,15 @@ export type CtrlDCallback = () => void;
 
 const MOUSE_THROTTLE_MS = 16;
 
-function isMouseEvent(data: string): boolean {
-  return data.startsWith('\x1b[<') || data.startsWith('\x1b[M');
+/** SGR mouse motion events carry the 0x20 (32) "motion" bit in the button code
+ *  (e.g. "\x1b[<35;..."). Only these are throttled; press/release/wheel are
+ *  passed through immediately so quick clicks are never delayed or merged. */
+function isMouseMotion(data: string): boolean {
+  if (!data.startsWith('\x1b[<')) { return false; }
+  const semicolon = data.indexOf(';', 3);
+  const button = Number(data.slice(3, semicolon === -1 ? undefined : semicolon));
+  if (!Number.isFinite(button)) { return false; }
+  return (button & 32) === 32;
 }
 
 export class InputManager {
@@ -34,7 +41,7 @@ export class InputManager {
         }
         return;
       }
-      if (isMouseEvent(data)) {
+      if (isMouseMotion(data)) {
         this.sendMouseData(data);
       } else {
         for (const cb of this.dataCallbacks) {
