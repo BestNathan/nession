@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { Plus, RefreshCw, X, FileCog } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Plus, RefreshCw, X, FileCog, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Agent, Session, ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
@@ -25,34 +25,61 @@ interface DashboardProps {
   connectionStatus: ConnectionStatus;
 }
 
-function AgentSection({
+export function AgentSection({
   loadingAgents,
   agents,
   filteredAgents,
   isSearchActive,
   setSelectedAgent,
+  onlineCount,
+  offlineCount,
 }: {
   loadingAgents: boolean;
   agents: Agent[];
   filteredAgents: Agent[];
   isSearchActive: boolean;
   setSelectedAgent: (a: Agent | null) => void;
+  onlineCount: number;
+  offlineCount: number;
 }) {
+  // Mobile: Agents collapse behind a summary bar so Sessions gets the screen
+  // by default. At md:+ the grid is always visible (md:grid wins) regardless
+  // of `expanded`, so no viewport JS is needed.
+  const [expanded, setExpanded] = useState(false);
+  const gridClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agents</h2>
       </div>
+      {/* Mobile-only collapse summary bar */}
+      <button
+        type="button"
+        data-testid="agent-summary-bar"
+        onClick={() => setExpanded((v) => !v)}
+        className="md:hidden w-full flex items-center justify-between rounded-lg border px-3 min-h-11 mb-2 text-sm"
+        aria-expanded={expanded}
+      >
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-500" /> {onlineCount} online
+          </span>
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-gray-400" /> {offlineCount} offline
+          </span>
+        </span>
+        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
       {loadingAgents ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={cn(expanded ? 'grid' : 'hidden', 'md:grid gap-3', gridClass)}>
           {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
         </div>
       ) : agents.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">No agents connected</p>
+        <p className={cn(expanded ? 'block' : 'hidden', 'md:block text-sm text-muted-foreground py-8 text-center')}>No agents connected</p>
       ) : filteredAgents.length === 0 && isSearchActive ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">No agents match your search</p>
+        <p className={cn(expanded ? 'block' : 'hidden', 'md:block text-sm text-muted-foreground py-8 text-center')}>No agents match your search</p>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={cn(expanded ? 'grid' : 'hidden', 'md:grid gap-3', gridClass)}>
           {filteredAgents.map((a) => (
             <AgentCard key={a.agent_id} agent={a} onClick={() => setSelectedAgent(a)} />
           ))}
@@ -99,10 +126,10 @@ function DashboardHeader({
           {connectionStatus}
         </Badge>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" onClick={onOpenEnv}>
-          <FileCog className="w-4 h-4 mr-1" /> Env Files
+        <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
+          <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
         </Button>
-        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents}>
+        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0">
           <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
         </Button>
       </header>
@@ -232,7 +259,7 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-[100dvh] flex flex-col bg-background">
       <DashboardHeader
         connectionStatus={connectionStatus}
         loadingAgents={loadingAgents}
@@ -247,13 +274,15 @@ export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
         error={error}
       />
 
-      <div className="flex-1 min-h-0 flex flex-col p-6 gap-6">
+      <div className="flex-1 min-h-0 flex flex-col p-3 gap-4 md:p-4 lg:p-6 lg:gap-6 pb-[env(safe-area-inset-bottom)] w-full max-w-[1920px] mx-auto">
         <AgentSection
           loadingAgents={loadingAgents}
           agents={agents}
           filteredAgents={filteredAgents}
           isSearchActive={isSearchActive}
           setSelectedAgent={setSelectedAgent}
+          onlineCount={onlineCount}
+          offlineCount={offlineCount}
         />
 
         {/* Sessions */}
