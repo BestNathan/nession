@@ -19,6 +19,21 @@ export class Renderer {
     if (preferred === 'webgl' && detectWebGLSupport()) {
       try {
         const webgl = new WebglAddon();
+        // @xterm/addon-webgl's dispose() throws "Cannot read properties of
+        // undefined (reading '_isDisposed')" if the addon is disposed before
+        // its GL renderer finished initializing — which happens under React
+        // StrictMode's dev mount→unmount→mount. Wrap dispose so teardown never
+        // throws and crashes the React tree. loadAddon() captures this
+        // reference and calls it through its own wrapper, so the addon is still
+        // unregistered correctly on terminal.dispose().
+        const rawDispose = webgl.dispose.bind(webgl);
+        webgl.dispose = () => {
+          try {
+            rawDispose();
+          } catch {
+            /* GL renderer never initialized — safe to ignore */
+          }
+        };
         webgl.onContextLoss(() => {
           webgl.dispose();
           this.fallbackToCanvas();
