@@ -123,4 +123,33 @@ describe('SidePanel', () => {
     // After mouseup, mousemove should not trigger resize
     fireEvent.mouseMove(document, { clientX: 500 });
   });
+
+  it('renders a backdrop when open', () => {
+    const { container } = render(
+      <SidePanel defaultOpen={true}>
+        <div>Content</div>
+      </SidePanel>,
+    );
+    expect(container.querySelector('[data-testid="sidepanel-backdrop"]')).toBeTruthy();
+  });
+
+  it('does not render a backdrop when closed', () => {
+    const { container } = render(
+      <SidePanel defaultOpen={false}>
+        <div>Content</div>
+      </SidePanel>,
+    );
+    expect(container.querySelector('[data-testid="sidepanel-backdrop"]')).toBeFalsy();
+  });
+
+  it('closes when the backdrop is clicked', () => {
+    const { container } = render(
+      <SidePanel defaultOpen={true}>
+        <div>Content</div>
+      </SidePanel>,
+    );
+    const backdrop = container.querySelector('[data-testid="sidepanel-backdrop"]')!;
+    fireEvent.click(backdrop);
+    expect(screen.getByTitle('Open panel')).toBeInTheDocument();
+  });
 });

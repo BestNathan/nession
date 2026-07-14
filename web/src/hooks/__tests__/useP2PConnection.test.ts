@@ -289,4 +289,34 @@ describe('useP2PConnection', () => {
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0].msg_type).toBe('__binary__');
   });
+
+  it('keeps a stable object identity across state transitions', async () => {
+    setupMock();
+    const { result } = renderHook(() =>
+      useP2PConnection({ agentUrl: 'ws://agent:9090/ws', sessionName: 'test' }),
+    );
+
+    const first = result.current!;
+    expect(first.connectionState).toBe('connecting');
+
+    await flushTimers(); // connecting → connected (a state change → re-render)
+    // Identity MUST NOT change: Terminal.tsx rebuilds its xterm view when the
+    // p2pConnection prop identity changes, so a fresh object per render made
+    // unrelated re-renders (e.g. bottom-bar tab toggles) tear down the terminal.
+    expect(result.current).toBe(first);
+  });
+
+  it('exposes live state through getters despite stable identity', async () => {
+    setupMock();
+    const { result } = renderHook(() =>
+      useP2PConnection({ agentUrl: 'ws://agent:9090/ws', sessionName: 'test' }),
+    );
+
+    const conn = result.current!;
+    expect(conn.connectionState).toBe('connecting');
+    await flushTimers();
+    // Same object, but the getter reflects the new state.
+    expect(conn.connectionState).toBe('connected');
+    expect(conn.reconnectAttempt).toBe(0);
+  });
 });

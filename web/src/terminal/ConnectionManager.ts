@@ -74,19 +74,15 @@ export class ConnectionManager {
   async attach(): Promise<void> {
     if (this.disposed) { return; }
     if (this.mode === 'p2p' && this.p2pConnection) {
+      // A bare `client.attach` is enough: the agent's `tmux attach-session`
+      // redraws the full screen on attach. We deliberately do NOT inject a
+      // trailing `\r` — that executed an empty command in the shell, leaving a
+      // stray blank prompt line on every (re)attach.
       this.p2pConnection.sendMessage({
         msg_type: 'client.attach',
         id: generateId(),
         timestamp: Math.floor(Date.now() / 1000),
         payload: { session_name: this.sessionName },
-      });
-      const encoder = new TextEncoder();
-      const b64 = btoa(String.fromCharCode(...encoder.encode('\r')));
-      this.p2pConnection.sendMessage({
-        msg_type: 'terminal.input',
-        id: generateId(),
-        timestamp: Math.floor(Date.now() / 1000),
-        payload: { session_name: this.sessionName, data: b64 },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
       try {

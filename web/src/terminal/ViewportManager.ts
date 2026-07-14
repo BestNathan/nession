@@ -7,6 +7,11 @@ const FONT_MIN = 10;
 const FONT_MAX = 14;
 const DEFAULT_TARGET_COLS = 80;
 
+/** Optional construction settings for {@link ViewportManager}. */
+export interface ViewportOptions {
+  profile?: DeviceProfile;
+}
+
 export class ViewportManager {
   private observer: ResizeObserver;
   private profile: DeviceProfile;
@@ -18,12 +23,19 @@ export class ViewportManager {
     private term: Terminal,
     private fitAddon: FitAddon,
     private container: HTMLElement,
-    profile?: DeviceProfile,
+    options: ViewportOptions = {},
   ) {
-    this.profile = profile ?? detectProfile(container.clientWidth);
+    this.profile = options.profile ?? detectProfile(container.clientWidth);
     this.targetCols = DEFAULT_TARGET_COLS;
     this.applyProfile();
 
+    // NOTE: do NOT mutate container layout (display/flex) here. This runs
+    // before TerminalView calls terminal.open(), and changing the box model
+    // races with the renderer's initialisation: the ResizeObserver below fires
+    // during open() while xterm's _renderService is still undefined, crashing
+    // Viewport.syncScrollArea. The sub-row remainder is hidden instead by a
+    // static terminal-coloured background on the mount container in
+    // Terminal.tsx, which doesn't touch the box model and so can't race.
     this.observer = new ResizeObserver(() => {
       if (this.disposed) {
         return;

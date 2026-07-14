@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, X, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import {
   PRESETS,
   loadUserCommands,
@@ -52,9 +53,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-0">
       {/* Quick command buttons — compact, scrollable row */}
-      <div className="flex flex-wrap gap-1 content-start overflow-y-auto flex-1 min-h-0 p-2 pb-0">
+      <div className="flex flex-wrap gap-1 content-start overflow-y-auto min-h-0 p-2 pb-0">
         {PRESETS.map((cmd) => (
           <Button key={cmd.id} variant="outline" size="sm"
             className="h-6 text-[11px] px-2" disabled={disabled}
@@ -90,10 +91,12 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
         )}
       </div>
 
-      {/* Input row — pinned to bottom */}
-      <div className="flex gap-1.5 flex-shrink-0 p-2 pt-1 border-t">
-        <Input placeholder="Type to send… (Enter to submit)"
+      {/* Input row — pinned to bottom; multi-line, fixed ~3 rows */}
+      <div className="flex gap-1.5 flex-shrink-0 p-2 pt-1 border-t items-end">
+        <Textarea
+          placeholder="Type to send… (Enter to submit, Shift+Enter for newline)"
           value={inputValue}
+          rows={3}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -101,7 +104,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
               sendInput();
             }
           }}
-          className="h-7 text-xs flex-1" disabled={disabled} />
+          className="text-xs md:text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
+          disabled={disabled}
+        />
         <Button variant="outline" size="icon" className="h-7 w-7 flex-shrink-0" title="Send"
           onClick={sendInput} disabled={disabled}>
           <SendHorizontal className="h-3.5 w-3.5" />

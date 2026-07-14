@@ -80,6 +80,21 @@ describe('ConnectionManager', () => {
       vi.advanceTimersByTime(60_000);
       expect((p2p.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(calls);
     });
+
+    it('attach sends only client.attach, never a synthetic terminal.input (no phantom Enter)', async () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      await cm.attach();
+      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
+      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
+      expect(types).toContain('client.attach');
+      // tmux attach-session already redraws on attach; injecting a '\r' left a
+      // stray blank prompt line on every (re)attach — assert we no longer do it.
+      expect(types).not.toContain('terminal.input');
+      cm.dispose();
+    });
   });
 
   describe('Relay mode', () => {

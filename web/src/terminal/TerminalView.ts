@@ -54,7 +54,7 @@ export class TerminalView {
       this.terminal,
       fitAddon,
       container,
-      options.deviceProfile,
+      { profile: options.deviceProfile },
     );
 
     this.input = new InputManager(this.terminal);

@@ -89,6 +89,19 @@ describe('ViewportManager', () => {
     manager.dispose();
   });
 
+  it('does not mutate the container box model (avoids renderer-init race)', () => {
+    // Regression guard: setting display/flex on the mount container in the
+    // constructor (before terminal.open()) races with xterm's renderer init
+    // and crashes Viewport.syncScrollArea on slower renderers. The sub-row
+    // remainder is hidden via a static background in Terminal.tsx instead, so
+    // ViewportManager must leave the container's layout untouched.
+    const manager = new ViewportManager(term, fitAddon, container);
+    expect(container.style.display).toBe('');
+    expect(container.style.flexDirection).toBe('');
+    expect(container.style.justifyContent).toBe('');
+    manager.dispose();
+  });
+
   it('dispose cleans up without error', () => {
     const manager = new ViewportManager(term, fitAddon, container);
     expect(() => manager.dispose()).not.toThrow();

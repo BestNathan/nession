@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 
 export interface P2PMessage {
   msg_type: string;
@@ -154,6 +154,11 @@ export function useP2PConnection(
   const connectionStateRef = useRef<ConnectionState>(connectionState);
   connectionStateRef.current = connectionState;
 
+  // Mirror reconnectAttempt into a ref too, so the returned object can expose it
+  // via a getter (see the useMemo below) without changing object identity.
+  const reconnectAttemptStateRef = useRef<number>(reconnectAttempt);
+  reconnectAttemptStateRef.current = reconnectAttempt;
+
   // Pending waitForConnection() waiters, settled event-driven from the
   // connectionState effect below (no busy-polling — works under fake timers).
   const waitersRef = useRef<Set<{ resolve: () => void; reject: (e: Error) => void }>>(new Set());
@@ -244,6 +249,25 @@ export function useP2PConnection(
     });
   }, []);
 
+  // Build a STABLE connection object. `sendMessage`/`onMessage`/`close`/
+  // `waitForConnection` are useCallback-stable; `connectionState` and
+  // `reconnectAttempt` are exposed as getters backed by refs so the object
+  // identity never changes across state transitions. This matters because
+  // `Terminal.tsx` rebuilds its xterm view when the `p2pConnection` prop
+  // identity changes — returning a fresh object literal every render (the old
+  // behaviour) made unrelated re-renders (e.g. toggling the bottom-bar tab)
+  // tear down and recreate the terminal. Consumers that need reactivity read
+  // the primitive getter value into an effect dependency (e.g. useP2PWithFallback),
+  // which still updates because the owning component re-renders on setState.
+  const connection = useMemo<P2PConnection>(() => ({
+    sendMessage,
+    onMessage,
+    close,
+    waitForConnection,
+    get connectionState() { return connectionStateRef.current; },
+    get reconnectAttempt() { return reconnectAttemptStateRef.current; },
+  }), [sendMessage, onMessage, close, waitForConnection]);
+
   if (!options) {return null;}
-  return { sendMessage, onMessage, connectionState, reconnectAttempt, close, waitForConnection };
+  return connection;
 }
