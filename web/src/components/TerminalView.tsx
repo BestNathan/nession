@@ -159,7 +159,10 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
               onSheetToggle={setSheetOpen}
               envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
               commandsPanel={
-                <TerminalToolbar sendText={(text) => terminalRef.current?.sendText(text)} />
+                <TerminalToolbar
+                  sendText={(text) => terminalRef.current?.sendText(text)}
+                  disabled={toolbarDisabled}
+                />
               }
             />
           </>
