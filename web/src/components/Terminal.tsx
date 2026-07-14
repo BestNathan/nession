@@ -82,6 +82,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const container = containerRef.current;
     if (!container) { return; }
 
+    // Do NOT build the xterm view in p2p mode until the connection object
+    // exists. On first render the address plan is still resolving, so
+    // useP2PWithFallback yields p2pConnection=null while effectiveMode is
+    // already 'p2p'. Building here would open() a connectionless terminal,
+    // and one render later — when the connection resolves and this prop flips
+    // null→object — the effect tears that view down. xterm's Viewport
+    // constructor schedules an un-cancellable `setTimeout(syncScrollArea)`
+    // during open(); if the view is disposed before that 0ms timer fires, the
+    // timer reads the now-disposed RenderService's `.dimensions` and crashes
+    // with "Cannot read properties of undefined (reading 'dimensions')"
+    // (issue #51). Gating on the connection removes the throwaway view
+    // entirely, so the view is built exactly once, with a live connection.
+    if (mode === 'p2p' && !p2pConnection) { return; }
+
     const connOpts = mode === 'p2p'
       ? { mode: 'p2p' as const, sessionName, sessionId, p2pConnection: p2pConnection ?? undefined }
       : { mode: 'relay' as const, sessionName, sessionId, serverConnection };
