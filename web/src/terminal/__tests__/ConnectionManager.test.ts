@@ -117,7 +117,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('transitions to lost after RELAY_MAX_ATTEMPTS and fires onDisconnect', () => {
+    it('transitions to lost after RELAY_MAX_ATTEMPTS and fires onDisconnect exactly once', () => {
       const ws = makeMockWs();
       let stateCb: (status: string) => void = () => {};
       (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
@@ -131,11 +131,11 @@ describe('ConnectionManager', () => {
       cm.onStateChange = (s) => states.push(s);
       cm.onDisconnect = onDisconnect;
 
-      // 11 disconnect signals: attempts 1..10 reconnecting, the 11th → lost.
-      for (let i = 0; i < 11; i++) { stateCb('disconnected'); }
+      // 15 disconnect signals: attempts 1..10 reconnecting, then latched at lost.
+      for (let i = 0; i < 15; i++) { stateCb('disconnected'); }
 
-      expect(states).toContain('lost');
       expect(states.filter((s) => s === 'reconnecting').length).toBe(10);
+      expect(states.filter((s) => s === 'lost').length).toBe(1);
       vi.advanceTimersByTime(3000);
       expect(onDisconnect).toHaveBeenCalledTimes(1);
       cm.dispose();

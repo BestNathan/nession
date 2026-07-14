@@ -30,6 +30,7 @@ export class ConnectionManager {
   private serverConnection?: ConnectionOptions['serverConnection'];
 
   private reconnectAttempt = 0;
+  private relayLost = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
@@ -164,13 +165,16 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'disconnected' || status === 'connecting') {
+        if (this.relayLost) { return; }
         const next = this.reconnectAttempt + 1;
         if (next > RELAY_MAX_ATTEMPTS) {
+          this.relayLost = true;
           this.setState('lost', RELAY_MAX_ATTEMPTS);
         } else {
           this.setState('reconnecting', next);
         }
       } else if (status === 'authenticated') {
+        this.relayLost = false;
         this.setState('connected', 0);
         this.attach().catch(() => {});
       }
