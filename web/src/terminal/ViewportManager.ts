@@ -18,6 +18,7 @@ export class ViewportManager {
   private targetCols: number;
   private wheelCleanup: (() => void) | null = null;
   private disposed = false;
+  private rafHandle: number | null = null;
 
   constructor(
     private term: Terminal,
@@ -40,13 +41,25 @@ export class ViewportManager {
       if (this.disposed) {
         return;
       }
-      this.fit();
+      this.scheduleFit();
     });
     this.observer.observe(container);
 
     this.installWheelIntercept();
 
-    requestAnimationFrame(() => {
+    this.scheduleFit();
+  }
+
+  /**
+   * Coalesce bursts of fit requests (e.g. resize notifications during a drag)
+   * into a single fit per animation frame to avoid layout thrashing.
+   */
+  private scheduleFit(): void {
+    if (this.disposed || this.rafHandle !== null) {
+      return;
+    }
+    this.rafHandle = requestAnimationFrame(() => {
+      this.rafHandle = null;
       if (!this.disposed) {
         this.fit();
       }
@@ -82,6 +95,10 @@ export class ViewportManager {
   }
 
   dispose(): void {
+    if (this.rafHandle !== null) {
+      cancelAnimationFrame(this.rafHandle);
+      this.rafHandle = null;
+    }
     this.disposed = true;
     this.observer.disconnect();
     this.wheelCleanup?.();
@@ -104,16 +121,31 @@ export class ViewportManager {
   private scaleFont(): void {
     const currentFont = this.term.options.fontSize ?? FONT_MAX;
     const cols = this.term.cols;
-    if (cols >= this.targetCols || currentFont <= FONT_MIN) {
+    const profileFont = this.profile.fontSize;
+
+    // Wide enough to hit target columns: restore toward the profile font size.
+    if (cols >= this.targetCols) {
+      if (currentFont < profileFont) {
+        this.term.options.fontSize = profileFont;
+        this.reflowAfterFontChange();
+      }
       return;
     }
 
+    // Too narrow: shrink so more columns fit, down to FONT_MIN.
+    if (currentFont <= FONT_MIN) {
+      return;
+    }
     const newFont = Math.max(FONT_MIN, Math.round(currentFont * cols / this.targetCols));
     if (newFont >= currentFont) {
       return;
     }
-
     this.term.options.fontSize = newFont;
+    this.reflowAfterFontChange();
+  }
+
+  /** Re-fit after a font-size change, two rAFs out so xterm applies metrics. */
+  private reflowAfterFontChange(): void {
     requestAnimationFrame(() => {
       if (this.disposed) {
         return;
