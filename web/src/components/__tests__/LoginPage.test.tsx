@@ -219,4 +219,22 @@ describe('LoginPage', () => {
     expect(screen.getByText(/Real-time dashboard/)).toBeInTheDocument();
     expect(screen.getByText(/P2P and relay terminal/)).toBeInTheDocument();
   });
+
+  it('hides the Features card on mobile (md:block)', () => {
+    const { container } = render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl=""
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={vi.fn()}
+        onDisconnect={vi.fn()}
+      />,
+    );
+    const featuresCard = container.querySelector('[data-testid="features-card"]');
+    expect(featuresCard).not.toBeNull();
+    expect(featuresCard?.className).toContain('hidden');
+    expect(featuresCard?.className).toContain('md:block');
+  });
 });

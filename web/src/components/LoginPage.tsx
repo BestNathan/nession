@@ -65,7 +65,7 @@ export function LoginPage({
   const isConnecting = connectionStatus !== 'disconnected';
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+    <div className="min-h-[100dvh] flex flex-col items-center justify-center p-4">
       <h1 className="text-3xl font-bold mb-2">Nession</h1>
       <p className="text-muted-foreground mb-8">Distributed tmux Agent</p>
 
@@ -121,7 +121,7 @@ export function LoginPage({
         </CardContent>
       </Card>
 
-      <Card className="w-full max-w-md">
+      <Card data-testid="features-card" className="hidden md:block w-full max-w-md">
         <CardHeader>
           <CardTitle>Features</CardTitle>
         </CardHeader>
