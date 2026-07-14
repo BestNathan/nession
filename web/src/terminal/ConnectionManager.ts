@@ -20,6 +20,8 @@ function decodeB64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+const RELAY_MAX_ATTEMPTS = 10;
+
 export class ConnectionManager {
   private mode: 'p2p' | 'relay';
   private sessionName: string;
@@ -162,7 +164,12 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'disconnected' || status === 'connecting') {
-        this.setState('reconnecting', this.reconnectAttempt + 1);
+        const next = this.reconnectAttempt + 1;
+        if (next > RELAY_MAX_ATTEMPTS) {
+          this.setState('lost', RELAY_MAX_ATTEMPTS);
+        } else {
+          this.setState('reconnecting', next);
+        }
       } else if (status === 'authenticated') {
         this.setState('connected', 0);
         this.attach().catch(() => {});

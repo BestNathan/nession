@@ -116,5 +116,29 @@ describe('ConnectionManager', () => {
       expect(ws.onTerminalOutput).toHaveBeenCalledWith('a:test', expect.any(Function));
       cm.dispose();
     });
+
+    it('transitions to lost after RELAY_MAX_ATTEMPTS and fires onDisconnect', () => {
+      const ws = makeMockWs();
+      let stateCb: (status: string) => void = () => {};
+      (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
+        (cb: (status: string) => void) => { stateCb = cb; return () => {}; },
+      );
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+      const states: string[] = [];
+      const onDisconnect = vi.fn();
+      cm.onStateChange = (s) => states.push(s);
+      cm.onDisconnect = onDisconnect;
+
+      // 11 disconnect signals: attempts 1..10 reconnecting, the 11th → lost.
+      for (let i = 0; i < 11; i++) { stateCb('disconnected'); }
+
+      expect(states).toContain('lost');
+      expect(states.filter((s) => s === 'reconnecting').length).toBe(10);
+      vi.advanceTimersByTime(3000);
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
   });
 });
