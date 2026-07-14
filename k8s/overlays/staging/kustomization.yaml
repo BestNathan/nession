@@ -14,13 +14,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-f76dce3
+  newTag: agent-66bb8e7
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-f76dce3
+  newTag: server-66bb8e7
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-f76dce3
+  newTag: ui-66bb8e7
 
 patches:
 - path: patch-ingress.yaml
