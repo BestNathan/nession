@@ -49,6 +49,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onBannerChangeRef.current?.(banner !== 'none');
   }, [banner]);
 
+  // Observe P2P transport reconnects. connectionState is a getter (no re-render
+  // on change), but this component re-renders whenever the owner does, and the
+  // owner (via useP2PWithFallback) re-renders on every P2P state transition —
+  // so reading it here in an effect keyed on the value tracks it correctly.
+  const p2pState = p2pConnection?.connectionState;
+  const prevP2pStateRef = useRef(p2pState);
+  useEffect(() => {
+    if (mode !== 'p2p') { return; }
+    const view = viewRef.current;
+    if (!view) { return; }
+    const prev = prevP2pStateRef.current;
+    prevP2pStateRef.current = p2pState;
+
+    if (p2pState === 'reconnecting') {
+      view.setExternalBanner('reconnecting', p2pConnection?.reconnectAttempt ?? 0);
+    } else if (p2pState === 'connected' && prev === 'reconnecting') {
+      // Transport came back after a drop: clear banner and redraw tmux.
+      view.setExternalBanner('none', 0);
+      view.reattach();
+    }
+    // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
+  }, [mode, p2pState, p2pConnection]);
+
   // Create/dispose TerminalView — only rebuild on session/mode change.
   useEffect(() => {
     const container = containerRef.current;
