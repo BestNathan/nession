@@ -56,6 +56,7 @@ describe('ViewportManager', () => {
 
   it('fits the terminal on construction (deferred via rAF)', async () => {
     const manager = new ViewportManager(term, fitAddon, container);
+    manager.start();
     await new Promise((r) => requestAnimationFrame(r));
     expect(term.cols).toBeGreaterThan(0);
     expect(term.rows).toBeGreaterThan(0);
@@ -109,6 +110,7 @@ describe('ViewportManager', () => {
 
   it('debounces ResizeObserver callbacks via rAF (single fit per frame)', async () => {
     const manager = new ViewportManager(term, fitAddon, container);
+    manager.start();
     const fitSpy = vi.spyOn(fitAddon, 'fit');
     fitSpy.mockClear();
     const ro = (manager as unknown as { observer: { callback: ResizeObserverCallback } }).observer;

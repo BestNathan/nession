@@ -93,6 +93,11 @@ export class TerminalView {
     // 4. Open terminal in DOM.
     this.terminal.open(container);
 
+    // 4b. Start viewport observation — MUST happen after open() so the
+    //     ResizeObserver never fires while the render service is uninitialised
+    //     (syncScrollArea crashes on undefined _renderService otherwise).
+    this.viewport.start();
+
     // 5. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
