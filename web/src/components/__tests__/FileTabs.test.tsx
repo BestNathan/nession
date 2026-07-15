@@ -21,15 +21,36 @@ function makeFileOps(entries: FileEntry[]): FileOps {
 
 const FILE: FileEntry = { name: 'f.txt', path: 'f.txt', is_dir: false, size: 5, modified: 0 };
 
+function mockMatchMedia(matches: boolean) {
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches,
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })));
+}
+
+// Bottom-bar props are required by FileTabs; tests don't exercise them here.
+const bottomBarProps = {
+  bottomTab: 'commands' as const,
+  onBottomTabChange: vi.fn(),
+  sheetOpen: false,
+  onSheetToggle: vi.fn(),
+  envPanel: null,
+  commandsPanel: null,
+};
+
 describe('FileTabs', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
   it('keeps the terminal mounted (not unmounted) when a file tab is active', async () => {
+    mockMatchMedia(false);
     const fileOps = makeFileOps([FILE]);
     render(
       <FileTabs
         fileOps={fileOps}
         terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
       />,
     );
 
@@ -51,6 +72,7 @@ describe('FileTabs', () => {
   });
 
   it('calls onTerminalReveal when switching back to the terminal tab', async () => {
+    mockMatchMedia(false);
     const fileOps = makeFileOps([FILE]);
     const onTerminalReveal = vi.fn();
     render(
@@ -58,6 +80,7 @@ describe('FileTabs', () => {
         fileOps={fileOps}
         onTerminalReveal={onTerminalReveal}
         terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
       />,
     );
 
@@ -74,5 +97,50 @@ describe('FileTabs', () => {
     fireEvent.click(tabBar);
 
     await waitFor(() => expect(onTerminalReveal).toHaveBeenCalledTimes(1));
+  });
+
+  it('on desktop renders the SidePanel and no Files tab', () => {
+    mockMatchMedia(false);
+    render(
+      <FileTabs
+        fileOps={makeFileOps([FILE])}
+        terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
+      />,
+    );
+    expect(screen.getByTitle('Open panel')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Files/ })).toBeNull();
+  });
+
+  it('on mobile hides the SidePanel and shows a Files tab', () => {
+    mockMatchMedia(true);
+    render(
+      <FileTabs
+        fileOps={makeFileOps([FILE])}
+        terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
+      />,
+    );
+    expect(screen.queryByTitle('Open panel')).toBeNull();
+    expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument();
+  });
+
+  it('on mobile, opening a file from the Files panel collapses the sheet', async () => {
+    mockMatchMedia(true);
+    const onSheetToggle = vi.fn();
+    render(
+      <FileTabs
+        fileOps={makeFileOps([FILE])}
+        terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
+        bottomTab={'files'}
+        sheetOpen={true}
+        onSheetToggle={onSheetToggle}
+      />,
+    );
+    // With bottomTab='files' the Files panel (FileBrowser) is the active content.
+    const fileButton = await screen.findByText('f.txt');
+    fireEvent.click(fileButton);
+    await waitFor(() => expect(onSheetToggle).toHaveBeenCalledWith(false));
   });
 });

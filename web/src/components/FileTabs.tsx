@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import { SidePanel } from './SidePanel';
 import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { BottomBar, type BottomTab } from './BottomBar';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface OpenFile {
@@ -21,6 +23,13 @@ interface FileTabsProps {
    * while hidden (display:none).
    */
   onTerminalReveal?: () => void;
+  /** Bottom-bar wiring (state lifted in TerminalView; shared with the non-fileOps path). */
+  bottomTab: BottomTab;
+  onBottomTabChange: (tab: BottomTab) => void;
+  sheetOpen: boolean;
+  onSheetToggle: (open: boolean) => void;
+  envPanel: React.ReactNode;
+  commandsPanel: React.ReactNode;
 }
 
 const MAX_TABS = 10;
@@ -66,7 +75,12 @@ function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, onSelect, on
   );
 }
 
-export function FileTabs({ fileOps, terminalElement, onTerminalReveal }: FileTabsProps) {
+/**
+ * Open-file tab state: which files are open, which tab is active, dirty
+ * tracking, and the handlers FileBrowser/FileViewer drive. Extracted from the
+ * component to keep the render body small.
+ */
+function useFileTabs(onTerminalReveal?: () => void) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('terminal');
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
@@ -165,11 +179,37 @@ export function FileTabs({ fileOps, terminalElement, onTerminalReveal }: FileTab
     wasTerminalVisibleRef.current = showTerminal;
   }, [showTerminal, onTerminalReveal]);
 
+  return {
+    openFiles, activeTabId, setActiveTabId, dirtyFiles, activeFile, showTerminal,
+    handleFileClick, handleCloseFile, handleDirtyChange, handleFileDeleted, handleFileRenamed,
+  };
+}
+
+export function FileTabs({
+  fileOps, terminalElement, onTerminalReveal,
+  bottomTab, onBottomTabChange, sheetOpen, onSheetToggle, envPanel, commandsPanel,
+}: FileTabsProps) {
+  const {
+    openFiles, activeTabId, setActiveTabId, dirtyFiles, activeFile, showTerminal,
+    handleFileClick, handleCloseFile, handleDirtyChange, handleFileDeleted, handleFileRenamed,
+  } = useFileTabs(onTerminalReveal);
+
+  const isMobile = useMediaQuery('(max-width: 1023px)');
+
+  // On mobile the browser lives in the Bottom Bar; opening a file collapses the
+  // sheet so the freshly opened tab is visible.
+  const handleFileClickMobile = useCallback((entry: FileEntry) => {
+    handleFileClick(entry);
+    onSheetToggle(false);
+  }, [handleFileClick, onSheetToggle]);
+
   return (
     <div className="flex-1 min-h-0 flex flex-row">
-      <SidePanel>
-        <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
-      </SidePanel>
+      {!isMobile && (
+        <SidePanel>
+          <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
+        </SidePanel>
+      )}
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Tab bar */}
@@ -196,6 +236,19 @@ export function FileTabs({ fileOps, terminalElement, onTerminalReveal }: FileTab
             </div>
           ) : null}
         </div>
+
+        <BottomBar
+          activeTab={bottomTab}
+          onTabChange={onBottomTabChange}
+          showFilesTab={isMobile}
+          sheetOpen={sheetOpen}
+          onSheetToggle={onSheetToggle}
+          envPanel={envPanel}
+          commandsPanel={commandsPanel}
+          filesPanel={
+            <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
+          }
+        />
       </div>
     </div>
   );
