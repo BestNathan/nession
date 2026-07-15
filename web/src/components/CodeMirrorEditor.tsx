@@ -82,13 +82,18 @@ export function CodeMirrorEditor({
     [],
   );
 
-  // Create editor on mount
+  // Create editor on mount (only once)
+  // Store initial values in refs to avoid dependency issues
+  const initialValueRef = useRef(value);
+  const initialReadOnlyRef = useRef(readOnly);
+  const initialLanguageRef = useRef(resolvedLanguage);
+
   useEffect(() => {
     if (!containerRef.current) {return;}
 
     const state = EditorState.create({
-      doc: value,
-      extensions: buildExtensions(readOnly, resolvedLanguage),
+      doc: initialValueRef.current,
+      extensions: buildExtensions(initialReadOnlyRef.current, initialLanguageRef.current),
     });
 
     const view = new EditorView({
@@ -102,9 +107,7 @@ export function CodeMirrorEditor({
       view.destroy();
       viewRef.current = null;
     };
-    // Only re-create on mount; value/readOnly/language updates are handled below
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [buildExtensions]);
 
   // Update value when prop changes (external updates)
   useEffect(() => {

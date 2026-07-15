@@ -84,7 +84,8 @@ export class WebSocketService {
   // Connection Management
 
   async connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    // Guard against concurrent connection attempts (OPEN or CONNECTING)
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
@@ -140,6 +141,8 @@ export class WebSocketService {
     }
 
     if (this.ws) {
+      // Null out handlers before closing to prevent async onclose from scheduling reconnection
+      this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }
