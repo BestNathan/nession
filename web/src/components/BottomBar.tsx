@@ -38,8 +38,9 @@ export function BottomBar({
   // to Commands so we never mount an orphan/duplicate FileBrowser.
   const effectiveTab = activeTab === 'files' && !showFilesTab ? 'commands' : activeTab;
 
-  // The Files browser needs more vertical room than the Commands grid / Env list.
-  const maxH = effectiveTab === 'files' ? 'max-h-[85dvh] sm:max-h-[40dvh]' : 'max-h-[70dvh] sm:max-h-[40dvh]';
+  // Fixed height across all tabs so switching tabs doesn't cause the container
+  // to jump. Content scrolls within the fixed envelope (overflow-y-auto below).
+  const maxH = 'max-h-[85dvh] sm:max-h-[40dvh]';
 
   return (
     <div className={cn('border-t flex-shrink-0 flex flex-col pb-[env(safe-area-inset-bottom)]', maxH)}>
