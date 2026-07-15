@@ -720,6 +720,22 @@ impl ServerClient {
                 });
                 sink.send(WsMessage::Text(response.to_string())).await?;
             }
+            "server.env.query" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let sourced_files = sourced_env_files().await;
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "env.query",
+                        "success": true,
+                        "sourced_files": sourced_files,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
             "server.session.kill" => {
                 let request_id = msg
                     .payload
@@ -791,6 +807,32 @@ fn str_field(payload: &serde_json::Value, key: &str) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// List env file names currently sourced on any tmux session.
+///
+/// Scans `/tmp/` for nession source scripts (written by
+/// [`TmuxManager::source_env`]) and extracts the env file names from the
+/// file naming convention `nession-source-{session}-{name}`.
+///
+/// Returns a sorted, deduplicated list of env file names. If `/tmp/` is
+/// unreadable, returns an empty list.
+async fn sourced_env_files() -> Vec<String> {
+    let mut files = std::collections::BTreeSet::new();
+    let mut dir = match tokio::fs::read_dir("/tmp").await {
+        Ok(d) => d,
+        Err(_) => return vec![],
+    };
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(rest) = name.strip_prefix("nession-source-") {
+            // rest = "{session}-{safe_name}" — strip the session part (first segment).
+            if let Some(env_name) = rest.split_once('-').map(|(_, n)| n) {
+                files.insert(env_name.to_string());
+            }
+        }
+    }
+    files.into_iter().collect()
 }
 
 /// Flatten multiple env-file snapshots into a single ordered variable list.
