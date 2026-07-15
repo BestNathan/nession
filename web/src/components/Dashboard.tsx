@@ -1,12 +1,11 @@
-import { useCallback, useState } from 'react';
-import { Plus, RefreshCw, X, FileCog, ChevronDown, ChevronUp } from 'lucide-react';
+import { useCallback } from 'react';
+import { Plus, RefreshCw, X, FileCog } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Agent, Session, ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { TerminalView, type AttachedSession } from './TerminalView';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
-import { AgentCard } from './AgentCard';
 import { SessionList } from './SessionList';
 import { SearchBar } from './SearchBar';
 import { AgentDetailPanel } from './AgentDetailPanel';
@@ -14,79 +13,16 @@ import { EnvManager } from './env/EnvManager';
 import { AttachDialog } from './env/AttachDialog';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Skeleton } from './ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useDashboardHandlers } from './useDashboardHandlers';
 import { useAttachFlow } from './useAttachFlow';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
+import { AgentSection } from './AgentSection';
+export { AgentSection };
 
 interface DashboardProps {
   wsService: WebSocketService;
   connectionStatus: ConnectionStatus;
-}
-
-export function AgentSection({
-  loadingAgents,
-  agents,
-  filteredAgents,
-  isSearchActive,
-  setSelectedAgent,
-  onlineCount,
-  offlineCount,
-}: {
-  loadingAgents: boolean;
-  agents: Agent[];
-  filteredAgents: Agent[];
-  isSearchActive: boolean;
-  setSelectedAgent: (a: Agent | null) => void;
-  onlineCount: number;
-  offlineCount: number;
-}) {
-  // Mobile: Agents collapse behind a summary bar so Sessions gets the screen
-  // by default. At md:+ the grid is always visible (md:grid wins) regardless
-  // of `expanded`, so no viewport JS is needed.
-  const [expanded, setExpanded] = useState(false);
-  const gridClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
-  return (
-    <section>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agents</h2>
-      </div>
-      {/* Mobile-only collapse summary bar */}
-      <button
-        type="button"
-        data-testid="agent-summary-bar"
-        onClick={() => setExpanded((v) => !v)}
-        className="md:hidden w-full flex items-center justify-between rounded-lg border px-3 min-h-11 mb-2 text-sm"
-        aria-expanded={expanded}
-      >
-        <span className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-500" /> {onlineCount} online
-          </span>
-          <span className="flex items-center gap-1.5 text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-gray-400" /> {offlineCount} offline
-          </span>
-        </span>
-        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-      </button>
-      {loadingAgents ? (
-        <div className={cn(expanded ? 'grid' : 'hidden', 'md:grid gap-3', gridClass)}>
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
-        </div>
-      ) : agents.length === 0 ? (
-        <p className={cn(expanded ? 'block' : 'hidden', 'md:block text-sm text-muted-foreground py-8 text-center')}>No agents connected</p>
-      ) : filteredAgents.length === 0 && isSearchActive ? (
-        <p className={cn(expanded ? 'block' : 'hidden', 'md:block text-sm text-muted-foreground py-8 text-center')}>No agents match your search</p>
-      ) : (
-        <div className={cn(expanded ? 'grid' : 'hidden', 'md:grid gap-3', gridClass)}>
-          {filteredAgents.map((a) => (
-            <AgentCard key={a.agent_id} agent={a} onClick={() => setSelectedAgent(a)} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
 }
 
 function DashboardHeader({
