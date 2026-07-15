@@ -531,6 +531,8 @@ pub struct ServerSessionEnvApplyPayload {
     pub request_id: String,
     pub name: String,
     pub snapshots: Vec<EnvSnapshot>,
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -539,6 +541,8 @@ pub struct ServerSessionEnvUnsetPayload {
     pub name: String,
     /// The variable keys to remove via `tmux set-environment -u`.
     pub keys: Vec<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 // --- Env state query payloads ---

@@ -264,6 +264,10 @@ impl ConnectionHandler {
         if status_str == "gone" {
             info!("Session {} removed (agent: {})", session_name, agent_id);
             self.session_registry.remove(&session_id).await;
+            // Release any env usage locks held by this session so the env
+            // files can be edited/deleted again. Without this, externally
+            // killed sessions leave stale locks in memory.
+            self.env_service.usage.clear_session(&session_id);
             return Ok(HandlerAction::Reply(None));
         }
 

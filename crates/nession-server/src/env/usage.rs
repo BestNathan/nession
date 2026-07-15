@@ -272,7 +272,7 @@ mod tests {
         let reg = EnvUsageRegistry::new();
         let f = file_ref("a.env");
         // Same file attached twice should only produce one record.
-        reg.record_attach("agent:s1", &[f.clone()], Some("alice"));
+        reg.record_attach("agent:s1", std::slice::from_ref(&f), Some("alice"));
         reg.record_attach("agent:s1", &[f], Some("alice"));
         assert_eq!(reg.active_for("agent:s1").len(), 1);
     }

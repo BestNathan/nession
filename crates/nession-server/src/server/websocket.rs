@@ -80,6 +80,7 @@ impl WebSocketServer {
             let agent_registry = Arc::clone(&self.agent_registry);
             let session_registry = Arc::clone(&self.session_registry);
             let command_broker = Arc::clone(&self.command_broker);
+            let env_service = Arc::clone(&self.env_service);
             // Sweep at the heartbeat cadence (min 1s) so detection latency stays
             // close to the configured timeout.
             let sweep_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
@@ -98,6 +99,7 @@ impl WebSocketServer {
                         // expires, its sessions are preserved.
                         let session_registry = Arc::clone(&session_registry);
                         let agent_registry = Arc::clone(&agent_registry);
+                        let env_service = Arc::clone(&env_service);
                         let agent_id_clone = agent_id.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -108,7 +110,13 @@ impl WebSocketServer {
                                         "Cleaning sessions for offline agent {} (grace period expired)",
                                         agent_id_clone
                                     );
-                                    session_registry.remove_by_agent(&agent_id_clone).await;
+                                    // Collect session IDs first so we can clear their
+                                    // env usage locks after removal.
+                                    let removed =
+                                        session_registry.remove_by_agent(&agent_id_clone).await;
+                                    for session_id in &removed {
+                                        env_service.usage.clear_session(session_id);
+                                    }
                                 }
                             }
                         });
@@ -121,6 +129,7 @@ impl WebSocketServer {
         // agent has been unreachable for more than 24 hours.
         {
             let session_registry = Arc::clone(&self.session_registry);
+            let env_service = Arc::clone(&self.env_service);
             let db = Arc::clone(&self.db);
             // Run every hour — orphan cleanup is not latency-sensitive.
             let sweep_period = std::time::Duration::from_secs(3600);
@@ -142,6 +151,8 @@ impl WebSocketServer {
                                     row.session_id, row.agent_id, row.last_activity
                                 );
                                 session_registry.remove(&row.session_id).await;
+                                // Release env usage locks held by this session.
+                                env_service.usage.clear_session(&row.session_id);
                             }
                             tracing::info!("Cleaned {} orphaned sessions", rows.len());
                         }

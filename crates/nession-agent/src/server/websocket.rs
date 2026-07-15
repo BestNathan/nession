@@ -199,12 +199,15 @@ fn default_height() -> u16 {
 pub struct ClientAuthPayload {
     #[serde(default)]
     pub auth_token: String,
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthResponsePayload {
     pub status: String,
     pub message: String,
+    pub client_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -636,12 +639,15 @@ impl AgentServer {
         // Per-client attached PTY sessions keyed by session name.
         let sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>> =
             Arc::new(Mutex::new(std::collections::HashMap::new()));
+        // Per-connection client ID (set during CLIENT_AUTH handshake)
+        let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         Self::run_message_loop(
             ws_stream,
             sink,
             tmux_manager,
             sessions,
+            client_id.clone(),
             addr,
             default_working_dir,
             file_ops,
@@ -658,6 +664,7 @@ impl AgentServer {
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
+        client_id: Arc<Mutex<Option<String>>>,
         addr: SocketAddr,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
@@ -679,6 +686,7 @@ impl AgentServer {
                         &text,
                         tmux.clone(),
                         sessions.clone(),
+                        client_id.clone(),
                         sink.clone(),
                         &default_working_dir,
                         file_ops.clone(),
@@ -715,6 +723,13 @@ impl AgentServer {
             }
         }
 
+        // Clean up any env scripts sourced by this client
+        let client_id_guard = client_id.lock().await;
+        if let Some(ref cid) = *client_id_guard {
+            tmux.cleanup_client_scripts(cid).await;
+            info!("Cleaned up env scripts for client {}", cid);
+        }
+
         info!("Client {} disconnected", addr);
         Ok(())
     }
@@ -725,6 +740,7 @@ impl AgentServer {
         text: &str,
         tmux: Arc<TmuxManager>,
         sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
+        client_id: Arc<Mutex<Option<String>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
         default_working_dir: &str,
         file_ops: Arc<FileOps>,
@@ -962,9 +978,35 @@ impl AgentServer {
 
             // --- Web UI compatibility handlers ---
             msg_types::CLIENT_AUTH => {
+                let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!("Invalid client.auth payload: {e}");
+                        let resp = AuthResponsePayload {
+                            status: "error".to_string(),
+                            message: format!("invalid payload: {e}"),
+                            client_id: String::new(),
+                        };
+                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+
+                // Use provided client_id or generate a new one
+                let assigned_client_id = payload
+                    .client_id
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                // Store the client_id for this connection
+                {
+                    let mut cid = client_id.lock().await;
+                    *cid = Some(assigned_client_id.clone());
+                }
+
                 let resp = AuthResponsePayload {
                     status: "success".to_string(),
                     message: "ok".to_string(),
+                    client_id: assigned_client_id,
                 };
                 serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
             }

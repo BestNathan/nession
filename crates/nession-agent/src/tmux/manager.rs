@@ -4,16 +4,18 @@ use std::path::PathBuf;
 use tokio::fs;
 use tokio::process::Command;
 
-/// Fixed-path script names, keyed by session + env-file name so they are
+/// Fixed-path script names, keyed by client + session + env-file name so they are
 /// reused (overwritten) across repeated source / unsource operations.
-fn source_script_path(session: &str, name: &str) -> PathBuf {
+fn source_script_path(client_id: &str, session: &str, name: &str) -> PathBuf {
     let safe = name.replace(['/', '\\'], "_");
-    PathBuf::from(format!("/tmp/nession-source-{session}-{safe}"))
+    PathBuf::from(format!("/tmp/nession-source-{client_id}-{session}-{safe}"))
 }
 
-fn unsource_script_path(session: &str, name: &str) -> PathBuf {
+fn unsource_script_path(client_id: &str, session: &str, name: &str) -> PathBuf {
     let safe = name.replace(['/', '\\'], "_");
-    PathBuf::from(format!("/tmp/nession-unsource-{session}-{safe}"))
+    PathBuf::from(format!(
+        "/tmp/nession-unsource-{client_id}-{session}-{safe}"
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -117,11 +119,12 @@ impl TmuxManager {
     /// it barely flashes on screen.
     pub async fn source_env(
         &self,
+        client_id: &str,
         session_name: &str,
         env_name: &str,
         vars: &[(String, String)],
     ) -> Result<()> {
-        let path = source_script_path(session_name, env_name);
+        let path = source_script_path(client_id, session_name, env_name);
         let mut content = String::new();
         for (k, v) in vars {
             content.push_str(&format!("export {k}='{}'\n", v.replace('\'', "'\\''")));
@@ -141,11 +144,12 @@ impl TmuxManager {
     /// session, clearing the command from view.
     pub async fn unsource_env(
         &self,
+        client_id: &str,
         session_name: &str,
         env_name: &str,
         keys: &[String],
     ) -> Result<()> {
-        let path = unsource_script_path(session_name, env_name);
+        let path = unsource_script_path(client_id, session_name, env_name);
         let content = keys.iter().fold(String::new(), |mut s, k| {
             s.push_str(&format!("unset {k}\n"));
             s
@@ -169,7 +173,72 @@ impl TmuxManager {
             anyhow::bail!("Failed to kill session: {name}");
         }
 
+        // Clean up env source/unsource scripts for this session so they
+        // don't linger in /tmp/ (sourced_env_files() scans /tmp/ to report
+        // which env files are active — orphaned scripts cause stale
+        // "sourced" state after the session is gone).
+        self.cleanup_session_scripts(name).await;
+
         Ok(())
+    }
+
+    /// Remove all env source/unsource scripts from `/tmp/` for the given
+    /// session. Called automatically by [`kill_session`](Self::kill_session)
+    /// so that `sourced_env_files()` doesn't report stale entries.
+    /// Matches files with format: `nession-{source,unsource}-{client_id}-{session}-{env}`
+    async fn cleanup_session_scripts(&self, session_name: &str) {
+        // Match files containing "-{session_name}-" to handle the client_id in the middle
+        let session_marker = format!("-{session_name}-");
+        let mut dir = match tokio::fs::read_dir("/tmp").await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(
+                    "failed to read /tmp for env script cleanup (session {session_name}): {e}"
+                );
+                return;
+            }
+        };
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if (name_str.starts_with("nession-source-")
+                || name_str.starts_with("nession-unsource-"))
+                && name_str.contains(&session_marker)
+            {
+                let path = entry.path();
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("failed to remove env script {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
+    /// Remove all env source/unsource scripts from `/tmp/` for the given
+    /// client. Called when a client disconnects so that only that client's
+    /// sourced envs are cleaned up, leaving other clients' scripts intact.
+    /// Matches files with format: `nession-{source,unsource}-{client_id}-*`
+    pub async fn cleanup_client_scripts(&self, client_id: &str) {
+        let source_prefix = format!("nession-source-{client_id}-");
+        let unsource_prefix = format!("nession-unsource-{client_id}-");
+        let mut dir = match tokio::fs::read_dir("/tmp").await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(
+                    "failed to read /tmp for env script cleanup (client {client_id}): {e}"
+                );
+                return;
+            }
+        };
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with(&source_prefix) || name_str.starts_with(&unsource_prefix) {
+                let path = entry.path();
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("failed to remove env script {}: {e}", path.display());
+                }
+            }
+        }
     }
 
     pub async fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {

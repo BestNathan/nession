@@ -664,13 +664,15 @@ impl ServerClient {
                             return Ok(());
                         }
                     };
+                // Extract client_id or use "unknown" if not provided
+                let client_id = payload.client_id.as_deref().unwrap_or("unknown");
                 // One source script per snapshot (env file), sent via send-keys
                 // to the session. Each command is hidden from view with tput.
                 let mut error: Option<String> = None;
                 for snap in &payload.snapshots {
                     if let Err(e) = self
                         .tmux
-                        .source_env(&payload.name, &snap.name, &snap.vars)
+                        .source_env(client_id, &payload.name, &snap.name, &snap.vars)
                         .await
                     {
                         error = Some(e.to_string());
@@ -699,10 +701,12 @@ impl ServerClient {
                             return Ok(());
                         }
                     };
+                // Extract client_id or use "unknown" if not provided
+                let client_id = payload.client_id.as_deref().unwrap_or("unknown");
                 let mut error: Option<String> = None;
                 if let Err(e) = self
                     .tmux
-                    .unsource_env(&payload.name, "all", &payload.keys)
+                    .unsource_env(client_id, &payload.name, "all", &payload.keys)
                     .await
                 {
                     error = Some(e.to_string());
@@ -813,7 +817,7 @@ fn str_field(payload: &serde_json::Value, key: &str) -> String {
 ///
 /// Scans `/tmp/` for nession source scripts (written by
 /// [`TmuxManager::source_env`]) and extracts the env file names from the
-/// file naming convention `nession-source-{session}-{name}`.
+/// file naming convention `nession-source-{client_id}-{session}-{name}`.
 ///
 /// Returns a sorted, deduplicated list of env file names. If `/tmp/` is
 /// unreadable, returns an empty list.
@@ -826,9 +830,22 @@ async fn sourced_env_files() -> Vec<String> {
     while let Ok(Some(entry)) = dir.next_entry().await {
         let name = entry.file_name().to_string_lossy().to_string();
         if let Some(rest) = name.strip_prefix("nession-source-") {
-            // rest = "{session}-{safe_name}" — strip the session part (first segment).
-            if let Some(env_name) = rest.split_once('-').map(|(_, n)| n) {
-                files.insert(env_name.to_string());
+            // rest = "{client_id}-{session}-{safe_name}"
+            // client_id is a UUID with hyphens, so we can't just split by '-'
+            // Instead, find the env name by looking for the last segment after '-'
+            // Format: {uuid}-{session}-{env_name}
+            // UUID has format: 8-4-4-4-12 (36 chars with hyphens)
+            // So we skip the first 36 chars (UUID), then parse the rest
+            if rest.len() > 36 {
+                let after_uuid = &rest[36..]; // Skip UUID part (includes its hyphens)
+                                              // after_uuid = "-{session}-{safe_name}"
+                if let Some(session_and_env) = after_uuid.strip_prefix('-') {
+                    // session_and_env = "{session}-{safe_name}"
+                    // Extract env name (last segment)
+                    if let Some(env_name) = session_and_env.rsplit_once('-').map(|(_, n)| n) {
+                        files.insert(env_name.to_string());
+                    }
+                }
             }
         }
     }

@@ -89,6 +89,7 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'au
 export interface AuthResponse {
   status: 'success' | 'failed';
   message: string;
+  client_id?: string;
 }
 
 export interface AgentsListResponse {
