@@ -36,6 +36,7 @@ export interface DashboardState {
   handleSessionCreated: () => void;
   fetchSessions: (agentId?: string) => Promise<void>;
   getHeartbeatHistory: (agentId: string) => string[];
+  clearError: () => void;
 }
 
 // ── Pure helpers (extracted to keep hook under 120-line lint limit) ──────
@@ -175,6 +176,8 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
 
   const isSearchActive = searchQuery !== '' || statusFilter !== 'all';
 
+  const clearError = useCallback(() => setError(null), []);
+
   const handleAttach = useCallback(async (session: Session, mode: AttachMode = 'auto') => {
     setAttachingInProgress(true);
     setError(null);
@@ -215,6 +218,6 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
     setSearchQuery, setStatusFilter, setSelectedAgent, toggleSort,
     setShowCreateModal, setSessionToKill,
     handleAttach, handleSessionKilled, handleSessionCreated,
-    fetchSessions, getHeartbeatHistory,
+    fetchSessions, getHeartbeatHistory, clearError,
   };
 }
