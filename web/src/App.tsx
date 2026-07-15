@@ -10,11 +10,16 @@ const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'w
 
 function App() {
   const params = new URLSearchParams(window.location.search);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
-  const [authToken, setAuthToken] = useState(
-    () => params.get('token') || getToken() || ''
-  );
+  const [authToken, setAuthToken] = useState(() => {
+    const urlToken = params.get('token');
+    if (urlToken) {
+      setToken(urlToken, false);
+      return urlToken;
+    }
+    return getToken() || '';
+  });
   const [serverUrl, setServerUrl] = useState(
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL
   );
@@ -62,11 +67,11 @@ function App() {
   // Auto-connect on mount when auth token is provided via URL parameter.
   // hasAutoConnected ref ensures this only fires once per mount.
   useEffect(() => {
-    if (!hasAutoConnected.current && autoConnect && authToken && connectionStatus === 'disconnected') {
+    if (!hasAutoConnected.current && autoConnect && authToken) {
       hasAutoConnected.current = true;
       handleConnect(false);
     }
-  }, [autoConnect, authToken, connectionStatus, handleConnect]);
+  }, [autoConnect, authToken, handleConnect]);
 
   const handleDisconnect = () => {
     if (wsService) {
