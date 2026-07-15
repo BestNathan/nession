@@ -23,6 +23,7 @@ import {
   ContextMenuSeparator,
 } from './ui/context-menu';
 import { cn } from '@/lib/utils';
+import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -36,28 +37,6 @@ export interface FileBrowserProps {
 }
 
 const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) {return '';}
-  if (bytes < 1024) {return `${bytes} B`;}
-  if (bytes < 1024 * 1024) {return `${(bytes / 1024).toFixed(1)} KB`;}
-  if (bytes < 1024 * 1024 * 1024) {return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;}
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatModified(ts: number): string {
-  if (!ts) {return '';}
-  const now = Date.now();
-  const diff = now - ts * 1000;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) {return 'just now';}
-  if (mins < 60) {return `${mins}m ago`;}
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) {return `${hours}h ago`;}
-  const days = Math.floor(hours / 24);
-  if (days < 30) {return `${days}d ago`;}
-  return new Date(ts * 1000).toLocaleDateString();
-}
 
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
@@ -353,7 +332,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   )}
                   <span className="flex-1 truncate">{entry.name}</span>
                   <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatModified(entry.modified)}</span>
+                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>
