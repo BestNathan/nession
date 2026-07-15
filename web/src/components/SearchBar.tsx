@@ -81,7 +81,7 @@ export function SearchBar({
       </div>
       <div
         data-testid="filter-row"
-        className="flex items-center gap-1 overflow-x-auto flex-nowrap md:overflow-x-visible"
+        className="flex items-center gap-1 flex-wrap md:overflow-x-visible"
       >
         {FILTERS.map((filter) => {
           const count = countForFilter(filter);

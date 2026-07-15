@@ -22,7 +22,18 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from './ui/context-menu';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from './ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -36,28 +47,6 @@ export interface FileBrowserProps {
 }
 
 const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) {return '';}
-  if (bytes < 1024) {return `${bytes} B`;}
-  if (bytes < 1024 * 1024) {return `${(bytes / 1024).toFixed(1)} KB`;}
-  if (bytes < 1024 * 1024 * 1024) {return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;}
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatModified(ts: number): string {
-  if (!ts) {return '';}
-  const now = Date.now();
-  const diff = now - ts * 1000;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) {return 'just now';}
-  if (mins < 60) {return `${mins}m ago`;}
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) {return `${hours}h ago`;}
-  const days = Math.floor(hours / 24);
-  if (days < 30) {return `${days}d ago`;}
-  return new Date(ts * 1000).toLocaleDateString();
-}
 
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
@@ -75,6 +64,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const [newName, setNewName] = useState('');
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [largeFileTarget, setLargeFileTarget] = useState<FileEntry | null>(null);
 
   const loadDir = useCallback(async (path: string) => {
     setLoading(true);
@@ -102,9 +93,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     if (entry.is_dir) {
       setCurrentPath(entry.path);
     } else {
-      if (entry.size > MAX_SIZE_WARNING && !window.confirm(
-        `This file is ${formatSize(entry.size)}. Loading large files may be slow. Continue?`
-      )) {
+      if (entry.size > MAX_SIZE_WARNING) {
+        setLargeFileTarget(entry);
         return;
       }
       onFileClick(entry);
@@ -196,8 +186,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleDelete = async (entry: FileEntry) => {
-    const label = entry.is_dir ? `directory "${entry.name}"` : `"${entry.name}"`;
-    if (!window.confirm(`Delete ${label}?\n\nThis action cannot be undone.`)) {return;}
+    setDeleteTarget(entry);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) {return;}
+    const entry = deleteTarget;
+    setDeleteTarget(null);
 
     try {
       await fileOps.deleteFile(entry.path);
@@ -353,7 +348,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   )}
                   <span className="flex-1 truncate">{entry.name}</span>
                   <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatModified(entry.modified)}</span>
+                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>
@@ -369,6 +364,67 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
           )
         )}
       </div>
+
+      <FileBrowserDialogs
+        deleteTarget={deleteTarget}
+        largeFileTarget={largeFileTarget}
+        onDeleteTargetChange={setDeleteTarget}
+        onLargeFileTargetChange={setLargeFileTarget}
+        onDeleteConfirm={handleDeleteConfirm}
+        onFileClick={onFileClick}
+      />
     </div>
+  );
+}
+
+interface FileBrowserDialogsProps {
+  deleteTarget: FileEntry | null;
+  largeFileTarget: FileEntry | null;
+  onDeleteTargetChange: (target: FileEntry | null) => void;
+  onLargeFileTargetChange: (target: FileEntry | null) => void;
+  onDeleteConfirm: () => void;
+  onFileClick: (entry: FileEntry) => void;
+}
+
+function FileBrowserDialogs({
+  deleteTarget,
+  largeFileTarget,
+  onDeleteTargetChange,
+  onLargeFileTargetChange,
+  onDeleteConfirm,
+  onFileClick,
+}: FileBrowserDialogsProps) {
+  return (
+    <>
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { onDeleteTargetChange(null); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.is_dir ? 'directory' : 'file'}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete {deleteTarget?.is_dir ? `directory "${deleteTarget?.name}"` : `"${deleteTarget?.name}"`}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={largeFileTarget !== null} onOpenChange={(open) => { if (!open) { onLargeFileTargetChange(null); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Large file warning</AlertDialogTitle>
+            <AlertDialogDescription>
+              This file is {largeFileTarget ? formatSize(largeFileTarget.size) : ''}. Loading large files may be slow. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (largeFileTarget) { onFileClick(largeFileTarget); } onLargeFileTargetChange(null); }}>Continue</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

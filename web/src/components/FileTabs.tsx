@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { X, Terminal } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SidePanel } from './SidePanel';
 import { FileBrowser } from './FileBrowser';
@@ -97,7 +98,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
       if (toClose) {
         setOpenFiles((prev) => prev.filter((f) => f.id !== toClose.id));
       } else {
-        alert(`Maximum ${MAX_TABS} files open. Close some first.`);
+        toast.error(`Maximum ${MAX_TABS} files open. Close some first.`);
         return;
       }
     }
@@ -108,9 +109,6 @@ function useFileTabs(onTerminalReveal?: () => void) {
   }, [openFiles, dirtyFiles]);
 
   const handleCloseFile = useCallback((id: string) => {
-    if (dirtyFiles.has(id)) {
-      if (!window.confirm('Unsaved changes will be lost. Close anyway?')) {return;}
-    }
     setOpenFiles((prev) => {
       const filtered = prev.filter((f) => f.id !== id);
       if (activeTabId === id) {
@@ -123,7 +121,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
       next.delete(id);
       return next;
     });
-  }, [activeTabId, dirtyFiles]);
+  }, [activeTabId]);
 
   const handleDirtyChange = useCallback((id: string, dirty: boolean) => {
     setDirtyFiles((prev) => {

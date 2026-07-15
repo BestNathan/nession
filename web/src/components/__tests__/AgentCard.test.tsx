@@ -72,14 +72,14 @@ describe('AgentCard', () => {
   });
 
   describe('formatRelativeTime', () => {
-    it('shows just now for recent heartbeat', () => {
+    it('shows seconds ago for recent heartbeat', () => {
       render(
         <AgentCard
           agent={makeAgent({ last_heartbeat: new Date().toISOString() })}
           onClick={vi.fn()}
         />,
       );
-      expect(screen.getByText(/just now/)).toBeInTheDocument();
+      expect(screen.getByText(/\d+s ago/)).toBeInTheDocument();
     });
 
     it('shows minutes ago', () => {

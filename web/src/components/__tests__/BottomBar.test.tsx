@@ -50,17 +50,16 @@ describe('BottomBar', () => {
     expect(props.onSheetToggle).toHaveBeenCalledWith(true);
   });
 
-  it('uses a taller max-height when the Files tab is active', () => {
-    const { container } = setup({ showFilesTab: true, activeTab: 'files' });
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('max-h-[85dvh]');
-  });
-
-  it('uses the standard max-height for commands/env', () => {
-    const { container } = setup({ activeTab: 'commands' });
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('max-h-[70dvh]');
-    expect(root.className).not.toContain('max-h-[85dvh]');
+  it('uses the same max-height regardless of active tab', () => {
+    const { container: filesContainer } = setup({ showFilesTab: true, activeTab: 'files' });
+    const { container: cmdContainer } = setup({ activeTab: 'commands' });
+    const { container: envContainer } = setup({ activeTab: 'env' });
+    const filesRoot = filesContainer.firstElementChild as HTMLElement;
+    const cmdRoot = cmdContainer.firstElementChild as HTMLElement;
+    const envRoot = envContainer.firstElementChild as HTMLElement;
+    expect(filesRoot.className).toContain('max-h-[85dvh]');
+    expect(cmdRoot.className).toContain('max-h-[85dvh]');
+    expect(envRoot.className).toContain('max-h-[85dvh]');
   });
 
   it('does not render the files panel when files is active but the tab is hidden', () => {

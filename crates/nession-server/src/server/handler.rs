@@ -103,6 +103,7 @@ impl ConnectionHandler {
             "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
             "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
             "client.session.env.active" => self.handle_client_session_env_active(msg).await,
+            "client.session.env.query" => self.handle_client_session_env_query(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
                 Ok(HandlerAction::Reply(None))
@@ -1627,6 +1628,59 @@ impl ConnectionHandler {
             "client.session.env.active.response",
             json!({ "active": active }),
         ))
+    }
+
+    /// Handle `client.session.env.query` — ask the agent which env files are
+    /// currently sourced (applied to its process environment).
+    async fn handle_client_session_env_query(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.query.response",
+                json!({ "sourced_files": [], "error": "Not authenticated" }),
+            ));
+        }
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let Some((agent_id, _session_name)) = session_id.split_once(':') else {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.env.query.response",
+                json!({ "sourced_files": [], "error": "Invalid session_id" }),
+            ));
+        };
+        let resp = self
+            .agent_command(agent_id, "server.env.query", json!({}))
+            .await;
+        match resp {
+            Ok(r) => {
+                let sourced = r
+                    .get("sourced_files")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.env.query.response",
+                    json!({ "sourced_files": sourced }),
+                ))
+            }
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.session.env.query.response",
+                json!({ "sourced_files": [], "error": e }),
+            )),
+        }
     }
 }
 

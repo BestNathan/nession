@@ -1,5 +1,6 @@
 import { Server, Clock, Terminal, Activity, Monitor } from 'lucide-react';
 import type { Agent } from '../types';
+import { formatRelativeTime, formatAbsoluteTime, getStatusVariant } from '../lib/format';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
@@ -8,14 +9,6 @@ interface AgentDetailPanelProps {
   agent: Agent;
   heartbeatHistory: string[];  // ISO timestamps, oldest first
   onClose: () => void;
-}
-
-function getStatusVariant(status: Agent['status']): 'default' | 'secondary' | 'outline' {
-  switch (status) {
-    case 'online':   return 'default';
-    case 'degraded': return 'secondary';
-    case 'offline':  return 'outline';
-  }
 }
 
 function computeUptime(heartbeatHistory: string[]): string | null {
@@ -33,21 +26,6 @@ function getHeartbeatColor(iso: string): string {
   if (seconds < 60) {return 'bg-green-500';}
   if (seconds < 180) {return 'bg-amber-500';}
   return 'bg-gray-500';
-}
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) {return `${seconds}s ago`;}
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {return `${minutes}m ago`;}
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {return `${hours}h ago`;}
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function formatAbsoluteTime(iso: string): string {
-  return new Date(iso).toLocaleString();
 }
 
 function SectionHeader(props: { icon: React.ComponentType<{ className?: string }>; title: string }) {
@@ -74,7 +52,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
-      <SheetContent side="right" className="w-full sm:w-[480px] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+      <SheetContent side="right" className="w-full sm:w-[400px] md:w-[480px] max-w-[100vw] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 space-y-4">
           {/* Header: Status badge + hostname */}
           <div>

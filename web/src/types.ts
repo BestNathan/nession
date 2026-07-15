@@ -168,3 +168,8 @@ export interface SessionEnvResponse {
   error?: string;
   warnings?: string[];
 }
+
+export interface SessionEnvQueryResponse {
+  sourced_files: string[];
+  error?: string;
+}

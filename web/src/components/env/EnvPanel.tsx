@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { toast } from 'sonner';
 import { Play, X, FileText, RefreshCw, Check } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -11,6 +11,56 @@ import { refKey, toRef, sourceLabel } from './envRef';
 interface EnvPanelProps {
   wsService: WebSocketService;
   sessionId: string;
+}
+
+// ── Helpers (extracted to keep EnvPanel under the 120-line limit) ────────
+
+function useEnvActions(
+  wsService: WebSocketService,
+  sessionId: string,
+  setSourced: Dispatch<SetStateAction<Set<string>>>,
+  setBusy: Dispatch<SetStateAction<Set<string>>>,
+) {
+  return useCallback(
+    (file: EnvFileInfo, action: 'source' | 'unsource') => {
+      const ref = toRef(file);
+      const key = refKey(ref);
+      setBusy((prev) => new Set(prev).add(key));
+      const promise =
+        action === 'source'
+          ? wsService.applySessionEnv(sessionId, [ref])
+          : wsService.unsetSessionEnv(sessionId, [ref]);
+      promise
+        .then((resp) => {
+          if (resp.success) {
+            setSourced((prev) => {
+              const next = new Set(prev);
+              if (action === 'source') {
+                next.add(key);
+              } else {
+                next.delete(key);
+              }
+              return next;
+            });
+            const warns = resp.warnings ?? [];
+            if (action === 'source' && warns.length > 0) {
+              toast.warning(`Sourced ${file.name} with warnings: ${warns.join('; ')}`);
+            }
+          } else {
+            const verb = action === 'source' ? 'source' : 'unsource';
+            toast.error(resp.error ?? `Failed to ${verb} ${file.name}`);
+          }
+        })
+        .catch((err) => {
+          const verb = action === 'source' ? 'source' : 'unsource';
+          toast.error(err instanceof Error ? err.message : `Failed to ${verb} ${file.name}`);
+        })
+        .finally(() => {
+          setBusy((prev) => { const next = new Set(prev); next.delete(key); return next; });
+        });
+    },
+    [wsService, sessionId, setSourced, setBusy],
+  );
 }
 
 // ── Row (extracted to keep EnvPanel under the 120-line limit) ──────────
@@ -90,6 +140,7 @@ export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
 
   useEffect(() => {
     refresh();
+    const agentId = sessionId.split(':')[0] ?? '';
     // Pre-mark env files applied at session create time as already sourced.
     wsService
       .getSessionEnvActive(sessionId)
@@ -107,51 +158,30 @@ export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
         }
       })
       .catch(() => undefined);
+    // Query the agent for currently sourced env files.
+    if (agentId) {
+      wsService
+        .queryAgentEnvState(sessionId)
+        .then((resp) => {
+          const names = resp.sourced_files ?? [];
+          if (names.length === 0) {
+            return;
+          }
+          setSourced((prev) => {
+            const next = new Set(prev);
+            for (const name of names) {
+              next.add(refKey({ name, source: 'agent', agent_id: agentId }));
+            }
+            return next;
+          });
+        })
+        .catch(() => undefined);
+    }
   }, [refresh, sessionId, wsService]);
 
-  const source = useCallback(
-    async (file: EnvFileInfo) => {
-      const ref = toRef(file);
-      const key = refKey(ref);
-      setBusy((prev) => new Set(prev).add(key));
-      try {
-        const resp = await wsService.applySessionEnv(sessionId, [ref]);
-        if (resp.success) {
-          setSourced((prev) => new Set(prev).add(key));
-          const warns = resp.warnings ?? [];
-          if (warns.length > 0) { toast.warning(`Sourced ${file.name} with warnings: ${warns.join('; ')}`); }
-        } else {
-          toast.error(resp.error ?? `Failed to source ${file.name}`);
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : `Failed to source ${file.name}`);
-      } finally {
-        setBusy((prev) => { const next = new Set(prev); next.delete(key); return next; });
-      }
-    },
-    [wsService, sessionId],
-  );
-
-  const unsource = useCallback(
-    async (file: EnvFileInfo) => {
-      const ref = toRef(file);
-      const key = refKey(ref);
-      setBusy((prev) => new Set(prev).add(key));
-      try {
-        const resp = await wsService.unsetSessionEnv(sessionId, [ref]);
-        if (resp.success) {
-          setSourced((prev) => { const next = new Set(prev); next.delete(key); return next; });
-        } else {
-          toast.error(resp.error ?? `Failed to unsource ${file.name}`);
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : `Failed to unsource ${file.name}`);
-      } finally {
-        setBusy((prev) => { const next = new Set(prev); next.delete(key); return next; });
-      }
-    },
-    [wsService, sessionId],
-  );
+  const action = useEnvActions(wsService, sessionId, setSourced, setBusy);
+  const source = useCallback((f: EnvFileInfo) => action(f, 'source'), [action]);
+  const unsource = useCallback((f: EnvFileInfo) => action(f, 'unsource'), [action]);
 
   const sourcedFiles = files.filter((f) => sourced.has(refKey(f)));
 

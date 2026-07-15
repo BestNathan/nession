@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
+import { Checkbox } from './ui/checkbox';
+import { getRememberPreference, setRememberPreference } from '../lib/auth';
 import type { ConnectionStatus } from '../types';
 
 interface LoginPageProps {
@@ -11,7 +14,7 @@ interface LoginPageProps {
   setServerUrl: (url: string) => void;
   authToken: string;
   setAuthToken: (token: string) => void;
-  onConnect: () => void;
+  onConnect: (remember: boolean) => void;
   onDisconnect: () => void;
 }
 
@@ -63,6 +66,7 @@ export function LoginPage({
   onDisconnect,
 }: LoginPageProps) {
   const isConnecting = connectionStatus !== 'disconnected';
+  const [remember, setRemember] = useState(getRememberPreference());
 
   return (
     <div className="min-h-[100dvh] flex flex-col items-center justify-center p-4">
@@ -103,8 +107,27 @@ export function LoginPage({
             />
           </div>
 
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="remember"
+              checked={remember}
+              onCheckedChange={(checked) => {
+                const value = checked === true;
+                setRemember(value);
+                setRememberPreference(value);
+              }}
+              disabled={isConnecting}
+            />
+            <label
+              htmlFor="remember"
+              className="text-sm font-normal text-muted-foreground cursor-pointer"
+            >
+              Remember me
+            </label>
+          </div>
+
           <div className="flex gap-2">
-            <Button onClick={onConnect} disabled={isConnecting} className="flex-1">
+            <Button onClick={() => onConnect(remember)} disabled={isConnecting} className="flex-1">
               Connect
             </Button>
             <Button

@@ -19,6 +19,7 @@ import {
   EnvDeleteResponse,
   SessionEnvResponse,
   SessionEnvActiveResponse,
+  SessionEnvQueryResponse,
 } from '../types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
@@ -300,6 +301,15 @@ export class WebSocketService {
       throw new Error('Not authenticated');
     }
     return this.request<SessionEnvActiveResponse>('client.session.env.active', {
+      session_id: sessionId,
+    });
+  }
+
+  async queryAgentEnvState(sessionId: string): Promise<SessionEnvQueryResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+    return this.request<SessionEnvQueryResponse>('client.session.env.query', {
       session_id: sessionId,
     });
   }
