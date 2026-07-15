@@ -22,13 +22,14 @@ export function formatAbsoluteTime(iso: string): string {
 }
 
 export function getStatusVariant(status: Agent['status']): 'default' | 'secondary' | 'outline' {
-  if (status === 'online') {
-    return 'default';
+  switch (status) {
+    case 'online':
+      return 'default';
+    case 'degraded':
+      return 'secondary';
+    case 'offline':
+      return 'outline';
   }
-  if (status === 'offline') {
-    return 'secondary';
-  }
-  return 'outline';
 }
 
 export function formatSize(bytes: number): string {

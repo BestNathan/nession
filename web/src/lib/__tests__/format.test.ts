@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, formatSize, formatRelativeTimeSeconds } from '../format';
-import type { Agent } from '../../types';
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {
@@ -51,12 +50,12 @@ describe('getStatusVariant', () => {
     expect(getStatusVariant('online')).toBe('default');
   });
 
-  it('returns secondary for offline', () => {
-    expect(getStatusVariant('offline')).toBe('secondary');
+  it('returns secondary for degraded', () => {
+    expect(getStatusVariant('degraded')).toBe('secondary');
   });
 
-  it('returns outline for unknown', () => {
-    expect(getStatusVariant('unknown' as unknown as Agent['status'])).toBe('outline');
+  it('returns outline for offline', () => {
+    expect(getStatusVariant('offline')).toBe('outline');
   });
 });
 
