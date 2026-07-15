@@ -101,7 +101,7 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs hover:text-destructive" onClick={handleCloseClick}>✕</Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs hover:text-destructive" onClick={handleCloseClick} aria-label="Close file" title="Close file">✕</Button>
         </div>
       </div>
 

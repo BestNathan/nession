@@ -67,7 +67,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
               className="h-11 md:h-6 text-xs md:text-[11px] px-2 rounded-r-none" disabled={disabled}
               onClick={() => runCommand(cmd)}>{cmd.label}</Button>
             <Button variant="ghost" size="icon" className="h-11 md:h-6 w-9 md:w-5 rounded-l-none"
-              disabled={disabled} onClick={() => deleteUserCommand(cmd.id)} title="Delete">
+              disabled={disabled} onClick={() => deleteUserCommand(cmd.id)} aria-label="Delete command" title="Delete">
               <X className="h-3 w-3" /></Button>
           </div>
         ))}
@@ -82,7 +82,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
             <Button size="sm" className="h-6 text-[11px] px-2" disabled={disabled}
               onClick={addUserCommand}>Add</Button>
             <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" disabled={disabled}
-              onClick={() => setShowAddForm(false)}>✕</Button>
+              onClick={() => setShowAddForm(false)} aria-label="Cancel" title="Cancel">✕</Button>
           </div>
         ) : (
           <Button variant="ghost" size="sm" className="h-11 md:h-6 text-xs md:text-[11px] px-2"
@@ -107,7 +107,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
           className="text-xs md:text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
           disabled={disabled}
         />
-        <Button variant="outline" size="icon" className="h-11 w-11 md:h-7 md:w-7 flex-shrink-0" title="Send"
+        <Button variant="outline" size="icon" className="h-11 w-11 md:h-7 md:w-7 flex-shrink-0" aria-label="Send" title="Send"
           onClick={sendInput} disabled={disabled}>
           <SendHorizontal className="h-3.5 w-3.5" />
         </Button>

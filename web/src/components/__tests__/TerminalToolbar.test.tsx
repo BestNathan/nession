@@ -118,8 +118,8 @@ describe('TerminalToolbar', () => {
     await user.click(screen.getByRole('button', { name: /Add/ }));
     expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText('Label'), 'test');
-    // Cancel button is "✕"
-    await user.click(screen.getByRole('button', { name: '✕' }));
+    // Cancel button has aria-label="Cancel"
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByPlaceholderText('Label')).not.toBeInTheDocument();
   });
 
