@@ -3,9 +3,11 @@ import { toast } from 'sonner';
 import type { EnvFileInfo } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { sourceLabel, toRef } from './envRef';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 /** State + CRUD actions for the env management page. */
-export function useEnvManager(wsService: WebSocketService) {
+export function useEnvManager(_wsService?: WebSocketService) {
+  const wsService = useWebSocket(_wsService);
   const [files, setFiles] = useState<EnvFileInfo[]>([]);
   const [loading, setLoading] = useState(false);
 

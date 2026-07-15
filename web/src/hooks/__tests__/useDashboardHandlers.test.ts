@@ -396,7 +396,7 @@ describe('useDashboardHandlers', () => {
     });
   });
 
-  // ── fetch agents/sessions error handling ───────────────────────────
+  // ── fetch agents error handling ────────────────────────────────────
 
   describe('fetch errors', () => {
     it('sets error when fetchAgents fails', async () => {
@@ -412,103 +412,6 @@ describe('useDashboardHandlers', () => {
       // Wait for the initial fetch to settle
       await vi.waitFor(() => {
         expect(result.current.error).toContain('Fetch agents failed');
-      });
-    });
-
-    it('sets error when fetchSessions fails', async () => {
-      const mock = createMockWsService();
-      mock.listAgents = vi.fn().mockResolvedValue([]);
-      mock.listSessions = vi.fn().mockRejectedValue(new Error('Fetch sessions failed'));
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
-
-      await vi.waitFor(() => {
-        expect(result.current.error).toContain('Fetch sessions failed');
-      });
-    });
-  });
-
-  // ── attach flow ────────────────────────────────────────────────────
-
-  describe('handleAttach', () => {
-    it('sets attachingInProgress during attach', async () => {
-      const mock = createMockWsService();
-      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach =
-        vi.fn().mockResolvedValue({ mode: 'p2p', session_id: 'agent-1:s1', agent_address: 'ws://a/ws', connection_token: 'tok' });
-      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
-
-      // Wait for initial fetch
-      await vi.waitFor(() => {
-        expect(result.current.loadingAgents).toBe(false);
-      });
-
-      const session = makeSession();
-      act(() => { result.current.handleAttach(session); });
-
-      expect(result.current.attachingInProgress).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(result.current.attachingInProgress).toBe(false);
-      });
-    });
-
-    it('falls back to relay when p2p attach fails', async () => {
-      const mock = createMockWsService();
-      const requestAttach = vi.fn()
-        .mockRejectedValueOnce(new Error('P2P failed'))
-        .mockResolvedValueOnce({ mode: 'relay', session_id: 'agent-1:s1' });
-      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach = requestAttach;
-      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
-
-      await vi.waitFor(() => {
-        expect(result.current.loadingAgents).toBe(false);
-      });
-
-      act(() => { result.current.handleAttach(makeSession()); });
-
-      await vi.waitFor(() => {
-        expect(result.current.attachingInProgress).toBe(false);
-      });
-
-      expect(requestAttach).toHaveBeenCalledTimes(2);
-      expect(requestAttach).toHaveBeenNthCalledWith(1, 'agent-1:session-1', 'p2p');
-      expect(requestAttach).toHaveBeenNthCalledWith(2, 'agent-1:session-1', 'relay');
-    });
-
-    it('sets error when both p2p and relay attach fail', async () => {
-      const mock = createMockWsService();
-      const requestAttach = vi.fn()
-        .mockRejectedValueOnce(new Error('P2P failed'))
-        .mockRejectedValueOnce(new Error('Relay failed'));
-      (mock as unknown as { requestAttach: ReturnType<typeof vi.fn> }).requestAttach = requestAttach;
-      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.listSessions = vi.fn().mockResolvedValue([makeSession()]);
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
-
-      await vi.waitFor(() => {
-        expect(result.current.loadingAgents).toBe(false);
-      });
-
-      act(() => { result.current.handleAttach(makeSession()); });
-
-      await vi.waitFor(() => {
-        expect(result.current.attachingInProgress).toBe(false);
-        expect(result.current.error).toContain('Relay failed');
       });
     });
   });

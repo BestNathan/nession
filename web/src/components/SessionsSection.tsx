@@ -6,14 +6,13 @@ import { SessionList } from './SessionList';
 import type { SortField, SortDirection } from './useDashboardHandlers';
 
 export function SessionsSection({
-  agents, filteredSessions, loadingSessions, attachingInProgress,
+  agents, filteredSessions, loadingSessions,
   onCreate, fetchSessions, onAttach, onKill,
   sortField, sortDirection, toggleSort, isSearchActive,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
   loadingSessions: boolean;
-  attachingInProgress: boolean;
   onCreate: () => void;
   fetchSessions: () => void;
   onAttach: (s: Session) => void;
@@ -43,7 +42,6 @@ export function SessionsSection({
         loading={loadingSessions}
         onAttach={onAttach}
         onKill={onKill}
-        attachingInProgress={attachingInProgress}
         sortField={sortField}
         sortDirection={sortDirection}
         toggleSort={toggleSort}

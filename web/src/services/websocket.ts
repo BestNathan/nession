@@ -43,7 +43,6 @@ export class WebSocketService {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private messageId = 0;
 
   // Request correlation
   private pendingRequests = new Map<string, PendingRequest>();
@@ -567,8 +566,7 @@ export class WebSocketService {
   }
 
   private generateMessageId(): string {
-    this.messageId++;
-    return `msg_${this.messageId}_${Date.now()}`;
+    return `msg_${crypto.randomUUID()}`;
   }
 
   private rejectAllPendingRequests(error: Error): void {

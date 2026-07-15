@@ -1,10 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
+import {
+  createHashRouter,
+  RouterProvider,
+  Navigate,
+} from 'react-router-dom';
 import { createWebSocketService, destroyWebSocketService, WebSocketService } from './services/websocket';
 import { ConnectionStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
 import { getToken, setToken } from './lib/auth';
+import { WebSocketContext } from './hooks/useWebSocket';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
@@ -75,34 +81,60 @@ function App() {
     }
   }, [autoConnect, authToken, handleConnect]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = useCallback(() => {
     if (wsService) {
       destroyWebSocketService();
       setWsService(null);
       setConnectionStatus('disconnected');
     }
-  };
+  }, [wsService]);
 
-  if (connectionStatus === 'authenticated' && wsService) {
-    return (
-      <Dashboard
-        wsService={wsService}
-        connectionStatus={connectionStatus}
-      />
-    );
-  }
+  const isAuthed = connectionStatus === 'authenticated' && wsService !== null;
 
-  return (
-    <LoginPage
-      connectionStatus={connectionStatus}
-      serverUrl={serverUrl}
-      setServerUrl={setServerUrl}
-      authToken={authToken}
-      setAuthToken={setAuthToken}
-      onConnect={handleConnect}
-      onDisconnect={handleDisconnect}
-    />
+  // Two distinct router shapes: login vs. authenticated dashboard.
+  // The router is only recreated on auth-state transitions (login/logout),
+  // which is when the URL scheme meaningfully changes.
+  const loginRouter = useMemo(
+    () => createHashRouter([
+      {
+        path: '*',
+        element: (
+          <LoginPage
+            connectionStatus={connectionStatus}
+            serverUrl={serverUrl}
+            setServerUrl={setServerUrl}
+            authToken={authToken}
+            setAuthToken={setAuthToken}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+          />
+        ),
+      },
+    ]),
+    [connectionStatus, serverUrl, authToken, handleConnect, handleDisconnect],
   );
+
+  const appRouter = useMemo(
+    () => createHashRouter([
+      {
+        element: (
+          <WebSocketContext.Provider value={wsService!}>
+            <Dashboard connectionStatus={connectionStatus} />
+          </WebSocketContext.Provider>
+        ),
+        children: [
+          { index: true, element: null },
+          { path: 'terminal/:sessionId', element: null },
+          { path: 'env', element: null },
+          { path: 'login', element: <Navigate to="/" replace /> },
+          { path: '*', element: <Navigate to="/" replace /> },
+        ],
+      },
+    ]),
+    [connectionStatus, wsService],
+  );
+
+  return <RouterProvider router={isAuthed ? appRouter : loginRouter} />;
 }
 
 export default App;

@@ -17,13 +17,12 @@ import {
   SelectValue,
 } from './ui/select';
 import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
-import type { WebSocketService } from '../services/websocket';
 import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  wsService: WebSocketService;
   agents: Agent[];
   preselectedAgentId?: string | null;
   onCreated: () => void;
@@ -62,11 +61,11 @@ function AgentSelect({
 export function CreateSessionDialog({
   isOpen,
   onClose,
-  wsService,
   agents,
   preselectedAgentId,
   onCreated,
 }: CreateSessionDialogProps) {
+  const wsService = useWebSocket();
   const [agentId, setAgentId] = useState('');
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);

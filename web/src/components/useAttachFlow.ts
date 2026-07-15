@@ -1,22 +1,39 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { Session } from '../types';
 import type { AttachedSession } from './TerminalView';
 import type { AttachChoice } from './env/AttachDialog';
 import { saveAttachPrefs } from '../services/attachPrefs';
 
+interface LocationLike { pathname: string; }
+/** Accepts react-router's navigate or a test mock (vi.fn()). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type NavigateFn = (...args: any[]) => void;
+
 /**
  * Owns the attach-to-terminal transition. The attach request + browser address
  * test now happen inside the AttachDialog, which hands back a resolved
  * {@link AttachChoice}; this hook just turns that into an AttachedSession and
- * shows the terminal.
+ * navigates to the terminal route.
+ *
+ * @param navigate — react-router's navigate (or a mock for tests)
+ * @param location — react-router's location (or a mock for tests)
  */
-export function useAttachFlow(fetchSessions: () => void) {
-  const [view, setView] = useState<'dashboard' | 'terminal' | 'env'>('dashboard');
+export function useAttachFlow(
+  fetchSessions: () => void,
+  navigate: NavigateFn,
+  location: LocationLike,
+) {
   const [attachedSession, setAttachedSession] = useState<AttachedSession | null>(null);
   const [attachDialogSession, setAttachDialogSession] = useState<Session | null>(null);
 
+  // Extract session ID from the current URL for deep-link restoration.
+  const pendingTerminalSessionId = useMemo(() => {
+    const match = location.pathname.match(/^\/terminal\/(.+)$/);
+    return match?.[1] ?? null;
+  }, [location.pathname]);
+
   // The Attach button opens the dialog; confirming (with the resolved choice)
-  // performs the transition to the terminal view.
+  // navigates to /terminal/:sessionId.
   const onAttach = useCallback((session: Session) => setAttachDialogSession(session), []);
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
@@ -31,20 +48,20 @@ export function useAttachFlow(fetchSessions: () => void) {
       selectedAddress: choice.selectedUrl ?? undefined,
       renderer: choice.renderer,
     });
-    setView('terminal');
-  }, []);
+    navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
+  }, [navigate]);
 
   const backToDashboard = useCallback(() => {
     setAttachedSession(null);
-    setView('dashboard');
+    navigate('/');
     fetchSessions();
-  }, [fetchSessions]);
+  }, [fetchSessions, navigate]);
 
   return {
-    view, setView,
     attachedSession,
     attachDialogSession, setAttachDialogSession,
     onAttach, confirmAttach,
     backToDashboard,
+    pendingTerminalSessionId,
   };
 }

@@ -9,12 +9,11 @@ import {
 } from './ui/dialog';
 import { Button } from './ui/button';
 import type { Session } from '../types';
-import type { WebSocketService } from '../services/websocket';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface KillConfirmDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  wsService: WebSocketService;
   session: Session | null;
   onKilled: () => void;
 }
@@ -22,10 +21,10 @@ interface KillConfirmDialogProps {
 export function KillConfirmDialog({
   isOpen,
   onClose,
-  wsService,
   session,
   onKilled,
 }: KillConfirmDialogProps) {
+  const wsService = useWebSocket();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

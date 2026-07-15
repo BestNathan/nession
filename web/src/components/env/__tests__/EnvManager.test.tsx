@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EnvManager } from '../EnvManager';
 import type { WebSocketService } from '../../../services/websocket';
+import { WebSocketContext } from '../../../hooks/useWebSocket';
 import type { Agent, EnvFileInfo } from '../../../types';
 
 function agent(overrides: Partial<Agent> = {}): Agent {
@@ -36,7 +37,11 @@ describe('EnvManager', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('shows empty state when no files', async () => {
-    render(<EnvManager wsService={makeWs()} agents={[agent()]} onBack={vi.fn()} />);
+    render(
+      <WebSocketContext.Provider value={makeWs()}>
+        <EnvManager agents={[agent()]} onBack={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
     await waitFor(() => {
       expect(screen.getByText(/No env files yet/)).toBeInTheDocument();
     });
@@ -46,7 +51,11 @@ describe('EnvManager', () => {
     const ws = makeWs({
       listEnvFiles: vi.fn().mockResolvedValue({ files: [file('staging.env')] }),
     });
-    render(<EnvManager wsService={ws} agents={[agent()]} onBack={vi.fn()} />);
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <EnvManager agents={[agent()]} onBack={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
     await waitFor(() => {
       expect(screen.getByText('staging.env')).toBeInTheDocument();
     });
@@ -56,7 +65,11 @@ describe('EnvManager', () => {
   it('calls onBack when Back clicked', async () => {
     const onBack = vi.fn();
     const user = userEvent.setup();
-    render(<EnvManager wsService={makeWs()} agents={[agent()]} onBack={onBack} />);
+    render(
+      <WebSocketContext.Provider value={makeWs()}>
+        <EnvManager agents={[agent()]} onBack={onBack} />
+      </WebSocketContext.Provider>,
+    );
     await waitFor(() => expect(screen.getByText(/No env files yet/)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Back/ }));
     expect(onBack).toHaveBeenCalled();
@@ -70,7 +83,11 @@ describe('EnvManager', () => {
       deleteEnvFile,
     });
     const user = userEvent.setup();
-    render(<EnvManager wsService={ws} agents={[agent()]} onBack={vi.fn()} />);
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <EnvManager agents={[agent()]} onBack={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
     await waitFor(() => expect(screen.getByText('gone.env')).toBeInTheDocument());
     // The delete button is the second action button in the row (Trash icon).
     const buttons = screen.getAllByRole('button');
@@ -82,7 +99,11 @@ describe('EnvManager', () => {
 
   it('opens the create dialog on New', async () => {
     const user = userEvent.setup();
-    render(<EnvManager wsService={makeWs()} agents={[agent()]} onBack={vi.fn()} />);
+    render(
+      <WebSocketContext.Provider value={makeWs()}>
+        <EnvManager agents={[agent()]} onBack={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
     await waitFor(() => expect(screen.getByText(/No env files yet/)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /New/ }));
     await waitFor(() => expect(screen.getByText('New Env File')).toBeInTheDocument());

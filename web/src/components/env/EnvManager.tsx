@@ -6,13 +6,11 @@ import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import { Skeleton } from '../ui/skeleton';
 import type { Agent, EnvFileInfo } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
 import { EnvEditorDialog } from './EnvEditorDialog';
 import { sourceLabel } from './envRef';
 import { useEnvManager } from './useEnvManager';
 
 interface EnvManagerProps {
-  wsService: WebSocketService;
   agents: Agent[];
   onBack: () => void;
 }
@@ -57,8 +55,8 @@ function EnvFileRow({
   );
 }
 
-export function EnvManager({ wsService, agents, onBack }: EnvManagerProps) {
-  const { files, loading, refresh, deleteFile, uploadFile } = useEnvManager(wsService);
+export function EnvManager({ agents, onBack }: EnvManagerProps) {
+  const { files, loading, refresh, deleteFile, uploadFile } = useEnvManager();
   const [editing, setEditing] = useState<EnvFileInfo | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -139,7 +137,6 @@ export function EnvManager({ wsService, agents, onBack }: EnvManagerProps) {
       <EnvEditorDialog
         isOpen={editorOpen}
         onClose={() => setEditorOpen(false)}
-        wsService={wsService}
         editing={editing}
         agents={agents}
         onSaved={refresh}

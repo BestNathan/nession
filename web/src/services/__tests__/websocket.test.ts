@@ -359,7 +359,7 @@ describe('WebSocketService', () => {
   });
 
   describe('message ID generation', () => {
-    it('generates unique sequential IDs', async () => {
+    it('generates unique IDs (msg_<uuid>)', async () => {
       const ws = new WebSocketService('ws://localhost/ws', 'token');
       await connectAndAuth(ws);
 
@@ -372,8 +372,8 @@ describe('WebSocketService', () => {
       const id1 = JSON.parse(calls[calls.length - 2]).id;
       const id2 = JSON.parse(calls[calls.length - 1]).id;
       expect(id1).not.toBe(id2);
-      expect(id1).toMatch(/^msg_\d+_\d+$/);
-      expect(id2).toMatch(/^msg_\d+_\d+$/);
+      expect(id1).toMatch(/^msg_[0-9a-f-]+$/);
+      expect(id2).toMatch(/^msg_[0-9a-f-]+$/);
     });
   });
 

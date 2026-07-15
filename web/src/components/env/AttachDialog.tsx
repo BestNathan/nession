@@ -11,9 +11,9 @@ import {
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {
@@ -34,7 +34,6 @@ interface AttachDialogProps {
   isOpen: boolean;
   onClose: () => void;
   session: Session | null;
-  wsService: WebSocketService;
   /** Called with the resolved attach choice; the flow shows the terminal. */
   onConfirm: (session: Session, choice: AttachChoice) => void;
   /** Per-agent latency cache; supplies probe data without live testing. */
@@ -56,7 +55,8 @@ const AUTO_URL = '__auto__';
  * is read from the app-level address probe cache — not measured live here — so
  * the dialog never blocks on probing. A "Re-test" control forces a fresh probe.
  */
-export function AttachDialog({ isOpen, onClose, session, wsService, onConfirm, probeCache }: AttachDialogProps) {
+export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }: AttachDialogProps) {
+  const wsService = useWebSocket();
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
   const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
