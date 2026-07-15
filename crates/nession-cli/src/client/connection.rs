@@ -9,12 +9,27 @@ use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 use tracing::{debug, info};
+use uuid::Uuid;
 
 /// Client connection to the central server.
 #[derive(Debug)]
 pub struct ClientConnection {
     ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     authenticated: bool,
+}
+
+/// Generate a persistent client ID for this CLI installation.
+///
+/// This ID is used to track which client sourced which environment variables,
+/// allowing proper cleanup when the client disconnects without affecting other
+/// clients' environment variables.
+///
+/// The ID is generated once and cached in memory for the duration of the process.
+fn get_or_create_client_id() -> String {
+    // For now, generate a new ID each time the process starts.
+    // In the future, this could be persisted to a file for true persistence
+    // across CLI invocations, similar to the web UI's localStorage approach.
+    Uuid::new_v4().to_string()
 }
 
 /// Agent information returned from the server.
@@ -75,14 +90,18 @@ impl ClientConnection {
             authenticated: false,
         };
 
+        // Generate a persistent client ID for this connection
+        let client_id = get_or_create_client_id();
+        info!("Using client ID: {}", client_id);
+
         // Authenticate
-        conn.authenticate(auth_token).await?;
+        conn.authenticate(auth_token, &client_id).await?;
 
         Ok(conn)
     }
 
     /// Authenticate with the server.
-    async fn authenticate(&mut self, auth_token: &str) -> Result<()> {
+    async fn authenticate(&mut self, auth_token: &str, client_id: &str) -> Result<()> {
         let msg_id = format!(
             "auth_{}",
             SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()
@@ -94,7 +113,8 @@ impl ClientConnection {
             "id": msg_id,
             "timestamp": timestamp,
             "payload": {
-                "auth_token": auth_token
+                "auth_token": auth_token,
+                "client_id": client_id
             }
         });
 
@@ -593,6 +613,12 @@ mod tests {
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
 
+                                let client_id = parsed
+                                    .get("payload")
+                                    .and_then(|v| v.get("client_id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+
                                 if token == "valid_token" {
                                     json!({
                                         "msg_type": "client.auth.response",
@@ -600,7 +626,8 @@ mod tests {
                                         "timestamp": 0,
                                         "payload": {
                                             "status": "success",
-                                            "message": "ok"
+                                            "message": "ok",
+                                            "client_id": client_id
                                         }
                                     })
                                 } else {

@@ -37,6 +37,7 @@ export class WebSocketService {
   private ws: WebSocket | null = null;
   private url: string;
   private authToken: string;
+  private clientId: string;
   private connectionStatus: ConnectionStatus = 'disconnected';
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -61,6 +62,23 @@ export class WebSocketService {
   constructor(url: string, authToken: string) {
     this.url = url;
     this.authToken = authToken;
+    this.clientId = this.getOrCreateClientId();
+  }
+
+  // Client ID management (persisted in localStorage)
+  private getOrCreateClientId(): string {
+    const storageKey = 'nessioclientid';
+    let clientId = localStorage.getItem(storageKey);
+
+    if (!clientId) {
+      clientId = crypto.randomUUID();
+      localStorage.setItem(storageKey, clientId);
+      console.log('Generated new client ID:', clientId);
+    } else {
+      console.log('Using existing client ID:', clientId);
+    }
+
+    return clientId;
   }
 
   // Connection Management
@@ -159,6 +177,7 @@ export class WebSocketService {
   async authenticate(): Promise<void> {
     const response = await this.request<AuthResponse>('client.auth', {
       auth_token: this.authToken,
+      client_id: this.clientId,
     });
 
     if (response.status === 'success') {

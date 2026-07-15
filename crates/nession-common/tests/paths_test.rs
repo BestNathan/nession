@@ -1,8 +1,11 @@
 use nession_common::paths;
 use std::path::PathBuf;
 
+#[allow(clippy::expect_used)]
 fn expected_home() -> PathBuf {
-    dirs::home_dir().unwrap().join(".nession")
+    dirs::home_dir()
+        .expect("home directory should be available")
+        .join(".nession")
 }
 
 #[test]

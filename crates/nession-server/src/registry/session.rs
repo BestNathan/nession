@@ -128,7 +128,7 @@ impl SessionRegistry {
         sessions.remove(session_id);
     }
 
-    pub async fn remove_by_agent(&self, agent_id: &str) {
+    pub async fn remove_by_agent(&self, agent_id: &str) -> Vec<String> {
         if let Err(e) = self.db.delete_sessions_by_agent(agent_id).await {
             tracing::error!(
                 "Failed to delete sessions for agent {} from DB: {:#}",
@@ -137,6 +137,12 @@ impl SessionRegistry {
             );
         }
         let mut sessions = self.sessions.write().await;
+        let removed: Vec<String> = sessions
+            .keys()
+            .filter(|k| sessions.get(*k).is_some_and(|s| s.agent_id == agent_id))
+            .cloned()
+            .collect();
         sessions.retain(|_, s| s.agent_id != agent_id);
+        removed
     }
 }
