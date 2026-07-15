@@ -37,7 +37,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -53,7 +52,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -73,7 +71,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={onAttach}
         onKill={vi.fn()}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -93,7 +90,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={onKill}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -109,7 +105,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -124,7 +119,6 @@ describe('SessionList', () => {
         loading={true}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         {...defaultProps}
       />,
     );
@@ -132,21 +126,6 @@ describe('SessionList', () => {
     // Skeletons should be rendered
     const skeletons = document.querySelectorAll('[data-slot="skeleton"]');
     expect(skeletons.length).toBeGreaterThan(0);
-  });
-
-  it('disables Attach buttons when attachingInProgress', () => {
-    render(
-      <SessionList
-        sessions={[makeSession()]}
-        loading={false}
-        onAttach={vi.fn()}
-        onKill={vi.fn()}
-        attachingInProgress={true}
-        {...defaultProps}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Attach' })).toBeDisabled();
   });
 
   it('calls toggleSort with "name" when Name header clicked', async () => {
@@ -159,7 +138,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -181,7 +159,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -200,7 +177,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -218,7 +194,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -246,7 +221,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -265,7 +239,6 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
-        attachingInProgress={false}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}

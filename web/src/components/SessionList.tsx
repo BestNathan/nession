@@ -11,7 +11,6 @@ interface SessionListProps {
   loading: boolean;
   onAttach: (session: Session) => void;
   onKill: (session: Session) => void;
-  attachingInProgress: boolean;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
@@ -23,7 +22,6 @@ export function SessionList({
   loading,
   onAttach,
   onKill,
-  attachingInProgress,
   sortField,
   sortDirection,
   toggleSort,
@@ -102,7 +100,6 @@ export function SessionList({
                 <Button
                   size="sm"
                   onClick={() => onAttach(session)}
-                  disabled={attachingInProgress}
                   className="flex-1 md:flex-none min-h-11 md:min-h-7"
                 >
                   Attach

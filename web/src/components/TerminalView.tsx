@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
-import type { WebSocketService } from '../services/websocket';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { TerminalToolbar } from './TerminalToolbar';
 import { BottomBar, type BottomTab } from './BottomBar';
@@ -12,6 +11,7 @@ import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
 import { createFileOps } from '../services/fileOps';
 import { FileTabs } from './FileTabs';
 import { AddressSelector } from './AddressSelector';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 export interface AttachedSession {
   attachInfo: AttachInfo;
@@ -40,14 +40,14 @@ export interface AttachedSession {
 
 interface TerminalViewProps {
   session: AttachedSession;
-  wsService: WebSocketService;
   onBack: () => void;
   onDisconnect: () => void;
   onError: (error: Error) => void;
 }
 
-export function TerminalView({ session, wsService, onBack, onDisconnect, onError }: TerminalViewProps) {
+export function TerminalView({ session, onBack, onDisconnect, onError }: TerminalViewProps) {
   const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer } = session;
+  const wsService = useWebSocket();
   const terminalRef = useRef<TerminalHandle>(null);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
@@ -134,7 +134,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
             onBottomTabChange={setBottomTab}
             sheetOpen={sheetOpen}
             onSheetToggle={setSheetOpen}
-            envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+            envPanel={<EnvPanel sessionId={sessionId} />}
             commandsPanel={
               <TerminalToolbar
                 sendText={(text) => terminalRef.current?.sendText(text)}
@@ -156,7 +156,7 @@ export function TerminalView({ session, wsService, onBack, onDisconnect, onError
               showFilesTab={false}
               sheetOpen={sheetOpen}
               onSheetToggle={setSheetOpen}
-              envPanel={<EnvPanel wsService={wsService} sessionId={sessionId} />}
+              envPanel={<EnvPanel sessionId={sessionId} />}
               commandsPanel={
                 <TerminalToolbar
                   sendText={(text) => terminalRef.current?.sendText(text)}

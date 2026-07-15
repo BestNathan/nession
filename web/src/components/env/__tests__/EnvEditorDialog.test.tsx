@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EnvEditorDialog } from '../EnvEditorDialog';
 import type { WebSocketService } from '../../../services/websocket';
+import { WebSocketContext } from '../../../hooks/useWebSocket';
 import type { Agent, EnvFileInfo } from '../../../types';
 
 function agent(): Agent {
@@ -41,14 +42,15 @@ describe('EnvEditorDialog', () => {
     const onSaved = vi.fn();
     const user = userEvent.setup();
     render(
-      <EnvEditorDialog
-        isOpen
-        onClose={vi.fn()}
-        wsService={makeWs({ writeEnvFile })}
-        editing={null}
-        agents={[agent()]}
-        onSaved={onSaved}
-      />,
+      <WebSocketContext.Provider value={makeWs({ writeEnvFile })}>
+        <EnvEditorDialog
+          isOpen
+          onClose={vi.fn()}
+          editing={null}
+          agents={[agent()]}
+          onSaved={onSaved}
+        />
+      </WebSocketContext.Provider>,
     );
     await waitFor(() => expect(screen.getByText('New Env File')).toBeInTheDocument());
     await user.type(screen.getByPlaceholderText('staging.env'), 'prod.env');
@@ -70,14 +72,15 @@ describe('EnvEditorDialog', () => {
         .mockResolvedValue({ success: true, content: 'A=1', in_use_by: ['agent-1:dev'] }),
     });
     render(
-      <EnvEditorDialog
-        isOpen
-        onClose={vi.fn()}
-        wsService={ws}
-        editing={editingFile}
-        agents={[agent()]}
-        onSaved={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <EnvEditorDialog
+          isOpen
+          onClose={vi.fn()}
+          editing={editingFile}
+          agents={[agent()]}
+          onSaved={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
     await waitFor(() => {
       expect(screen.getByText(/in use by session\(s\): agent-1:dev/)).toBeInTheDocument();
@@ -88,14 +91,15 @@ describe('EnvEditorDialog', () => {
     const writeEnvFile = vi.fn().mockResolvedValue({ success: true });
     const user = userEvent.setup();
     render(
-      <EnvEditorDialog
-        isOpen
-        onClose={vi.fn()}
-        wsService={makeWs({ writeEnvFile })}
-        editing={null}
-        agents={[agent()]}
-        onSaved={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWs({ writeEnvFile })}>
+        <EnvEditorDialog
+          isOpen
+          onClose={vi.fn()}
+          editing={null}
+          agents={[agent()]}
+          onSaved={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
     await waitFor(() => expect(screen.getByText('New Env File')).toBeInTheDocument());
     await user.type(screen.getByPlaceholderText('staging.env'), 'noext');

@@ -18,13 +18,11 @@ import {
   SelectValue,
 } from '../ui/select';
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
 import { useEnvEditor } from './useEnvEditor';
 
 interface EnvEditorDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  wsService: WebSocketService;
   /** When set, edit that file; when null, create a new one. */
   editing: EnvFileInfo | null;
   agents: Agent[];
@@ -37,12 +35,11 @@ const PLACEHOLDER =
 export function EnvEditorDialog({
   isOpen,
   onClose,
-  wsService,
   editing,
   agents,
   onSaved,
 }: EnvEditorDialogProps) {
-  const editor = useEnvEditor({ wsService, isOpen, editing, agents, onSaved, onClose });
+  const editor = useEnvEditor({ isOpen, editing, agents, onSaved, onClose });
   const nameRef = useRef<HTMLInputElement>(null);
   const onlineAgents = agents.filter((a) => a.status === 'online');
 

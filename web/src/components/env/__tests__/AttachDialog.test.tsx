@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { AttachDialog } from '../AttachDialog';
 import type { Session, AttachInfo } from '../../../types';
 import type { WebSocketService } from '../../../services/websocket';
+import { WebSocketContext } from '../../../hooks/useWebSocket';
 import type { AddressProbeCache } from '../../../hooks/useAddressProbeCache';
 
 function session(): Session {
@@ -61,14 +62,15 @@ describe('AttachDialog', () => {
     const ws = mockWs(attachInfo());
     const user = userEvent.setup();
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={onConfirm}
-        probeCache={mockProbeCache()}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={onConfirm}
+          probeCache={mockProbeCache()}
+        />
+      </WebSocketContext.Provider>,
     );
     // Attach button enables once attach info resolves.
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
@@ -84,14 +86,15 @@ describe('AttachDialog', () => {
   it('does not offer a forced Relay mode', () => {
     const ws = mockWs(attachInfo());
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={vi.fn()}
-        probeCache={mockProbeCache()}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={vi.fn()}
+          probeCache={mockProbeCache()}
+        />
+      </WebSocketContext.Provider>,
     );
     expect(screen.getByText('Auto')).toBeInTheDocument();
     expect(screen.getByText('P2P')).toBeInTheDocument();
@@ -118,14 +121,15 @@ describe('AttachDialog', () => {
     });
     const user = userEvent.setup();
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={onConfirm}
-        probeCache={probeCache}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={onConfirm}
+          probeCache={probeCache}
+        />
+      </WebSocketContext.Provider>,
     );
     // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
@@ -164,14 +168,15 @@ describe('AttachDialog', () => {
       }),
     });
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={vi.fn()}
-        probeCache={probeCache}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={vi.fn()}
+          probeCache={probeCache}
+        />
+      </WebSocketContext.Provider>,
     );
     expect(await screen.findByText('12ms')).toBeInTheDocument();
     expect(screen.queryByText(/Testing…/)).not.toBeInTheDocument();
@@ -188,14 +193,15 @@ describe('AttachDialog', () => {
     const probeCache = mockProbeCache({ refreshAgent });
     const user = userEvent.setup();
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={vi.fn()}
-        probeCache={probeCache}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={vi.fn()}
+          probeCache={probeCache}
+        />
+      </WebSocketContext.Provider>,
     );
     const retest = await screen.findByRole('button', { name: /Re-test/ });
     await user.click(retest);
@@ -205,14 +211,15 @@ describe('AttachDialog', () => {
   it('renders a Renderer row with WebGL and Canvas options', () => {
     const ws = mockWs(attachInfo());
     render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        wsService={ws}
-        onConfirm={vi.fn()}
-        probeCache={mockProbeCache()}
-      />,
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={vi.fn()}
+          probeCache={mockProbeCache()}
+        />
+      </WebSocketContext.Provider>,
     );
     expect(screen.getByText('Renderer')).toBeInTheDocument();
     expect(screen.getByText('WebGL')).toBeInTheDocument();

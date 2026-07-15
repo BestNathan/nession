@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { toast } from 'sonner';
-import type { Agent, Session, AttachInfo, AttachMode } from '../types';
+import { useState, useCallback, useMemo } from 'react';
+import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/websocket';
-import type { AttachedSession } from './TerminalView';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { useAgentData } from '../hooks/useAgentData';
+import { useSessionData } from '../hooks/useSessionData';
+import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from '../hooks/useDashboardFilter';
+import { useRealtimeUpdates } from '../hooks/useRealtimeUpdates';
 
-export type StatusFilter = 'all' | 'online' | 'offline';
-export type SortField = 'name' | 'activity';
-export type SortDirection = 'asc' | 'desc';
+export type { StatusFilter, SortField, SortDirection };
 
 export interface DashboardState {
   agents: Agent[];
@@ -17,7 +18,6 @@ export interface DashboardState {
   selectedAgent: Agent | null;
   filteredAgents: Agent[];
   filteredSessions: Session[];
-  attachingInProgress: boolean;
   showCreateModal: boolean;
   sessionToKill: Session | null;
   searchQuery: string;
@@ -31,7 +31,6 @@ export interface DashboardState {
   toggleSort: (field: SortField) => void;
   setShowCreateModal: (show: boolean) => void;
   setSessionToKill: (s: Session | null) => void;
-  handleAttach: (session: Session, mode?: AttachMode) => Promise<void>;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
   fetchSessions: (agentId?: string) => Promise<void>;
@@ -39,30 +38,9 @@ export interface DashboardState {
   clearError: () => void;
 }
 
-// ── Pure helpers (extracted to keep hook under 120-line lint limit) ──────
+// ── Pure helpers (kept here to avoid re-exports plumbing) ────────────────
 
-function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
-  for (const agent of newAgents) {
-    if (!agent.last_heartbeat) { continue; }
-    const history = map.get(agent.agent_id) ?? [];
-    history.push(agent.last_heartbeat);
-    if (history.length > 10) { history.splice(0, history.length - 10); }
-    map.set(agent.agent_id, history);
-  }
-}
-
-interface FilterSortOptions {
-  statusFilter: StatusFilter;
-  searchQuery: string;
-  sortField: SortField;
-  sortDirection: SortDirection;
-}
-
-function computeFilteredAgents(
-  agents: Agent[],
-  statusFilter: StatusFilter,
-  searchQuery: string,
-): Agent[] {
+function filterAgents(agents: Agent[], statusFilter: StatusFilter, searchQuery: string): Agent[] {
   let result = agents;
   if (statusFilter !== 'all') {
     result = result.filter((a) => a.status === statusFilter);
@@ -76,10 +54,17 @@ function computeFilteredAgents(
   return result;
 }
 
-function computeFilteredSessions(
+interface FilterSessionsOpts {
+  statusFilter: StatusFilter;
+  searchQuery: string;
+  sortField: SortField;
+  sortDirection: SortDirection;
+}
+
+function filterSessions(
   sessions: Session[],
   agents: Agent[],
-  opts: FilterSortOptions,
+  opts: FilterSessionsOpts,
 ): Session[] {
   let result = sessions;
   if (opts.statusFilter !== 'all') {
@@ -102,104 +87,49 @@ function computeFilteredSessions(
   });
 }
 
-// ── Hook ─────────────────────────────────────────────────────────────────
+// ── Composed hook ────────────────────────────────────────────────────────
 
-export function useDashboardHandlers(wsService: WebSocketService): DashboardState {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * Composes agent/session data, filter state, modal state, and realtime
+ * subscriptions into the single shape that `<Dashboard>` consumes.
+ */
+export function useDashboardHandlers(_wsService?: WebSocketService): DashboardState {
+  const wsService = useWebSocket(_wsService);
+
+  // Data
+  const agentData = useAgentData(wsService);
+  const sessionData = useSessionData(wsService);
+
+  // Realtime subscriptions + initial fetch
+  const { clearError, fetchSessions } = useRealtimeUpdates(wsService, agentData, sessionData);
+
+  // Filter state
+  const {
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortField, sortDirection, toggleSort,
+    isSearchActive,
+  } = useDashboardFilter();
+
+  // Modal state
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [attachingInProgress, setAttachingInProgress] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [sessionToKill, setSessionToKill] = useState<Session | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const heartbeatHistory = useRef<Map<string, string[]>>(new Map());
 
-  const fetchAgents = useCallback(async () => {
-    setLoadingAgents(true);
-    setError(null);
-    try {
-      const newAgents = await wsService.listAgents();
-      setAgents(newAgents);
-      trackHeartbeats(newAgents, heartbeatHistory.current);
-    }
-    catch (err) { const msg = err instanceof Error ? err.message : 'Failed to fetch agents'; setError(msg); toast.error(msg); }
-    finally { setLoadingAgents(false); }
-  }, [wsService]);
-
-  const fetchSessions = useCallback(async (agentId?: string) => {
-    setLoadingSessions(true);
-    setError(null);
-    try { setSessions(await wsService.listSessions(agentId)); }
-    catch (err) { const msg = err instanceof Error ? err.message : 'Failed to fetch sessions'; setError(msg); toast.error(msg); }
-    finally { setLoadingSessions(false); }
-  }, [wsService]);
-
-  useEffect(() => {
-    const u1 = wsService.onAgentsChanged((newAgents) => {
-      setAgents(newAgents);
-      trackHeartbeats(newAgents, heartbeatHistory.current);
-    });
-    const u2 = wsService.onSessionsChanged(setSessions);
-    return () => { u1(); u2(); };
-  }, [wsService]);
-
-  useEffect(() => { fetchAgents(); fetchSessions(); }, [fetchAgents, fetchSessions]);
-
-  const getHeartbeatHistory = useCallback((agentId: string): string[] => {
-    return heartbeatHistory.current.get(agentId) ?? [];
-  }, []);
-
-  const toggleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  }, [sortField]);
-
+  // Derived filtered lists (memoised on data + filter state)
   const filteredAgents = useMemo(
-    () => computeFilteredAgents(agents, statusFilter, searchQuery),
-    [agents, statusFilter, searchQuery],
+    () => filterAgents(agentData.agents, statusFilter, searchQuery),
+    [agentData.agents, statusFilter, searchQuery],
   );
-
   const filteredSessions = useMemo(
-    () => computeFilteredSessions(sessions, agents, { statusFilter, searchQuery, sortField, sortDirection }),
-    [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
+    () => filterSessions(
+      sessionData.sessions, agentData.agents,
+      { statusFilter, searchQuery, sortField, sortDirection },
+    ),
+    [sessionData.sessions, agentData.agents, statusFilter, searchQuery, sortField, sortDirection],
   );
 
-  const isSearchActive = searchQuery !== '' || statusFilter !== 'all';
-
-  const clearError = useCallback(() => setError(null), []);
-
-  const handleAttach = useCallback(async (session: Session, mode: AttachMode = 'auto') => {
-    setAttachingInProgress(true);
-    setError(null);
-    try {
-      let attachInfo: AttachInfo;
-      if (mode === 'auto') {
-        // Try P2P first, fall back to relay on failure.
-        try { attachInfo = await wsService.requestAttach(session.session_id, 'p2p'); }
-        catch { attachInfo = await wsService.requestAttach(session.session_id, 'relay'); }
-      } else {
-        // Forced mode: honor the user's choice, no fallback.
-        attachInfo = await wsService.requestAttach(session.session_id, mode);
-      }
-      (handleAttach as unknown as { _attached?: AttachedSession })._attached = {
-        sessionId: session.session_id, sessionName: session.session_name, attachInfo,
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to attach to session';
-      setError(msg); toast.error(msg);
-    } finally { setAttachingInProgress(false); }
-  }, [wsService]);
-
+  // Handlers
   const handleSessionKilled = useCallback(() => {
     setSessionToKill(null);
     fetchSessions();
@@ -211,13 +141,31 @@ export function useDashboardHandlers(wsService: WebSocketService): DashboardStat
   }, [fetchSessions]);
 
   return {
-    agents, sessions, loadingAgents, loadingSessions, error,
-    selectedAgent, filteredAgents, filteredSessions, attachingInProgress,
-    showCreateModal, sessionToKill,
-    searchQuery, statusFilter, sortField, sortDirection, isSearchActive,
-    setSearchQuery, setStatusFilter, setSelectedAgent, toggleSort,
-    setShowCreateModal, setSessionToKill,
-    handleAttach, handleSessionKilled, handleSessionCreated,
-    fetchSessions, getHeartbeatHistory, clearError,
+    agents: agentData.agents,
+    sessions: sessionData.sessions,
+    loadingAgents: agentData.loadingAgents,
+    loadingSessions: sessionData.loadingSessions,
+    error: agentData.error,
+    selectedAgent,
+    filteredAgents,
+    filteredSessions,
+    showCreateModal,
+    sessionToKill,
+    searchQuery,
+    statusFilter,
+    sortField,
+    sortDirection,
+    isSearchActive,
+    setSearchQuery,
+    setStatusFilter,
+    setSelectedAgent,
+    toggleSort,
+    setShowCreateModal,
+    setSessionToKill,
+    handleSessionKilled,
+    handleSessionCreated,
+    fetchSessions,
+    getHeartbeatHistory: agentData.getHeartbeatHistory,
+    clearError,
   };
 }

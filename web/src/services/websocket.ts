@@ -568,7 +568,13 @@ export class WebSocketService {
 
   private generateMessageId(): string {
     this.messageId++;
-    return `msg_${this.messageId}_${Date.now()}`;
+    // crypto.randomUUID() requires a secure context (HTTPS/localhost);
+    // fall back to a counter + random suffix which is unique enough for
+    // single-tab request correlation.
+    const rnd = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    return `msg_${this.messageId}_${rnd}`;
   }
 
   private rejectAllPendingRequests(error: Error): void {

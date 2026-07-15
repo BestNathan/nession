@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import type { Agent, EnvFileInfo, EnvFileRef, EnvSource } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 /** Inputs for {@link useEnvEditor}. */
 export interface EnvEditorOptions {
-  wsService: WebSocketService;
+  wsService?: WebSocketService;
   isOpen: boolean;
   editing: EnvFileInfo | null;
   agents: Agent[];
@@ -15,13 +16,14 @@ export interface EnvEditorOptions {
 
 /** Form state + load/save behaviour for the env editor dialog. */
 export function useEnvEditor({
-  wsService,
+  wsService: _wsService,
   isOpen,
   editing,
   agents,
   onSaved,
   onClose,
 }: EnvEditorOptions) {
+  const wsService = useWebSocket(_wsService);
   const [name, setName] = useState('');
   const [source, setSource] = useState<EnvSource>('server');
   const [agentId, setAgentId] = useState('');

@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Session, KillSessionResponse } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
+import { WebSocketContext } from '../../hooks/useWebSocket';
 
 // Mock Dialog to render children directly (no portal)
 vi.mock('../ui/dialog', () => ({
@@ -43,13 +44,14 @@ describe('KillConfirmDialog', () => {
   it('renders dialog when open', async () => {
     const { KillConfirmDialog } = KillConfirmDialogModule;
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={makeWsService()}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService()}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -61,13 +63,14 @@ describe('KillConfirmDialog', () => {
   it('does not render when closed', async () => {
     const { KillConfirmDialog } = KillConfirmDialogModule;
     render(
-      <KillConfirmDialog
-        isOpen={false}
-        onClose={vi.fn()}
-        wsService={makeWsService()}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService()}>
+        <KillConfirmDialog
+          isOpen={false}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     expect(screen.queryByRole('heading', { name: 'Kill Session' })).not.toBeInTheDocument();
@@ -76,13 +79,14 @@ describe('KillConfirmDialog', () => {
   it('does not render when session is null', async () => {
     const { KillConfirmDialog } = KillConfirmDialogModule;
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={makeWsService()}
-        session={null}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService()}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={null}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     expect(screen.queryByRole('heading', { name: 'Kill Session' })).not.toBeInTheDocument();
@@ -91,13 +95,14 @@ describe('KillConfirmDialog', () => {
   it('has Cancel and Kill buttons', async () => {
     const { KillConfirmDialog } = KillConfirmDialogModule;
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={makeWsService()}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService()}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -112,13 +117,14 @@ describe('KillConfirmDialog', () => {
     const onClose = vi.fn();
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={onClose}
-        wsService={makeWsService()}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService()}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={onClose}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -135,13 +141,14 @@ describe('KillConfirmDialog', () => {
     const wsService = makeWsService();
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -162,13 +169,14 @@ describe('KillConfirmDialog', () => {
     });
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -191,13 +199,14 @@ describe('KillConfirmDialog', () => {
     );
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -218,13 +227,14 @@ describe('KillConfirmDialog', () => {
     (wsService.killSession as ReturnType<typeof vi.fn>).mockRejectedValue('unknown');
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -246,13 +256,14 @@ describe('KillConfirmDialog', () => {
     );
 
     render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={makeWsService({ killSession })}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={makeWsService({ killSession })}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -277,13 +288,14 @@ describe('KillConfirmDialog', () => {
     );
 
     const { rerender } = render(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {
@@ -298,22 +310,24 @@ describe('KillConfirmDialog', () => {
 
     // Close and reopen
     rerender(
-      <KillConfirmDialog
-        isOpen={false}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={false}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
     rerender(
-      <KillConfirmDialog
-        isOpen={true}
-        onClose={vi.fn()}
-        wsService={wsService}
-        session={makeSession()}
-        onKilled={vi.fn()}
-      />,
+      <WebSocketContext.Provider value={wsService}>
+        <KillConfirmDialog
+          isOpen={true}
+          onClose={vi.fn()}
+          session={makeSession()}
+          onKilled={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
     );
 
     await waitFor(() => {

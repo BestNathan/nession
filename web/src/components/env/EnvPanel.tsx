@@ -7,20 +7,21 @@ import { ScrollArea } from '../ui/scroll-area';
 import type { EnvFileInfo } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { refKey, toRef, sourceLabel } from './envRef';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface EnvPanelProps {
-  wsService: WebSocketService;
   sessionId: string;
 }
 
 // ── Helpers (extracted to keep EnvPanel under the 120-line limit) ────────
 
 function useEnvActions(
-  wsService: WebSocketService,
+  _wsService: WebSocketService | undefined,
   sessionId: string,
   setSourced: Dispatch<SetStateAction<Set<string>>>,
   setBusy: Dispatch<SetStateAction<Set<string>>>,
 ) {
+  const wsService = useWebSocket(_wsService);
   return useCallback(
     (file: EnvFileInfo, action: 'source' | 'unsource') => {
       const ref = toRef(file);
@@ -122,7 +123,8 @@ function EnvFileRow({
  * the user source them (send-keys "source /tmp/script.sh") or unsource them
  * (send-keys "source /tmp/unsource.sh"). Sourced files are tracked locally.
  */
-export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
+export function EnvPanel({ sessionId }: EnvPanelProps) {
+  const wsService = useWebSocket();
   const [files, setFiles] = useState<EnvFileInfo[]>([]);
   const [sourced, setSourced] = useState<Set<string>>(new Set());
   const [createTimeKeys, setCreateTimeKeys] = useState<Set<string>>(new Set());
@@ -179,7 +181,7 @@ export function EnvPanel({ wsService, sessionId }: EnvPanelProps) {
     }
   }, [refresh, sessionId, wsService]);
 
-  const action = useEnvActions(wsService, sessionId, setSourced, setBusy);
+  const action = useEnvActions(undefined, sessionId, setSourced, setBusy);
   const source = useCallback((f: EnvFileInfo) => action(f, 'source'), [action]);
   const unsource = useCallback((f: EnvFileInfo) => action(f, 'unsource'), [action]);
 
