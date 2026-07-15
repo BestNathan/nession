@@ -1,9 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LoginPage } from '../LoginPage';
 
 describe('LoginPage', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
   it('renders connection form', () => {
     render(
       <LoginPage
@@ -236,5 +240,107 @@ describe('LoginPage', () => {
     expect(featuresCard).not.toBeNull();
     expect(featuresCard?.className).toContain('hidden');
     expect(featuresCard?.className).toContain('md:block');
+  });
+
+  it('renders the Remember me checkbox (unchecked by default)', () => {
+    render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl="ws://localhost:19090/ws"
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={vi.fn()}
+        onDisconnect={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole('checkbox', { name: /remember me/i });
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it('toggles Remember me checkbox when clicked', async () => {
+    const user = userEvent.setup();
+    render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl="ws://localhost:19090/ws"
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={vi.fn()}
+        onDisconnect={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole('checkbox', { name: /remember me/i });
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it('passes remember=true to onConnect when checkbox is checked', async () => {
+    const user = userEvent.setup();
+    const onConnect = vi.fn();
+
+    render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl="ws://localhost:19090/ws"
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={onConnect}
+        onDisconnect={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('checkbox', { name: /remember me/i }));
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(onConnect).toHaveBeenCalledWith(true);
+  });
+
+  it('passes remember=false to onConnect when checkbox is unchecked', async () => {
+    const user = userEvent.setup();
+    const onConnect = vi.fn();
+
+    render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl="ws://localhost:19090/ws"
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={onConnect}
+        onDisconnect={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(onConnect).toHaveBeenCalledWith(false);
+  });
+
+  it('restores remember preference from localStorage', () => {
+    localStorage.setItem('remember', 'true');
+
+    render(
+      <LoginPage
+        connectionStatus="disconnected"
+        serverUrl="ws://localhost:19090/ws"
+        setServerUrl={vi.fn()}
+        authToken=""
+        setAuthToken={vi.fn()}
+        onConnect={vi.fn()}
+        onDisconnect={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole('checkbox', { name: /remember me/i });
+    expect(checkbox).toBeChecked();
   });
 });
