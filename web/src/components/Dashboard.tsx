@@ -1,86 +1,24 @@
 import { useCallback } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Agent, Session, ConnectionStatus } from '../types';
+import type { ConnectionStatus } from '../types';
 import type { WebSocketService } from '../services/websocket';
-import { TerminalView, type AttachedSession } from './TerminalView';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
-import { SessionList } from './SessionList';
 import { AgentDetailPanel } from './AgentDetailPanel';
 import { EnvManager } from './env/EnvManager';
 import { AttachDialog } from './env/AttachDialog';
-import { cn } from '@/lib/utils';
-import { Button } from './ui/button';
 import { useDashboardHandlers } from './useDashboardHandlers';
 import { useAttachFlow } from './useAttachFlow';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { AgentSection } from './AgentSection';
 import { DashboardHeader } from './DashboardHeader';
+import { RenderTerminal } from './RenderTerminal';
+import { SessionsSection } from './SessionsSection';
 export { AgentSection };
 
 interface DashboardProps {
   wsService: WebSocketService;
   connectionStatus: ConnectionStatus;
-}
-
-function RenderTerminal({
-  attachedSession, wsService, handleBackToDashboard, handleTerminalDisconnect, handleTerminalError,
-}: { attachedSession: AttachedSession; wsService: WebSocketService;
-  handleBackToDashboard: () => void; handleTerminalDisconnect: () => void;
-  handleTerminalError: (err: Error) => void; }) {
-  return (
-    <TerminalView session={attachedSession} wsService={wsService}
-      onBack={handleBackToDashboard} onDisconnect={handleTerminalDisconnect} onError={handleTerminalError} />
-  );
-}
-
-function SessionsSection({
-  agents, filteredSessions, loadingSessions, attachingInProgress,
-  onCreate, fetchSessions, onAttach, onKill,
-  sortField, sortDirection, toggleSort, isSearchActive,
-}: {
-  agents: Agent[];
-  filteredSessions: Session[];
-  loadingSessions: boolean;
-  attachingInProgress: boolean;
-  onCreate: () => void;
-  fetchSessions: () => void;
-  onAttach: (s: Session) => void;
-  onKill: (s: Session) => void;
-  sortField: import('./useDashboardHandlers').SortField;
-  sortDirection: import('./useDashboardHandlers').SortDirection;
-  toggleSort: (f: import('./useDashboardHandlers').SortField) => void;
-  isSearchActive: boolean;
-}) {
-  return (
-    <section className="flex-1 min-h-0 flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Sessions
-        </h2>
-        <div className="flex gap-2">
-          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-11 md:min-h-7">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Create
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0">
-            <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
-          </Button>
-        </div>
-      </div>
-      <SessionList
-        sessions={filteredSessions}
-        loading={loadingSessions}
-        onAttach={onAttach}
-        onKill={onKill}
-        attachingInProgress={attachingInProgress}
-        sortField={sortField}
-        sortDirection={sortDirection}
-        toggleSort={toggleSort}
-        isSearchActive={isSearchActive}
-      />
-    </section>
-  );
 }
 
 export function Dashboard({ wsService, connectionStatus }: DashboardProps) {
