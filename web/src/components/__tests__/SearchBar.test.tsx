@@ -243,7 +243,7 @@ describe('SearchBar', () => {
     expect(setSearchQuery).toHaveBeenCalledWith('ab');
   });
 
-  it('wraps the filter buttons in a horizontally scrollable container on mobile', () => {
+  it('wraps the filter buttons with flex-wrap for responsive layout', () => {
     const { container } = render(
       <SearchBar
         searchQuery=""
@@ -254,9 +254,9 @@ describe('SearchBar', () => {
         offlineCount={2}
       />,
     );
-    const scroller = container.querySelector('[data-testid="filter-row"]');
-    expect(scroller).not.toBeNull();
-    expect(scroller?.className).toContain('overflow-x-auto');
+    const filterRow = container.querySelector('[data-testid="filter-row"]');
+    expect(filterRow).not.toBeNull();
+    expect(filterRow?.className).toContain('flex-wrap');
   });
 
   it('gives filter buttons a 44px touch target on mobile', () => {

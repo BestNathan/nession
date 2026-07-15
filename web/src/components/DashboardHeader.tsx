@@ -38,7 +38,7 @@ export function DashboardHeader({
   const { fetchSessions, onOpenEnv, loadingAgents, clearError } = actionsProps;
   return (
     <>
-      <header className="border-b px-6 py-3 flex items-center gap-4 flex-shrink-0">
+      <header className="border-b px-6 py-3 flex flex-wrap items-center gap-4 flex-shrink-0">
         <h1 className="text-lg font-bold">Nession</h1>
         <Badge variant="outline" className="gap-1.5 py-1.5">
           <span className={cn('w-2 h-2 rounded-full',
