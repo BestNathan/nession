@@ -4,6 +4,16 @@ import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from './ui/alert-dialog';
 import type { FileOps } from '../services/fileOps';
 
 export interface FileViewerProps {
@@ -22,6 +32,7 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
   const [isReadOnly, setIsReadOnly] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   const loadFile = useCallback(async () => {
     setLoading(true);
@@ -68,8 +79,14 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
 
   const handleCloseClick = () => {
     if (isDirty) {
-      if (!window.confirm('You have unsaved changes. Close anyway?')) {return;}
+      setShowUnsavedDialog(true);
+      return;
     }
+    onClose();
+  };
+
+  const handleConfirmClose = () => {
+    setShowUnsavedDialog(false);
     onClose();
   };
 
@@ -116,6 +133,22 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
           />
         )}
       </div>
+
+      {/* Unsaved changes dialog */}
+      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Close anyway?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmClose} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Close without saving</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
