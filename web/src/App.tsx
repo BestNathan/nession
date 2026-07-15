@@ -10,7 +10,10 @@ const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'w
 
 function App() {
   const params = new URLSearchParams(window.location.search);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const autoConnect = params.get('token') !== null;
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+    () => autoConnect ? 'connecting' : 'disconnected'
+  );
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
   const [authToken, setAuthToken] = useState(() => {
     const urlToken = params.get('token');
@@ -23,7 +26,6 @@ function App() {
   const [serverUrl, setServerUrl] = useState(
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL
   );
-  const autoConnect = params.get('token') !== null;
   const unsubRef = useRef<(() => void) | null>(null);
   const hasAutoConnected = useRef(false);
 
