@@ -43,6 +43,7 @@ export class WebSocketService {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private messageId = 0;
 
   // Request correlation
   private pendingRequests = new Map<string, PendingRequest>();
@@ -566,7 +567,14 @@ export class WebSocketService {
   }
 
   private generateMessageId(): string {
-    return `msg_${crypto.randomUUID()}`;
+    this.messageId++;
+    // crypto.randomUUID() requires a secure context (HTTPS/localhost);
+    // fall back to a counter + random suffix which is unique enough for
+    // single-tab request correlation.
+    const rnd = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    return `msg_${this.messageId}_${rnd}`;
   }
 
   private rejectAllPendingRequests(error: Error): void {
