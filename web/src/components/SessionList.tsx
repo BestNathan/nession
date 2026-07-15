@@ -66,12 +66,12 @@ export function SessionList({
             Name {sortField === 'name' && (sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
           </button>
           <button
-            className="hidden md:flex w-16 items-center gap-1 hover:text-foreground"
+            className="hidden md:flex w-12 sm:w-16 items-center gap-1 hover:text-foreground"
             onClick={() => toggleSort('activity')}
           >
             Activity {sortField === 'activity' && (sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
           </button>
-          <span className="hidden md:block w-[124px] flex-shrink-0" />
+          <span className="hidden md:block w-20 sm:w-[124px] flex-shrink-0" />
         </div>
         <div className="divide-y divide-border">
           {sessions.map((session) => (
@@ -98,7 +98,7 @@ export function SessionList({
                   </p>
                 </div>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
+              <div className="flex gap-1.5 flex-shrink-0 whitespace-nowrap">
                 <Button
                   size="sm"
                   onClick={() => onAttach(session)}
