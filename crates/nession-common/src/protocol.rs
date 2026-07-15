@@ -540,3 +540,23 @@ pub struct ServerSessionEnvUnsetPayload {
     /// The variable keys to remove via `tmux set-environment -u`.
     pub keys: Vec<String>,
 }
+
+// --- Env state query payloads ---
+
+/// `server.env.query` — ask an agent for its currently sourced env files.
+/// Used by the EnvPanel to show which env files are active on each agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerEnvQueryPayload {
+    pub request_id: String,
+}
+
+/// Agent response to `server.env.query`. The agent reports which env files
+/// it has currently sourced (applied to its environment).
+/// Response message type: `agent.session.command.response` with command="env.query"
+/// and this payload structure in the JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentEnvStatePayload {
+    pub request_id: String,
+    /// List of env file names currently sourced by this agent.
+    pub sourced_files: Vec<String>,
+}
