@@ -101,4 +101,15 @@ export default tseslint.config(
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },
   },
+
+  // ── App entry point ───────────────────────────────────────────────────
+  // main.tsx is the bootstrap file; its Root wrapper hosts a media-query
+  // hook and is never HMR-mounted, so the fast-refresh export rule
+  // doesn't apply.
+  {
+    files: ['src/main.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 )

@@ -131,4 +131,11 @@ describe('TerminalToolbar', () => {
     expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
   });
 
+  it('gives preset command buttons a 44px touch target on mobile', () => {
+    render(<TerminalToolbar sendText={vi.fn()} />);
+    const buttons = screen.getAllByRole('button');
+    const preset = buttons.find((b) => b.className.includes('h-11 md:h-6'));
+    expect(preset).toBeDefined();
+  });
+
 });

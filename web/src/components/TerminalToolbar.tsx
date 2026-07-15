@@ -58,15 +58,15 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
       <div className="flex flex-wrap gap-1 content-start overflow-y-auto min-h-0 p-2 pb-0">
         {PRESETS.map((cmd) => (
           <Button key={cmd.id} variant="outline" size="sm"
-            className="h-6 text-[11px] px-2" disabled={disabled}
+            className="h-11 md:h-6 text-xs md:text-[11px] px-2" disabled={disabled}
             onClick={() => runCommand(cmd)}>{cmd.label}</Button>
         ))}
         {userCommands.map((cmd) => (
-          <div key={cmd.id} className="flex items-center h-6">
+          <div key={cmd.id} className="flex items-center h-11 md:h-6">
             <Button variant="outline" size="sm"
-              className="h-6 text-[11px] px-2 rounded-r-none" disabled={disabled}
+              className="h-11 md:h-6 text-xs md:text-[11px] px-2 rounded-r-none" disabled={disabled}
               onClick={() => runCommand(cmd)}>{cmd.label}</Button>
-            <Button variant="ghost" size="icon" className="h-6 w-5 rounded-l-none"
+            <Button variant="ghost" size="icon" className="h-11 md:h-6 w-9 md:w-5 rounded-l-none"
               disabled={disabled} onClick={() => deleteUserCommand(cmd.id)} title="Delete">
               <X className="h-3 w-3" /></Button>
           </div>
@@ -85,7 +85,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
               onClick={() => setShowAddForm(false)}>✕</Button>
           </div>
         ) : (
-          <Button variant="ghost" size="sm" className="h-6 text-[11px] px-2"
+          <Button variant="ghost" size="sm" className="h-11 md:h-6 text-xs md:text-[11px] px-2"
             disabled={disabled} onClick={() => setShowAddForm(true)}>
             <Plus className="h-3 w-3 mr-1" /> Add</Button>
         )}
@@ -107,7 +107,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
           className="text-xs md:text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
           disabled={disabled}
         />
-        <Button variant="outline" size="icon" className="h-7 w-7 flex-shrink-0" title="Send"
+        <Button variant="outline" size="icon" className="h-11 w-11 md:h-7 md:w-7 flex-shrink-0" title="Send"
           onClick={sendInput} disabled={disabled}>
           <SendHorizontal className="h-3.5 w-3.5" />
         </Button>

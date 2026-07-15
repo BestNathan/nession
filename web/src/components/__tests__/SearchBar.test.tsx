@@ -242,4 +242,35 @@ describe('SearchBar', () => {
     expect(setSearchQuery).toHaveBeenCalledTimes(1);
     expect(setSearchQuery).toHaveBeenCalledWith('ab');
   });
+
+  it('wraps the filter buttons in a horizontally scrollable container on mobile', () => {
+    const { container } = render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={1}
+        offlineCount={2}
+      />,
+    );
+    const scroller = container.querySelector('[data-testid="filter-row"]');
+    expect(scroller).not.toBeNull();
+    expect(scroller?.className).toContain('overflow-x-auto');
+  });
+
+  it('gives filter buttons a 44px touch target on mobile', () => {
+    render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={vi.fn()}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={1}
+        offlineCount={2}
+      />,
+    );
+    const all = screen.getByRole('button', { name: /All/ });
+    expect(all.className).toContain('min-h-11');
+  });
 });

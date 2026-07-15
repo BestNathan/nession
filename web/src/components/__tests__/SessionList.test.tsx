@@ -228,4 +228,52 @@ describe('SessionList', () => {
 
     expect(screen.getByText(/No sessions for this agent/)).toBeInTheDocument();
   });
+
+  const sampleSession = {
+    session_id: 's1',
+    session_name: 'build',
+    agent_id: 'agent-1',
+    status: 'active' as const,
+    window_count: 2,
+    attached_clients: 1,
+    last_activity: new Date().toISOString(),
+  };
+
+  it('fills available height instead of a fixed max-height', () => {
+    const { container } = render(
+      <SessionList
+        sessions={[sampleSession]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={vi.fn()}
+        isSearchActive={false}
+      />,
+    );
+    const scrollArea = container.querySelector('[data-testid="session-scroll"]');
+    expect(scrollArea?.className).toContain('flex-1');
+    expect(scrollArea?.className).not.toContain('max-h-64');
+  });
+
+  it('hides the Activity sort column on mobile', () => {
+    render(
+      <SessionList
+        sessions={[sampleSession]}
+        loading={false}
+        onAttach={vi.fn()}
+        onKill={vi.fn()}
+        attachingInProgress={false}
+        sortField="name"
+        sortDirection="asc"
+        toggleSort={vi.fn()}
+        isSearchActive={false}
+      />,
+    );
+    const activity = screen.getByRole('button', { name: /Activity/ });
+    expect(activity.className).toContain('hidden');
+    expect(activity.className).toContain('md:flex');
+  });
 });

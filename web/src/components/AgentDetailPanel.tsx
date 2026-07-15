@@ -74,7 +74,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
-      <SheetContent side="right" className="w-[400px] sm:w-[480px] overflow-y-auto">
+      <SheetContent side="right" className="w-full sm:w-[480px] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 space-y-4">
           {/* Header: Status badge + hostname */}
           <div>
