@@ -38,6 +38,9 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{error, info, warn};
 
+/// Per-connection map of attached tmux control-mode sessions, keyed by session name.
+type SessionMap = std::collections::HashMap<String, crate::tmux::control::ControlModeSession>;
+
 /// A stream that can be either plain TCP or TLS-wrapped.
 #[allow(clippy::large_enum_variant)]
 enum TcpOrTls {
@@ -637,7 +640,7 @@ impl AgentServer {
         // send messages back to the client.
         let sink = Arc::new(Mutex::new(ws_sink));
         // Per-client attached PTY sessions keyed by session name.
-        let sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>> =
+        let sessions: Arc<Mutex<SessionMap>> =
             Arc::new(Mutex::new(std::collections::HashMap::new()));
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -663,7 +666,7 @@ impl AgentServer {
         mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
         tmux: Arc<TmuxManager>,
-        sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
+        sessions: Arc<Mutex<SessionMap>>,
         client_id: Arc<Mutex<Option<String>>>,
         addr: SocketAddr,
         default_working_dir: String,
@@ -717,9 +720,9 @@ impl AgentServer {
         // connection so that the underlying tmux attach children are
         // terminated promptly.
         let mut sessions_guard = sessions.lock().await;
-        for (name, session) in sessions_guard.drain() {
+        for (name, mut session) in sessions_guard.drain() {
             if let Err(e) = session.close().await {
-                warn!("Error closing PTY session {}: {:#}", name, e);
+                warn!("Error closing control session {}: {:#}", name, e);
             }
         }
 
@@ -739,7 +742,7 @@ impl AgentServer {
     async fn handle_request(
         text: &str,
         tmux: Arc<TmuxManager>,
-        sessions: Arc<Mutex<std::collections::HashMap<String, crate::tmux::pty::PtySession>>>,
+        sessions: Arc<Mutex<SessionMap>>,
         client_id: Arc<Mutex<Option<String>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
         default_working_dir: &str,
@@ -840,65 +843,42 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                match crate::tmux::pty::PtySession::attach(
+                match crate::tmux::control::ControlModeSession::attach(
                     &payload.session_name,
                     payload.width,
                     payload.height,
                 )
                 .await
                 {
-                    Ok(session) => {
+                    Ok((session, mut output_rx)) => {
                         let session_name = payload.session_name.clone();
                         sessions.lock().await.insert(session_name.clone(), session);
 
-                        // Spawn a background task that continuously reads
-                        // PTY output and pushes it to the client as
-                        // `terminal.output` messages.
+                        // Spawn a background task that consumes the output
+                        // channel from the control-mode subprocess and
+                        // forwards bytes to the client as `terminal.output`
+                        // messages.
                         let sink_clone = Arc::clone(&sink);
-                        let sessions_for_output = Arc::clone(&sessions);
                         let session_name_clone = session_name.clone();
                         tokio::spawn(async move {
-                            let mut buf = [0u8; 4096];
-                            loop {
-                                // Borrow the session from the map so we
-                                // don't hold the map lock during the
-                                // blocking read.
-                                let read_result = {
-                                    let map = sessions_for_output.lock().await;
-                                    match map.get(&session_name_clone) {
-                                        Some(session) => session.read_output(&mut buf, 100).await,
-                                        None => break,
-                                    }
+                            while let Some(bytes) = output_rx.recv().await {
+                                use base64::Engine;
+                                let encoded =
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                let output = TerminalOutputPayload {
+                                    session_name: session_name_clone.clone(),
+                                    data: encoded,
                                 };
-                                match read_result {
-                                    Ok(0) => {
-                                        break; // EOF
-                                    }
-                                    Ok(n) => {
-                                        use base64::Engine;
-                                        let encoded = base64::engine::general_purpose::STANDARD
-                                            .encode(buf.get(..n).unwrap_or(&[]));
-                                        let output = TerminalOutputPayload {
-                                            session_name: session_name_clone.clone(),
-                                            data: encoded,
-                                        };
-                                        let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                        if let Ok(json) = serde_json::to_string(&msg) {
-                                            let mut s = sink_clone.lock().await;
-                                            if s.send(WsMessage::Text(json)).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        // Check if it's a timeout error — if so, continue
-                                        if e.to_string().contains("PTY_READ_TIMEOUT") {
-                                            continue;
-                                        }
+                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                if let Ok(json) = serde_json::to_string(&msg) {
+                                    let mut s = sink_clone.lock().await;
+                                    if s.send(WsMessage::Text(json)).await.is_err() {
                                         break;
                                     }
                                 }
                             }
+                            // Channel closed — tmux subprocess exited or
+                            // session was closed by the detach handler.
                         });
 
                         let resp = ClientAttachResponse {
@@ -918,9 +898,12 @@ impl AgentServer {
                 };
                 let removed = sessions.lock().await.remove(&payload.session_name);
                 match removed {
-                    Some(session) => {
+                    Some(mut session) => {
                         if let Err(e) = session.close().await {
-                            warn!("Error closing PTY for {}: {:#}", payload.session_name, e);
+                            warn!(
+                                "Error closing control session for {}: {:#}",
+                                payload.session_name, e
+                            );
                         }
                         let resp = ClientDetachResponse {
                             session_name: payload.session_name,
@@ -945,8 +928,8 @@ impl AgentServer {
                     Ok(d) => d,
                     Err(e) => return err("decode_error", &e.to_string()),
                 };
-                let sessions_guard = sessions.lock().await;
-                match sessions_guard.get(&payload.session_name) {
+                let mut sessions_guard = sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
                     Some(session) => match session.write_input(&data).await {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("write_error", &e.to_string()),
@@ -963,8 +946,8 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                let sessions_guard = sessions.lock().await;
-                match sessions_guard.get(&payload.session_name) {
+                let mut sessions_guard = sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
                     Some(session) => match session.resize(payload.width, payload.height).await {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("resize_error", &e.to_string()),
