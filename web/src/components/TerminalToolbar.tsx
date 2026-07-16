@@ -3,6 +3,7 @@ import { Plus, X, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
+import { generateId } from '@/lib/idGenerator';
 import {
   PRESETS,
   loadUserCommands,
@@ -36,7 +37,7 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
     const label = newLabel.trim();
     const command = newCommand.trim();
     if (!label || !command) { return; }
-    const id = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = generateId('user');
     const next = [...userCommands, { id, label, command }];
     setUserCommands(next);
     saveUserCommands(next);
