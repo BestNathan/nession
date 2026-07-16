@@ -2,7 +2,7 @@ import { RefreshCw, X, FileCog } from 'lucide-react';
 import type { ConnectionStatus } from '../types';
 import type { StatusFilter } from './useDashboardHandlers';
 import { SearchBar } from './SearchBar';
-import { Badge } from './ui/badge';
+import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
@@ -40,13 +40,7 @@ export function DashboardHeader({
     <>
       <header className="border-b px-6 py-3 flex flex-wrap items-center gap-4 flex-shrink-0">
         <h1 className="text-lg font-bold">Nession</h1>
-        <Badge variant="outline" className="gap-1.5 py-1.5">
-          <span className={cn('w-2 h-2 rounded-full',
-            connectionStatus === 'authenticated' ? 'bg-green-500' : 'bg-red-500',
-            connectionStatus === 'connecting' && 'animate-pulse bg-amber-500',
-          )} />
-          {connectionStatus}
-        </Badge>
+        <ConnectionStatusBadge status={connectionStatus} />
         <div className="flex-1" />
         <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
           <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
