@@ -21,7 +21,15 @@ pub enum ControlMessage {
 
 /// 解析 tmux control mode 的一行输出
 pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
-    let line = line.trim();
+    // Strip only line terminator (\n or \r\n), preserving trailing whitespace
+    // that may be meaningful in %output ANSI data (e.g., trailing \r for cursor control).
+    let line = if let Some(stripped) = line.strip_suffix("\r\n") {
+        stripped
+    } else if let Some(stripped) = line.strip_suffix('\n') {
+        stripped
+    } else {
+        line
+    };
 
     if line.starts_with("%output ") {
         parse_output(line)
@@ -35,7 +43,7 @@ pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
         parse_session_changed(line)
     } else if line.starts_with("%layout-change ") {
         parse_layout_change(line)
-    } else if line == "%exit" {
+    } else if line == "%exit" || line.starts_with("%exit ") {
         Some(ControlMessage::Exit)
     } else {
         None
@@ -182,5 +190,38 @@ mod tests {
     fn test_parse_unknown() {
         let msg = parse_control_line("%unknown message");
         assert!(msg.is_none());
+    }
+
+    #[test]
+    fn test_parse_output_preserves_trailing_whitespace() {
+        // %output data may end in whitespace or \r that's meaningful for ANSI cursor control
+        let msg = parse_control_line("%output %0 hello \r");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::Output { data, .. })
+            if data == "hello \r"
+        ));
+    }
+
+    #[test]
+    fn test_parse_output_preserves_trailing_spaces() {
+        let msg = parse_control_line("%output %0 line with trailing spaces   ");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::Output { data, .. })
+            if data == "line with trailing spaces   "
+        ));
+    }
+
+    #[test]
+    fn test_parse_exit_with_reason() {
+        let msg = parse_control_line("%exit lost server");
+        assert!(matches!(msg, Some(ControlMessage::Exit)));
+    }
+
+    #[test]
+    fn test_parse_exit_bare() {
+        let msg = parse_control_line("%exit");
+        assert!(matches!(msg, Some(ControlMessage::Exit)));
     }
 }
