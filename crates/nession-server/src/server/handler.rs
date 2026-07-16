@@ -1733,7 +1733,6 @@ mod tests {
     use crate::env::EnvService;
     use crate::registry::{AgentRegistry, SessionRegistry};
     use crate::server::command_broker::CommandBroker;
-    use nession_common::protocol::AgentMetadata;
     use tokio_tungstenite::tungstenite::Message;
 
     /// Build a test handler wired to in-memory DB + tempdir env store.
@@ -1742,7 +1741,7 @@ mod tests {
         let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
         let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
         let command_broker = Arc::new(CommandBroker::new());
-        let env_root = tempfile::tempdir().unwrap().into_path();
+        let env_root = tempfile::tempdir().unwrap().keep();
         let env_service = EnvService::new(env_root);
         ConnectionHandler::new(
             agent_registry,
@@ -2145,7 +2144,7 @@ mod tests {
         .await
         .unwrap();
         // Session should be gone
-        let action = h
+        let _action = h
             .handle_message(proto_msg("client.sessions.list", json!({})))
             .await
             .unwrap();

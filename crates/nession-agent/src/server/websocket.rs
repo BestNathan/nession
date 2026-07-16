@@ -2251,8 +2251,8 @@ mod tests {
             send_and_receive(&mut sink, &mut stream, &req).await;
 
         assert_eq!(resp.msg_type, msg_types::OK);
-        // May be empty if no tmux sessions exist
-        assert!(resp.payload.sessions.len() >= 0);
+        // May be empty if no tmux sessions exist — just verify field exists
+        let _ = resp.payload.sessions.len();
 
         handle.shutdown().await.ok();
     }

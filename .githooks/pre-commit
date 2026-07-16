@@ -30,11 +30,20 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 
   echo -e "${YELLOW}→ cargo clippy --workspace -- -D warnings${NC}"
-  if ! cargo clippy --workspace -- -D warnings 2>&1; then
+  if ! RUSTFLAGS="-D warnings" cargo clippy --workspace -- -D warnings 2>&1; then
     echo -e "${RED}✗ cargo clippy failed — fix the warnings above${NC}"
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ cargo clippy${NC}"
+  fi
+
+  # Also check test compilation with -D warnings (matches CI behavior)
+  echo -e "${YELLOW}→ cargo test --no-run (with -D warnings, matches CI)${NC}"
+  if ! RUSTFLAGS="-D warnings" cargo test --workspace --no-run 2>&1; then
+    echo -e "${RED}✗ test compilation failed — see errors above${NC}"
+    HAS_ERROR=1
+  else
+    echo -e "${GREEN}✓ test compiles${NC}"
   fi
 
   # Determine which crates have staged changes to focus coverage on
