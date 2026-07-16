@@ -1,10 +1,10 @@
-import { RefreshCw, X, FileCog } from 'lucide-react';
+import { X, FileCog } from 'lucide-react';
 import type { ConnectionStatus } from '../types';
 import type { StatusFilter } from './useDashboardHandlers';
 import { SearchBar } from './SearchBar';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
+import { RefreshButton } from './ui/RefreshButton';
 import { Button } from './ui/button';
-import { cn } from '@/lib/utils';
 
 export interface SearchProps {
   query: string;
@@ -45,9 +45,7 @@ export function DashboardHeader({
         <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
           <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
         </Button>
-        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0">
-          <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
-        </Button>
+        <RefreshButton onClick={fetchSessions} loading={loadingAgents} />
       </header>
       <SearchBar
         searchQuery={searchProps.query}
