@@ -171,6 +171,6 @@ export interface SessionEnvResponse {
 }
 
 export interface SessionEnvQueryResponse {
-  sourced_files: string[];
+  sourced_files: EnvFileRef[];
   error?: string;
 }

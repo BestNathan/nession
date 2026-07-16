@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
 import type { Session } from '../types';
 import type { WebSocketService } from '../services/websocket';
 
@@ -11,8 +12,9 @@ export function useSessionData(wsService: WebSocketService) {
     setLoadingSessions(true);
     try {
       setSessions(await wsService.listSessions(agentId));
-    } catch {
-      // Error surfaced via toast in the service layer; UI will re-fetch on next event.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
+      toast.error(msg);
     } finally {
       setLoadingSessions(false);
     }

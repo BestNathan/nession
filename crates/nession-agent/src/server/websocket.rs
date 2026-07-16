@@ -2099,4 +2099,336 @@ mod tests {
         // Should take everything after the first colon
         assert_eq!(extract_session_name("agent:session:extra"), "session:extra");
     }
+
+    #[test]
+    fn test_make_response_echoes_request_id() {
+        let resp = make_response(
+            "req-123",
+            msg_types::OK,
+            OkPayload {
+                message: "done".into(),
+            },
+        );
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.id, "req-123");
+        assert_eq!(resp.payload.message, "done");
+        assert!(resp.timestamp > 0);
+    }
+
+    #[test]
+    fn test_make_error() {
+        let resp = make_error("req-456", "not_found", "thing missing");
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.id, "req-456");
+        assert_eq!(resp.payload.code, "not_found");
+        assert_eq!(resp.payload.message, "thing missing");
+    }
+
+    #[test]
+    fn test_make_ok() {
+        let resp = make_ok("req-789", "success!");
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.id, "req-789");
+        assert_eq!(resp.payload.message, "success!");
+    }
+
+    #[test]
+    fn test_now_timestamp_is_recent() {
+        let ts = now_timestamp();
+        // Should be after 2024-01-01
+        assert!(ts > 1_704_067_200);
+    }
+
+    #[test]
+    fn test_new_message_structure() {
+        let msg = new_message("test.type", serde_json::json!({"key": "value"}));
+        assert_eq!(msg.msg_type, "test.type");
+        assert!(!msg.id.is_empty());
+        assert!(uuid::Uuid::parse_str(&msg.id).is_ok());
+    }
+
+    #[test]
+    fn test_default_width_height() {
+        assert_eq!(default_width(), 80);
+        assert_eq!(default_height(), 24);
+    }
+
+    #[test]
+    fn test_default_p2p_mode() {
+        assert_eq!(default_p2p(), "p2p");
+    }
+
+    #[test]
+    fn test_session_create_payload_defaults() {
+        let json = serde_json::json!({"name": "test"});
+        let p: SessionCreatePayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.name, "test");
+        assert_eq!(p.width, 80);
+        assert_eq!(p.height, 24);
+    }
+
+    #[test]
+    fn test_client_attach_payload_defaults() {
+        let json = serde_json::json!({"session_name": "s"});
+        let p: ClientAttachPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.session_name, "s");
+        assert_eq!(p.width, 80);
+        assert_eq!(p.height, 24);
+    }
+
+    #[test]
+    fn test_web_session_attach_default_mode() {
+        let json = serde_json::json!({"session_id": "a:b"});
+        let p: WebSessionAttachPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.preferred_mode, "p2p");
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_client_auth() {
+        let (addr, handle) = start_test_server_on(18096).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let auth_payload = ClientAuthPayload {
+            auth_token: "test-token".to_string(),
+            client_id: Some("my-client-id".to_string()),
+        };
+        let req = new_message(msg_types::CLIENT_AUTH, auth_payload);
+        let resp: Message<AuthResponsePayload> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.payload.status, "success");
+        assert_eq!(resp.payload.client_id, "my-client-id");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_client_auth_generates_id() {
+        let (addr, handle) = start_test_server_on(18097).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let auth_payload = ClientAuthPayload {
+            auth_token: "test-token".to_string(),
+            client_id: None, // server should generate one
+        };
+        let req = new_message(msg_types::CLIENT_AUTH, auth_payload);
+        let resp: Message<AuthResponsePayload> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.payload.status, "success");
+        // Generated client_id should be a valid UUID
+        assert!(uuid::Uuid::parse_str(&resp.payload.client_id).is_ok());
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_agents_list() {
+        let (addr, handle) = start_test_server_on(18098).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req = new_message(msg_types::CLIENT_AGENTS_LIST, serde_json::json!({}));
+        let resp: Message<WebAgentsListResponse> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.payload.agents.len(), 1);
+        assert_eq!(resp.payload.agents[0].agent_id, "test-agent");
+        assert_eq!(resp.payload.agents[0].status, "online");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_sessions_list() {
+        let (addr, handle) = start_test_server_on(18099).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let req = new_message(msg_types::CLIENT_SESSIONS_LIST, serde_json::json!({}));
+        let resp: Message<WebSessionsListResponse> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        // May be empty if no tmux sessions exist — just verify field exists
+        let _ = resp.payload.sessions.len();
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_session_attach() {
+        let (addr, handle) = start_test_server_on(18100).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let payload = WebSessionAttachPayload {
+            session_id: "test-agent:my-session".to_string(),
+            preferred_mode: "p2p".to_string(),
+        };
+        let req = new_message(msg_types::CLIENT_SESSION_ATTACH, payload);
+        let resp: Message<WebAttachInfo> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(resp.payload.mode, "p2p");
+        assert_eq!(resp.payload.session_name, "my-session");
+        assert_eq!(resp.payload.session_id, "test-agent:my-session");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_session_create_and_kill() {
+        let (addr, handle) = start_test_server_on(18101).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // Pre-clean
+        TmuxManager::new()
+            .kill_session("web_create_kill")
+            .await
+            .ok();
+
+        let create_payload = WebSessionCreatePayload {
+            agent_id: "test-agent".to_string(),
+            name: "web_create_kill".to_string(),
+            width: 100,
+            height: 30,
+        };
+        let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
+        let create_resp: Message<WebSessionCreateResponse> =
+            send_and_receive(&mut sink, &mut stream, &create_req).await;
+
+        assert_eq!(create_resp.msg_type, msg_types::OK);
+        assert!(create_resp.payload.success);
+        assert_eq!(
+            create_resp.payload.session_id,
+            Some("test-agent:web_create_kill".to_string())
+        );
+
+        // Kill via web UI
+        let kill_payload = WebSessionKillPayload {
+            session_id: "test-agent:web_create_kill".to_string(),
+        };
+        let kill_req = new_message(msg_types::CLIENT_SESSION_KILL, kill_payload);
+        let kill_resp: Message<WebSessionKillResponse> =
+            send_and_receive(&mut sink, &mut stream, &kill_req).await;
+
+        assert_eq!(kill_resp.msg_type, msg_types::OK);
+        assert!(kill_resp.payload.success);
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_session_kill_nonexistent() {
+        let (addr, handle) = start_test_server_on(18102).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let kill_payload = WebSessionKillPayload {
+            session_id: "agent:nonexistent-session-xyz".to_string(),
+        };
+        let kill_req = new_message(msg_types::CLIENT_SESSION_KILL, kill_payload);
+        let kill_resp: Message<WebSessionKillResponse> =
+            send_and_receive(&mut sink, &mut stream, &kill_req).await;
+
+        assert_eq!(kill_resp.msg_type, msg_types::OK);
+        assert!(!kill_resp.payload.success);
+        assert!(kill_resp.payload.error.is_some());
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_web_ui_session_create_invalid_payload() {
+        let (addr, handle) = start_test_server_on(18103).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        // Send a completely invalid payload (missing name field)
+        let req = new_message(
+            msg_types::CLIENT_SESSION_CREATE,
+            serde_json::json!({"wrong_field": 123}),
+        );
+        let resp: Message<WebSessionCreateResponse> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert!(!resp.payload.success);
+        assert!(resp.payload.error.is_some());
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_client_detach_not_attached() {
+        let (addr, handle) = start_test_server_on(18104).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let detach_payload = ClientDetachPayload {
+            session_name: "never-attached-session".to_string(),
+        };
+        let req = new_message(msg_types::CLIENT_DETACH, detach_payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "not_attached");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_terminal_input_not_attached() {
+        let (addr, handle) = start_test_server_on(18105).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        use base64::Engine;
+        let input_payload = TerminalInputPayload {
+            session_name: "no-such-session".to_string(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"hello"),
+        };
+        let req = new_message(msg_types::TERMINAL_INPUT, input_payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "not_attached");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_terminal_resize_not_attached() {
+        let (addr, handle) = start_test_server_on(18106).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let resize_payload = TerminalResizePayload {
+            session_name: "no-such-session".to_string(),
+            width: 120,
+            height: 40,
+        };
+        let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "not_attached");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_tls_load_both_none() {
+        let result = AgentServer::load_tls(None, None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tls_load_only_cert_fails() {
+        let result = AgentServer::load_tls(Some("/tmp/cert.pem"), None);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tls_load_only_key_fails() {
+        let result = AgentServer::load_tls(None, Some("/tmp/key.pem"));
+        assert!(result.is_err());
+    }
 }

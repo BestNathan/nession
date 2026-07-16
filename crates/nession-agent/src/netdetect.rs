@@ -162,4 +162,95 @@ mod tests {
         assert_eq!(ws_url(v4, 8080), "ws://192.168.1.5:8080/ws");
         assert_eq!(ws_url(v6, 8080), "ws://[fd00::1]:8080/ws");
     }
+
+    #[test]
+    fn label_for_lan() {
+        assert_eq!(label_for("eth0", NetworkType::Lan), "LAN (eth0)");
+    }
+
+    #[test]
+    fn label_for_vpn() {
+        assert_eq!(label_for("utun0", NetworkType::Vpn), "VPN (utun0)");
+    }
+
+    #[test]
+    fn label_for_tunnel() {
+        assert_eq!(label_for("tun0", NetworkType::Tunnel), "Tunnel (tun0)");
+    }
+
+    #[test]
+    fn label_for_public() {
+        assert_eq!(label_for("en0", NetworkType::Public), "Public (en0)");
+    }
+
+    #[test]
+    fn label_for_custom() {
+        assert_eq!(label_for("wg0", NetworkType::Custom), "Custom (wg0)");
+    }
+
+    #[test]
+    fn classify_v4_below_cgnat_range() {
+        // 100.63.x.x is below the CGNAT block (100.64/10)
+        assert_eq!(
+            classify("100.63.255.255".parse().unwrap()),
+            NetworkType::Lan
+        );
+    }
+
+    #[test]
+    fn classify_v4_above_cgnat_range() {
+        // 100.128.x.x is above the CGNAT block
+        assert_eq!(classify("100.128.0.1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn classify_v4_link_local() {
+        assert_eq!(classify("169.254.1.1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn classify_v4_public() {
+        // 8.8.8.8 is a public IP
+        assert_eq!(classify("8.8.8.8".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn classify_v6_link_local_is_lan() {
+        assert_eq!(classify("fe80::1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn classify_v6_global_is_lan() {
+        // Global unicast addresses are classified as LAN by default
+        assert_eq!(classify("2001:db8::1".parse().unwrap()), NetworkType::Lan);
+    }
+
+    #[test]
+    fn is_advertisable_skips_unspecified() {
+        assert!(!is_advertisable("0.0.0.0".parse().unwrap()));
+        assert!(!is_advertisable("::".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_advertisable_accepts_private_v4() {
+        assert!(is_advertisable("10.0.0.1".parse().unwrap()));
+        assert!(is_advertisable("172.16.0.1".parse().unwrap()));
+        assert!(is_advertisable("192.168.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_advertisable_accepts_global_v6() {
+        assert!(is_advertisable("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn detect_local_addresses_returns_vec() {
+        // Should not panic. May return empty in CI with no NICs.
+        let addrs = detect_local_addresses(19090);
+        // If we get addresses, they should have valid fields
+        for addr in &addrs {
+            assert!(addr.url.starts_with("ws://"));
+            assert!(addr.label.is_some());
+        }
+    }
 }

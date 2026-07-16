@@ -15,10 +15,11 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
     AgentAddress, AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus,
-    EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
-    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    EnvFileRef, EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage,
+    ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -106,6 +107,8 @@ pub struct ServerClient {
     tmux: Arc<TmuxManager>,
     /// Store for agent-local env files under `~/.nession/agent/envs`.
     env_store: EnvStore,
+    /// Track sourced env files per session (session_id -> Vec<EnvFileRef>)
+    sourced_envs: std::sync::Mutex<HashMap<String, Vec<EnvFileRef>>>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -248,6 +251,7 @@ impl ServerClient {
             metadata,
             tmux,
             env_store: EnvStore::new(env_root),
+            sourced_envs: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -679,6 +683,15 @@ impl ServerClient {
                         break;
                     }
                 }
+                // Track sourced env files if no error occurred
+                if error.is_none() && !payload.env_files.is_empty() {
+                    if let Ok(mut sourced) = self.sourced_envs.lock() {
+                        sourced
+                            .entry(payload.name.clone())
+                            .or_insert_with(Vec::new)
+                            .extend(payload.env_files.clone());
+                    }
+                }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
@@ -726,7 +739,7 @@ impl ServerClient {
             }
             "server.env.query" => {
                 let request_id = str_field(&msg.payload, "request_id");
-                let sourced_files = sourced_env_files().await;
+                let sourced_files = self.get_sourced_env_files();
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
@@ -813,43 +826,18 @@ fn str_field(payload: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-/// List env file names currently sourced on any tmux session.
+/// List env file refs currently sourced on any tmux session.
 ///
-/// Scans `/tmp/` for nession source scripts (written by
-/// [`TmuxManager::source_env`]) and extracts the env file names from the
-/// file naming convention `nession-source-{client_id}-{session}-{name}`.
-///
-/// Returns a sorted, deduplicated list of env file names. If `/tmp/` is
-/// unreadable, returns an empty list.
-async fn sourced_env_files() -> Vec<String> {
-    let mut files = std::collections::BTreeSet::new();
-    let mut dir = match tokio::fs::read_dir("/tmp").await {
-        Ok(d) => d,
-        Err(_) => return vec![],
-    };
-    while let Ok(Some(entry)) = dir.next_entry().await {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if let Some(rest) = name.strip_prefix("nession-source-") {
-            // rest = "{client_id}-{session}-{safe_name}"
-            // client_id is a UUID with hyphens, so we can't just split by '-'
-            // Instead, find the env name by looking for the last segment after '-'
-            // Format: {uuid}-{session}-{env_name}
-            // UUID has format: 8-4-4-4-12 (36 chars with hyphens)
-            // So we skip the first 36 chars (UUID), then parse the rest
-            if rest.len() > 36 {
-                let after_uuid = &rest[36..]; // Skip UUID part (includes its hyphens)
-                                              // after_uuid = "-{session}-{safe_name}"
-                if let Some(session_and_env) = after_uuid.strip_prefix('-') {
-                    // session_and_env = "{session}-{safe_name}"
-                    // Extract env name (last segment)
-                    if let Some(env_name) = session_and_env.rsplit_once('-').map(|(_, n)| n) {
-                        files.insert(env_name.to_string());
-                    }
-                }
-            }
+/// Returns the tracked EnvFileRef information from sourced_envs map.
+/// If no files are tracked, returns an empty list.
+impl ServerClient {
+    fn get_sourced_env_files(&self) -> Vec<EnvFileRef> {
+        if let Ok(sourced) = self.sourced_envs.lock() {
+            sourced.values().flatten().cloned().collect()
+        } else {
+            vec![]
         }
     }
-    files.into_iter().collect()
 }
 
 /// Flatten multiple env-file snapshots into a single ordered variable list.
@@ -1510,5 +1498,517 @@ mod tests {
 
         handle.shutdown().await.ok();
         server_handle.abort();
+    }
+
+    // -----------------------------------------------------------------------
+    // Unit tests for pure functions and handle methods
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flatten_snapshots_empty() {
+        let result = flatten_snapshots(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn flatten_snapshots_single_snapshot() {
+        let snapshots = vec![EnvSnapshot {
+            name: "a.env".to_string(),
+            source: nession_common::protocol::EnvSource::Server,
+            agent_id: None,
+            vars: vec![("FOO".into(), "bar".into()), ("BAZ".into(), "qux".into())],
+            warnings: vec![],
+        }];
+        let result = flatten_snapshots(&snapshots);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("FOO".to_string(), "bar".to_string()));
+        assert_eq!(result[1], ("BAZ".to_string(), "qux".to_string()));
+    }
+
+    #[test]
+    fn flatten_snapshots_later_overrides_earlier() {
+        let snapshots = vec![
+            EnvSnapshot {
+                name: "first.env".to_string(),
+                source: nession_common::protocol::EnvSource::Server,
+                agent_id: None,
+                vars: vec![
+                    ("KEY".into(), "first_value".into()),
+                    ("ONLY".into(), "1".into()),
+                ],
+                warnings: vec![],
+            },
+            EnvSnapshot {
+                name: "second.env".to_string(),
+                source: nession_common::protocol::EnvSource::Server,
+                agent_id: None,
+                vars: vec![("KEY".into(), "second_value".into())],
+                warnings: vec![],
+            },
+        ];
+        let result = flatten_snapshots(&snapshots);
+        // KEY should be overridden in place (position 0)
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("KEY".to_string(), "second_value".to_string()));
+        assert_eq!(result[1], ("ONLY".to_string(), "1".to_string()));
+    }
+
+    #[test]
+    fn flatten_snapshots_preserves_insertion_order() {
+        let snapshots = vec![
+            EnvSnapshot {
+                name: "a.env".to_string(),
+                source: nession_common::protocol::EnvSource::Server,
+                agent_id: None,
+                vars: vec![("B".into(), "1".into()), ("A".into(), "2".into())],
+                warnings: vec![],
+            },
+            EnvSnapshot {
+                name: "b.env".to_string(),
+                source: nession_common::protocol::EnvSource::Server,
+                agent_id: None,
+                vars: vec![("C".into(), "3".into())],
+                warnings: vec![],
+            },
+        ];
+        let result = flatten_snapshots(&snapshots);
+        let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, vec!["B", "A", "C"]);
+    }
+
+    #[test]
+    fn str_field_extracts_string() {
+        let value = serde_json::json!({"request_id": "abc", "name": "test"});
+        assert_eq!(str_field(&value, "request_id"), "abc");
+        assert_eq!(str_field(&value, "name"), "test");
+    }
+
+    #[test]
+    fn str_field_missing_returns_empty() {
+        let value = serde_json::json!({"other": "val"});
+        assert_eq!(str_field(&value, "missing"), "");
+    }
+
+    #[test]
+    fn str_field_non_string_returns_empty() {
+        let value = serde_json::json!({"num": 42});
+        assert_eq!(str_field(&value, "num"), "");
+    }
+
+    #[test]
+    fn new_message_has_correct_type_and_payload() {
+        let msg = new_message("test.type", serde_json::json!({"key": "value"}));
+        assert_eq!(msg.msg_type, "test.type");
+        assert_eq!(msg.payload, serde_json::json!({"key": "value"}));
+        // ID should be a valid UUID string
+        assert!(!msg.id.is_empty());
+        assert!(uuid::Uuid::parse_str(&msg.id).is_ok());
+        // Timestamp should be recent
+        assert!(msg.timestamp > 0);
+    }
+
+    #[test]
+    fn server_client_handle_sync_needed_flag() {
+        let (outbox_tx, _outbox_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        let handle = ServerClientHandle {
+            outbox: outbox_tx,
+            shutdown_tx,
+            agent_id: "test".to_string(),
+            sync_needed: Arc::new(AtomicBool::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
+        };
+
+        // Initially not sync needed
+        assert!(!handle.take_sync_needed());
+
+        // Mark and take
+        handle.mark_sync_needed();
+        assert!(handle.take_sync_needed());
+
+        // Take clears the flag
+        assert!(!handle.take_sync_needed());
+    }
+
+    #[test]
+    fn server_client_handle_connected_flag() {
+        let (outbox_tx, _outbox_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        let handle = ServerClientHandle {
+            outbox: outbox_tx,
+            shutdown_tx,
+            agent_id: "test".to_string(),
+            sync_needed: Arc::new(AtomicBool::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
+        };
+
+        assert!(!handle.is_connected());
+
+        handle.connected.store(true, Ordering::SeqCst);
+        assert!(handle.is_connected());
+
+        handle.connected.store(false, Ordering::SeqCst);
+        assert!(!handle.is_connected());
+    }
+
+    #[tokio::test]
+    async fn server_client_handle_enqueue_after_drop_fails() {
+        let (outbox_tx, outbox_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        let handle = ServerClientHandle {
+            outbox: outbox_tx,
+            shutdown_tx,
+            agent_id: "test".to_string(),
+            sync_needed: Arc::new(AtomicBool::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
+        };
+
+        // Drop the receiver so the channel is closed
+        drop(outbox_rx);
+
+        // Enqueue should fail because supervisor is gone
+        let msg = new_message("test", serde_json::json!({}));
+        let result = handle.enqueue(&msg);
+        assert!(result.is_err());
+    }
+
+    /// Mock server that sends env.list command after registration.
+    async fn start_mock_server_env_list(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await;
+
+                let cmd = serde_json::json!({
+                    "msg_type": "server.env.list",
+                    "id": "cmd-env-list",
+                    "timestamp": 1234567891,
+                    "payload": { "request_id": "req-env-list-1" }
+                });
+                let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
+
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_env_list_command() {
+        let port = 28089;
+        let (server_handle, mut msg_rx) = start_mock_server_env_list(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-env-list",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+            .await
+            .expect("timeout waiting for env.list response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["payload"]["command"], "env.list");
+        assert_eq!(parsed["payload"]["success"], true);
+        assert!(parsed["payload"]["files"].is_array());
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that sends env.query command after registration.
+    async fn start_mock_server_env_query(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await;
+
+                let cmd = serde_json::json!({
+                    "msg_type": "server.env.query",
+                    "id": "cmd-env-query",
+                    "timestamp": 1234567891,
+                    "payload": { "request_id": "req-env-query-1" }
+                });
+                let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
+
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_env_query_command() {
+        let port = 28090;
+        let (server_handle, mut msg_rx) = start_mock_server_env_query(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-env-query",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+            .await
+            .expect("timeout waiting for env.query response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["payload"]["command"], "env.query");
+        assert_eq!(parsed["payload"]["success"], true);
+        assert!(parsed["payload"]["sourced_files"].is_array());
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that sends server.session.env.unset command.
+    async fn start_mock_server_env_unset(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await;
+
+                // First create a session to apply env to
+                let tmux = TmuxManager::new();
+                let _ = tmux
+                    .create_session("test-session-env-unset", 80, 24, "/tmp", &[])
+                    .await;
+
+                let cmd = serde_json::json!({
+                    "msg_type": "server.session.env.unset",
+                    "id": "cmd-env-unset",
+                    "timestamp": 1234567891,
+                    "payload": {
+                        "request_id": "req-env-unset-1",
+                        "name": "test-session-env-unset",
+                        "keys": ["FOO", "BAR"],
+                        "client_id": "test-client"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
+
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    #[tokio::test]
+    async fn test_server_session_env_unset_command() {
+        let port = 28091;
+        let (server_handle, mut msg_rx) = start_mock_server_env_unset(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-env-unset",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+            .await
+            .expect("timeout waiting for env.unset response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["payload"]["command"], "session.env.unset");
+        assert_eq!(parsed["payload"]["request_id"], "req-env-unset-1");
+
+        // Clean up
+        let tmux = TmuxManager::new();
+        let _ = tmux.kill_session("test-session-env-unset").await;
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_supervisor_shutdown_during_backoff() {
+        // Connect to a port that doesn't exist — the supervisor will enter backoff.
+        // Then shutdown during backoff.
+        let port = 28092;
+        // Don't start a server — connect will fail immediately
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-backoff",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            metadata,
+            Arc::new(TmuxManager::new()),
+            "/tmp".to_string(),
+        );
+
+        let (handle, interval) = client.connect_and_run().await.expect("connect failed");
+        // The first connection fails, so interval should be None
+        assert_eq!(interval, None);
+
+        // Shutdown should succeed quickly (during backoff)
+        handle.shutdown().await.ok();
+    }
+
+    #[test]
+    fn register_response_payload_with_interval() {
+        let json = serde_json::json!({
+            "status": "accepted",
+            "message": "ok",
+            "heartbeat_interval_secs": 30
+        });
+        let resp: RegisterResponsePayload = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.status, "accepted");
+        assert_eq!(resp.heartbeat_interval_secs, Some(30));
+    }
+
+    #[test]
+    fn register_response_payload_without_interval() {
+        let json = serde_json::json!({
+            "status": "accepted",
+            "message": "ok"
+        });
+        let resp: RegisterResponsePayload = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.heartbeat_interval_secs, None);
+    }
+
+    #[test]
+    fn session_update_payload_serialization() {
+        let payload = SessionUpdatePayload {
+            agent_id: "a1".to_string(),
+            session_name: "s1".to_string(),
+            status: "active".to_string(),
+            window_count: 3,
+            attached_clients: 1,
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["agent_id"], "a1");
+        assert_eq!(json["session_name"], "s1");
+        assert_eq!(json["status"], "active");
+        assert_eq!(json["window_count"], 3);
+        assert_eq!(json["attached_clients"], 1);
     }
 }

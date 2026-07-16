@@ -278,3 +278,158 @@ pub fn legacy_agent_address(addresses: &[ProbedAddress]) -> Option<String> {
         .or_else(|| addresses.first())
         .map(|p| p.address.url.clone())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_probed(url: &str, network_type: NetworkType, status: AddressStatus) -> ProbedAddress {
+        ProbedAddress {
+            address: AgentAddress {
+                url: url.to_string(),
+                network_type,
+                label: None,
+                priority: 0,
+            },
+            status,
+            rtt_ms: None,
+        }
+    }
+
+    #[test]
+    fn encode_addresses_empty() {
+        let result = encode_addresses(&[]);
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn encode_addresses_single() {
+        let addrs = vec![make_probed(
+            "ws://1.2.3.4:8080/ws",
+            NetworkType::Lan,
+            AddressStatus::Unknown,
+        )];
+        let result = encode_addresses(&addrs);
+        assert!(result.contains("ws://1.2.3.4:8080/ws"));
+        assert!(result.contains("lan"));
+    }
+
+    #[test]
+    fn decode_addresses_empty_string() {
+        let result = decode_addresses("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decode_addresses_whitespace() {
+        let result = decode_addresses("   ");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decode_addresses_empty_json_array() {
+        let result = decode_addresses("[]");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decode_addresses_malformed_returns_empty() {
+        let result = decode_addresses("not valid json");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decode_addresses_round_trip() {
+        let original = vec![make_probed(
+            "ws://1.2.3.4:8080/ws",
+            NetworkType::Lan,
+            AddressStatus::Reachable,
+        )];
+        let encoded = encode_addresses(&original);
+        let decoded = decode_addresses(&encoded);
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].address.url, "ws://1.2.3.4:8080/ws");
+        assert_eq!(decoded[0].address.network_type, NetworkType::Lan);
+        // Status is reset to Unknown on decode
+        assert_eq!(decoded[0].status, AddressStatus::Unknown);
+        assert!(decoded[0].rtt_ms.is_none());
+    }
+
+    #[test]
+    fn build_probed_addresses_from_legacy() {
+        let result = build_probed_addresses(vec![], "192.168.1.1", 8080, None);
+        assert!(!result.is_empty());
+        assert!(result[0].address.url.contains("192.168.1.1"));
+    }
+
+    #[test]
+    fn build_probed_addresses_with_connect_url() {
+        let result = build_probed_addresses(
+            vec![],
+            "192.168.1.1",
+            8080,
+            Some("wss://public.example.com/ws"),
+        );
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn legacy_agent_address_prefers_tunnel() {
+        let addrs = vec![
+            make_probed(
+                "ws://lan:8080/ws",
+                NetworkType::Lan,
+                AddressStatus::Reachable,
+            ),
+            make_probed(
+                "wss://tunnel.example.com/ws",
+                NetworkType::Tunnel,
+                AddressStatus::Unknown,
+            ),
+        ];
+        let result = legacy_agent_address(&addrs);
+        assert_eq!(result, Some("wss://tunnel.example.com/ws".to_string()));
+    }
+
+    #[test]
+    fn legacy_agent_address_prefers_reachable() {
+        let addrs = vec![
+            make_probed(
+                "ws://unknown:8080/ws",
+                NetworkType::Lan,
+                AddressStatus::Unknown,
+            ),
+            make_probed(
+                "ws://reachable:8080/ws",
+                NetworkType::Lan,
+                AddressStatus::Reachable,
+            ),
+        ];
+        let result = legacy_agent_address(&addrs);
+        assert_eq!(result, Some("ws://reachable:8080/ws".to_string()));
+    }
+
+    #[test]
+    fn legacy_agent_address_falls_back_to_first() {
+        let addrs = vec![
+            make_probed(
+                "ws://first:8080/ws",
+                NetworkType::Lan,
+                AddressStatus::Unknown,
+            ),
+            make_probed(
+                "ws://second:8080/ws",
+                NetworkType::Lan,
+                AddressStatus::Unknown,
+            ),
+        ];
+        let result = legacy_agent_address(&addrs);
+        assert_eq!(result, Some("ws://first:8080/ws".to_string()));
+    }
+
+    #[test]
+    fn legacy_agent_address_empty_list() {
+        let result = legacy_agent_address(&[]);
+        assert!(result.is_none());
+    }
+}

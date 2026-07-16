@@ -143,3 +143,91 @@ impl Default for AgentConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_listen_address() {
+        assert_eq!(default_listen_address(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn test_default_heartbeat_interval() {
+        assert_eq!(default_heartbeat_interval(), 10);
+    }
+
+    #[test]
+    fn test_default_session_poll_interval() {
+        assert_eq!(default_session_poll_interval(), 5);
+    }
+
+    #[test]
+    fn test_default_working_dir() {
+        let dir = default_working_dir();
+        // Either HOME or "/"
+        assert!(!dir.is_empty());
+    }
+
+    #[test]
+    fn test_default_network_type() {
+        assert_eq!(default_network_type(), NetworkType::Tunnel);
+    }
+
+    #[test]
+    fn test_agent_config_default() {
+        let config = AgentConfig::default();
+        assert!(config.agent_id.starts_with("agent-"));
+        assert_eq!(config.server_url, "ws://localhost:8443");
+        assert_eq!(config.listen_address, "0.0.0.0:8080");
+        assert_eq!(config.heartbeat_interval_secs, 10);
+        assert_eq!(config.session_poll_interval_secs, 5);
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
+        assert!(config.advertise_address.is_none());
+        assert!(config.connect_url.is_none());
+        assert!(config.advertise_addresses.is_empty());
+        assert!(!config.disable_address_autodetect);
+        assert!(config.file_root.is_none());
+    }
+
+    #[test]
+    fn test_advertise_address_into_agent_address() {
+        let advertise = AdvertiseAddress {
+            url: "wss://example.com/ws".to_string(),
+            label: Some("test".to_string()),
+            network_type: NetworkType::Tunnel,
+            priority: 5,
+        };
+        let agent_addr = advertise.into_agent_address();
+        assert_eq!(agent_addr.url, "wss://example.com/ws");
+        assert_eq!(agent_addr.label, Some("test".to_string()));
+        assert_eq!(agent_addr.network_type, NetworkType::Tunnel);
+        assert_eq!(agent_addr.priority, 5);
+    }
+
+    #[test]
+    fn test_advertise_address_defaults() {
+        let toml_str = r#"url = "wss://example.com/ws""#;
+        let advertise: AdvertiseAddress = toml::from_str(toml_str).unwrap();
+        assert_eq!(advertise.url, "wss://example.com/ws");
+        assert!(advertise.label.is_none());
+        assert_eq!(advertise.network_type, NetworkType::Tunnel);
+        assert_eq!(advertise.priority, 0);
+    }
+
+    #[test]
+    fn test_agent_config_serde_minimal() {
+        let toml_str = r#"
+            agent_id = "test-agent"
+            server_url = "ws://localhost:9090"
+            auth_token = "token123"
+        "#;
+        let config: AgentConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.agent_id, "test-agent");
+        assert_eq!(config.server_url, "ws://localhost:9090");
+        assert_eq!(config.auth_token, "token123");
+        assert_eq!(config.listen_address, "0.0.0.0:8080");
+    }
+}

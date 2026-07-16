@@ -85,6 +85,12 @@ function useFileTabs(onTerminalReveal?: () => void) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('terminal');
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
+  const openFilesRef = useRef(openFiles);
+
+  // Keep ref in sync
+  useEffect(() => {
+    openFilesRef.current = openFiles;
+  }, [openFiles]);
 
   const handleFileClick = useCallback((entry: FileEntry) => {
     const existing = openFiles.find((f) => f.path === entry.path);
@@ -109,19 +115,13 @@ function useFileTabs(onTerminalReveal?: () => void) {
   }, [openFiles, dirtyFiles]);
 
   const handleCloseFile = useCallback((id: string) => {
-    setOpenFiles((prev) => {
-      const filtered = prev.filter((f) => f.id !== id);
-      if (activeTabId === id) {
-        setActiveTabId(filtered.length > 0 ? filtered[filtered.length - 1].id : 'terminal');
-      }
-      return filtered;
-    });
+    setOpenFiles((prev) => prev.filter((f) => f.id !== id));
     setDirtyFiles((prev) => {
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
-  }, [activeTabId]);
+  }, []);
 
   const handleDirtyChange = useCallback((id: string, dirty: boolean) => {
     setDirtyFiles((prev) => {
@@ -133,25 +133,18 @@ function useFileTabs(onTerminalReveal?: () => void) {
   }, []);
 
   const handleFileDeleted = useCallback((path: string) => {
-    setOpenFiles((prev) => {
-      const filtered = prev.filter((f) => f.path !== path);
-      if (prev.length !== filtered.length) {
-        const deletedFile = prev.find((f) => f.path === path);
-        if (deletedFile && activeTabId === deletedFile.id) {
-          setActiveTabId(filtered.length > 0 ? filtered[filtered.length - 1].id : 'terminal');
-        }
-        // Clean up dirty tracking for the deleted file
-        if (deletedFile) {
-          setDirtyFiles((prevDirty) => {
-            const next = new Set(prevDirty);
-            next.delete(deletedFile.id);
-            return next;
-          });
-        }
-      }
-      return filtered;
-    });
-  }, [activeTabId]);
+    // Find the file ID from the current openFiles (using ref to avoid stale closure)
+    const deletedFile = openFilesRef.current.find((f) => f.path === path);
+    setOpenFiles((prev) => prev.filter((f) => f.path !== path));
+    // Clean up dirty tracking for the deleted file
+    if (deletedFile) {
+      setDirtyFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(deletedFile.id);
+        return next;
+      });
+    }
+  }, []);
 
   const handleFileRenamed = useCallback((oldPath: string, newPath: string) => {
     const newFilename = newPath.split('/').pop() || newPath;
@@ -164,6 +157,13 @@ function useFileTabs(onTerminalReveal?: () => void) {
 
   const activeFile = openFiles.find((f) => f.id === activeTabId);
   const showTerminal = activeTabId === 'terminal';
+
+  // If the active tab was closed, switch to the last remaining tab or terminal
+  useEffect(() => {
+    if (activeTabId !== 'terminal' && !openFiles.find((f) => f.id === activeTabId)) {
+      setActiveTabId(openFiles.length > 0 ? openFiles[openFiles.length - 1].id : 'terminal');
+    }
+  }, [activeTabId, openFiles, setActiveTabId]);
 
   // Refit the terminal whenever it transitions back into view. It stays mounted
   // (hidden via CSS) so its xterm instance + scrollback survive tab switches,

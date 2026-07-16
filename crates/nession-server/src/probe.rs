@@ -135,4 +135,73 @@ mod tests {
         assert_eq!(dial_target("ftp://host/x"), None);
         assert_eq!(dial_target("not-a-url"), None);
     }
+
+    #[test]
+    fn dial_target_http_https() {
+        assert_eq!(dial_target("http://host/x"), Some("host:80".to_string()));
+        assert_eq!(dial_target("https://host/x"), Some("host:443".to_string()));
+    }
+
+    #[test]
+    fn dial_target_empty_authority() {
+        assert_eq!(dial_target("ws:///path"), None);
+    }
+
+    #[test]
+    fn dial_target_hostname_with_port() {
+        assert_eq!(
+            dial_target("ws://example.com:9000/path"),
+            Some("example.com:9000".to_string())
+        );
+    }
+
+    #[test]
+    fn dial_target_query_and_fragment() {
+        assert_eq!(
+            dial_target("ws://host:8080?query=1"),
+            Some("host:8080".to_string())
+        );
+        assert_eq!(
+            dial_target("ws://host:8080#fragment"),
+            Some("host:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn dial_target_invalid_port_falls_back_to_default() {
+        // When port isn't numeric, fall back to default
+        assert_eq!(
+            dial_target("ws://host:invalid/ws"),
+            Some("host:invalid:80".to_string())
+        );
+    }
+
+    #[test]
+    fn dial_target_trimmed_whitespace() {
+        assert_eq!(
+            dial_target("  ws://host:8080/ws  "),
+            Some("host:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn dial_target_case_insensitive_scheme() {
+        assert_eq!(dial_target("WS://host/ws"), Some("host:80".to_string()));
+        assert_eq!(dial_target("WSS://host/ws"), Some("host:443".to_string()));
+    }
+
+    #[tokio::test]
+    async fn probe_once_invalid_url() {
+        let (status, rtt) = probe_once("not-a-url").await;
+        assert_eq!(status, AddressStatus::Unreachable);
+        assert!(rtt.is_none());
+    }
+
+    #[tokio::test]
+    async fn probe_once_unreachable_address() {
+        // Reserved address (TEST-NET-1, RFC 5737) that should always be unreachable
+        let (status, rtt) = probe_once("ws://192.0.2.1:12345/ws").await;
+        assert_eq!(status, AddressStatus::Unreachable);
+        assert!(rtt.is_none());
+    }
 }

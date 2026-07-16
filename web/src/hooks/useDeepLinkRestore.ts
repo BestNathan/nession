@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Session } from '../types';
 import type { AttachedSession } from '../components/TerminalView';
@@ -23,12 +23,18 @@ export function useDeepLinkRestore(opts: {
     sessions, confirmAttach, navigate,
   } = opts;
 
+  const confirmedRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!pendingSessionId) { return; }
     if (attachedSession) { return; }
     if (loadingSessions) { return; } // still loading, wait
+    // Prevent duplicate confirmAttach calls when sessions array reference changes
+    if (confirmedRef.current === pendingSessionId) { return; }
+
     const session = sessions.find((s) => s.session_id === pendingSessionId);
     if (session) {
+      confirmedRef.current = pendingSessionId;
       confirmAttach(session, {
         mode: 'auto',
         attachInfo: { mode: 'p2p', session_id: session.session_id, agent_address: '', connection_token: '' },

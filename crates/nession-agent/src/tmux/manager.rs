@@ -133,11 +133,18 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write source script: {}", path.display()))?;
 
-        // Leading space + HISTCONTROL=ignorespace keeps the command out of
-        // shell history. ANSI \033[1A (cursor up) + \033[2K (clear line)
-        // removes it from view immediately after execution.
-        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
-        self.send_keys(session_name, &cmd).await
+        // Use tmux send-keys to source the script, then clear the scrollback
+        // history so the command doesn't appear when re-attaching.
+        let cmd = format!(" . {}", path.display());
+        self.send_keys(session_name, &cmd).await?;
+
+        // Clear tmux scrollback history to hide the source command
+        let _ = Command::new("tmux")
+            .args(["clear-history", "-t", session_name])
+            .output()
+            .await;
+
+        Ok(())
     }
 
     /// Write a shell script with `unset` lines and source it into the
@@ -158,9 +165,16 @@ impl TmuxManager {
             .await
             .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
 
-        // Leading space keeps it out of history (HISTCONTROL=ignorespace).
-        let cmd = format!(" . {}; printf '\\033[1A\\033[2K'", path.display());
-        self.send_keys(session_name, &cmd).await
+        let cmd = format!(" . {}", path.display());
+        self.send_keys(session_name, &cmd).await?;
+
+        // Clear tmux scrollback history to hide the unsource command
+        let _ = Command::new("tmux")
+            .args(["clear-history", "-t", session_name])
+            .output()
+            .await;
+
+        Ok(())
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
@@ -264,5 +278,110 @@ impl TmuxManager {
 impl Default for TmuxManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_script_path_sanitizes_slashes() {
+        let path = source_script_path("client-1", "sess", "my/env.file");
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/nession-source-client-1-sess-my_env.file")
+        );
+    }
+
+    #[test]
+    fn source_script_path_backslash_sanitized() {
+        let path = source_script_path("c", "s", r"a\b");
+        assert_eq!(path, PathBuf::from("/tmp/nession-source-c-s-a_b"));
+    }
+
+    #[test]
+    fn unsource_script_path_format() {
+        let path = unsource_script_path("cid", "sess", "vars.env");
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/nession-unsource-cid-sess-vars.env")
+        );
+    }
+
+    #[test]
+    fn source_script_path_no_special_chars() {
+        let path = source_script_path("abc", "def", "ghi.env");
+        assert_eq!(path, PathBuf::from("/tmp/nession-source-abc-def-ghi.env"));
+    }
+
+    #[tokio::test]
+    async fn cleanup_session_scripts_removes_matching_files() {
+        let mgr = TmuxManager::new();
+        // Create some fake script files in /tmp
+        let session = "test-cleanup-sess";
+        let source_path = source_script_path("c1", session, "a.env");
+        let unsource_path = unsource_script_path("c1", session, "b.env");
+        let other_session_path = source_script_path("c1", "other-sess", "c.env");
+
+        // Write the files
+        tokio::fs::write(&source_path, "export X=1\n")
+            .await
+            .unwrap();
+        tokio::fs::write(&unsource_path, "unset X\n").await.unwrap();
+        tokio::fs::write(&other_session_path, "export Y=2\n")
+            .await
+            .unwrap();
+
+        // Clean up for our session
+        mgr.cleanup_session_scripts(session).await;
+
+        // Our session's files should be gone
+        assert!(!source_path.exists());
+        assert!(!unsource_path.exists());
+
+        // Other session's file should still exist
+        assert!(other_session_path.exists());
+
+        // Clean up the other file
+        let _ = tokio::fs::remove_file(&other_session_path).await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_client_scripts_removes_matching_files() {
+        let mgr = TmuxManager::new();
+        let client_id = "test-cleanup-client";
+        let source_path = source_script_path(client_id, "sess1", "a.env");
+        let unsource_path = unsource_script_path(client_id, "sess2", "b.env");
+        let other_client_path = source_script_path("other-client", "sess1", "c.env");
+
+        tokio::fs::write(&source_path, "export X=1\n")
+            .await
+            .unwrap();
+        tokio::fs::write(&unsource_path, "unset X\n").await.unwrap();
+        tokio::fs::write(&other_client_path, "export Y=2\n")
+            .await
+            .unwrap();
+
+        mgr.cleanup_client_scripts(client_id).await;
+
+        assert!(!source_path.exists());
+        assert!(!unsource_path.exists());
+        assert!(other_client_path.exists());
+
+        let _ = tokio::fs::remove_file(&other_client_path).await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_session_scripts_no_match_is_noop() {
+        let mgr = TmuxManager::new();
+        // Should not panic even when no matching files exist
+        mgr.cleanup_session_scripts("nonexistent-session-xyz").await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_client_scripts_no_match_is_noop() {
+        let mgr = TmuxManager::new();
+        mgr.cleanup_client_scripts("nonexistent-client-xyz").await;
     }
 }

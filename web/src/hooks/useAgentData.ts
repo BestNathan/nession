@@ -40,16 +40,17 @@ export function useAgentData(wsService: WebSocketService) {
     return heartbeatHistory.current.get(agentId) ?? [];
   }, []);
 
+  const applyAgentUpdate = useCallback((newAgents: Agent[]) => {
+    setAgents(newAgents);
+    trackHeartbeats(newAgents, heartbeatHistory.current);
+  }, []);
+
   return {
     agents, setAgents,
     loadingAgents,
     error, setError,
     fetchAgents,
     getHeartbeatHistory,
-    /** Push new agent data from a realtime event (no loading spinner). */
-    applyAgentUpdate: (newAgents: Agent[]) => {
-      setAgents(newAgents);
-      trackHeartbeats(newAgents, heartbeatHistory.current);
-    },
+    applyAgentUpdate,
   };
 }

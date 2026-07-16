@@ -59,12 +59,17 @@ function sendRequest<T>(
     // P2P socket is still 'connecting', so firing immediately would either drop
     // the frame (readyState !== OPEN) and time out, or reject with
     // "Connection lost" on the initial 'disconnected' state. Queue instead.
+    const startTime = Date.now();
     p2p.waitForConnection(timeoutMs).then(() => {
+      const elapsed = Date.now() - startTime;
+      // Adjust response timeout by elapsed connection time to prevent doubling
+      const remainingTimeout = Math.max(1000, timeoutMs - elapsed);
+
       const id = generateId();
       const timeout = setTimeout(() => {
         unsub();
         reject(new Error(`File operation timeout: ${msgType}`));
-      }, timeoutMs);
+      }, remainingTimeout);
 
       const unsub = p2p.onMessage((msg) => {
         if (msg.id === id) {

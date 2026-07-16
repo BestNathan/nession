@@ -45,3 +45,51 @@ fn default_db_path() -> String {
         .to_string_lossy()
         .into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_config_default() {
+        let config = ServerConfig::default();
+        assert_eq!(config.listen_address, "0.0.0.0:19090");
+        assert_eq!(config.tls_cert_path, "");
+        assert_eq!(config.tls_key_path, "");
+        assert_eq!(config.auth_token, "");
+        assert_eq!(config.heartbeat_interval_secs, 10);
+        assert_eq!(config.heartbeat_timeout_secs, 30);
+        assert!(!config.db_path.is_empty());
+    }
+
+    #[test]
+    fn test_server_config_serde() {
+        let config = ServerConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: ServerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.listen_address, "0.0.0.0:19090");
+        assert_eq!(deserialized.heartbeat_interval_secs, 10);
+    }
+
+    #[test]
+    fn test_server_config_custom_values() {
+        let config = ServerConfig {
+            listen_address: "127.0.0.1:9090".to_string(),
+            tls_cert_path: "/path/to/cert".to_string(),
+            tls_key_path: "/path/to/key".to_string(),
+            auth_token: "secret".to_string(),
+            heartbeat_interval_secs: 20,
+            heartbeat_timeout_secs: 60,
+            db_path: "/tmp/test.db".to_string(),
+        };
+        assert_eq!(config.listen_address, "127.0.0.1:9090");
+        assert_eq!(config.heartbeat_interval_secs, 20);
+    }
+
+    #[test]
+    fn test_default_functions() {
+        assert_eq!(default_heartbeat_interval(), 10);
+        assert_eq!(default_heartbeat_timeout(), 30);
+        assert!(!default_db_path().is_empty());
+    }
+}

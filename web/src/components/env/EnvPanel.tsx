@@ -165,14 +165,14 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
       wsService
         .queryAgentEnvState(sessionId)
         .then((resp) => {
-          const names = resp.sourced_files ?? [];
-          if (names.length === 0) {
+          const refs = resp.sourced_files ?? [];
+          if (refs.length === 0) {
             return;
           }
           setSourced((prev) => {
             const next = new Set(prev);
-            for (const name of names) {
-              next.add(refKey({ name, source: 'agent', agent_id: agentId }));
+            for (const ref of refs) {
+              next.add(refKey(ref));
             }
             return next;
           });

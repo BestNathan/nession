@@ -120,6 +120,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -132,6 +134,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -144,6 +148,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -192,6 +198,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -204,6 +212,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -216,6 +226,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-contexts: |
             web-dist=/tmp/web-dist
 
