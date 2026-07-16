@@ -110,6 +110,56 @@ fn parse_layout_change(line: &str) -> Option<ControlMessage> {
     })
 }
 
+/// 反转义 tmux control mode 的数据
+///
+/// tmux 使用八进制转义特殊字符:
+/// - \033 → ESC (0x1B)
+/// - \015 → CR (0x0D)
+/// - \012 → LF (0x0A)
+/// - \010 → BS (0x08)
+/// - \\ → \
+///
+/// Non-escape characters are passed through verbatim. Malformed escapes
+/// (e.g. lone `\` at end of string, incomplete octal) are preserved literally.
+pub fn unescape_tmux_data(data: &str) -> Vec<u8> {
+    let mut result = Vec::with_capacity(data.len());
+    let bytes = data.as_bytes();
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        if b == b'\\' {
+            if let Some(&next) = bytes.get(i + 1) {
+                if next == b'\\' {
+                    result.push(b'\\');
+                    i += 2;
+                    continue;
+                }
+                // Try to parse 3-digit octal starting at bytes[i+1]
+                if (b'0'..=b'7').contains(&next) {
+                    if let (Some(&d2), Some(&d3)) = (bytes.get(i + 2), bytes.get(i + 3)) {
+                        if (b'0'..=b'7').contains(&d2) && (b'0'..=b'7').contains(&d3) {
+                            let value = ((next - b'0') << 6) | ((d2 - b'0') << 3) | (d3 - b'0');
+                            result.push(value);
+                            i += 4;
+                            continue;
+                        }
+                    }
+                }
+                // Malformed escape - preserve the backslash literally and continue
+                result.push(b'\\');
+                i += 1;
+                continue;
+            }
+            // Trailing lone backslash - preserve literally
+            result.push(b'\\');
+            i += 1;
+        } else {
+            result.push(b);
+            i += 1;
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +273,55 @@ mod tests {
     fn test_parse_exit_bare() {
         let msg = parse_control_line("%exit");
         assert!(matches!(msg, Some(ControlMessage::Exit)));
+    }
+
+    #[test]
+    fn test_unescape_esc() {
+        let data = unescape_tmux_data("\\033[31m");
+        assert_eq!(data, vec![0x1B, b'[', b'3', b'1', b'm']);
+    }
+
+    #[test]
+    fn test_unescape_cr_lf() {
+        let data = unescape_tmux_data("hello\\015\\012");
+        assert_eq!(data, b"hello\r\n");
+    }
+
+    #[test]
+    fn test_unescape_backspace() {
+        let data = unescape_tmux_data("test\\010");
+        assert_eq!(data, b"test\x08");
+    }
+
+    #[test]
+    fn test_unescape_backslash() {
+        let data = unescape_tmux_data("path\\\\to\\\\file");
+        assert_eq!(data, b"path\\to\\file");
+    }
+
+    #[test]
+    fn test_unescape_mixed() {
+        let data = unescape_tmux_data("\\033[1m\\033[7m%\\033[27m\\033[1m\\033[0m");
+        assert_eq!(data, b"\x1B[1m\x1B[7m%\x1B[27m\x1B[1m\x1B[0m");
+    }
+
+    #[test]
+    fn test_unescape_no_escape() {
+        let data = unescape_tmux_data("hello world");
+        assert_eq!(data, b"hello world");
+    }
+
+    #[test]
+    fn test_unescape_incomplete_octal() {
+        // 不完整的八进制序列,保留反斜杠字面量
+        let data = unescape_tmux_data("\\0");
+        assert_eq!(data, b"\\0");
+    }
+
+    #[test]
+    fn test_unescape_high_bytes() {
+        // \377 = 0xFF (255) - highest octal byte
+        let data = unescape_tmux_data("\\377");
+        assert_eq!(data, vec![0xFF]);
     }
 }
