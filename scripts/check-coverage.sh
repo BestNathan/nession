@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Per-crate coverage threshold check for Rust workspace using cargo-llvm-cov
 # Exit 0 if all crates meet their thresholds, exit 1 otherwise
+#
+# Usage:
+#   ./scripts/check-coverage.sh                 # Check all crates
+#   ./scripts/check-coverage.sh crate1 crate2   # Check only specified crates
 
 set -euo pipefail
 
@@ -20,11 +24,37 @@ declare -A THRESHOLDS=(
     ["nession-cli"]=40
 )
 
+# Filter to specified crates if arguments provided
+if [ $# -gt 0 ]; then
+    declare -A FILTERED
+    for arg in "$@"; do
+        if [ -n "${THRESHOLDS[$arg]+x}" ]; then
+            FILTERED[$arg]=${THRESHOLDS[$arg]}
+        fi
+    done
+    # Replace THRESHOLDS with filtered version
+    unset THRESHOLDS
+    declare -A THRESHOLDS
+    for key in "${!FILTERED[@]}"; do
+        THRESHOLDS[$key]=${FILTERED[$key]}
+    done
+    if [ ${#THRESHOLDS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}→ No matching crates to check, skipping coverage${NC}"
+        exit 0
+    fi
+fi
+
 echo -e "${YELLOW}→ Checking Rust test coverage by crate...${NC}"
 echo ""
 
-# Run llvm-cov with JSON output (much faster than tarpaulin)
-JSON=$(cargo llvm-cov --workspace --json 2>/dev/null)
+# Build list of -p flags for llvm-cov to only test specified crates
+PACKAGE_FLAGS=""
+for crate in "${!THRESHOLDS[@]}"; do
+    PACKAGE_FLAGS="$PACKAGE_FLAGS -p $crate"
+done
+
+# Run llvm-cov with JSON output on just the target crates (faster)
+JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}✗ cargo llvm-cov not installed or failed${NC}"

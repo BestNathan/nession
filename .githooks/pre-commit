@@ -37,12 +37,22 @@ if [ -n "$STAGED_RUST" ]; then
     echo -e "${GREEN}✓ cargo clippy${NC}"
   fi
 
-  echo -e "${YELLOW}→ rust: per-crate coverage thresholds${NC}"
-  if ! ./scripts/check-coverage.sh 2>&1; then
-    echo -e "${RED}✗ coverage check failed — see details above${NC}"
-    HAS_ERROR=1
-  else
-    echo -e "${GREEN}✓ coverage${NC}"
+  # Determine which crates have staged changes to focus coverage on
+  CHANGED_CRATES=()
+  for crate in nession-common nession-agent nession-server nession-cli; do
+    if echo "$STAGED_RUST" | grep -q "^crates/${crate}/"; then
+      CHANGED_CRATES+=("$crate")
+    fi
+  done
+
+  if [ ${#CHANGED_CRATES[@]} -gt 0 ]; then
+    echo -e "${YELLOW}→ rust: coverage check for changed crates: ${CHANGED_CRATES[*]}${NC}"
+    if ! ./scripts/check-coverage.sh "${CHANGED_CRATES[@]}" 2>&1; then
+      echo -e "${RED}✗ coverage check failed — see details above${NC}"
+      HAS_ERROR=1
+    else
+      echo -e "${GREEN}✓ coverage${NC}"
+    fi
   fi
 fi
 
