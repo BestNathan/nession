@@ -24,7 +24,6 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 uuid.workspace = true
-portable-pty.workspace = true
 async-trait.workspace = true
 futures-util.workspace = true
 tokio-rustls.workspace = true
