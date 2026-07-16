@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
+import { useDebouncedInput } from '../hooks/useDebouncedInput';
 import type { StatusFilter } from './useDashboardHandlers';
 
 interface SearchBarProps {
@@ -27,40 +28,33 @@ export function SearchBar({
   onlineCount,
   offlineCount,
 }: SearchBarProps) {
-  const [localValue, setLocalValue] = useState(searchQuery);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { value: localValue, setValue: setLocalValue, debouncedValue, syncValue } = useDebouncedInput(searchQuery, 200);
+  const isFirstRender = useRef(true);
+  const skipNextSync = useRef(false);
+  const prevSearchQuery = useRef(searchQuery);
 
   // Sync external searchQuery prop back to local state when it changes externally
   useEffect(() => {
-    // Cancel any pending debounce — the external value takes precedence
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
+    if (prevSearchQuery.current === searchQuery) {
+      return;
     }
-    setLocalValue(searchQuery);
-  }, [searchQuery]);
+    prevSearchQuery.current = searchQuery;
+    skipNextSync.current = true;
+    syncValue(searchQuery);
+  }, [searchQuery, syncValue]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setLocalValue(value);
-
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = setTimeout(() => {
-      setSearchQuery(value);
-    }, 200);
-  };
-
-  // Clean up debounce on unmount
+  // Push debounced value to parent (skip initial mount and external syncs)
   useEffect(() => {
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, []);
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (skipNextSync.current) {
+      skipNextSync.current = false;
+      return;
+    }
+    setSearchQuery(debouncedValue);
+  }, [debouncedValue, setSearchQuery]);
 
   const countForFilter = (filter: (typeof FILTERS)[number]): number | undefined => {
     if (filter.countKey === 'onlineCount') { return onlineCount; }
@@ -75,7 +69,7 @@ export function SearchBar({
         <Input
           placeholder="Search agents and sessions..."
           value={localValue}
-          onChange={handleChange}
+          onChange={(e) => setLocalValue(e.target.value)}
           className="pl-8"
         />
       </div>
