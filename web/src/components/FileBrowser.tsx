@@ -35,6 +35,7 @@ import {
 import { cn } from '@/lib/utils';
 import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import { toastError } from '@/lib/errorHelpers';
+import { useNewEntryForm } from '../hooks/useNewEntryForm';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -60,9 +61,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showNewFile, setShowNewFile] = useState(false);
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newName, setNewName] = useState('');
+  const newEntryForm = useNewEntryForm();
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
@@ -103,14 +102,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleCreateFile = async () => {
-    const name = newName.trim();
+    const name = newEntryForm.newName.trim();
     if (!name) {return;}
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
     try {
       await fileOps.writeFile(fullPath, '');
       toast.success(`Created ${name}`);
-      setShowNewFile(false);
-      setNewName('');
+      newEntryForm.reset();
       loadDir(currentPath);
     } catch (err) {
       toastError(err, 'Failed to create file');
@@ -118,14 +116,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleCreateFolder = async () => {
-    const name = newName.trim();
+    const name = newEntryForm.newName.trim();
     if (!name) {return;}
     const fullPath = currentPath ? `${currentPath}/${name}` : name;
     try {
       await fileOps.createDir(fullPath);
       toast.success(`Created ${name}/`);
-      setShowNewFolder(false);
-      setNewName('');
+      newEntryForm.reset();
       loadDir(currentPath);
     } catch (err) {
       toastError(err, 'Failed to create folder');
@@ -236,10 +233,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={loading} title="Refresh">
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowNewFile(true); setShowNewFolder(false); }} title="New file">
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
           <FilePlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowNewFolder(true); setShowNewFile(false); }} title="New folder">
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
           <FolderPlus className="h-3.5 w-3.5" />
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fileInputRef.current?.click()} title="Upload file">
@@ -249,23 +246,23 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       </div>
 
       {/* New file/folder input */}
-      {(showNewFile || showNewFolder) && (
+      {(newEntryForm.showNewFile || newEntryForm.showNewFolder) && (
         <div className="flex items-center gap-1 px-2 py-1 border-b">
           <Input
             autoFocus
-            placeholder={showNewFile ? 'filename.txt' : 'folder-name'}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            placeholder={newEntryForm.showNewFile ? 'filename.txt' : 'folder-name'}
+            value={newEntryForm.newName}
+            onChange={(e) => newEntryForm.setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (showNewFile) {handleCreateFile();} else {handleCreateFolder();}
+                if (newEntryForm.showNewFile) {handleCreateFile();} else {handleCreateFolder();}
               }
-              if (e.key === 'Escape') { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }
+              if (e.key === 'Escape') { newEntryForm.reset(); }
             }}
             className="h-7 text-xs"
           />
-          <Button size="sm" className="h-7 text-xs" onClick={showNewFile ? handleCreateFile : handleCreateFolder}>Create</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }}>Cancel</Button>
+          <Button size="sm" className="h-7 text-xs" onClick={newEntryForm.showNewFile ? handleCreateFile : handleCreateFolder}>Create</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => newEntryForm.reset()}>Cancel</Button>
         </div>
       )}
 
