@@ -19,7 +19,7 @@ fi
 
 HAS_ERROR=0
 
-# ── Rust: fmt ────────────────────────────────────────────────────────────
+# ── Rust: fmt ───────────────────────────────────────────────────────────
 if [ -n "$STAGED_RUST" ]; then
   echo -e "${YELLOW}→ cargo fmt --all -- --check${NC}"
   if ! cargo fmt --all -- --check 2>/dev/null; then
@@ -35,6 +35,14 @@ if [ -n "$STAGED_RUST" ]; then
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ cargo clippy${NC}"
+  fi
+
+  echo -e "${YELLOW}→ rust: per-crate coverage thresholds${NC}"
+  if ! ./scripts/check-coverage.sh 2>&1; then
+    echo -e "${RED}✗ coverage check failed — see details above${NC}"
+    HAS_ERROR=1
+  else
+    echo -e "${GREEN}✓ coverage${NC}"
   fi
 fi
 
@@ -55,44 +63,13 @@ if [ -n "$STAGED_TSX" ]; then
   else
     echo -e "${GREEN}✓ tsc${NC}"
   fi
-fi
 
-# ── Rust: coverage gate (nession-cli update module) ──────────────────────
-STAGED_UPDATE=$(git diff --cached --name-only --diff-filter=ACM | grep 'crates/nession-cli/src/update/' || true)
-if [ -n "$STAGED_UPDATE" ]; then
-  THRESHOLD=90
-  echo -e "${YELLOW}→ cargo tarpaulin -p nession-cli (≥${THRESHOLD}% per file)${NC}"
-
-  TARPAULIN_OUT=$(cargo tarpaulin -p nession-cli --out json --output-dir target/tarpaulin 2>&1) || true
-  COVERAGE_JSON="target/tarpaulin/tarpaulin-report.json"
-
-  if [ ! -f "$COVERAGE_JSON" ]; then
-    echo -e "${RED}✗ cargo-tarpaulin not installed or failed.${NC}"
-    echo -e "${RED}  Install: cargo install cargo-tarpaulin${NC}"
+  echo -e "${YELLOW}→ web: test coverage thresholds${NC}"
+  if ! (cd web && npx vitest run --coverage --reporter=default >/dev/null 2>&1); then
+    echo -e "${RED}✗ coverage below threshold — run 'cd web && npm run coverage' to see details${NC}"
     HAS_ERROR=1
   else
-    COV_ERROR=0
-    while IFS= read -r file_path; do
-      FILE_DATA=$(jq -r --arg f "$file_path" '.files[] | select(.path == $f)' "$COVERAGE_JSON")
-      if [ -n "$FILE_DATA" ]; then
-        COVERED=$(echo "$FILE_DATA" | jq -r '.covered')
-        COUNT=$(echo "$FILE_DATA" | jq -r '.count')
-        if [ "$COUNT" -gt 0 ]; then
-          PCT=$(echo "scale=1; $COVERED * 100 / $COUNT" | bc)
-          if (( $(echo "$PCT < $THRESHOLD" | bc -l) )); then
-            echo -e "${RED}✗ $(basename "$file_path"): ${COVERED}/${COUNT} (${PCT}%) — below ${THRESHOLD}%${NC}"
-            COV_ERROR=1
-          else
-            echo -e "${GREEN}✓ $(basename "$file_path"): ${COVERED}/${COUNT} (${PCT}%)${NC}"
-          fi
-        fi
-      fi
-    done <<< "$STAGED_UPDATE"
-
-    if [ $COV_ERROR -eq 1 ]; then
-      echo -e "${RED}✗ Coverage gate failed — each file must have ≥${THRESHOLD}% coverage${NC}"
-      HAS_ERROR=1
-    fi
+    echo -e "${GREEN}✓ coverage${NC}"
   fi
 fi
 
