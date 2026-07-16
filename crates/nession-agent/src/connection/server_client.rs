@@ -15,10 +15,11 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
     AgentAddress, AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus,
-    EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
-    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    EnvFileRef, EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage,
+    ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -106,6 +107,8 @@ pub struct ServerClient {
     tmux: Arc<TmuxManager>,
     /// Store for agent-local env files under `~/.nession/agent/envs`.
     env_store: EnvStore,
+    /// Track sourced env files per session (session_id -> Vec<EnvFileRef>)
+    sourced_envs: std::sync::Mutex<HashMap<String, Vec<EnvFileRef>>>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -248,6 +251,7 @@ impl ServerClient {
             metadata,
             tmux,
             env_store: EnvStore::new(env_root),
+            sourced_envs: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -679,6 +683,15 @@ impl ServerClient {
                         break;
                     }
                 }
+                // Track sourced env files if no error occurred
+                if error.is_none() && !payload.env_files.is_empty() {
+                    if let Ok(mut sourced) = self.sourced_envs.lock() {
+                        sourced
+                            .entry(payload.name.clone())
+                            .or_insert_with(Vec::new)
+                            .extend(payload.env_files.clone());
+                    }
+                }
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
@@ -726,7 +739,7 @@ impl ServerClient {
             }
             "server.env.query" => {
                 let request_id = str_field(&msg.payload, "request_id");
-                let sourced_files = sourced_env_files().await;
+                let sourced_files = self.get_sourced_env_files();
                 let response = serde_json::json!({
                     "msg_type": "agent.session.command.response",
                     "id": uuid::Uuid::new_v4().to_string(),
@@ -813,43 +826,18 @@ fn str_field(payload: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-/// List env file names currently sourced on any tmux session.
+/// List env file refs currently sourced on any tmux session.
 ///
-/// Scans `/tmp/` for nession source scripts (written by
-/// [`TmuxManager::source_env`]) and extracts the env file names from the
-/// file naming convention `nession-source-{client_id}-{session}-{name}`.
-///
-/// Returns a sorted, deduplicated list of env file names. If `/tmp/` is
-/// unreadable, returns an empty list.
-async fn sourced_env_files() -> Vec<String> {
-    let mut files = std::collections::BTreeSet::new();
-    let mut dir = match tokio::fs::read_dir("/tmp").await {
-        Ok(d) => d,
-        Err(_) => return vec![],
-    };
-    while let Ok(Some(entry)) = dir.next_entry().await {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if let Some(rest) = name.strip_prefix("nession-source-") {
-            // rest = "{client_id}-{session}-{safe_name}"
-            // client_id is a UUID with hyphens, so we can't just split by '-'
-            // Instead, find the env name by looking for the last segment after '-'
-            // Format: {uuid}-{session}-{env_name}
-            // UUID has format: 8-4-4-4-12 (36 chars with hyphens)
-            // So we skip the first 36 chars (UUID), then parse the rest
-            if rest.len() > 36 {
-                let after_uuid = &rest[36..]; // Skip UUID part (includes its hyphens)
-                                              // after_uuid = "-{session}-{safe_name}"
-                if let Some(session_and_env) = after_uuid.strip_prefix('-') {
-                    // session_and_env = "{session}-{safe_name}"
-                    // Extract env name (last segment)
-                    if let Some(env_name) = session_and_env.rsplit_once('-').map(|(_, n)| n) {
-                        files.insert(env_name.to_string());
-                    }
-                }
-            }
+/// Returns the tracked EnvFileRef information from sourced_envs map.
+/// If no files are tracked, returns an empty list.
+impl ServerClient {
+    fn get_sourced_env_files(&self) -> Vec<EnvFileRef> {
+        if let Ok(sourced) = self.sourced_envs.lock() {
+            sourced.values().flatten().cloned().collect()
+        } else {
+            vec![]
         }
     }
-    files.into_iter().collect()
 }
 
 /// Flatten multiple env-file snapshots into a single ordered variable list.

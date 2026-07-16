@@ -533,6 +533,9 @@ pub struct ServerSessionEnvApplyPayload {
     pub snapshots: Vec<EnvSnapshot>,
     #[serde(default)]
     pub client_id: Option<String>,
+    /// The env file refs being applied (for tracking purposes)
+    #[serde(default)]
+    pub env_files: Vec<EnvFileRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -561,6 +564,6 @@ pub struct ServerEnvQueryPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentEnvStatePayload {
     pub request_id: String,
-    /// List of env file names currently sourced by this agent.
-    pub sourced_files: Vec<String>,
+    /// List of env file refs currently sourced by this agent.
+    pub sourced_files: Vec<EnvFileRef>,
 }
