@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import {
 import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
 import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useDialogReset } from '../hooks/useDialogReset';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;
@@ -76,13 +77,17 @@ export function CreateSessionDialog({
 
   const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
 
+  const resetState = useCallback(() => {
+    setAgentId(preselectedAgentId ?? (onlineAgents.length > 0 ? onlineAgents[0].agent_id : ''));
+    setSessionName('');
+    setLoading(false);
+    setError(null);
+    setSelectedEnv([]);
+  }, [preselectedAgentId, onlineAgents]);
+  useDialogReset(isOpen, resetState);
+
   useEffect(() => {
     if (isOpen) {
-      setAgentId(preselectedAgentId ?? (onlineAgents.length > 0 ? onlineAgents[0].agent_id : ''));
-      setSessionName('');
-      setLoading(false);
-      setError(null);
-      setSelectedEnv([]);
       // Load available env files (optional selection — failure is non-fatal).
       wsService
         .listEnvFiles()
@@ -90,8 +95,7 @@ export function CreateSessionDialog({
         .catch(() => setEnvFiles([]));
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
-    // onlineAgents derived from agents — stable across renders when agents unchanged
-  }, [isOpen, preselectedAgentId, onlineAgents, wsService]);
+  }, [isOpen, wsService]);
 
   const validateName = (name: string): string | null => {
     if (!name.trim()) {return 'Session name is required';}
