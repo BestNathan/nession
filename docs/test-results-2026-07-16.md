@@ -16,7 +16,7 @@
   - test_resize_updates_viewport
   - test_multiple_clients_independent_viewport
   - test_close_is_idempotent
-- Rust 端到端测试 (e2e_test): 7/7 通过（含 terminal I/O 全链路）
+- Rust 端到端测试 (e2e_test): 7/7 通过 (含 test_terminal_io_through_full_chain fixed in follow-up commit)
 - Coverage: nession-agent 90.2% (超过 80% 阈值)
 - clippy: 0 warnings
 
@@ -50,13 +50,12 @@
 **已确认工作:**
 - tmux session 固定 200×60 尺寸
 - tmux control mode 正常输出 `%output` 消息
-- ControlModeSession `attach`、`write_input` (via `send-keys -l`)、`resize` (via `refresh-client -C`) 全部按预期工作（集成测试证明）
+- ControlModeSession `attach`、`write_input` (via `send-keys -H` hex)、`resize` (via `refresh-client -C`) 全部按预期工作（集成测试证明）
 - 底层 PTY 已完全替换，portable-pty 依赖已移除
 
 **已知问题（不属于 Task 11 范围，后续跟进）:**
-- 本次 Playwright 会话中，浏览器 attach 后的端到端输出显示未能完全验证 —— tmux 收到了输入并执行了命令，但 xterm.js 上未显示回显。可能是 `send-keys -l` 与终端模式（`?2004l` bracketed paste）的交互问题，或 P2P attach 握手中的时序问题。
-- 建议后续通过端到端 e2e_test 测试（已通过）+ 更细粒度的浏览器日志排查（超出本任务的验证范围）跟进。
-- 现有的 `test_terminal_io_through_full_chain` e2e 测试已通过，证明整个链路（server → agent → tmux）在协议层面工作正常。
+- **[已修复]** 早前观察到浏览器 attach 后 tmux 收到输入并执行了命令,但 xterm.js 上未显示回显。根因是 `send-keys -l` 将输入原样嵌入 tmux control mode 命令行,输入中的 `\n` 会破坏命令帧,导致输入无法可靠提交给 tmux。follow-up commit 已切换到 `send-keys -H` (hex 编码逐字节),完全避开 shell 转义与换行问题。
+- `test_terminal_io_through_full_chain` e2e 测试(之前因同一原因失败)现已通过,证明整个链路(server → agent → tmux)在协议层面工作正常。
 
 ## 结论
 

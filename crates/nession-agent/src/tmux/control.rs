@@ -67,16 +67,27 @@ impl ControlModeSession {
         Ok((session, output_rx))
     }
 
-    /// Send raw input bytes to the tmux session via `send-keys -l`.
+    /// Send raw input bytes to the tmux session using `send-keys -H` (hex).
     ///
-    /// The `-l` flag tells tmux to treat the argument as literal bytes rather
-    /// than key names, which is what we want when forwarding keystrokes from
-    /// a browser terminal.
+    /// Using `-H` with hex-encoded bytes avoids shell escaping issues and lets us
+    /// forward any byte value (control codes, high bytes, non-UTF-8) unchanged.
+    /// `send-keys -l` (literal characters) was insufficient because it required
+    /// single-quote escaping AND newlines in the input broke the outer tmux
+    /// command framing.
     pub async fn write_input(&mut self, data: &[u8]) -> Result<()> {
-        let text = std::str::from_utf8(data).context("input was not valid UTF-8")?;
-        // Escape single quotes for the tmux command shell: `'` → `'\''`
-        let escaped = text.replace('\'', "'\\''");
-        let cmd = format!("send-keys -t {} -l '{}'\n", self.session_name, escaped);
+        if data.is_empty() {
+            return Ok(());
+        }
+        // Format each byte as two lowercase hex digits, separated by spaces:
+        // "hello" -> "68 65 6c 6c 6f"
+        let mut hex = String::with_capacity(data.len() * 3);
+        for (i, byte) in data.iter().enumerate() {
+            if i > 0 {
+                hex.push(' ');
+            }
+            hex.push_str(&format!("{byte:02x}"));
+        }
+        let cmd = format!("send-keys -t {} -H {}\n", self.session_name, hex);
         self.stdin.write_all(cmd.as_bytes()).await?;
         self.stdin.flush().await?;
         Ok(())
