@@ -74,6 +74,29 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * Forward the current xterm cols/rows to the agent so tmux's per-client
+   * viewport (via `refresh-client -C W,H`) matches this browser's size.
+   * Callers should debounce burst events (e.g. window drag) before invoking.
+   */
+  resize(cols: number, rows: number): void {
+    if (this.disposed) { return; }
+    try {
+      if (this.mode === 'p2p' && this.p2pConnection?.connectionState === 'connected') {
+        this.p2pConnection.sendMessage({
+          msg_type: 'terminal.resize',
+          id: generateId(),
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: { session_name: this.sessionName, width: cols, height: rows },
+        });
+      } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+        this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);
+      }
+    } catch (err) {
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   async attach(): Promise<void> {
     if (this.disposed) { return; }
     if (this.mode === 'p2p' && this.p2pConnection) {

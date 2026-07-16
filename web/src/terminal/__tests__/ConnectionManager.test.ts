@@ -59,6 +59,48 @@ describe('ConnectionManager', () => {
       expect(p2p.sendMessage).not.toHaveBeenCalled();
     });
 
+    it('resize routes to terminal.resize with session_name + width/height', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.resize(120, 40);
+      expect(p2p.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          msg_type: 'terminal.resize',
+          payload: expect.objectContaining({ session_name: 'test', width: 120, height: 40 }),
+        }),
+      );
+      cm.dispose();
+    });
+
+    it('resize is a no-op after dispose', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.dispose();
+      cm.resize(80, 24);
+      // sendMessage may have been called for other reasons before dispose (none
+      // here) but definitely not with a resize payload.
+      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
+      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
+      expect(types).not.toContain('terminal.resize');
+    });
+
+    it('resize is skipped while P2P connection is not connected', () => {
+      const p2p = makeMockP2P();
+      (p2p as { connectionState: string }).connectionState = 'connecting';
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.resize(120, 40);
+      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
+      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
+      expect(types).not.toContain('terminal.resize');
+      cm.dispose();
+    });
+
     it('keepalive pings are sent every 30 seconds', () => {
       const p2p = makeMockP2P();
       new ConnectionManager({
@@ -117,6 +159,21 @@ describe('ConnectionManager', () => {
       });
       cm.send('hello');
       expect(ws.sendTerminalInput).toHaveBeenCalledWith('a:test', 'hello');
+      cm.dispose();
+    });
+
+    it('resize routes via serverConnection.sendTerminalResize with sessionId', () => {
+      const ws = makeMockWs();
+      // Add sendTerminalResize mock (not in default mock builder).
+      (ws as unknown as { sendTerminalResize: ReturnType<typeof vi.fn> }).sendTerminalResize
+        = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+      cm.resize(120, 40);
+      expect(
+        (ws as unknown as { sendTerminalResize: ReturnType<typeof vi.fn> }).sendTerminalResize,
+      ).toHaveBeenCalledWith('a:test', 120, 40);
       cm.dispose();
     });
 

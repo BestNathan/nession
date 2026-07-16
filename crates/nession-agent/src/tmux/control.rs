@@ -95,7 +95,13 @@ impl ControlModeSession {
 
     /// Resize the client viewport. Only affects THIS control client; other
     /// clients attached to the same session keep their own sizes.
+    ///
+    /// No-op when the size matches the current viewport, avoiding pointless
+    /// `refresh-client` calls when the caller re-sends the last known size.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
+        if self.viewport == (width, height) {
+            return Ok(());
+        }
         self.send_refresh(width, height).await?;
         self.viewport = (width, height);
         Ok(())
