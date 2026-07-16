@@ -62,3 +62,68 @@ pub fn ensure_component_dirs() -> io::Result<()> {
     std::fs::create_dir_all(agent_dir()?)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nession_home() {
+        let home = nession_home().unwrap();
+        assert!(home.to_string_lossy().ends_with(".nession"));
+    }
+
+    #[test]
+    fn test_server_dir() {
+        let dir = server_dir().unwrap();
+        assert!(dir.to_string_lossy().ends_with("server"));
+    }
+
+    #[test]
+    fn test_agent_dir() {
+        let dir = agent_dir().unwrap();
+        assert!(dir.to_string_lossy().ends_with("agent"));
+    }
+
+    #[test]
+    fn test_server_db_path() {
+        let path = server_db_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("server.db"));
+    }
+
+    #[test]
+    fn test_server_pid_path() {
+        let path = server_pid_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("server.pid"));
+    }
+
+    #[test]
+    fn test_agent_pid_path() {
+        let path = agent_pid_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("agent.pid"));
+    }
+
+    #[test]
+    fn test_server_envs_dir() {
+        let dir = server_envs_dir().unwrap();
+        assert!(dir.to_string_lossy().ends_with("envs"));
+    }
+
+    #[test]
+    fn test_agent_envs_dir() {
+        let dir = agent_envs_dir().unwrap();
+        assert!(dir.to_string_lossy().ends_with("envs"));
+    }
+
+    #[test]
+    fn test_agent_config_path() {
+        let path = agent_config_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("agent-config.toml"));
+    }
+
+    #[test]
+    fn test_server_config_path() {
+        let path = server_config_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("server-config.toml"));
+    }
+}

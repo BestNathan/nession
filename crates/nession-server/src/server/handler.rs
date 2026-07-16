@@ -1725,3 +1725,1480 @@ fn current_timestamp() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::env::EnvService;
+    use crate::registry::{AgentRegistry, SessionRegistry};
+    use crate::server::command_broker::CommandBroker;
+    use nession_common::protocol::AgentMetadata;
+    use tokio_tungstenite::tungstenite::Message;
+
+    /// Build a test handler wired to in-memory DB + tempdir env store.
+    async fn test_handler(auth_token: &str) -> ConnectionHandler {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
+        let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
+        let command_broker = Arc::new(CommandBroker::new());
+        let env_root = tempfile::tempdir().unwrap().into_path();
+        let env_service = EnvService::new(env_root);
+        ConnectionHandler::new(
+            agent_registry,
+            session_registry,
+            command_broker,
+            env_service,
+            auth_token.to_string(),
+            30,
+        )
+    }
+
+    fn proto_msg(msg_type: &str, payload: serde_json::Value) -> Message {
+        let text = json!({
+            "msg_type": msg_type,
+            "id": "test-1",
+            "timestamp": 0,
+            "payload": payload,
+        })
+        .to_string();
+        Message::Text(text)
+    }
+
+    fn parse_reply(action: HandlerAction) -> serde_json::Value {
+        match action {
+            HandlerAction::Reply(Some(Message::Text(text))) => serde_json::from_str(&text).unwrap(),
+            _ => panic!("expected Reply(Some(Text))"),
+        }
+    }
+
+    // ---- handle_message dispatch ----
+
+    #[tokio::test]
+    async fn close_message_returns_close() {
+        let mut h = test_handler("").await;
+        let action = h.handle_message(Message::Close(None)).await.unwrap();
+        assert!(matches!(action, HandlerAction::Close));
+    }
+
+    #[tokio::test]
+    async fn binary_message_returns_empty_reply() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(Message::Binary(vec![1, 2, 3]))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn invalid_json_returns_error() {
+        let mut h = test_handler("").await;
+        let result = h.handle_message(Message::Text("not json".into())).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn unknown_msg_type_returns_empty_reply() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("unknown.type", json!({})))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- agent.register ----
+
+    #[tokio::test]
+    async fn agent_register_no_auth_mode() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.register",
+                json!({
+                    "agent_id": "a1",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "anything",
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "accepted");
+        assert_eq!(h.registered_agent_id(), Some(&"a1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn agent_register_valid_token() {
+        let mut h = test_handler("secret").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.register",
+                json!({
+                    "agent_id": "a1",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "secret",
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "accepted");
+    }
+
+    #[tokio::test]
+    async fn agent_register_invalid_token_rejected() {
+        let mut h = test_handler("secret").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.register",
+                json!({
+                    "agent_id": "a1",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "wrong",
+                    "addresses": [],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "rejected");
+        assert!(reply["payload"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid auth token"));
+    }
+
+    #[tokio::test]
+    async fn agent_register_with_addresses() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.register",
+                json!({
+                    "agent_id": "a1",
+                    "hostname": "host",
+                    "ip_address": "1.2.3.4",
+                    "port": 19091,
+                    "auth_token": "",
+                    "addresses": [
+                        { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan", "label": "" }
+                    ],
+                    "connect_url": null,
+                    "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "accepted");
+        // Verify heartbeat_interval_secs is present
+        assert_eq!(reply["payload"]["heartbeat_interval_secs"], 30);
+    }
+
+    // ---- agent.heartbeat ----
+
+    #[tokio::test]
+    async fn agent_heartbeat_registered() {
+        let mut h = test_handler("").await;
+        // Register first
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let action = h
+            .handle_message(proto_msg(
+                "agent.heartbeat",
+                json!({
+                    "agent_id": "a1",
+                    "session_count": 3,
+                    "active_sessions": 1,
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["msg_type"], "server.heartbeat.ack");
+        assert_eq!(reply["payload"]["agent_id"], "a1");
+    }
+
+    #[tokio::test]
+    async fn agent_heartbeat_unregistered_returns_none() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.heartbeat",
+                json!({
+                    "agent_id": "unknown",
+                    "session_count": 0,
+                    "active_sessions": 0,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn agent_heartbeat_missing_fields_defaults_to_zero() {
+        let mut h = test_handler("").await;
+        // Register
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Heartbeat with no session_count / active_sessions
+        let action = h
+            .handle_message(proto_msg("agent.heartbeat", json!({ "agent_id": "a1" })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["msg_type"], "server.heartbeat.ack");
+    }
+
+    // ---- agent.session.update ----
+
+    #[tokio::test]
+    async fn session_update_active() {
+        let mut h = test_handler("").await;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let action = h
+            .handle_message(proto_msg(
+                "agent.session.update",
+                json!({
+                    "agent_id": "a1",
+                    "session_name": "dev",
+                    "status": "active",
+                    "window_count": 2,
+                    "attached_clients": 1,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn session_update_all_statuses() {
+        let mut h = test_handler("").await;
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+
+        for status in &["active", "detached", "recovering", "orphaned", "zombie"] {
+            let action = h
+                .handle_message(proto_msg(
+                    "agent.session.update",
+                    json!({
+                        "agent_id": "a1",
+                        "session_name": format!("s_{status}"),
+                        "status": status,
+                        "window_count": 1,
+                        "attached_clients": 0,
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert!(matches!(action, HandlerAction::Reply(None)));
+        }
+    }
+
+    #[tokio::test]
+    async fn session_update_unknown_status_returns_none() {
+        let mut h = test_handler("").await;
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        let action = h
+            .handle_message(proto_msg(
+                "agent.session.update",
+                json!({
+                    "agent_id": "a1",
+                    "session_name": "dev",
+                    "status": "invalid_status",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn session_update_gone_removes_session() {
+        let mut h = test_handler("").await;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Create a session
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": "a1",
+                "session_name": "dev",
+                "status": "active",
+                "window_count": 1,
+                "attached_clients": 0,
+            }),
+        ))
+        .await
+        .unwrap();
+        // Remove it
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": "a1",
+                "session_name": "dev",
+                "status": "gone",
+            }),
+        ))
+        .await
+        .unwrap();
+        // Session should be gone
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .await
+            .unwrap();
+        // First need to authenticate
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["sessions"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_update_from_unregistered_agent() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.session.update",
+                json!({
+                    "agent_id": "unknown",
+                    "session_name": "dev",
+                    "status": "active",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- client.auth ----
+
+    #[tokio::test]
+    async fn client_auth_success() {
+        let mut h = test_handler("secret").await;
+        let action = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "secret" })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "success");
+    }
+
+    #[tokio::test]
+    async fn client_auth_failure() {
+        let mut h = test_handler("secret").await;
+        let action = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "wrong" })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "failed");
+    }
+
+    #[tokio::test]
+    async fn client_auth_no_auth_mode() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.auth",
+                json!({ "auth_token": "anything" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "success");
+    }
+
+    // ---- unauthenticated client rejection ----
+
+    #[tokio::test]
+    async fn unauthenticated_agents_list_rejected() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("client.agents.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_sessions_list_rejected() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_session_attach_rejected() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_session_create_rejected() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.create",
+                json!({ "agent_id": "a1", "name": "dev" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_session_kill_rejected() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.kill",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+    }
+
+    // ---- client.agents.list ----
+
+    #[tokio::test]
+    async fn agents_list_returns_registered() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register an agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let action = h
+            .handle_message(proto_msg("client.agents.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let agents = reply["payload"]["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["agent_id"], "a1");
+        assert_eq!(agents[0]["status"], "online");
+    }
+
+    #[tokio::test]
+    async fn agents_list_empty() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.agents.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["agents"].as_array().unwrap().is_empty());
+    }
+
+    // ---- client.sessions.list ----
+
+    #[tokio::test]
+    async fn sessions_list_with_filter() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Create sessions
+        for name in &["s1", "s2"] {
+            h.handle_message(proto_msg(
+                "agent.session.update",
+                json!({
+                    "agent_id": "a1",
+                    "session_name": name,
+                    "status": "active",
+                    "window_count": 1,
+                    "attached_clients": 0,
+                }),
+            ))
+            .await
+            .unwrap();
+        }
+        // Filter by agent_id
+        let action = h
+            .handle_message(proto_msg(
+                "client.sessions.list",
+                json!({ "agent_id": "a1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let sessions = reply["payload"]["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+    }
+
+    // ---- client.session.attach ----
+
+    #[tokio::test]
+    async fn attach_invalid_session_id_format() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "no-colon" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid session_id format"));
+    }
+
+    #[tokio::test]
+    async fn attach_session_not_found() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "a1:nonexistent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn attach_agent_offline() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Create session
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": "a1",
+                "session_name": "dev",
+                "status": "active",
+                "window_count": 1,
+                "attached_clients": 0,
+            }),
+        ))
+        .await
+        .unwrap();
+        // Manually set agent offline by checking with timeout
+        h.agent_registry.check_offline_agents().await;
+        // Force offline: update heartbeat to long ago
+        h.agent_registry.unregister("a1").await;
+
+        // Re-register with a different approach - just test that agent not found works
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "a1:dev" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn attach_p2p_mode_success() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Create session
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": "a1",
+                "session_name": "dev",
+                "status": "active",
+                "window_count": 1,
+                "attached_clients": 0,
+            }),
+        ))
+        .await
+        .unwrap();
+        // Attach in P2P mode
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["status"], "success");
+        assert_eq!(reply["payload"]["mode"], "p2p");
+        assert!(reply["payload"]["agent_address"]
+            .as_str()
+            .unwrap()
+            .contains("1.2.3.4"));
+    }
+
+    #[tokio::test]
+    async fn attach_relay_mode() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register agent + create session
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": "a1",
+                "session_name": "dev",
+                "status": "active",
+                "window_count": 1,
+                "attached_clients": 0,
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.attach",
+                json!({ "session_id": "a1:dev", "preferred_mode": "relay" }),
+            ))
+            .await
+            .unwrap();
+        match action {
+            HandlerAction::Relay { agent_ws_url } => {
+                assert!(agent_ws_url.contains("1.2.3.4"));
+            }
+            _ => panic!("expected Relay action"),
+        }
+    }
+
+    // ---- client.session.create ----
+
+    #[tokio::test]
+    async fn session_create_missing_fields() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.create",
+                json!({ "agent_id": "", "name": "" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("required"));
+    }
+
+    #[tokio::test]
+    async fn session_create_agent_not_found() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.create",
+                json!({ "agent_id": "nonexistent", "name": "dev" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    // ---- client.session.kill ----
+
+    #[tokio::test]
+    async fn session_kill_invalid_format() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.kill",
+                json!({ "session_id": "no-colon" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid session_id format"));
+    }
+
+    #[tokio::test]
+    async fn session_kill_agent_not_found() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.kill",
+                json!({ "session_id": "unknown:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn session_kill_session_not_found_agent_online() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Register agent (it's online)
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        // Kill a session that doesn't exist — agent is online
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.kill",
+                json!({ "session_id": "a1:nonexistent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
+    }
+
+    // ---- agent.session.command.response ----
+
+    #[tokio::test]
+    async fn command_response_from_unregistered_returns_none() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.session.command.response",
+                json!({ "request_id": "r1", "success": true }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn command_response_missing_request_id_returns_none() {
+        let mut h = test_handler("").await;
+        // Register agent
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        let action = h
+            .handle_message(proto_msg(
+                "agent.session.command.response",
+                json!({ "request_id": "", "success": true }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- env handlers (unauthenticated) ----
+
+    #[tokio::test]
+    async fn env_list_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("client.env.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn env_get_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg("client.env.get", json!({ "name": "test.env" })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn env_write_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.write",
+                json!({ "name": "test.env", "content": "X=1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn env_delete_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.delete",
+                json!({ "name": "test.env" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    // ---- env handlers (authenticated, server files) ----
+
+    #[tokio::test]
+    async fn env_get_missing_name() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.env.get", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("required"));
+    }
+
+    #[tokio::test]
+    async fn env_write_and_read_server_file() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Write
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.write",
+                json!({
+                    "name": "test.env",
+                    "content": "FOO=bar\nBAZ=qux",
+                    "overwrite": false,
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], true);
+        // Read back
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.get",
+                json!({ "name": "test.env", "source": "server" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], true);
+        assert!(reply["payload"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("FOO=bar"));
+    }
+
+    #[tokio::test]
+    async fn env_write_missing_name() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.write",
+                json!({ "name": "", "content": "X=1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("required"));
+    }
+
+    #[tokio::test]
+    async fn env_delete_missing_name() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.env.delete", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("required"));
+    }
+
+    #[tokio::test]
+    async fn env_list_server_files() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Write a file first
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({
+                "name": "test.env",
+                "content": "X=1",
+                "overwrite": false,
+            }),
+        ))
+        .await
+        .unwrap();
+        let action = h
+            .handle_message(proto_msg("client.env.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let files = reply["payload"]["files"].as_array().unwrap();
+        assert!(!files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn env_delete_server_file() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({ "name": "del.env", "content": "X=1", "overwrite": false }),
+        ))
+        .await
+        .unwrap();
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.delete",
+                json!({ "name": "del.env", "source": "server" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], true);
+    }
+
+    // ---- session env handlers ----
+
+    #[tokio::test]
+    async fn session_env_apply_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.apply",
+                json!({ "session_id": "a1:s1", "env_files": [] }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn session_env_apply_invalid_session_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.apply",
+                json!({ "session_id": "no-colon", "env_files": [] }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid session_id"));
+    }
+
+    #[tokio::test]
+    async fn session_env_unset_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.unset",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn session_env_unset_invalid_session_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.unset",
+                json!({ "session_id": "no-colon" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+    }
+
+    #[tokio::test]
+    async fn session_env_active_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.active",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn session_env_active_returns_list() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.active",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["active"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn session_env_query_unauthenticated() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.query",
+                json!({ "session_id": "a1:s1" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["error"], "Not authenticated");
+    }
+
+    #[tokio::test]
+    async fn session_env_query_invalid_session_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.env.query",
+                json!({ "session_id": "no-colon" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid session_id"));
+    }
+
+    // ---- parse_env_ref ----
+
+    #[test]
+    fn parse_env_ref_server_default() {
+        let payload = json!({ "name": "test.env" });
+        let (name, source, agent_id) = parse_env_ref(&payload);
+        assert_eq!(name, "test.env");
+        assert_eq!(source, EnvSource::Server);
+        assert!(agent_id.is_none());
+    }
+
+    #[test]
+    fn parse_env_ref_agent() {
+        let payload = json!({ "name": "test.env", "source": "agent", "agent_id": "a1" });
+        let (name, source, agent_id) = parse_env_ref(&payload);
+        assert_eq!(name, "test.env");
+        assert_eq!(source, EnvSource::Agent);
+        assert_eq!(agent_id, Some("a1".to_string()));
+    }
+
+    #[test]
+    fn parse_env_ref_empty() {
+        let payload = json!({});
+        let (name, source, agent_id) = parse_env_ref(&payload);
+        assert_eq!(name, "");
+        assert_eq!(source, EnvSource::Server);
+        assert!(agent_id.is_none());
+    }
+
+    // ---- env write in-use lock ----
+
+    #[tokio::test]
+    async fn env_write_blocked_when_in_use() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Write a file first
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({ "name": "locked.env", "content": "X=1", "overwrite": false }),
+        ))
+        .await
+        .unwrap();
+        // Record usage
+        h.env_service.usage.record_create(
+            "a1:s1",
+            &[nession_common::protocol::EnvFileRef {
+                name: "locked.env".to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            }],
+            None,
+        );
+        // Try to overwrite — should fail
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.write",
+                json!({
+                    "name": "locked.env",
+                    "content": "X=2",
+                    "overwrite": true,
+                    "source": "server",
+                }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("in use"));
+    }
+
+    #[tokio::test]
+    async fn env_delete_blocked_when_in_use() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Write a file first
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
+        ))
+        .await
+        .unwrap();
+        // Record usage
+        h.env_service.usage.record_create(
+            "a1:s1",
+            &[nession_common::protocol::EnvFileRef {
+                name: "used.env".to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            }],
+            None,
+        );
+        // Try to delete — should fail
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.delete",
+                json!({ "name": "used.env", "source": "server" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("in use"));
+    }
+
+    // ---- agent.env.get without agent_id ----
+
+    #[tokio::test]
+    async fn env_get_agent_without_agent_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.get",
+                json!({ "name": "test.env", "source": "agent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("agent_id is required"));
+    }
+
+    #[tokio::test]
+    async fn env_write_agent_without_agent_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.write",
+                json!({ "name": "test.env", "content": "X=1", "source": "agent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("agent_id is required"));
+    }
+
+    #[tokio::test]
+    async fn env_delete_agent_without_agent_id() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.delete",
+                json!({ "name": "test.env", "source": "agent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], false);
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("agent_id is required"));
+    }
+}

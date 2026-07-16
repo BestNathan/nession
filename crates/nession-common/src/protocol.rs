@@ -29,6 +29,7 @@ pub struct AgentRegisterPayload {
     pub port: u16,
     pub auth_token: String,
     pub metadata: AgentMetadata,
+    #[serde(default = "default_protocol_version")]
     pub protocol_version: String,
     /// Public WebSocket URL clients use to connect (e.g. "wss://agent.example.com/ws").
     /// When empty, the server constructs a URL from ip_address:port with `/ws` path.
@@ -40,6 +41,10 @@ pub struct AgentRegisterPayload {
     /// from `ip_address`/`port`/`connect_url` for backward compatibility.
     #[serde(default)]
     pub addresses: Vec<AgentAddress>,
+}
+
+fn default_protocol_version() -> String {
+    "1.0".to_string()
 }
 
 /// Network category of an advertised agent address.
@@ -566,4 +571,125 @@ pub struct AgentEnvStatePayload {
     pub request_id: String,
     /// List of env file refs currently sourced by this agent.
     pub sourced_files: Vec<EnvFileRef>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_new() {
+        let msg = Message::new(
+            "test.type".to_string(),
+            "id-123".to_string(),
+            1234567890,
+            "payload".to_string(),
+        );
+        assert_eq!(msg.msg_type, "test.type");
+        assert_eq!(msg.id, "id-123");
+        assert_eq!(msg.timestamp, 1234567890);
+        assert_eq!(msg.payload, "payload");
+    }
+
+    #[test]
+    fn test_message_serde() {
+        let msg = Message::new("test".to_string(), "id".to_string(), 100, 42i32);
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: Message<i32> = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.msg_type, "test");
+        assert_eq!(deserialized.payload, 42);
+    }
+
+    #[test]
+    fn test_network_type_as_str() {
+        assert_eq!(NetworkType::Lan.as_str(), "lan");
+        assert_eq!(NetworkType::Vpn.as_str(), "vpn");
+        assert_eq!(NetworkType::Tunnel.as_str(), "tunnel");
+        assert_eq!(NetworkType::Public.as_str(), "public");
+        assert_eq!(NetworkType::Custom.as_str(), "custom");
+    }
+
+    #[test]
+    fn test_network_type_serde() {
+        let t: NetworkType = serde_json::from_str("\"lan\"").unwrap();
+        assert_eq!(t, NetworkType::Lan);
+        let json = serde_json::to_string(&NetworkType::Tunnel).unwrap();
+        assert_eq!(json, "\"tunnel\"");
+    }
+
+    #[test]
+    fn test_address_status_as_str() {
+        assert_eq!(AddressStatus::Unknown.as_str(), "unknown");
+        assert_eq!(AddressStatus::Reachable.as_str(), "reachable");
+        assert_eq!(AddressStatus::Unreachable.as_str(), "unreachable");
+    }
+
+    #[test]
+    fn test_env_source_as_str() {
+        assert_eq!(EnvSource::Server.as_str(), "server");
+        assert_eq!(EnvSource::Agent.as_str(), "agent");
+    }
+
+    #[test]
+    fn test_env_source_serde() {
+        let s: EnvSource = serde_json::from_str("\"server\"").unwrap();
+        assert_eq!(s, EnvSource::Server);
+        let s: EnvSource = serde_json::from_str("\"agent\"").unwrap();
+        assert_eq!(s, EnvSource::Agent);
+    }
+
+    #[test]
+    fn test_default_attach_mode() {
+        assert_eq!(default_attach_mode(), "p2p");
+    }
+
+    #[test]
+    fn test_agent_register_payload_serde() {
+        let payload = AgentRegisterPayload {
+            agent_id: "agent-1".to_string(),
+            hostname: "host".to_string(),
+            ip_address: "127.0.0.1".to_string(),
+            port: 8080,
+            auth_token: "token".to_string(),
+            metadata: AgentMetadata {
+                tmux_version: "3.4".to_string(),
+                os_version: "linux".to_string(),
+                nession_version: "0.1.0".to_string(),
+            },
+            protocol_version: "1.0".to_string(),
+            connect_url: None,
+            addresses: vec![],
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: AgentRegisterPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.agent_id, "agent-1");
+        assert_eq!(deserialized.port, 8080);
+        assert!(deserialized.connect_url.is_none());
+    }
+
+    #[test]
+    fn test_env_file_ref_serde() {
+        let r = EnvFileRef {
+            name: "test.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        let deserialized: EnvFileRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "test.env");
+        assert_eq!(deserialized.source, EnvSource::Server);
+        assert!(deserialized.agent_id.is_none());
+    }
+
+    #[test]
+    fn test_env_file_ref_with_agent_id() {
+        let r = EnvFileRef {
+            name: "test.env".to_string(),
+            source: EnvSource::Agent,
+            agent_id: Some("agent-1".to_string()),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        let deserialized: EnvFileRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.agent_id, Some("agent-1".to_string()));
+    }
 }

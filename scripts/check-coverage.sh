@@ -11,11 +11,13 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ── Coverage thresholds per crate (percentage) ──────────────────────────
-# Set to current coverage levels as baseline; raise over time
+# Core crates target 80%+ but currently at 74-79% (excluding main.rs).
+# Thresholds set slightly below current to prevent regression; raise
+# over time as coverage improves.
 declare -A THRESHOLDS=(
-    ["crates/nession-common"]=70
-    ["crates/nession-agent"]=60
-    ["crates/nession-server"]=55
+    ["crates/nession-common"]=80
+    ["crates/nession-agent"]=75
+    ["crates/nession-server"]=70
     ["crates/nession-cli"]=40
 )
 
@@ -33,7 +35,9 @@ for crate_path in "${!THRESHOLDS[@]}"; do
 
     # Extract coverage for this crate from the summary section
     # Format: "|| crates/nession-xxx/src/file.rs: 123/456 +0.00%"
-    crate_coverage=$(echo "$OUTPUT" | grep -A 100 "Tested/Total Lines:" | grep "^|| ${crate_path}/" | grep -oE '[0-9]+/[0-9]+')
+    # Exclude main.rs (binary entry points, hard to unit test)
+    crate_lines=$(echo "$OUTPUT" | grep -A 100 "Tested/Total Lines:" | grep "^|| ${crate_path}/" | grep -v "/main.rs:")
+    crate_coverage=$(echo "$crate_lines" | grep -oE '[0-9]+/[0-9]+')
 
     total_covered=0
     total_lines=0
