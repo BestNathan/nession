@@ -34,6 +34,7 @@ import {
 } from './ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
+import { toastError } from '@/lib/errorHelpers';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -76,7 +77,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load directory';
       setError(msg);
-      toast.error(msg);
+      toastError(err, msg);
       setEntries([]);
     } finally {
       setLoading(false);
@@ -112,7 +113,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       setNewName('');
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create file');
+      toastError(err, 'Failed to create file');
     }
   };
 
@@ -127,7 +128,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       setNewName('');
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create folder');
+      toastError(err, 'Failed to create folder');
     }
   };
 
@@ -140,7 +141,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       toast.success(`Uploaded ${file.name}`);
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to upload file');
+      toastError(err, 'Failed to upload file');
     }
     e.target.value = '';
   };
@@ -176,7 +177,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       setRenameValue('');
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to rename');
+      toastError(err, 'Failed to rename');
     }
   };
 
@@ -200,11 +201,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       onFileDeleted?.(entry.path);
       loadDir(currentPath);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete';
-      if (msg.toLowerCase().includes('not empty')) {
+      if (err instanceof Error && err.message.toLowerCase().includes('not empty')) {
         toast.error('Cannot delete non-empty directory');
       } else {
-        toast.error(msg);
+        toastError(err, 'Failed to delete');
       }
     }
   };
