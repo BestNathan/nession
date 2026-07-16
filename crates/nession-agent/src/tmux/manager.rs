@@ -4,6 +4,14 @@ use std::path::PathBuf;
 use tokio::fs;
 use tokio::process::Command;
 
+/// Fixed width for tmux sessions. Individual clients get independent
+/// viewports via `refresh-client -C`, so the session's own size only needs
+/// to be large enough to accommodate all realistic client viewports.
+pub const SESSION_WIDTH: u16 = 200;
+
+/// Fixed height for tmux sessions. See [`SESSION_WIDTH`] for rationale.
+pub const SESSION_HEIGHT: u16 = 60;
+
 /// Fixed-path script names, keyed by client + session + env-file name so they are
 /// reused (overwritten) across repeated source / unsource operations.
 fn source_script_path(client_id: &str, session: &str, name: &str) -> PathBuf {
@@ -76,11 +84,18 @@ impl TmuxManager {
         Ok(sessions)
     }
 
+    /// Create a new detached tmux session at a fixed [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
+    ///
+    /// The `_width` and `_height` parameters are ignored — sessions always use the
+    /// fixed size so that multiple clients with different viewports can attach to
+    /// the same session without one resizing the pane out from under another.
+    /// Each client sets its own viewport independently via `refresh-client -C`
+    /// (see `ControlModeSession::resize`).
     pub async fn create_session(
         &self,
         name: &str,
-        width: u16,
-        height: u16,
+        _width: u16,
+        _height: u16,
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
@@ -91,9 +106,9 @@ impl TmuxManager {
             "-s",
             name,
             "-x",
-            &width.to_string(),
+            &SESSION_WIDTH.to_string(),
             "-y",
-            &height.to_string(),
+            &SESSION_HEIGHT.to_string(),
             "-c",
             working_dir,
         ]);
