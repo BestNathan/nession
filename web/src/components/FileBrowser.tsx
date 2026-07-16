@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import { toastError } from '@/lib/errorHelpers';
 import { useNewEntryForm } from '../hooks/useNewEntryForm';
+import { useRenameState } from '../hooks/useRenameState';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -62,8 +63,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newEntryForm = useNewEntryForm();
-  const [renamingPath, setRenamingPath] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  const renameState = useRenameState();
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
   const [largeFileTarget, setLargeFileTarget] = useState<FileEntry | null>(null);
 
@@ -144,34 +144,31 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleRenameStart = (entry: FileEntry) => {
-    setRenamingPath(entry.path);
-    setRenameValue(entry.name);
+    renameState.startRename(entry.path, entry.name);
   };
 
   const handleRenameSubmit = async () => {
-    const name = renameValue.trim();
+    const name = renameState.renameValue.trim();
     if (!name) {
       toast.error('Name cannot be empty');
       return;
     }
-    if (!renamingPath) {return;}
+    if (!renameState.renamingPath) {return;}
 
-    const oldName = renamingPath.substring(renamingPath.lastIndexOf('/') + 1);
+    const oldName = renameState.renamingPath.substring(renameState.renamingPath.lastIndexOf('/') + 1);
     if (name === oldName) {
-      setRenamingPath(null);
-      setRenameValue('');
+      renameState.cancelRename();
       return;
     }
 
-    const parentPath = renamingPath.substring(0, renamingPath.lastIndexOf('/'));
+    const parentPath = renameState.renamingPath.substring(0, renameState.renamingPath.lastIndexOf('/'));
     const newPath = parentPath ? `${parentPath}/${name}` : name;
 
     try {
-      await fileOps.renameFile(renamingPath, newPath);
+      await fileOps.renameFile(renameState.renamingPath, newPath);
       toast.success(`Renamed to ${name}`);
-      onFileRenamed?.(renamingPath, newPath);
-      setRenamingPath(null);
-      setRenameValue('');
+      onFileRenamed?.(renameState.renamingPath, newPath);
+      renameState.cancelRename();
       loadDir(currentPath);
     } catch (err) {
       toastError(err, 'Failed to rename');
@@ -179,8 +176,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleRenameCancel = () => {
-    setRenamingPath(null);
-    setRenameValue('');
+    renameState.cancelRename();
   };
 
   const handleDelete = async (entry: FileEntry) => {
@@ -312,7 +308,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
           <div className="p-3 text-center text-sm text-muted-foreground">This directory is empty</div>
         ) : (
           sortedEntries.map((entry) =>
-            renamingPath === entry.path ? (
+            renameState.renamingPath === entry.path ? (
               <div key={entry.path} className="flex items-center gap-1 w-full px-2 py-0.5">
                 {entry.is_dir ? (
                   <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
@@ -321,8 +317,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                 )}
                 <Input
                   autoFocus
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
+                  value={renameState.renameValue}
+                  onChange={(e) => renameState.setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {handleRenameSubmit();}
                     if (e.key === 'Escape') {handleRenameCancel();}
