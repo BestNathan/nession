@@ -2,16 +2,14 @@ import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
-import { TerminalToolbar } from './TerminalToolbar';
-import { BottomBar, type BottomTab } from './BottomBar';
-import { EnvPanel } from './env/EnvPanel';
+import type { BottomTab } from './BottomBar';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
 import { createFileOps } from '../services/fileOps';
-import { FileTabs } from './FileTabs';
 import { AddressSelector } from './AddressSelector';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { TerminalLayout } from './TerminalLayout';
 
 export interface AttachedSession {
   attachInfo: AttachInfo;
@@ -126,46 +124,18 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col">
-        {fileOps ? (
-          <FileTabs
-            fileOps={fileOps}
-            onTerminalReveal={() => terminalRef.current?.refit()}
-            bottomTab={bottomTab}
-            onBottomTabChange={setBottomTab}
-            sheetOpen={sheetOpen}
-            onSheetToggle={setSheetOpen}
-            envPanel={<EnvPanel sessionId={sessionId} />}
-            commandsPanel={
-              <TerminalToolbar
-                sendText={(text) => terminalRef.current?.sendText(text)}
-                disabled={toolbarDisabled}
-              />
-            }
-            terminalElement={
-              <div className="h-full min-h-0 flex flex-col">
-                <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
-              </div>
-            }
-          />
-        ) : (
-          <>
-            <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
-            <BottomBar
-              activeTab={bottomTab}
-              onTabChange={setBottomTab}
-              showFilesTab={false}
-              sheetOpen={sheetOpen}
-              onSheetToggle={setSheetOpen}
-              envPanel={<EnvPanel sessionId={sessionId} />}
-              commandsPanel={
-                <TerminalToolbar
-                  sendText={(text) => terminalRef.current?.sendText(text)}
-                  disabled={toolbarDisabled}
-                />
-              }
-            />
-          </>
-        )}
+        <TerminalLayout
+          terminalElement={terminalElement}
+          bottomTab={bottomTab}
+          onBottomTabChange={setBottomTab}
+          sheetOpen={sheetOpen}
+          onSheetToggle={setSheetOpen}
+          sessionId={sessionId}
+          sendText={(text) => terminalRef.current?.sendText(text)}
+          toolbarDisabled={toolbarDisabled}
+          fileOps={fileOps}
+          onTerminalReveal={() => terminalRef.current?.refit()}
+        />
       </div>
     </div>
   );
