@@ -25,6 +25,7 @@ pub struct ControlModeSession {
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
+    output_tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl ControlModeSession {
@@ -54,13 +55,15 @@ impl ControlModeSession {
         let stdout = child.stdout.take().context("child stdout was not piped")?;
 
         let (output_tx, output_rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
-        tokio::spawn(read_output_loop(stdout, output_tx));
+        let reader_tx = output_tx.clone();
+        tokio::spawn(read_output_loop(stdout, reader_tx));
 
         let mut session = Self {
             session_name: session_name.to_string(),
             child,
             stdin,
             viewport: (width, height),
+            output_tx,
         };
         session.send_refresh(width, height).await?;
 
@@ -104,6 +107,31 @@ impl ControlModeSession {
         }
         self.send_refresh(width, height).await?;
         self.viewport = (width, height);
+
+        // tmux does not re-broadcast pane content after refresh-client -C, so
+        // capture the current pane state out-of-band and inject it into the
+        // output stream so xterm redraws at the new cols/rows. Per the tmux
+        // Control Mode wiki: "It is up to the client to update the content of
+        // the pane if necessary, for example using capture-pane."
+        let session_name = self.session_name.clone();
+        let tx = self.output_tx.clone();
+        tokio::spawn(async move {
+            let result = Command::new("tmux")
+                .args(["capture-pane", "-t", &session_name, "-p", "-e", "-N"])
+                .output()
+                .await;
+            if let Ok(output) = result {
+                if output.status.success() {
+                    let mut bytes = Vec::with_capacity(output.stdout.len() + 8);
+                    // Clear screen + move cursor to home before injecting the
+                    // redraw so xterm doesn't overlay content on old cells.
+                    bytes.extend_from_slice(b"\x1b[H\x1b[2J");
+                    bytes.extend_from_slice(&output.stdout);
+                    let _ = tx.send(bytes).await;
+                }
+            }
+        });
+
         Ok(())
     }
 
