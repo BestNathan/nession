@@ -1,13 +1,8 @@
 # Minimal server image — packages pre-built binary + nginx + web UI
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-# Retry logic for ARM runners with transient network issues to ports.ubuntu.com
-RUN for i in 1 2 3; do \
-      apt-get update && \
-      apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
-      break || \
-      (echo "Attempt $i failed, retrying..." && sleep 5); \
-    done && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 
