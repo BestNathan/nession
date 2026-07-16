@@ -42,47 +42,42 @@ export function BottomBar({
   // to jump. Content scrolls within the fixed envelope (overflow-y-auto below).
   const maxH = 'max-h-[85dvh] sm:max-h-[40dvh]';
 
+  // Tab definition: mapped array eliminates duplicated button elements.
+  const tabs: Array<{
+    id: BottomTab;
+    icon: typeof TerminalIcon;
+    label: string;
+    conditional?: boolean;
+  }> = [
+    { id: 'commands', icon: TerminalIcon, label: 'Commands' },
+    { id: 'env', icon: Package, label: 'Env' },
+    { id: 'files', icon: FolderTree, label: 'Files', conditional: showFilesTab },
+  ];
+
   return (
     <div className={cn('border-t flex-shrink-0 flex flex-col pb-[env(safe-area-inset-bottom)]', maxH)}>
       <div className="flex border-b items-center">
-        <button
-          type="button"
-          onClick={() => selectTab('commands')}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            effectiveTab === 'commands'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <TerminalIcon className="w-3 h-3" /> Commands
-        </button>
-        <button
-          type="button"
-          onClick={() => selectTab('env')}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-            effectiveTab === 'env'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Package className="w-3 h-3" /> Env
-        </button>
-        {showFilesTab && (
-          <button
-            type="button"
-            onClick={() => selectTab('files')}
-            className={cn(
-              'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-              effectiveTab === 'files'
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <FolderTree className="w-3 h-3" /> Files
-          </button>
-        )}
+        {tabs.map(({ id, icon, label, conditional }) => {
+          if (conditional === false) {
+            return null;
+          }
+          const Icon = icon;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => selectTab(id)}
+              className={cn(
+                'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
+                effectiveTab === id
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="w-3 h-3" /> {label}
+            </button>
+          );
+        })}
         {/* Mobile-only sheet toggle: expand when collapsed, collapse when open. */}
         <button
           type="button"
