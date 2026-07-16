@@ -45,7 +45,7 @@ export function DashboardHeader({
         <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
           <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
         </Button>
-        <RefreshButton onClick={fetchSessions} loading={loadingAgents} />
+        <RefreshButton onClick={fetchSessions} loading={loadingAgents} variant="default" />
       </header>
       <SearchBar
         searchQuery={searchProps.query}
