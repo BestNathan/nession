@@ -1,6 +1,7 @@
 // WebSocket service for nession Web UI
 // Handles connection management, authentication, request/response, and event subscriptions
 
+import { v4 as uuidv4 } from 'uuid';
 import {
   WebSocketMessage,
   ConnectionStatus,
@@ -71,11 +72,7 @@ export class WebSocketService {
     let clientId = localStorage.getItem(storageKey);
 
     if (!clientId) {
-      // crypto.randomUUID() is only available in secure contexts (HTTPS/localhost)
-      // Fallback to manual UUID generation for HTTP connections
-      clientId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : this.generateFallbackUUID();
+      clientId = uuidv4();
       localStorage.setItem(storageKey, clientId);
       console.log('Generated new client ID:', clientId);
     } else {
@@ -83,15 +80,6 @@ export class WebSocketService {
     }
 
     return clientId;
-  }
-
-  // Fallback UUID generation for non-secure contexts
-  private generateFallbackUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = Math.random() * 16 | 0;
-      const v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
   }
 
   // Connection Management
