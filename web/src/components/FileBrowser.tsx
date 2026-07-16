@@ -37,6 +37,7 @@ import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import { toastError } from '@/lib/errorHelpers';
 import { useNewEntryForm } from '../hooks/useNewEntryForm';
 import { useRenameState } from '../hooks/useRenameState';
+import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -64,8 +65,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newEntryForm = useNewEntryForm();
   const renameState = useRenameState();
-  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
-  const [largeFileTarget, setLargeFileTarget] = useState<FileEntry | null>(null);
+  const dialogs = useFileBrowserDialogs();
 
   const loadDir = useCallback(async (path: string) => {
     setLoading(true);
@@ -94,40 +94,42 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       setCurrentPath(entry.path);
     } else {
       if (entry.size > MAX_SIZE_WARNING) {
-        setLargeFileTarget(entry);
+        dialogs.setLargeFileTarget(entry);
         return;
       }
       onFileClick(entry);
     }
   };
 
-  const handleCreateFile = async () => {
-    const name = newEntryForm.newName.trim();
-    if (!name) {return;}
-    const fullPath = currentPath ? `${currentPath}/${name}` : name;
-    try {
-      await fileOps.writeFile(fullPath, '');
-      toast.success(`Created ${name}`);
-      newEntryForm.reset();
-      loadDir(currentPath);
-    } catch (err) {
-      toastError(err, 'Failed to create file');
+  const handleCreate = useCallback(async (name: string, kind: 'file' | 'folder') => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
     }
-  };
 
-  const handleCreateFolder = async () => {
-    const name = newEntryForm.newName.trim();
-    if (!name) {return;}
-    const fullPath = currentPath ? `${currentPath}/${name}` : name;
+    const path = currentPath ? `${currentPath}/${trimmed}` : trimmed;
     try {
-      await fileOps.createDir(fullPath);
-      toast.success(`Created ${name}/`);
+      if (kind === 'file') {
+        await fileOps.writeFile(path, '');
+        toast.success(`Created ${trimmed}`);
+      } else {
+        await fileOps.createDir(path);
+        toast.success(`Created ${trimmed}/`);
+      }
+      await loadDir(currentPath);
       newEntryForm.reset();
-      loadDir(currentPath);
     } catch (err) {
-      toastError(err, 'Failed to create folder');
+      toastError(err, `Failed to create ${kind}`);
     }
-  };
+  }, [currentPath, fileOps, loadDir, newEntryForm]);
+
+  const handleCreateFile = useCallback(() => {
+    handleCreate(newEntryForm.newName, 'file');
+  }, [handleCreate, newEntryForm.newName]);
+
+  const handleCreateFolder = useCallback(() => {
+    handleCreate(newEntryForm.newName, 'folder');
+  }, [handleCreate, newEntryForm.newName]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,13 +182,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   };
 
   const handleDelete = async (entry: FileEntry) => {
-    setDeleteTarget(entry);
+    dialogs.setDeleteTarget(entry);
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget) {return;}
-    const entry = deleteTarget;
-    setDeleteTarget(null);
+    if (!dialogs.deleteTarget) {return;}
+    const entry = dialogs.deleteTarget;
+    dialogs.setDeleteTarget(null);
 
     try {
       await fileOps.deleteFile(entry.path);
@@ -359,10 +361,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       </div>
 
       <FileBrowserDialogs
-        deleteTarget={deleteTarget}
-        largeFileTarget={largeFileTarget}
-        onDeleteTargetChange={setDeleteTarget}
-        onLargeFileTargetChange={setLargeFileTarget}
+        deleteTarget={dialogs.deleteTarget}
+        largeFileTarget={dialogs.largeFileTarget}
+        onDeleteTargetChange={dialogs.setDeleteTarget}
+        onLargeFileTargetChange={dialogs.setLargeFileTarget}
         onDeleteConfirm={handleDeleteConfirm}
         onFileClick={onFileClick}
       />
