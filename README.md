@@ -41,7 +41,7 @@ tmux sessions (per-node)
 Downloads the release binaries matching your OS and architecture:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BestNathan/nession/main/scripts/install.sh | sh
+curl -fsSL https://github.com/BestNathan/nession/releases/latest/download/install.sh | sh
 ```
 
 Options:
