@@ -10,6 +10,8 @@ const DEFAULT_TARGET_COLS = 80;
 /** Optional construction settings for {@link ViewportManager}. */
 export interface ViewportOptions {
   profile?: DeviceProfile;
+  /** Callback when viewport shrinks significantly (cols reduced by >20%). */
+  onSignificantShrink?: () => void;
 }
 
 export class ViewportManager {
@@ -19,6 +21,8 @@ export class ViewportManager {
   private wheelCleanup: (() => void) | null = null;
   private disposed = false;
   private rafHandle: number | null = null;
+  private lastCols: number = 0;
+  private onSignificantShrink?: () => void;
 
   constructor(
     private term: Terminal,
@@ -28,6 +32,7 @@ export class ViewportManager {
   ) {
     this.profile = options.profile ?? detectProfile(container.clientWidth);
     this.targetCols = DEFAULT_TARGET_COLS;
+    this.onSignificantShrink = options.onSignificantShrink;
     this.applyProfile();
 
     // NOTE: do NOT mutate container layout (display/flex) here. This runs
@@ -88,15 +93,13 @@ export class ViewportManager {
     this.detectAndApplyProfile();
     this.scaleFont();
 
-    // Force a refresh after resize to ensure cursor line reflows properly.
-    // xterm.js by default doesn't reflow the cursor line, which causes the
-    // cursor to "eat" content instead of wrapping when viewport shrinks.
-    // A delayed refresh forces xterm to re-render the content.
-    requestAnimationFrame(() => {
-      if (!this.disposed) {
-        this.term.refresh(0, this.term.rows - 1);
-      }
-    });
+    // Detect significant viewport shrink (>20% reduction in cols) and trigger reattach
+    // to force tmux to re-send content at the new size.
+    const currentCols = this.term.cols;
+    if (this.lastCols > 0 && currentCols < this.lastCols * 0.8) {
+      this.onSignificantShrink?.();
+    }
+    this.lastCols = currentCols;
   }
 
   updateProfile(profile: DeviceProfile): void {
