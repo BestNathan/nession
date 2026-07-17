@@ -87,6 +87,16 @@ export class ViewportManager {
     }
     this.detectAndApplyProfile();
     this.scaleFont();
+
+    // Force a refresh after resize to ensure cursor line reflows properly.
+    // xterm.js by default doesn't reflow the cursor line, which causes the
+    // cursor to "eat" content instead of wrapping when viewport shrinks.
+    // A delayed refresh forces xterm to re-render the content.
+    requestAnimationFrame(() => {
+      if (!this.disposed) {
+        this.term.refresh(0, this.term.rows - 1);
+      }
+    });
   }
 
   updateProfile(profile: DeviceProfile): void {
