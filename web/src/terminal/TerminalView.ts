@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { Renderer } from './Renderer';
 import { ThemeManager } from './ThemeManager';
 import { TerminalSizeManager } from './TerminalSizeManager';
+import { ScalingManager } from './ScalingManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
 import type {
@@ -16,6 +17,7 @@ const DEFAULT_FONT =
 export class TerminalView {
   readonly terminal: Terminal;
 
+  private scaling: ScalingManager;
   private size: TerminalSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
@@ -29,7 +31,21 @@ export class TerminalView {
   onDisconnect: (() => void) | null = null;
 
   constructor(container: HTMLElement, options: TerminalViewOptions) {
-    // 1. Create xterm instance.
+    // 1. Create DOM structure: container -> scalingWrapper -> scrollContainer -> mountElement
+    const scalingWrapper = document.createElement('div');
+    scalingWrapper.style.cssText = 'position: relative; width: 100%; height: 100%; overflow: hidden;';
+
+    const scrollContainer = document.createElement('div');
+    scrollContainer.style.cssText = 'width: 100%; height: 100%; overflow: auto;';
+
+    const mountElement = document.createElement('div');
+    mountElement.style.cssText = 'position: relative;';
+
+    scrollContainer.appendChild(mountElement);
+    scalingWrapper.appendChild(scrollContainer);
+    container.appendChild(scalingWrapper);
+
+    // 2. Create xterm instance.
     this.terminal = new Terminal({
       cursorBlink: true,
       fontSize: options.deviceProfile?.fontSize ?? 14,
@@ -39,16 +55,16 @@ export class TerminalView {
       scrollback: options.deviceProfile?.scrollback ?? 10000,
     });
 
-    // 2. Create managers.
+    // 3. Create managers.
     new Renderer(this.terminal, options.rendererType);
     new ThemeManager(this.terminal, options.theme);
-
-    this.size = new TerminalSizeManager(this.terminal, container, container);
+    this.scaling = new ScalingManager(scalingWrapper);
+    this.size = new TerminalSizeManager(this.terminal, scrollContainer, mountElement);
 
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
 
-    // 3. Wire managers together.
+    // 4. Wire managers together.
     this.input.onData((data: string) => {
       if (!this.isDisposed) { this.connection.send(data); }
     });
@@ -74,11 +90,16 @@ export class TerminalView {
     this.connection.onDisconnect = () => {
       this.onDisconnect?.();
     };
+    this.connection.onResize = (cols: number, rows: number) => {
+      if (!this.isDisposed) {
+        this.size.handleResize(cols, rows);
+      }
+    };
 
-    // 4. Open terminal in DOM.
-    this.terminal.open(container);
+    // 5. Open terminal in DOM.
+    this.terminal.open(mountElement);
 
-    // 5. Deferred attach (survives React StrictMode double-mount).
+    // 6. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
         this.connection.attach().catch(() => {});
@@ -117,6 +138,7 @@ export class TerminalView {
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.input.dispose();
     this.size.dispose();
+    this.scaling.dispose();
     this.connection.dispose();
     this.terminal.dispose();
   }
