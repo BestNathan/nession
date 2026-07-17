@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ScalingManager } from '../ScalingManager';
+import { TABLET_BREAKPOINT, DESKTOP_BREAKPOINT } from '../DeviceProfile';
 
 function setViewportWidth(width: number): void {
   Object.defineProperty(window, 'innerWidth', {
@@ -23,22 +24,22 @@ describe('ScalingManager', () => {
   });
 
   describe('device detection', () => {
-    it('detects mobile when viewport <= 768px', () => {
-      setViewportWidth(768);
+    it('detects mobile when viewport < TABLET_BREAKPOINT', () => {
+      setViewportWidth(TABLET_BREAKPOINT - 1);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
       expect(manager.getScale()).toBeCloseTo(0.6);
     });
 
-    it('detects tablet when viewport is between 769 and 1024px', () => {
-      setViewportWidth(1024);
+    it('detects tablet when viewport is TABLET_BREAKPOINT..DESKTOP_BREAKPOINT-1', () => {
+      setViewportWidth(TABLET_BREAKPOINT);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
       expect(manager.getScale()).toBeCloseTo(0.8);
     });
 
-    it('detects desktop when viewport > 1024px', () => {
-      setViewportWidth(1440);
+    it('detects desktop when viewport >= DESKTOP_BREAKPOINT', () => {
+      setViewportWidth(DESKTOP_BREAKPOINT);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
       expect(manager.getScale()).toBeCloseTo(1.0);
@@ -96,6 +97,17 @@ describe('ScalingManager', () => {
       }
       expect(manager.getScale()).toBeLessThanOrEqual(3.0);
     });
+
+    it('does not accumulate floating-point drift after many steps', () => {
+      setViewportWidth(1440);
+      const wrapper = createWrapper();
+      const manager = new ScalingManager(wrapper);
+      for (let i = 0; i < 10; i++) {
+        manager.zoomIn();
+      }
+      // 1.0 + 10*0.1 should be exactly 2.0, not 2.0000000000000004
+      expect(manager.getScale()).toBe(2);
+    });
   });
 
   describe('zoomOut', () => {
@@ -125,6 +137,17 @@ describe('ScalingManager', () => {
         manager.zoomOut();
       }
       expect(manager.getScale()).toBeGreaterThanOrEqual(0.3);
+    });
+
+    it('does not accumulate floating-point drift after many steps', () => {
+      setViewportWidth(1440);
+      const wrapper = createWrapper();
+      const manager = new ScalingManager(wrapper);
+      // 1.0 - 7*0.1 should be exactly 0.3, not 0.30000000000000004 or similar
+      for (let i = 0; i < 7; i++) {
+        manager.zoomOut();
+      }
+      expect(manager.getScale()).toBe(0.3);
     });
   });
 
@@ -157,6 +180,20 @@ describe('ScalingManager', () => {
       manager.zoomOut();
       manager.reset();
       expect(manager.getScale()).toBeCloseTo(0.8);
+    });
+  });
+
+  describe('dispose', () => {
+    it('clears all inline styles from the wrapper element', () => {
+      setViewportWidth(1440);
+      const wrapper = createWrapper();
+      const manager = new ScalingManager(wrapper);
+      expect(wrapper.style.transform).toBe('scale(1)');
+      manager.dispose();
+      expect(wrapper.style.transform).toBe('');
+      expect(wrapper.style.transformOrigin).toBe('');
+      expect(wrapper.style.width).toBe('');
+      expect(wrapper.style.height).toBe('');
     });
   });
 

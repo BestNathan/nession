@@ -1,3 +1,9 @@
+import { TABLET_BREAKPOINT, DESKTOP_BREAKPOINT } from './DeviceProfile';
+
+const ZOOM_STEP = 0.1;
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 3.0;
+
 /**
  * Manages CSS transform scaling for terminal display.
  * Provides device-based auto-scaling and manual zoom controls.
@@ -17,10 +23,10 @@ export class ScalingManager {
 
   private detectDevice(): 'mobile' | 'tablet' | 'desktop' {
     const width = window.innerWidth;
-    if (width <= 768) {
+    if (width < TABLET_BREAKPOINT) {
       return 'mobile';
     }
-    if (width <= 1024) {
+    if (width < DESKTOP_BREAKPOINT) {
       return 'tablet';
     }
     return 'desktop';
@@ -35,18 +41,27 @@ export class ScalingManager {
   }
 
   zoomIn(): void {
-    this.scale = Math.min(3.0, this.scale + 0.1);
+    // Round to avoid IEEE 754 floating-point drift from repeated +0.1 steps
+    this.scale = Math.min(MAX_SCALE, Math.round((this.scale + ZOOM_STEP) * 10) / 10);
     this.applyScale();
   }
 
   zoomOut(): void {
-    this.scale = Math.max(0.3, this.scale - 0.1);
+    // Round to avoid IEEE 754 floating-point drift from repeated -0.1 steps
+    this.scale = Math.max(MIN_SCALE, Math.round((this.scale - ZOOM_STEP) * 10) / 10);
     this.applyScale();
   }
 
   reset(): void {
     this.scale = this.getDefaultScale();
     this.applyScale();
+  }
+
+  dispose(): void {
+    this.wrapperElement.style.transform = '';
+    this.wrapperElement.style.transformOrigin = '';
+    this.wrapperElement.style.width = '';
+    this.wrapperElement.style.height = '';
   }
 
   private applyScale(): void {
