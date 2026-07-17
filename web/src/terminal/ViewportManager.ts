@@ -87,6 +87,16 @@ export class ViewportManager {
     }
     this.detectAndApplyProfile();
     this.scaleFont();
+
+    // Force xterm.js renderer to recalculate wrap state and cursor layer.
+    // WebGL renderer has a known issue where viewport resize doesn't trigger
+    // proper reflow of the cursor line, causing content to be "eaten" instead
+    // of soft-wrapping. Calling refresh() forces the renderer to recompute.
+    requestAnimationFrame(() => {
+      if (!this.disposed) {
+        this.term.refresh(0, this.term.rows - 1);
+      }
+    });
   }
 
   updateProfile(profile: DeviceProfile): void {

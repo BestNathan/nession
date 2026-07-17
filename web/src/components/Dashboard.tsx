@@ -8,10 +8,13 @@ import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
 import { AgentSection } from './AgentSection';
 import { DashboardHeader } from './DashboardHeader';
-import { DashboardModals } from './DashboardModals';
 import { RenderTerminal } from './RenderTerminal';
 import { EnvManager } from './env/EnvManager';
 import { SessionsSection } from './SessionsSection';
+import { AgentDetailPanel } from './AgentDetailPanel';
+import { CreateSessionDialog } from './CreateSessionDialog';
+import { KillConfirmDialog } from './KillConfirmDialog';
+import { AttachDialog } from './env/AttachDialog';
 export { AgentSection };
 
 interface DashboardProps {
@@ -25,35 +28,20 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const envMatch = useMatch('/env');
 
   const {
-    agents, sessions, loadingSessions, loadingAgents, error,
-    filteredAgents, filteredSessions,
-    showCreateModal, sessionToKill,
-    searchQuery, setSearchQuery,
-    statusFilter, setStatusFilter,
-    isSearchActive,
-    sortField, sortDirection, toggleSort,
-    selectedAgent, setSelectedAgent,
-    getHeartbeatHistory,
-    setShowCreateModal, setSessionToKill,
-    handleSessionKilled, handleSessionCreated,
-    fetchSessions, clearError,
+    agents, sessions, loadingSessions, loadingAgents, error, filteredAgents, filteredSessions,
+    showCreateModal, sessionToKill, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
+    isSearchActive, sortField, sortDirection, toggleSort, selectedAgent, setSelectedAgent,
+    getHeartbeatHistory, setShowCreateModal, setSessionToKill, handleSessionKilled,
+    handleSessionCreated, fetchSessions, clearError,
   } = useDashboardHandlers();
 
   const {
-    attachedSession,
-    attachDialogSession, setAttachDialogSession,
-    onAttach, confirmAttach,
-    backToDashboard,
-    pendingTerminalSessionId,
+    attachedSession, attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
+    backToDashboard, pendingTerminalSessionId,
   } = useAttachFlow(fetchSessions, navigate, location);
 
   const probeCache = useAddressProbeCache(agents);
-
-  const handleTerminalDisconnect = useCallback(() => {
-    toast.error('Terminal connection lost');
-    backToDashboard();
-  }, [backToDashboard]);
-
+  const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); backToDashboard(); }, [backToDashboard]);
   const handleTerminalError = useCallback((err: Error) => { toast.error(`Terminal error: ${err.message}`); }, []);
 
   const onlineCount = agents.filter((a) => a.status === 'online').length;
@@ -134,21 +122,33 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         />
       </div>
 
-      <DashboardModals
+      {selectedAgent && (
+        <AgentDetailPanel
+          agent={selectedAgent}
+          heartbeatHistory={getHeartbeatHistory(selectedAgent.agent_id)}
+          onClose={() => setSelectedAgent(null)}
+        />
+      )}
+
+      <CreateSessionDialog
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
         agents={agents}
-        selectedAgent={selectedAgent}
-        getHeartbeatHistory={getHeartbeatHistory}
-        showCreateModal={showCreateModal}
-        sessionToKill={sessionToKill}
-        attachDialogSession={attachDialogSession}
+        preselectedAgentId={null}
+        onCreated={handleSessionCreated}
+      />
+      <KillConfirmDialog
+        isOpen={sessionToKill !== null}
+        onClose={() => setSessionToKill(null)}
+        session={sessionToKill}
+        onKilled={handleSessionKilled}
+      />
+      <AttachDialog
+        isOpen={attachDialogSession !== null}
+        onClose={() => setAttachDialogSession(null)}
+        session={attachDialogSession}
+        onConfirm={confirmAttach}
         probeCache={probeCache}
-        onCloseAgentDetail={() => setSelectedAgent(null)}
-        onCloseCreateModal={() => setShowCreateModal(false)}
-        onSessionCreated={handleSessionCreated}
-        onCloseKillModal={() => setSessionToKill(null)}
-        onSessionKilled={handleSessionKilled}
-        onCloseAttachDialog={() => setAttachDialogSession(null)}
-        onConfirmAttach={confirmAttach}
       />
     </div>
   );

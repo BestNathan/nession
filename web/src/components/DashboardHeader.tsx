@@ -1,10 +1,10 @@
-import { RefreshCw, X, FileCog } from 'lucide-react';
+import { X, FileCog } from 'lucide-react';
 import type { ConnectionStatus } from '../types';
 import type { StatusFilter } from './useDashboardHandlers';
 import { SearchBar } from './SearchBar';
-import { Badge } from './ui/badge';
+import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
+import { RefreshButton } from './ui/RefreshButton';
 import { Button } from './ui/button';
-import { cn } from '@/lib/utils';
 
 export interface SearchProps {
   query: string;
@@ -40,20 +40,12 @@ export function DashboardHeader({
     <>
       <header className="border-b px-6 py-3 flex flex-wrap items-center gap-4 flex-shrink-0">
         <h1 className="text-lg font-bold">Nession</h1>
-        <Badge variant="outline" className="gap-1.5 py-1.5">
-          <span className={cn('w-2 h-2 rounded-full',
-            connectionStatus === 'authenticated' ? 'bg-green-500' : 'bg-red-500',
-            connectionStatus === 'connecting' && 'animate-pulse bg-amber-500',
-          )} />
-          {connectionStatus}
-        </Badge>
+        <ConnectionStatusBadge status={connectionStatus} />
         <div className="flex-1" />
         <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
           <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
         </Button>
-        <Button size="sm" onClick={() => fetchSessions()} disabled={loadingAgents} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0">
-          <RefreshCw className={cn('w-4 h-4', loadingAgents && 'animate-spin')} />
-        </Button>
+        <RefreshButton onClick={fetchSessions} loading={loadingAgents} variant="default" />
       </header>
       <SearchBar
         searchQuery={searchProps.query}

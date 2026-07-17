@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { X, Terminal } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { generateId } from '@/lib/idGenerator';
 import { SidePanel } from './SidePanel';
 import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
@@ -109,7 +110,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
       }
     }
 
-    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = generateId('file');
     setOpenFiles((prev) => [...prev, { id, path: entry.path, filename: entry.name }]);
     setActiveTabId(id);
   }, [openFiles, dirtyFiles]);

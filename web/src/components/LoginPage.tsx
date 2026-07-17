@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
+import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { getRememberPreference, setRememberPreference } from '../lib/auth';
 import type { ConnectionStatus } from '../types';
 
@@ -18,34 +18,12 @@ interface LoginPageProps {
   onDisconnect: () => void;
 }
 
-function getStatusColor(status: ConnectionStatus): string {
-  switch (status) {
-    case 'authenticated': return 'bg-blue-500';
-    case 'connected':     return 'bg-green-500';
-    case 'connecting':    return 'bg-amber-500';
-    case 'disconnected':
-    default:              return 'bg-red-500';
-  }
-}
-
-function getStatusText(status: ConnectionStatus): string {
-  switch (status) {
-    case 'authenticated': return 'Authenticated';
-    case 'connected':     return 'Connected';
-    case 'connecting':    return 'Connecting...';
-    case 'disconnected':
-    default:              return 'Disconnected';
-  }
-}
-
-function getHelperText(status: ConnectionStatus): string {
-  switch (status) {
-    case 'disconnected':  return 'Enter your auth token and click Connect to establish a WebSocket connection to the server.';
-    case 'connecting':    return 'Establishing connection to the server...';
-    case 'connected':     return 'Connected! Authenticating...';
-    default:              return '';
-  }
-}
+const HELPER_TEXT: Record<ConnectionStatus, string> = {
+  disconnected: 'Enter your auth token and click Connect to establish a WebSocket connection to the server.',
+  connecting: 'Establishing connection to the server...',
+  connected: 'Connected! Authenticating...',
+  authenticated: '',
+};
 
 const FEATURES = [
   'Real-time dashboard with agents and sessions overview',
@@ -78,10 +56,7 @@ export function LoginPage({
           <CardTitle>Connect to Server</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Badge variant="outline" className="gap-1.5 py-1.5">
-            <span className={`w-2 h-2 rounded-full ${getStatusColor(connectionStatus)} ${connectionStatus === 'connecting' ? 'animate-pulse' : ''}`} />
-            {getStatusText(connectionStatus)}
-          </Badge>
+          <ConnectionStatusBadge status={connectionStatus} />
 
           <div className="space-y-2">
             <Label htmlFor="serverUrl">Server URL</Label>
@@ -140,7 +115,7 @@ export function LoginPage({
             </Button>
           </div>
 
-          <p className="text-sm text-muted-foreground">{getHelperText(connectionStatus)}</p>
+          <p className="text-sm text-muted-foreground">{HELPER_TEXT[connectionStatus]}</p>
         </CardContent>
       </Card>
 

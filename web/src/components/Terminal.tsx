@@ -2,6 +2,7 @@ import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 're
 import '@xterm/xterm/css/xterm.css';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 import { detectWebGLSupport } from '../terminal/Renderer';
+import { useLatest } from '../hooks/useLatest';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -36,20 +37,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   // Keep callback refs in sync without triggering the terminal effect below.
-  const onDisconnectRef = useRef(onDisconnect);
-  const onErrorRef = useRef(onError);
-  const onBannerChangeRef = useRef(onBannerChange);
-  const onCtrlDRef = useRef(onCtrlD);
-
-  useEffect(() => { onDisconnectRef.current = onDisconnect; }, [onDisconnect]);
-  useEffect(() => { onErrorRef.current = onError; }, [onError]);
-  useEffect(() => { onBannerChangeRef.current = onBannerChange; }, [onBannerChange]);
-  useEffect(() => { onCtrlDRef.current = onCtrlD; }, [onCtrlD]);
+  const onDisconnectRef = useLatest(onDisconnect);
+  const onErrorRef = useLatest(onError);
+  const onBannerChangeRef = useLatest(onBannerChange);
+  const onCtrlDRef = useLatest(onCtrlD);
 
   // Notify parent when banner/blocked state changes.
   useEffect(() => {
     onBannerChangeRef.current?.(banner !== 'none');
-  }, [banner]);
+  }, [banner, onBannerChangeRef]);
 
   // Observe P2P transport reconnects. connectionState is a getter (no re-render
   // on change), but this component re-renders whenever the owner does, and the
@@ -128,7 +124,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       view.dispose();
       viewRef.current = null;
     };
-  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer]);
+  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
 
   // Imperative handle for parent components.
   const isBlocked = banner !== 'none';

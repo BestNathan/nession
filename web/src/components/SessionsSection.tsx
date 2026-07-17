@@ -1,7 +1,7 @@
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import type { Agent, Session } from '../types';
-import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
+import { RefreshButton } from './ui/RefreshButton';
 import { SessionList } from './SessionList';
 import type { SortField, SortDirection } from './useDashboardHandlers';
 
@@ -32,9 +32,13 @@ export function SessionsSection({
           <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-11 md:min-h-7">
             <Plus className="w-3.5 h-3.5 mr-1" /> Create
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => fetchSessions()} disabled={loadingSessions} className="min-h-11 min-w-11 md:min-h-7 md:min-w-0" aria-label="Refresh sessions">
-            <RefreshCw className={cn('w-3.5 h-3.5', loadingSessions && 'animate-spin')} />
-          </Button>
+          <RefreshButton
+            onClick={fetchSessions}
+            loading={loadingSessions}
+            variant="ghost"
+            ariaLabel="Refresh sessions"
+            iconClassName="w-3.5 h-3.5"
+          />
         </div>
       </div>
       <SessionList

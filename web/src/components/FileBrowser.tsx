@@ -34,6 +34,10 @@ import {
 } from './ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
+import { toastError } from '@/lib/errorHelpers';
+import { useNewEntryForm } from '../hooks/useNewEntryForm';
+import { useRenameState } from '../hooks/useRenameState';
+import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface FileBrowserProps {
@@ -59,13 +63,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showNewFile, setShowNewFile] = useState(false);
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [renamingPath, setRenamingPath] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
-  const [largeFileTarget, setLargeFileTarget] = useState<FileEntry | null>(null);
+  const newEntryForm = useNewEntryForm();
+  const renameState = useRenameState();
+  const dialogs = useFileBrowserDialogs();
 
   const loadDir = useCallback(async (path: string) => {
     setLoading(true);
@@ -76,7 +76,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load directory';
       setError(msg);
-      toast.error(msg);
+      toastError(err, msg);
       setEntries([]);
     } finally {
       setLoading(false);
@@ -94,42 +94,42 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       setCurrentPath(entry.path);
     } else {
       if (entry.size > MAX_SIZE_WARNING) {
-        setLargeFileTarget(entry);
+        dialogs.setLargeFileTarget(entry);
         return;
       }
       onFileClick(entry);
     }
   };
 
-  const handleCreateFile = async () => {
-    const name = newName.trim();
-    if (!name) {return;}
-    const fullPath = currentPath ? `${currentPath}/${name}` : name;
-    try {
-      await fileOps.writeFile(fullPath, '');
-      toast.success(`Created ${name}`);
-      setShowNewFile(false);
-      setNewName('');
-      loadDir(currentPath);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create file');
+  const handleCreate = useCallback(async (name: string, kind: 'file' | 'folder') => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
     }
-  };
 
-  const handleCreateFolder = async () => {
-    const name = newName.trim();
-    if (!name) {return;}
-    const fullPath = currentPath ? `${currentPath}/${name}` : name;
+    const path = currentPath ? `${currentPath}/${trimmed}` : trimmed;
     try {
-      await fileOps.createDir(fullPath);
-      toast.success(`Created ${name}/`);
-      setShowNewFolder(false);
-      setNewName('');
-      loadDir(currentPath);
+      if (kind === 'file') {
+        await fileOps.writeFile(path, '');
+        toast.success(`Created ${trimmed}`);
+      } else {
+        await fileOps.createDir(path);
+        toast.success(`Created ${trimmed}/`);
+      }
+      await loadDir(currentPath);
+      newEntryForm.reset();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create folder');
+      toastError(err, `Failed to create ${kind}`);
     }
-  };
+  }, [currentPath, fileOps, loadDir, newEntryForm]);
+
+  const handleCreateFile = useCallback(() => {
+    handleCreate(newEntryForm.newName, 'file');
+  }, [handleCreate, newEntryForm.newName]);
+
+  const handleCreateFolder = useCallback(() => {
+    handleCreate(newEntryForm.newName, 'folder');
+  }, [handleCreate, newEntryForm.newName]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -140,59 +140,55 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       toast.success(`Uploaded ${file.name}`);
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to upload file');
+      toastError(err, 'Failed to upload file');
     }
     e.target.value = '';
   };
 
   const handleRenameStart = (entry: FileEntry) => {
-    setRenamingPath(entry.path);
-    setRenameValue(entry.name);
+    renameState.startRename(entry.path, entry.name);
   };
 
   const handleRenameSubmit = async () => {
-    const name = renameValue.trim();
+    const name = renameState.renameValue.trim();
     if (!name) {
       toast.error('Name cannot be empty');
       return;
     }
-    if (!renamingPath) {return;}
+    if (!renameState.renamingPath) {return;}
 
-    const oldName = renamingPath.substring(renamingPath.lastIndexOf('/') + 1);
+    const oldName = renameState.renamingPath.substring(renameState.renamingPath.lastIndexOf('/') + 1);
     if (name === oldName) {
-      setRenamingPath(null);
-      setRenameValue('');
+      renameState.cancelRename();
       return;
     }
 
-    const parentPath = renamingPath.substring(0, renamingPath.lastIndexOf('/'));
+    const parentPath = renameState.renamingPath.substring(0, renameState.renamingPath.lastIndexOf('/'));
     const newPath = parentPath ? `${parentPath}/${name}` : name;
 
     try {
-      await fileOps.renameFile(renamingPath, newPath);
+      await fileOps.renameFile(renameState.renamingPath, newPath);
       toast.success(`Renamed to ${name}`);
-      onFileRenamed?.(renamingPath, newPath);
-      setRenamingPath(null);
-      setRenameValue('');
+      onFileRenamed?.(renameState.renamingPath, newPath);
+      renameState.cancelRename();
       loadDir(currentPath);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to rename');
+      toastError(err, 'Failed to rename');
     }
   };
 
   const handleRenameCancel = () => {
-    setRenamingPath(null);
-    setRenameValue('');
+    renameState.cancelRename();
   };
 
   const handleDelete = async (entry: FileEntry) => {
-    setDeleteTarget(entry);
+    dialogs.setDeleteTarget(entry);
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget) {return;}
-    const entry = deleteTarget;
-    setDeleteTarget(null);
+    if (!dialogs.deleteTarget) {return;}
+    const entry = dialogs.deleteTarget;
+    dialogs.setDeleteTarget(null);
 
     try {
       await fileOps.deleteFile(entry.path);
@@ -200,11 +196,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       onFileDeleted?.(entry.path);
       loadDir(currentPath);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete';
-      if (msg.toLowerCase().includes('not empty')) {
+      if (err instanceof Error && err.message.toLowerCase().includes('not empty')) {
         toast.error('Cannot delete non-empty directory');
       } else {
-        toast.error(msg);
+        toastError(err, 'Failed to delete');
       }
     }
   };
@@ -236,10 +231,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={loading} title="Refresh">
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowNewFile(true); setShowNewFolder(false); }} title="New file">
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
           <FilePlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowNewFolder(true); setShowNewFile(false); }} title="New folder">
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
           <FolderPlus className="h-3.5 w-3.5" />
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fileInputRef.current?.click()} title="Upload file">
@@ -249,23 +244,23 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       </div>
 
       {/* New file/folder input */}
-      {(showNewFile || showNewFolder) && (
+      {(newEntryForm.showNewFile || newEntryForm.showNewFolder) && (
         <div className="flex items-center gap-1 px-2 py-1 border-b">
           <Input
             autoFocus
-            placeholder={showNewFile ? 'filename.txt' : 'folder-name'}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            placeholder={newEntryForm.showNewFile ? 'filename.txt' : 'folder-name'}
+            value={newEntryForm.newName}
+            onChange={(e) => newEntryForm.setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (showNewFile) {handleCreateFile();} else {handleCreateFolder();}
+                if (newEntryForm.showNewFile) {handleCreateFile();} else {handleCreateFolder();}
               }
-              if (e.key === 'Escape') { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }
+              if (e.key === 'Escape') { newEntryForm.reset(); }
             }}
             className="h-7 text-xs"
           />
-          <Button size="sm" className="h-7 text-xs" onClick={showNewFile ? handleCreateFile : handleCreateFolder}>Create</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowNewFile(false); setShowNewFolder(false); setNewName(''); }}>Cancel</Button>
+          <Button size="sm" className="h-7 text-xs" onClick={newEntryForm.showNewFile ? handleCreateFile : handleCreateFolder}>Create</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => newEntryForm.reset()}>Cancel</Button>
         </div>
       )}
 
@@ -315,7 +310,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
           <div className="p-3 text-center text-sm text-muted-foreground">This directory is empty</div>
         ) : (
           sortedEntries.map((entry) =>
-            renamingPath === entry.path ? (
+            renameState.renamingPath === entry.path ? (
               <div key={entry.path} className="flex items-center gap-1 w-full px-2 py-0.5">
                 {entry.is_dir ? (
                   <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
@@ -324,8 +319,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                 )}
                 <Input
                   autoFocus
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
+                  value={renameState.renameValue}
+                  onChange={(e) => renameState.setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {handleRenameSubmit();}
                     if (e.key === 'Escape') {handleRenameCancel();}
@@ -366,10 +361,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       </div>
 
       <FileBrowserDialogs
-        deleteTarget={deleteTarget}
-        largeFileTarget={largeFileTarget}
-        onDeleteTargetChange={setDeleteTarget}
-        onLargeFileTargetChange={setLargeFileTarget}
+        deleteTarget={dialogs.deleteTarget}
+        largeFileTarget={dialogs.largeFileTarget}
+        onDeleteTargetChange={dialogs.setDeleteTarget}
+        onLargeFileTargetChange={dialogs.setLargeFileTarget}
         onDeleteConfirm={handleDeleteConfirm}
         onFileClick={onFileClick}
       />

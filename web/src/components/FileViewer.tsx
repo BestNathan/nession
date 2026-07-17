@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Edit3, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { toastError } from '@/lib/errorHelpers';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
@@ -71,7 +72,7 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
       onDirtyChange?.(false);
       toast.success(`Saved ${filename}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save file');
+      toastError(err, 'Failed to save file');
     } finally {
       setSaving(false);
     }

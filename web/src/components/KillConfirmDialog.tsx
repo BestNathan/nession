@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
 import { Button } from './ui/button';
 import type { Session } from '../types';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useDialogReset } from '../hooks/useDialogReset';
 
 interface KillConfirmDialogProps {
   isOpen: boolean;
@@ -28,12 +29,11 @@ export function KillConfirmDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      setLoading(false);
-      setError(null);
-    }
-  }, [isOpen]);
+  const resetState = useCallback(() => {
+    setLoading(false);
+    setError(null);
+  }, []);
+  useDialogReset(isOpen, resetState);
 
   if (!session) {return null;}
 
