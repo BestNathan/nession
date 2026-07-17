@@ -25,6 +25,15 @@ export function useDeepLinkRestore(opts: {
 
   const confirmedRef = useRef<string | null>(null);
 
+  // Reset the guard when the user navigates away (pendingSessionId clears).
+  // Without this, a second visit to the same /terminal/:id URL would be
+  // blocked by the stale ref, preventing legitimate re-attachment. (#71 #1)
+  useEffect(() => {
+    if (!pendingSessionId) {
+      confirmedRef.current = null;
+    }
+  }, [pendingSessionId]);
+
   useEffect(() => {
     if (!pendingSessionId) { return; }
     if (attachedSession) { return; }
@@ -34,7 +43,6 @@ export function useDeepLinkRestore(opts: {
 
     const session = sessions.find((s) => s.session_id === pendingSessionId);
     if (session) {
-      confirmedRef.current = pendingSessionId;
       confirmAttach(session, {
         mode: 'auto',
         attachInfo: { mode: 'p2p', session_id: session.session_id, agent_address: '', connection_token: '' },
@@ -43,6 +51,8 @@ export function useDeepLinkRestore(opts: {
         selectedUrl: null,
         renderer: 'webgl',
       });
+      // Mark only after a successful (synchronous) confirm. (#71 #5)
+      confirmedRef.current = pendingSessionId;
     } else {
       // Sessions loaded but the requested one doesn't exist — back to dashboard.
       navigate('/', { replace: true });

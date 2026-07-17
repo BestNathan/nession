@@ -29,6 +29,15 @@ export interface FileData {
 
 // --- Helpers ---
 
+/**
+ * Minimum response timeout floor after accounting for P2P connection setup.
+ * Even when the handshake consumes most of the total budget, the server still
+ * needs a reasonable window to read/transfer the file after we send the
+ * request. 5s is enough for most file sizes without doubling the total wait
+ * (the old 1s floor was too tight for large files over slow links). (#71 #8)
+ */
+const MIN_RESPONSE_TIMEOUT_MS = 5000;
+
 let msgCounter = 0;
 function generateId(): string {
   return `file-${Date.now()}-${++msgCounter}`;
@@ -63,7 +72,7 @@ function sendRequest<T>(
     p2p.waitForConnection(timeoutMs).then(() => {
       const elapsed = Date.now() - startTime;
       // Adjust response timeout by elapsed connection time to prevent doubling
-      const remainingTimeout = Math.max(1000, timeoutMs - elapsed);
+      const remainingTimeout = Math.max(MIN_RESPONSE_TIMEOUT_MS, timeoutMs - elapsed);
 
       const id = generateId();
       const timeout = setTimeout(() => {
