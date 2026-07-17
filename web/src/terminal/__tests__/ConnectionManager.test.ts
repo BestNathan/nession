@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '../ConnectionManager';
-import type { P2PConnection } from '../../hooks/useP2PConnection';
+import type { P2PConnection, P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';
 
 function makeMockP2P(): P2PConnection {
@@ -79,6 +79,29 @@ describe('ConnectionManager', () => {
       const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length;
       vi.advanceTimersByTime(60_000);
       expect((p2p.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(calls);
+    });
+
+    it('should call onResize callback when terminal.resize message received', () => {
+      const onResize = vi.fn();
+      let messageHandler: (msg: P2PMessage) => void = () => {};
+      const p2p = makeMockP2P();
+      p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
+
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', p2pConnection: p2p,
+      });
+      cm.onResize = onResize;
+
+      // Simulate receiving terminal.resize message
+      messageHandler({
+        msg_type: 'terminal.resize',
+        id: 'test-1',
+        timestamp: Date.now(),
+        payload: { cols: 120, rows: 40 },
+      } as P2PMessage);
+
+      expect(onResize).toHaveBeenCalledWith(120, 40);
+      cm.dispose();
     });
 
     it('attach sends only client.attach, never a synthetic terminal.input (no phantom Enter)', async () => {

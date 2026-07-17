@@ -41,6 +41,7 @@ export class ConnectionManager {
   onOutput: ((data: string) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
+  onResize: ((cols: number, rows: number) => void) | null = null;
 
   constructor(options: ConnectionOptions) {
     this.mode = options.mode;
@@ -124,6 +125,7 @@ export class ConnectionManager {
     this.onOutput = null;
     this.onError = null;
     this.onDisconnect = null;
+    this.onResize = null;
   }
 
   private setupP2P(): void {
@@ -143,6 +145,11 @@ export class ConnectionManager {
           if (data) {
             this.onOutput?.(decodeB64(data));
           }
+          break;
+        }
+        case 'terminal.resize': {
+          const { cols, rows } = msg.payload as { cols: number; rows: number };
+          this.onResize?.(cols, rows);
           break;
         }
         case 'ok':
