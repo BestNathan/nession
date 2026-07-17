@@ -135,6 +135,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (!isBlocked) { viewRef.current?.sendText(text); }
       },
       refit: () => viewRef.current?.refit(),
+      scalingManager: viewRef.current?.scalingManager ?? null,
     }),
     [isBlocked],
   );

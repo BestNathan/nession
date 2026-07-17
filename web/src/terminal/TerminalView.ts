@@ -117,6 +117,11 @@ export class TerminalView {
     // No-op: TerminalSizeManager is driven by tmux resize events, not viewport fitting.
   }
 
+  /** Get the scaling manager for external zoom controls. */
+  get scalingManager(): ScalingManager {
+    return this.scaling;
+  }
+
   /** Push a banner state from an external observer (e.g. React watching P2P). */
   setExternalBanner(banner: 'none' | 'reconnecting' | 'failed', attempt: number): void {
     if (this.isDisposed) { return; }

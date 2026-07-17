@@ -135,6 +135,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
           onTerminalReveal={() => terminalRef.current?.refit()}
+          scalingManager={terminalRef.current?.scalingManager ?? null}
         />
       </div>
     </div>

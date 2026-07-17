@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, SendHorizontal } from 'lucide-react';
+import { Minus, Plus as PlusIcon, RotateCcw, Plus, X, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
@@ -10,13 +10,86 @@ import {
   saveUserCommands,
   type QuickCommand,
 } from './quickCommands';
+import type { ScalingManager } from '@/terminal/ScalingManager';
 
 export interface TerminalToolbarProps {
   sendText: (text: string) => void;
   disabled?: boolean;
+  scalingManager?: ScalingManager | null;
 }
 
-export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarProps) {
+interface ZoomControlsProps {
+  scalingManager: ScalingManager;
+  disabled: boolean;
+}
+
+function ZoomControls({ scalingManager, disabled }: ZoomControlsProps) {
+  const [scale, setScale] = useState(() => scalingManager.getScale());
+
+  const handleZoomIn = () => {
+    if (!scalingManager) {
+      return;
+    }
+    scalingManager.zoomIn();
+    setScale(scalingManager.getScale());
+  };
+
+  const handleZoomOut = () => {
+    if (!scalingManager) {
+      return;
+    }
+    scalingManager.zoomOut();
+    setScale(scalingManager.getScale());
+  };
+
+  const handleZoomReset = () => {
+    if (!scalingManager) {
+      return;
+    }
+    scalingManager.reset();
+    setScale(scalingManager.getScale());
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        onClick={handleZoomOut}
+        disabled={disabled}
+        title="Zoom out"
+      >
+        <Minus className="h-3.5 w-3.5" />
+      </Button>
+      <span className="text-xs font-mono min-w-[3rem] text-center">
+        {Math.round(scale * 100)}%
+      </span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        onClick={handleZoomIn}
+        disabled={disabled}
+        title="Zoom in"
+      >
+        <PlusIcon className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        onClick={handleZoomReset}
+        disabled={disabled}
+        title="Reset zoom"
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+export function TerminalToolbar({ sendText, disabled = false, scalingManager }: TerminalToolbarProps) {
   const [userCommands, setUserCommands] = useState<QuickCommand[]>(() => loadUserCommands());
   const [showAddForm, setShowAddForm] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -36,7 +109,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
   const addUserCommand = () => {
     const label = newLabel.trim();
     const command = newCommand.trim();
-    if (!label || !command) { return; }
+    if (!label || !command) {
+      return;
+    }
     const id = generateId('user');
     const next = [...userCommands, { id, label, command }];
     setUserCommands(next);
@@ -48,7 +123,9 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
 
   const sendInput = () => {
     const text = inputValue.trim();
-    if (!text) { return; }
+    if (!text) {
+      return;
+    }
     sendText(text + '\r');
     setInputValue('');
   };
@@ -108,10 +185,15 @@ export function TerminalToolbar({ sendText, disabled = false }: TerminalToolbarP
           className="text-xs md:text-xs flex-1 min-h-0 h-[4.5rem] resize-none field-sizing-fixed py-1.5"
           disabled={disabled}
         />
-        <Button variant="outline" size="icon" className="h-11 w-11 md:h-7 md:w-7 flex-shrink-0" aria-label="Send" title="Send"
-          onClick={sendInput} disabled={disabled}>
-          <SendHorizontal className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex flex-col gap-1.5">
+          <Button variant="outline" size="icon" className="h-11 w-11 md:h-7 md:w-7 flex-shrink-0" aria-label="Send" title="Send"
+            onClick={sendInput} disabled={disabled}>
+            <SendHorizontal className="h-3.5 w-3.5" />
+          </Button>
+          {scalingManager && (
+            <ZoomControls scalingManager={scalingManager} disabled={disabled} />
+          )}
+        </div>
       </div>
     </div>
   );
