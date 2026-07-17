@@ -1,9 +1,7 @@
 import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { AddonManager } from './AddonManager';
 import { Renderer } from './Renderer';
 import { ThemeManager } from './ThemeManager';
-import { ViewportManager } from './ViewportManager';
+import { TerminalSizeManager } from './TerminalSizeManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
 import type {
@@ -18,8 +16,7 @@ const DEFAULT_FONT =
 export class TerminalView {
   readonly terminal: Terminal;
 
-  private addons: AddonManager;
-  private viewport: ViewportManager;
+  private size: TerminalSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
 
@@ -43,22 +40,10 @@ export class TerminalView {
     });
 
     // 2. Create managers.
-    this.addons = new AddonManager(this.terminal);
-
-    // Renderer and ThemeManager are created for their constructor side-effects.
     new Renderer(this.terminal, options.rendererType);
     new ThemeManager(this.terminal, options.theme);
 
-    const fitAddon = this.addons.register(new FitAddon());
-    this.viewport = new ViewportManager(
-      this.terminal,
-      fitAddon,
-      container,
-      { profile: options.deviceProfile },
-    );
-    if (options.targetColumns) {
-      this.viewport.setTargetColumns(options.targetColumns);
-    }
+    this.size = new TerminalSizeManager(this.terminal, container, container);
 
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
@@ -93,11 +78,6 @@ export class TerminalView {
     // 4. Open terminal in DOM.
     this.terminal.open(container);
 
-    // 4b. Start viewport observation — MUST happen after open() so the
-    //     ResizeObserver never fires while the render service is uninitialised
-    //     (syncScrollArea crashes on undefined _renderService otherwise).
-    this.viewport.start();
-
     // 5. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
@@ -113,9 +93,7 @@ export class TerminalView {
 
   refit(): void {
     if (this.isDisposed) { return; }
-    requestAnimationFrame(() => {
-      if (!this.isDisposed) { this.viewport.fit(); }
-    });
+    // No-op: TerminalSizeManager is driven by tmux resize events, not viewport fitting.
   }
 
   /** Push a banner state from an external observer (e.g. React watching P2P). */
@@ -138,7 +116,7 @@ export class TerminalView {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.input.dispose();
-    this.viewport.dispose();
+    this.size.dispose();
     this.connection.dispose();
     this.terminal.dispose();
   }
