@@ -144,6 +144,17 @@ npm run dev        # Vite dev server on http://localhost:13000, proxies /ws → 
 
 Open http://localhost:13000, connect to the server, then browse agents and open terminals. For production, `npm run build` emits static assets to `web/dist/` (served by nginx in the Docker/K8s images).
 
+### Terminal Zoom Controls
+
+The web terminal supports zoom controls for better readability on different devices:
+
+- **Auto-scaling:** Terminal automatically scales based on device type (mobile: 60%, tablet: 80%, desktop: 100%)
+- **Manual zoom:** Use the +/- buttons in the terminal toolbar to adjust zoom level (30%-300%)
+- **Reset:** Click the reset button to restore default zoom for your device
+- **Scrolling:** When terminal size exceeds viewport, use scrollbars or touch gestures to navigate
+
+Zoom level is session-specific and resets on page refresh.
+
 ---
 
 ## Project layout
