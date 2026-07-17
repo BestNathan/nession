@@ -30,19 +30,28 @@ jobs:
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
 
-          BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
-            echo "No comparable previous commit — treating as version change."
+          # If the release tag doesn't exist yet, the previous release attempt
+          # either never ran or failed. Re-trigger regardless of version change
+          # so the same version can be retried without bumping. (#71)
+          TAG="v${RUST_VER}"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Release tag $TAG not found — release needed (retry or first run)."
             echo "version_changed=true" >> $GITHUB_OUTPUT
           else
-            PREV_RUST=$(git show ${BEFORE}:Cargo.toml 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
-            PREV_WEB=$(git show ${BEFORE}:web/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
-            if [ "$RUST_VER" != "$PREV_RUST" ] || [ "$WEB_VER" != "$PREV_WEB" ]; then
-              echo "Version changed (rust: ${PREV_RUST} -> ${RUST_VER}, web: ${PREV_WEB} -> ${WEB_VER})."
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              echo "No comparable previous commit — treating as version change."
               echo "version_changed=true" >> $GITHUB_OUTPUT
             else
-              echo "Version unchanged (rust: ${RUST_VER}, web: ${WEB_VER}). Skipping release."
-              echo "version_changed=false" >> $GITHUB_OUTPUT
+              PREV_RUST=$(git show ${BEFORE}:Cargo.toml 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
+              PREV_WEB=$(git show ${BEFORE}:web/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+              if [ "$RUST_VER" != "$PREV_RUST" ] || [ "$WEB_VER" != "$PREV_WEB" ]; then
+                echo "Version changed (rust: ${PREV_RUST} -> ${RUST_VER}, web: ${PREV_WEB} -> ${WEB_VER})."
+                echo "version_changed=true" >> $GITHUB_OUTPUT
+              else
+                echo "Version unchanged and tag $TAG exists. Skipping release."
+                echo "version_changed=false" >> $GITHUB_OUTPUT
+              fi
             fi
           fi
 
