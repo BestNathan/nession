@@ -1,6 +1,13 @@
 import type { Terminal } from '@xterm/xterm';
 
-/** Default cell dimensions used when xterm's render service is unavailable. */
+/**
+ * Default cell dimensions used when xterm's render service is unavailable.
+ * Derived from a 14px monospace font at devicePixelRatio=1 (cell width ≈ 8.4px,
+ * height ≈ 16.8px, rounded down to integer pixel values). These are only a
+ * fallback — normally the real values are read from xterm's internal render
+ * service. A debug message is logged when this fallback is hit so mismatches
+ * are visible during development.
+ */
 const DEFAULT_CELL_WIDTH = 8;
 const DEFAULT_CELL_HEIGHT = 16;
 
@@ -17,8 +24,15 @@ interface CellDimensions {
 function getCellDimensions(term: Terminal): CellDimensions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderService = (term as any)._core?._renderService;
-  const width = renderService?.dimensions?.css?.cell?.width ?? DEFAULT_CELL_WIDTH;
-  const height = renderService?.dimensions?.css?.cell?.height ?? DEFAULT_CELL_HEIGHT;
+  const width = renderService?.dimensions?.css?.cell?.width;
+  const height = renderService?.dimensions?.css?.cell?.height;
+  if (width === undefined || height === undefined) {
+    console.debug(
+      '[TerminalSizeManager] xterm render service unavailable, ' +
+        `falling back to default cell dimensions (${DEFAULT_CELL_WIDTH}x${DEFAULT_CELL_HEIGHT})`,
+    );
+    return { width: DEFAULT_CELL_WIDTH, height: DEFAULT_CELL_HEIGHT };
+  }
   return { width, height };
 }
 
@@ -34,14 +48,25 @@ function getCellDimensions(term: Terminal): CellDimensions {
  * and zoom changes.
  */
 export class TerminalSizeManager {
+  private readonly term: Terminal;
   private readonly mountElement: HTMLElement;
   private disposed = false;
 
+  /**
+   * @param term - xterm.js Terminal instance to drive resize/fit operations on.
+   * @param _scrollContainer - Reserved for Task 10 (scroll-position preservation
+   *   when CSS-transform scaling is wired in via ScalingManager). Accepted now
+   *   so the constructor signature is stable across the refactor; not yet stored
+   *   or used.
+   * @param mountElement - DOM element whose pixel dimensions are updated to
+   *   match the terminal's computed cell size × (cols, rows).
+   */
   constructor(
-    private readonly term: Terminal,
+    term: Terminal,
     _scrollContainer: HTMLElement,
     mountElement: HTMLElement,
   ) {
+    this.term = term;
     this.mountElement = mountElement;
   }
 
