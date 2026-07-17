@@ -80,6 +80,10 @@ enum Commands {
         /// Skip confirmation prompt
         #[arg(long)]
         yes: bool,
+
+        /// Also download install.sh installer script
+        #[arg(long)]
+        include_installer: bool,
     },
 }
 
@@ -442,8 +446,9 @@ async fn main() -> Result<()> {
             version,
             dry_run,
             yes,
+            include_installer,
         } => {
-            commands::update::run_update(check, version, dry_run, yes).await?;
+            commands::update::run_update(check, version, dry_run, yes, include_installer).await?;
         }
     }
 

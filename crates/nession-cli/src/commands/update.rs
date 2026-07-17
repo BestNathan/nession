@@ -11,6 +11,7 @@ pub async fn run_update(
     target_version: Option<String>,
     dry_run: bool,
     skip_prompt: bool,
+    include_installer: bool,
 ) -> Result<(), anyhow::Error> {
     let current_version = env!("CARGO_PKG_VERSION");
 
@@ -175,6 +176,16 @@ pub async fn run_update(
     let all_ok = results.iter().all(BinaryStatus::is_ok);
     if !all_ok {
         anyhow::bail!("Some binaries failed to update. Old versions are backed up as .bak files.");
+    }
+
+    // Download install.sh if requested
+    if include_installer {
+        println!("\nDownloading install.sh...");
+        let cli_dir = replace::cli_install_dir()?;
+        match download::download_installer(client.http_client(), &release, &cli_dir).await {
+            Ok(path) => println!("  ✓ install.sh -> {}", path.display()),
+            Err(e) => eprintln!("   install.sh ({e})"),
+        }
     }
 
     println!("\nUpdate complete.");

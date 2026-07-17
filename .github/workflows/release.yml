@@ -473,6 +473,9 @@ jobs:
           cat checksums-*.txt > release-assets/checksums.txt
           rm -f checksums-*.txt
 
+      - name: Copy install.sh to release assets
+        run: cp scripts/install.sh release-assets/install.sh
+
       - name: List assets
         run: ls -la release-assets/
 
