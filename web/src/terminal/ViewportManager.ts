@@ -10,8 +10,6 @@ const DEFAULT_TARGET_COLS = 80;
 /** Optional construction settings for {@link ViewportManager}. */
 export interface ViewportOptions {
   profile?: DeviceProfile;
-  /** Callback when viewport shrinks significantly (cols reduced by >20%). */
-  onSignificantShrink?: () => void;
 }
 
 export class ViewportManager {
@@ -21,8 +19,6 @@ export class ViewportManager {
   private wheelCleanup: (() => void) | null = null;
   private disposed = false;
   private rafHandle: number | null = null;
-  private lastCols: number = 0;
-  private onSignificantShrink?: () => void;
 
   constructor(
     private term: Terminal,
@@ -32,7 +28,6 @@ export class ViewportManager {
   ) {
     this.profile = options.profile ?? detectProfile(container.clientWidth);
     this.targetCols = DEFAULT_TARGET_COLS;
-    this.onSignificantShrink = options.onSignificantShrink;
     this.applyProfile();
 
     // NOTE: do NOT mutate container layout (display/flex) here. This runs
@@ -93,13 +88,15 @@ export class ViewportManager {
     this.detectAndApplyProfile();
     this.scaleFont();
 
-    // Detect significant viewport shrink (>20% reduction in cols) and trigger reattach
-    // to force tmux to re-send content at the new size.
-    const currentCols = this.term.cols;
-    if (this.lastCols > 0 && currentCols < this.lastCols * 0.8) {
-      this.onSignificantShrink?.();
-    }
-    this.lastCols = currentCols;
+    // Force xterm.js renderer to recalculate wrap state and cursor layer.
+    // WebGL renderer has a known issue where viewport resize doesn't trigger
+    // proper reflow of the cursor line, causing content to be "eaten" instead
+    // of soft-wrapping. Calling refresh() forces the renderer to recompute.
+    requestAnimationFrame(() => {
+      if (!this.disposed) {
+        this.term.refresh(0, this.term.rows - 1);
+      }
+    });
   }
 
   updateProfile(profile: DeviceProfile): void {

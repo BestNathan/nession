@@ -54,15 +54,7 @@ export class TerminalView {
       this.terminal,
       fitAddon,
       container,
-      {
-        profile: options.deviceProfile,
-        onSignificantShrink: () => {
-          if (!this.isDisposed) {
-            // Reattach to force tmux to re-send content at new size
-            this.reattach();
-          }
-        },
-      },
+      { profile: options.deviceProfile },
     );
     if (options.targetColumns) {
       this.viewport.setTargetColumns(options.targetColumns);
