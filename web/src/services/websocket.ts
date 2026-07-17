@@ -27,6 +27,7 @@ type ConnectionChangeCallback = (status: ConnectionStatus) => void;
 type AgentsChangeCallback = (agents: Agent[]) => void;
 type SessionsChangeCallback = (sessions: Session[]) => void;
 type TerminalOutputCallback = (data: string) => void;
+type TerminalResizeCallback = (cols: number, rows: number) => void;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -56,6 +57,7 @@ export class WebSocketService {
   private agentsChangeCallbacks: AgentsChangeCallback[] = [];
   private sessionsChangeCallbacks: SessionsChangeCallback[] = [];
   private terminalOutputCallbacks = new Map<string, TerminalOutputCallback[]>();
+  private terminalResizeCallbacks = new Map<string, TerminalResizeCallback[]>();
 
   // Authentication state
   private authenticated = false;
@@ -447,6 +449,29 @@ export class WebSocketService {
     };
   }
 
+  onTerminalResize(
+    sessionId: string,
+    callback: TerminalResizeCallback,
+  ): () => void {
+    if (!this.terminalResizeCallbacks.has(sessionId)) {
+      this.terminalResizeCallbacks.set(sessionId, []);
+    }
+    this.terminalResizeCallbacks.get(sessionId)!.push(callback);
+
+    return () => {
+      const callbacks = this.terminalResizeCallbacks.get(sessionId);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
+        if (callbacks.length === 0) {
+          this.terminalResizeCallbacks.delete(sessionId);
+        }
+      }
+    };
+  }
+
   // Terminal I/O (for after attach)
 
   sendTerminalInput(sessionId: string, data: string): void {
@@ -537,6 +562,10 @@ export class WebSocketService {
           this.handleTerminalOutput(message.payload);
           break;
 
+        case 'terminal.resize':
+          this.handleTerminalResize(message.payload);
+          break;
+
         case 'agents.changed':
           if (message.payload.agents) {
             this.notifyAgentsChange(message.payload.agents as Agent[]);
@@ -564,6 +593,17 @@ export class WebSocketService {
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
     if (callbacks) {
       callbacks.forEach((callback) => callback(data));
+    }
+  }
+
+  private handleTerminalResize(payload: Record<string, unknown>): void {
+    const sessionId = payload.session_id as string;
+    const cols = payload.cols as number;
+    const rows = payload.rows as number;
+
+    const callbacks = this.terminalResizeCallbacks.get(sessionId);
+    if (callbacks) {
+      callbacks.forEach((callback) => callback(cols, rows));
     }
   }
 

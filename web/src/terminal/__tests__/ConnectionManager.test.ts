@@ -18,6 +18,7 @@ function makeMockWs(): WebSocketService {
   return {
     sendTerminalInput: vi.fn(),
     onTerminalOutput: vi.fn().mockReturnValue(() => {}),
+    onTerminalResize: vi.fn().mockReturnValue(() => {}),
     onConnectionChange: vi.fn().mockReturnValue(() => {}),
     requestAttach: vi.fn().mockResolvedValue({ mode: 'relay' }),
     isConnected: () => true,
@@ -173,6 +174,31 @@ describe('ConnectionManager', () => {
       expect(states.filter((s) => s === 'lost').length).toBe(1);
       vi.advanceTimersByTime(3000);
       expect(onDisconnect).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    it('subscribes to terminal resize and invokes onResize callback', () => {
+      const onResize = vi.fn();
+      let resizeHandler: (cols: number, rows: number) => void = () => {};
+      const ws = makeMockWs();
+      (ws.onTerminalResize as ReturnType<typeof vi.fn>).mockImplementation(
+        (_sid: string, cb: (cols: number, rows: number) => void) => {
+          resizeHandler = cb;
+          return () => {};
+        },
+      );
+
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
+      });
+      cm.onResize = onResize;
+
+      expect(ws.onTerminalResize).toHaveBeenCalledWith('sess-1', expect.any(Function));
+
+      // Simulate server broadcasting terminal.resize for this session
+      resizeHandler(120, 40);
+
+      expect(onResize).toHaveBeenCalledWith(120, 40);
       cm.dispose();
     });
   });

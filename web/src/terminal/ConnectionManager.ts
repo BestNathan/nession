@@ -34,6 +34,7 @@ export class ConnectionManager {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
+  private relayUnsubResize: (() => void) | null = null;
   private p2pUnsubMessage: (() => void) | null = null;
   private disposed = false;
 
@@ -121,6 +122,7 @@ export class ConnectionManager {
     this.p2pUnsubMessage?.();
     this.relayUnsubOutput?.();
     this.relayUnsubState?.();
+    this.relayUnsubResize?.();
     this.onStateChange = null;
     this.onOutput = null;
     this.onError = null;
@@ -186,6 +188,15 @@ export class ConnectionManager {
         this.onOutput?.(data);
       }
     });
+
+    this.relayUnsubResize = svc.onTerminalResize(
+      this.sessionId,
+      (cols: number, rows: number) => {
+        if (!this.disposed) {
+          this.onResize?.(cols, rows);
+        }
+      },
+    );
 
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
