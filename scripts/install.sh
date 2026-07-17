@@ -113,10 +113,14 @@ download() {
 resolve_version() {
   if [ "$VERSION" = latest ]; then
     info "Resolving latest release…" >&2
-    tag=$(fetch "https://api.github.com/repos/$REPO/releases/latest" \
-      | grep -m1 '"tag_name"' \
-      | sed 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/')
-    [ -n "$tag" ] || die "could not determine latest release tag"
+    # Follow the 302 redirect from /releases/latest to extract the tag.
+    # No GitHub API call — avoids the 60 req/hr unauthenticated rate limit.
+    tag=$(curl -sI -L "https://github.com/$REPO/releases/latest" \
+      | grep -i '^location:' | tail -1 \
+      | sed 's|.*/releases/tag/||' | tr -d '')
+    if [ -z "$tag" ]; then
+      die "could not determine latest release tag"
+    fi
     echo "$tag"
   else
     # normalize to a v-prefixed tag
