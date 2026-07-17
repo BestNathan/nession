@@ -60,6 +60,9 @@ export class WebSocketService {
   // Authentication state
   private authenticated = false;
 
+  // In-flight connect promise — lets concurrent callers await the same attempt (#71 #4)
+  private connectPromise: Promise<void> | null = null;
+
   constructor(url: string, authToken: string) {
     this.url = url;
     this.authToken = authToken;
@@ -72,6 +75,8 @@ export class WebSocketService {
     let clientId = localStorage.getItem(storageKey);
 
     if (!clientId) {
+      // uuid v4 uses crypto.getRandomValues() for cryptographically secure IDs.
+      // Works in both HTTP and HTTPS environments.
       clientId = uuidv4();
       localStorage.setItem(storageKey, clientId);
       console.log('Generated new client ID:', clientId);
@@ -85,14 +90,20 @@ export class WebSocketService {
   // Connection Management
 
   async connect(): Promise<void> {
-    // Guard against concurrent connection attempts (OPEN or CONNECTING)
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    // Already open — nothing to do.
+    if (this.ws?.readyState === WebSocket.OPEN) {
       return;
+    }
+
+    // CONNECTING — an earlier call is still in flight; await the same promise
+    // so the caller's `await connect()` truly means "connected". (#71 #4)
+    if (this.ws?.readyState === WebSocket.CONNECTING && this.connectPromise) {
+      return this.connectPromise;
     }
 
     this.setConnectionStatus('connecting');
 
-    return new Promise((resolve, reject) => {
+    this.connectPromise = new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.url);
 
@@ -104,9 +115,11 @@ export class WebSocketService {
           // Send authentication immediately after connection
           this.authenticate()
             .then(() => {
+              this.connectPromise = null;
               resolve();
             })
             .catch((err) => {
+              this.connectPromise = null;
               reject(err);
             });
         };
@@ -118,6 +131,7 @@ export class WebSocketService {
         this.ws.onerror = (error) => {
           console.error('WebSocket error:', error);
           this.setConnectionStatus('disconnected');
+          this.connectPromise = null;
           reject(new Error('WebSocket connection failed'));
         };
 
@@ -130,9 +144,12 @@ export class WebSocketService {
         };
       } catch (error) {
         this.setConnectionStatus('disconnected');
+        this.connectPromise = null;
         reject(error);
       }
     });
+
+    return this.connectPromise;
   }
 
   disconnect(): void {
@@ -142,7 +159,11 @@ export class WebSocketService {
     }
 
     if (this.ws) {
-      // Null out handlers before closing to prevent async onclose from scheduling reconnection
+      // Null out ALL handlers before closing to prevent any async callback
+      // (onerror, onmessage, onopen, onclose) from racing with teardown. (#71 #3)
+      this.ws.onopen = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
       this.ws.onclose = null;
       this.ws.close();
       this.ws = null;

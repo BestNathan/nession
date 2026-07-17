@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { X, Terminal } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -86,12 +86,6 @@ function useFileTabs(onTerminalReveal?: () => void) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('terminal');
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
-  const openFilesRef = useRef(openFiles);
-
-  // Keep ref in sync
-  useEffect(() => {
-    openFilesRef.current = openFiles;
-  }, [openFiles]);
 
   const handleFileClick = useCallback((entry: FileEntry) => {
     const existing = openFiles.find((f) => f.path === entry.path);
@@ -134,10 +128,11 @@ function useFileTabs(onTerminalReveal?: () => void) {
   }, []);
 
   const handleFileDeleted = useCallback((path: string) => {
-    // Find the file ID from the current openFiles (using ref to avoid stale closure)
-    const deletedFile = openFilesRef.current.find((f) => f.path === path);
+    // Look up the file ID from current openFiles. We depend on openFiles so
+    // this is always in sync — the ref-based approach could be stale by one
+    // frame when multiple state updates batch in the same tick. (#71 #7)
+    const deletedFile = openFiles.find((f) => f.path === path);
     setOpenFiles((prev) => prev.filter((f) => f.path !== path));
-    // Clean up dirty tracking for the deleted file
     if (deletedFile) {
       setDirtyFiles((prev) => {
         const next = new Set(prev);
@@ -145,7 +140,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
         return next;
       });
     }
-  }, []);
+  }, [openFiles]);
 
   const handleFileRenamed = useCallback((oldPath: string, newPath: string) => {
     const newFilename = newPath.split('/').pop() || newPath;
@@ -159,8 +154,10 @@ function useFileTabs(onTerminalReveal?: () => void) {
   const activeFile = openFiles.find((f) => f.id === activeTabId);
   const showTerminal = activeTabId === 'terminal';
 
-  // If the active tab was closed, switch to the last remaining tab or terminal
-  useEffect(() => {
+  // If the active tab was closed, switch to the last remaining tab or terminal.
+  // useLayoutEffect runs before paint so the user never sees a blank frame
+  // where activeFile is undefined. (#71 #2)
+  useLayoutEffect(() => {
     if (activeTabId !== 'terminal' && !openFiles.find((f) => f.id === activeTabId)) {
       setActiveTabId(openFiles.length > 0 ? openFiles[openFiles.length - 1].id : 'terminal');
     }
