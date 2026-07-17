@@ -1,8 +1,13 @@
 //! tmux control mode session 管理
 //!
 //! Uses `tmux -C attach` to control a tmux session, parsing structured
-//! messages instead of raw PTY output. Each client sets an independent
-//! viewport via `refresh-client -C`.
+//! messages instead of raw PTY output.
+//!
+//! Terminal size (cols/rows) is handled entirely on the client side.
+//! xterm.js maintains its own screen buffer and reflows when the browser
+//! window resizes — the agent does not participate. Each web client sees
+//! the tmux pane's full ANSI output stream and adapts locally, so multiple
+//! clients on the same session are naturally independent.
 
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -19,21 +24,22 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input` and viewport changes via `resize`.
+/// input via `write_input`. Viewport is client-side only; `resize` records
+/// the last seen size for observability but does not talk to tmux.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
-    output_tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl ControlModeSession {
     /// Attach to a tmux session in control mode.
     ///
-    /// Spawns `tmux -C attach -t <session_name>`, starts a background task
+    /// Spawns `tmux -C attach -t <session_name>` and starts a background task
     /// that parses `%output` messages and sends unescaped ANSI bytes on the
-    /// returned channel, and sets the initial viewport via `refresh-client -C`.
+    /// returned channel. `width`/`height` are only recorded on the session
+    /// for reporting; xterm.js handles all viewport rendering.
     ///
     /// Returns `(session, output_receiver)`. The receiver yields raw ANSI
     /// byte chunks ready to forward to xterm.js. When the tmux subprocess
@@ -55,17 +61,14 @@ impl ControlModeSession {
         let stdout = child.stdout.take().context("child stdout was not piped")?;
 
         let (output_tx, output_rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
-        let reader_tx = output_tx.clone();
-        tokio::spawn(read_output_loop(stdout, reader_tx));
+        tokio::spawn(read_output_loop(stdout, output_tx));
 
-        let mut session = Self {
+        let session = Self {
             session_name: session_name.to_string(),
             child,
             stdin,
             viewport: (width, height),
-            output_tx,
         };
-        session.send_refresh(width, height).await?;
 
         Ok((session, output_rx))
     }
@@ -96,42 +99,16 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Resize the client viewport. Only affects THIS control client; other
-    /// clients attached to the same session keep their own sizes.
+    /// Record a client-side viewport change. This is bookkeeping only —
+    /// tmux is not notified and no synthetic output is injected. xterm.js
+    /// handles reflow of its own screen buffer when the browser resizes,
+    /// and subsequent `%output` from tmux flows in unchanged.
     ///
-    /// No-op when the size matches the current viewport, avoiding pointless
-    /// `refresh-client` calls when the caller re-sends the last known size.
+    /// Kept as a method (rather than removing the API) so callers on the
+    /// WebSocket protocol layer don't need to change: `terminal.resize`
+    /// messages remain accepted and no-op on the server.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
-        if self.viewport == (width, height) {
-            return Ok(());
-        }
-        self.send_refresh(width, height).await?;
         self.viewport = (width, height);
-
-        // tmux does not re-broadcast pane content after refresh-client -C, so
-        // capture the current pane state out-of-band and inject it into the
-        // output stream so xterm redraws at the new cols/rows. Per the tmux
-        // Control Mode wiki: "It is up to the client to update the content of
-        // the pane if necessary, for example using capture-pane."
-        let session_name = self.session_name.clone();
-        let tx = self.output_tx.clone();
-        tokio::spawn(async move {
-            let result = Command::new("tmux")
-                .args(["capture-pane", "-t", &session_name, "-p", "-e", "-N"])
-                .output()
-                .await;
-            if let Ok(output) = result {
-                if output.status.success() {
-                    let mut bytes = Vec::with_capacity(output.stdout.len() + 8);
-                    // Clear screen + move cursor to home before injecting the
-                    // redraw so xterm doesn't overlay content on old cells.
-                    bytes.extend_from_slice(b"\x1b[H\x1b[2J");
-                    bytes.extend_from_slice(&output.stdout);
-                    let _ = tx.send(bytes).await;
-                }
-            }
-        });
-
         Ok(())
     }
 
@@ -151,13 +128,6 @@ impl ControlModeSession {
         // is already gone.
         let _ = self.child.start_kill();
         let _ = self.child.wait().await;
-        Ok(())
-    }
-
-    async fn send_refresh(&mut self, width: u16, height: u16) -> Result<()> {
-        let cmd = format!("refresh-client -C {width},{height}\n");
-        self.stdin.write_all(cmd.as_bytes()).await?;
-        self.stdin.flush().await?;
         Ok(())
     }
 }

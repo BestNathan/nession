@@ -25,7 +25,6 @@ export class TerminalView {
 
   private isDisposed = false;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
-  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
   onStateChange: ((state: TerminalViewState) => void) | null = null;
   onCtrlD: (() => void) | null = null;
@@ -99,19 +98,6 @@ export class TerminalView {
     //     (syncScrollArea crashes on undefined _renderService otherwise).
     this.viewport.start();
 
-    // 4c. Forward cols/rows changes to the agent (debounced) so tmux's per-
-    //     client viewport (refresh-client -C W,H) tracks the browser size.
-    //     xterm only fires onResize when cols/rows actually change, so no
-    //     dedupe is needed here — 150ms debounce absorbs drag bursts.
-    this.terminal.onResize(({ cols, rows }) => {
-      if (this.isDisposed) { return; }
-      if (this.resizeTimer) { clearTimeout(this.resizeTimer); }
-      this.resizeTimer = setTimeout(() => {
-        this.resizeTimer = null;
-        if (!this.isDisposed) { this.connection.resize(cols, rows); }
-      }, 150);
-    });
-
     // 5. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
@@ -151,7 +137,6 @@ export class TerminalView {
   dispose(): void {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
-    if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = null; }
     this.input.dispose();
     this.viewport.dispose();
     this.connection.dispose();

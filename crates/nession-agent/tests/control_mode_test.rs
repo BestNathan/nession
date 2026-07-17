@@ -126,48 +126,6 @@ async fn test_multiple_clients_independent_viewport() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_resize_injects_captured_pane() -> Result<()> {
-    let session_name = "nession-ctrl-resize-inject";
-    cleanup_session(session_name).await;
-    create_session(session_name).await?;
-    sleep(Duration::from_millis(300)).await;
-
-    // Put a distinctive marker into the session before attach so capture-pane
-    // has something to return.
-    let status = Command::new("tmux")
-        .args([
-            "send-keys",
-            "-t",
-            session_name,
-            "echo REDRAW_MARKER_ABC",
-            "Enter",
-        ])
-        .status()
-        .await?;
-    assert!(status.success());
-    sleep(Duration::from_millis(500)).await;
-
-    let (mut session, mut rx) = ControlModeSession::attach(session_name, 80, 24).await?;
-    // Drain initial output (initial refresh-client burst).
-    let _ = drain_bytes(&mut rx, 500).await;
-
-    // Trigger a resize — this should schedule a capture-pane inject.
-    session.resize(120, 40).await?;
-
-    // The capture should include our marker.
-    let bytes = drain_bytes(&mut rx, 2000).await;
-    let text = String::from_utf8_lossy(&bytes);
-    assert!(
-        text.contains("REDRAW_MARKER_ABC"),
-        "resize should inject captured pane content; got: {text:?}"
-    );
-
-    let _ = session.close().await;
-    cleanup_session(session_name).await;
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_close_is_idempotent() -> Result<()> {
     let session_name = "nession-ctrl-close-test";
     cleanup_session(session_name).await;
