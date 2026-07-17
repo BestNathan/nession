@@ -6,10 +6,12 @@ use tracing::{info, warn};
 
 use crate::env::EnvService;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
-use crate::server::command_broker::CommandBroker;
+use crate::server::client_registry::ClientRegistry;
+use crate::server::command_broker::{CommandBroker, WsMessageSender};
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
-    AgentRegisterPayload, EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage,
+    AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot, EnvSource,
+    ProtocolMessage, ServerTerminalResizePayload,
 };
 
 /// Action returned by the connection handler after processing a message.
@@ -18,7 +20,13 @@ pub enum HandlerAction {
     Reply(Option<Message>),
     /// Enter relay mode: forward messages between this client and the agent
     /// at the given WebSocket address.
-    Relay { agent_ws_url: String },
+    Relay {
+        agent_ws_url: String,
+        /// Session being attached to (for client registry tracking).
+        session_id: String,
+        /// Unique client id assigned for this relay connection.
+        client_id: String,
+    },
     /// Close the connection.
     Close,
 }
@@ -27,12 +35,19 @@ pub struct ConnectionHandler {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    client_registry: Arc<ClientRegistry>,
     env_service: Arc<EnvService>,
     server_auth_token: String,
     /// Heartbeat interval (seconds) advertised to agents on registration.
     heartbeat_interval_secs: u64,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
+    /// Outgoing message sender for this client connection (set after construction).
+    client_sender: Option<WsMessageSender>,
+    /// Session this client is attached to via relay (for cleanup on disconnect).
+    attached_session_id: Option<String>,
+    /// Unique client id for this relay attachment (for cleanup on disconnect).
+    attached_client_id: Option<String>,
 }
 
 impl ConnectionHandler {
@@ -40,6 +55,7 @@ impl ConnectionHandler {
         agent_registry: Arc<AgentRegistry>,
         session_registry: Arc<SessionRegistry>,
         command_broker: Arc<CommandBroker>,
+        client_registry: Arc<ClientRegistry>,
         env_service: Arc<EnvService>,
         server_auth_token: String,
         heartbeat_interval_secs: u64,
@@ -48,16 +64,36 @@ impl ConnectionHandler {
             agent_registry,
             session_registry,
             command_broker,
+            client_registry,
             env_service,
             server_auth_token,
             heartbeat_interval_secs,
             authenticated_client: false,
             registered_agent_id: None,
+            client_sender: None,
+            attached_session_id: None,
+            attached_client_id: None,
         }
     }
 
     pub fn registered_agent_id(&self) -> Option<&String> {
         self.registered_agent_id.as_ref()
+    }
+
+    /// Set the outgoing message sender for this client connection.
+    /// Must be called before processing messages that may need to broadcast.
+    pub fn set_client_sender(&mut self, sender: WsMessageSender) {
+        self.client_sender = Some(sender);
+    }
+
+    /// Session this client is attached to via relay (for cleanup on disconnect).
+    pub fn attached_session_id(&self) -> Option<&str> {
+        self.attached_session_id.as_deref()
+    }
+
+    /// Unique client id for this relay attachment (for cleanup on disconnect).
+    pub fn attached_client_id(&self) -> Option<&str> {
+        self.attached_client_id.as_deref()
     }
 
     pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
@@ -90,6 +126,7 @@ impl ConnectionHandler {
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
             "agent.session.update" => self.handle_agent_session_update(msg).await,
             "agent.session.command.response" => self.handle_agent_command_response(msg).await,
+            "agent.terminal.resize" => self.handle_agent_terminal_resize(msg).await,
             "client.auth" => self.handle_client_auth(msg).await,
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
@@ -627,7 +664,26 @@ impl ConnectionHandler {
         if preferred_mode == "relay" {
             // For relay mode, the server will proxy I/O between client and agent.
             // The handler loop must transition into relay mode.
-            Ok(HandlerAction::Relay { agent_ws_url })
+            // Register this client with the ClientRegistry so the server can
+            // broadcast events (e.g. terminal resize) to all attached clients.
+            let client_id = uuid::Uuid::new_v4().to_string();
+            if let Some(ref sender) = self.client_sender {
+                self.client_registry
+                    .register(session_id, &client_id, sender.clone())
+                    .await;
+            } else {
+                warn!(
+                    "Client attach to session {} in relay mode but no client_sender set",
+                    session_id
+                );
+            }
+            self.attached_session_id = Some(session_id.to_string());
+            self.attached_client_id = Some(client_id.clone());
+            Ok(HandlerAction::Relay {
+                agent_ws_url,
+                session_id: session_id.to_string(),
+                client_id,
+            })
         } else {
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
@@ -1068,6 +1124,51 @@ impl ConnectionHandler {
         self.command_broker
             .resolve_command(&agent_id, &request_id, msg.payload)
             .await;
+
+        Ok(HandlerAction::Reply(None))
+    }
+
+    /// Handle `agent.terminal.resize` — broadcast terminal resize to all
+    /// web clients attached to the session via relay.
+    async fn handle_agent_terminal_resize(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let payload: AgentTerminalResizePayload = match serde_json::from_value(msg.payload) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("agent.terminal.resize with invalid payload: {}", e);
+                return Ok(HandlerAction::Reply(None));
+            }
+        };
+
+        info!(
+            "Terminal resize for session {}: {}x{}",
+            payload.session_id, payload.cols, payload.rows
+        );
+
+        let server_payload = ServerTerminalResizePayload {
+            cols: payload.cols,
+            rows: payload.rows,
+        };
+        let broadcast_msg = serde_json::json!({
+            "msg_type": "terminal.resize",
+            "id": uuid::Uuid::new_v4().to_string(),
+            "timestamp": current_timestamp(),
+            "payload": server_payload,
+        });
+
+        let sent = self
+            .client_registry
+            .broadcast(&payload.session_id, broadcast_msg.to_string())
+            .await;
+
+        if sent > 0 {
+            info!(
+                "Broadcast terminal resize to {} client(s) for session {}",
+                sent, payload.session_id
+            );
+        }
 
         Ok(HandlerAction::Reply(None))
     }
@@ -1732,6 +1833,7 @@ mod tests {
     use crate::db::Database;
     use crate::env::EnvService;
     use crate::registry::{AgentRegistry, SessionRegistry};
+    use crate::server::client_registry::ClientRegistry;
     use crate::server::command_broker::CommandBroker;
     use tokio_tungstenite::tungstenite::Message;
 
@@ -1741,12 +1843,14 @@ mod tests {
         let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
         let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
         let command_broker = Arc::new(CommandBroker::new());
+        let client_registry = Arc::new(ClientRegistry::new());
         let env_root = tempfile::tempdir().unwrap().keep();
         let env_service = EnvService::new(env_root);
         ConnectionHandler::new(
             agent_registry,
             session_registry,
             command_broker,
+            client_registry,
             env_service,
             auth_token.to_string(),
             30,
@@ -2557,7 +2661,11 @@ mod tests {
             .await
             .unwrap();
         match action {
-            HandlerAction::Relay { agent_ws_url } => {
+            HandlerAction::Relay {
+                agent_ws_url,
+                session_id: _,
+                client_id: _,
+            } => {
                 assert!(agent_ws_url.contains("1.2.3.4"));
             }
             _ => panic!("expected Relay action"),
@@ -3199,5 +3307,83 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("agent_id is required"));
+    }
+
+    // ---- agent.terminal.resize ----
+
+    #[tokio::test]
+    async fn agent_terminal_resize_broadcasts_to_attached_clients() {
+        use crate::server::command_broker::WsMessageSender;
+
+        let mut h = test_handler("").await;
+
+        // Register two clients in the ClientRegistry for the target session
+        let client_registry = Arc::clone(&h.client_registry);
+        let (sender1, mut rx1) = WsMessageSender::new();
+        let (sender2, mut rx2) = WsMessageSender::new();
+        client_registry.register("a1:dev", "c1", sender1).await;
+        client_registry.register("a1:dev", "c2", sender2).await;
+
+        // Send agent.terminal.resize
+        let action = h
+            .handle_message(proto_msg(
+                "agent.terminal.resize",
+                json!({
+                    "session_id": "a1:dev",
+                    "cols": 120,
+                    "rows": 40,
+                }),
+            ))
+            .await
+            .unwrap();
+
+        // Handler returns Reply(None) — broadcast goes through ClientRegistry
+        assert!(matches!(action, HandlerAction::Reply(None)));
+
+        // Both clients should receive the broadcast message
+        let msg1 = rx1.try_recv().unwrap();
+        let msg2 = rx2.try_recv().unwrap();
+
+        let parsed1: serde_json::Value = serde_json::from_str(msg1.to_text().unwrap()).unwrap();
+        let parsed2: serde_json::Value = serde_json::from_str(msg2.to_text().unwrap()).unwrap();
+
+        assert_eq!(parsed1["msg_type"], "terminal.resize");
+        assert_eq!(parsed1["payload"]["cols"], 120);
+        assert_eq!(parsed1["payload"]["rows"], 40);
+        assert_eq!(parsed2["msg_type"], "terminal.resize");
+    }
+
+    #[tokio::test]
+    async fn agent_terminal_resize_no_attached_clients() {
+        let mut h = test_handler("").await;
+
+        // No clients attached — should still succeed silently
+        let action = h
+            .handle_message(proto_msg(
+                "agent.terminal.resize",
+                json!({
+                    "session_id": "a1:dev",
+                    "cols": 80,
+                    "rows": 24,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    #[tokio::test]
+    async fn agent_terminal_resize_invalid_payload() {
+        let mut h = test_handler("").await;
+
+        // Missing required fields — should log warning but not crash
+        let action = h
+            .handle_message(proto_msg(
+                "agent.terminal.resize",
+                json!({ "session_id": "a1:dev" }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
     }
 }

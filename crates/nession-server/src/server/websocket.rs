@@ -8,6 +8,7 @@ use super::handler::{ConnectionHandler, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
+use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
 
@@ -16,6 +17,7 @@ pub struct WebSocketServer {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    client_registry: Arc<ClientRegistry>,
     env_service: Arc<EnvService>,
     db: Arc<Database>,
     listener: Option<TcpListener>,
@@ -37,6 +39,7 @@ impl WebSocketServer {
         session_registry.load_from_db().await;
 
         let command_broker = Arc::new(CommandBroker::new());
+        let client_registry = Arc::new(ClientRegistry::new());
 
         let env_root = nession_common::paths::server_envs_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/server/envs"));
@@ -47,6 +50,7 @@ impl WebSocketServer {
             agent_registry,
             session_registry,
             command_broker,
+            client_registry,
             env_service,
             db,
             listener: Some(listener),
@@ -177,6 +181,7 @@ impl WebSocketServer {
                 agent_registry: Arc::clone(&self.agent_registry),
                 session_registry: Arc::clone(&self.session_registry),
                 command_broker: Arc::clone(&self.command_broker),
+                client_registry: Arc::clone(&self.client_registry),
                 env_service: Arc::clone(&self.env_service),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
@@ -230,6 +235,7 @@ struct ServerContext {
     agent_registry: Arc<AgentRegistry>,
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
+    client_registry: Arc<ClientRegistry>,
     env_service: Arc<EnvService>,
     auth_token: String,
     heartbeat_interval_secs: u64,
@@ -260,6 +266,7 @@ where
         agent_registry,
         session_registry,
         command_broker,
+        client_registry,
         env_service,
         auth_token,
         heartbeat_interval_secs,
@@ -267,17 +274,21 @@ where
 
     let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
+
+    // Create the outgoing-message channel BEFORE the handler so the handler
+    // can register its sender for broadcasts (e.g. terminal resize).
+    let (sender, mut rx) = WsMessageSender::new();
+
     let mut handler = ConnectionHandler::new(
         agent_registry,
         session_registry,
         command_broker.clone(),
+        client_registry.clone(),
         env_service,
         auth_token,
         heartbeat_interval_secs,
     );
-
-    // Create a channel-based sender for CommandBroker to send commands
-    let (sender, mut rx) = WsMessageSender::new();
+    handler.set_client_sender(sender.clone());
 
     // Spawn a relay task that drains the receiver and forwards to the actual
     // write sink. A periodic WebSocket Ping keeps the TCP path alive through
@@ -334,7 +345,11 @@ where
             HandlerAction::Reply(None) => {
                 // No response needed, continue
             }
-            HandlerAction::Relay { agent_ws_url } => {
+            HandlerAction::Relay {
+                agent_ws_url,
+                session_id: _,
+                client_id: _,
+            } => {
                 relay_bidirectional_via_channel(&mut read, sender.clone(), &agent_ws_url).await?;
                 break;
             }
@@ -347,6 +362,14 @@ where
     // Clean up: unregister agent from CommandBroker on disconnect
     if let Some(agent_id) = handler.registered_agent_id() {
         command_broker.unregister_agent(agent_id).await;
+    }
+
+    // Clean up: unregister client from ClientRegistry on disconnect
+    if let (Some(session_id), Some(client_id)) = (
+        handler.attached_session_id().map(String::from),
+        handler.attached_client_id().map(String::from),
+    ) {
+        client_registry.unregister(&session_id, &client_id).await;
     }
 
     // Drop the sender to signal the relay task to exit
