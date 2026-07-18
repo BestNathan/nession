@@ -3,10 +3,10 @@ import type { Terminal } from '@xterm/xterm';
 /**
  * Default cell dimensions used when xterm's render service is unavailable.
  * Derived from a 14px monospace font at devicePixelRatio=1 (cell width ≈ 8.4px,
- * height ≈ 16.8px, rounded down to integer pixel values). These are only a
- * fallback — normally the real values are read from xterm's internal render
- * service. A debug message is logged when this fallback is hit so mismatches
- * are visible during development.
+ * height ≈ 16.8px, floored to integer pixels). These are only a fallback —
+ * normally the real values are read from xterm's internal render service.
+ * A debug message is logged when this fallback is hit so mismatches are
+ * visible during development.
  */
 const DEFAULT_CELL_WIDTH = 8;
 const DEFAULT_CELL_HEIGHT = 16;
@@ -39,56 +39,57 @@ function getCellDimensions(term: Terminal): CellDimensions {
 /**
  * Manages terminal dimensions driven by tmux resize events.
  *
- * Replaces ViewportManager — no longer fits the terminal to the viewport.
- * Instead, responds to tmux resize messages (cols/rows) and updates both
- * the xterm.js terminal size and the container pixel dimensions accordingly.
+ * On every `terminal.resize` broadcast from tmux, `handleResize(cols, rows)`
+ * runs and:
+ *   1. Updates xterm's internal grid via `term.resize(cols, rows)`.
+ *   2. Sets `mountElement`'s CSS pixel size to `cols*cellW × rows*cellH`.
  *
- * Container pixel dimensions are derived from the current cell size reported
- * by xterm's internal render service, so they stay in sync with font size
- * and zoom changes.
+ * `recompute()` is a hook for `FontSizeManager`: after fontSize changes,
+ * cellW/cellH change, so mountElement pixel size must be refreshed even
+ * though cols/rows didn't change.
+ *
+ * The scroll container that wraps `mountElement` is not this class's
+ * concern — browser-native `overflow: auto` handles scrolling without any
+ * JS involvement.
  */
 export class TerminalSizeManager {
-  private readonly term: Terminal;
-  private readonly mountElement: HTMLElement;
   private disposed = false;
 
-  /**
-   * @param term - xterm.js Terminal instance to drive resize/fit operations on.
-   * @param _scrollContainer - Reserved for Task 10 (scroll-position preservation
-   *   when CSS-transform scaling is wired in via ScalingManager). Accepted now
-   *   so the constructor signature is stable across the refactor; not yet stored
-   *   or used.
-   * @param mountElement - DOM element whose pixel dimensions are updated to
-   *   match the terminal's computed cell size × (cols, rows).
-   */
   constructor(
-    term: Terminal,
-    _scrollContainer: HTMLElement,
-    mountElement: HTMLElement,
-  ) {
-    this.term = term;
-    this.mountElement = mountElement;
-  }
+    private readonly term: Terminal,
+    private readonly mountElement: HTMLElement,
+  ) {}
 
   /**
    * Handle a resize event originating from tmux.
-   * Updates the xterm terminal dimensions and the mount element's pixel size.
+   * Updates xterm's internal grid and the mount element's CSS pixel size.
    */
   handleResize(cols: number, rows: number): void {
     if (this.disposed) {
       return;
     }
     this.term.resize(cols, rows);
-    this.updateContainerSize(cols, rows);
+    this.setMountPixels(cols, rows);
   }
 
-  private updateContainerSize(cols: number, rows: number): void {
-    const { width, height } = getCellDimensions(this.term);
-    this.mountElement.style.width = `${cols * width}px`;
-    this.mountElement.style.height = `${rows * height}px`;
+  /**
+   * Refresh mount element pixel size using current term cols/rows and current
+   * cell dimensions. Call this after fontSize changes.
+   */
+  recompute(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.setMountPixels(this.term.cols, this.term.rows);
   }
 
   dispose(): void {
     this.disposed = true;
+  }
+
+  private setMountPixels(cols: number, rows: number): void {
+    const { width, height } = getCellDimensions(this.term);
+    this.mountElement.style.width = `${cols * width}px`;
+    this.mountElement.style.height = `${rows * height}px`;
   }
 }

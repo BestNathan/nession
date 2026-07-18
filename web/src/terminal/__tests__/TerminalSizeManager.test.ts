@@ -2,39 +2,30 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 import { TerminalSizeManager } from '../TerminalSizeManager';
 
-/** Helper: attach a fake _renderService with given cell dimensions.
- *  Preserves any existing _core properties (e.g. resize) so term.resize() still works. */
+/** Attach a fake _renderService with given cell dimensions. */
 function mockRenderService(term: Terminal, cellWidth: number, cellHeight: number): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const t = term as any;
   t._core = t._core ?? {};
   t._core._renderService = {
-    dimensions: {
-      css: {
-        cell: { width: cellWidth, height: cellHeight },
-      },
-    },
+    dimensions: { css: { cell: { width: cellWidth, height: cellHeight } } },
   };
 }
 
 describe('TerminalSizeManager', () => {
   let term: Terminal;
   let mountElement: HTMLElement;
-  let scrollContainer: HTMLElement;
 
   beforeEach(() => {
     term = new Terminal();
     mountElement = document.createElement('div');
-    scrollContainer = document.createElement('div');
   });
 
-  afterEach(() => {
-    term.dispose();
-  });
+  afterEach(() => { term.dispose(); });
 
   it('calls term.resize when handleResize is invoked', () => {
     const resizeSpy = vi.spyOn(term, 'resize');
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
+    const manager = new TerminalSizeManager(term, mountElement);
 
     manager.handleResize(120, 40);
 
@@ -42,84 +33,68 @@ describe('TerminalSizeManager', () => {
     manager.dispose();
   });
 
-  it('sets mountElement pixel dimensions using fallback cell size (8x16)', () => {
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
-
-    manager.handleResize(80, 24);
-
-    // 80 cols * 8px = 640px, 24 rows * 16px = 384px
-    expect(mountElement.style.width).toBe('640px');
-    expect(mountElement.style.height).toBe('384px');
-    manager.dispose();
-  });
-
-  it('uses actual cell dimensions from _renderService when available', () => {
+  it('sets mountElement pixel dimensions from cell size × cols/rows', () => {
     mockRenderService(term, 10, 20);
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
-
-    manager.handleResize(100, 50);
-
-    // 100 cols * 10px = 1000px, 50 rows * 20px = 1000px
-    expect(mountElement.style.width).toBe('1000px');
-    expect(mountElement.style.height).toBe('1000px');
-    manager.dispose();
-  });
-
-  it('falls back when _renderService is missing', () => {
-    // _core exists (created by Terminal constructor) but has no _renderService.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (term as any)._core._renderService;
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
+    const manager = new TerminalSizeManager(term, mountElement);
 
     manager.handleResize(80, 24);
 
-    expect(mountElement.style.width).toBe('640px');
-    expect(mountElement.style.height).toBe('384px');
+    expect(mountElement.style.width).toBe('800px');   // 80 * 10
+    expect(mountElement.style.height).toBe('480px');  // 24 * 20
     manager.dispose();
   });
 
-  it('falls back when _renderService has partial dimensions', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (term as any)._core._renderService = { dimensions: {} };
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
+  it('falls back to 8x16 when render service is unavailable', () => {
+    const manager = new TerminalSizeManager(term, mountElement);
 
-    manager.handleResize(40, 10);
+    manager.handleResize(80, 24);
 
-    // 40 * 8 = 320, 10 * 16 = 160
-    expect(mountElement.style.width).toBe('320px');
-    expect(mountElement.style.height).toBe('160px');
+    expect(mountElement.style.width).toBe('640px');   // 80 * 8
+    expect(mountElement.style.height).toBe('384px');  // 24 * 16
     manager.dispose();
   });
 
-  it('does nothing after dispose', () => {
+  it('recompute() uses current term cols/rows and current cell size', () => {
+    mockRenderService(term, 10, 20);
+    const manager = new TerminalSizeManager(term, mountElement);
+
+    manager.handleResize(200, 60);
+    expect(mountElement.style.width).toBe('2000px');
+    expect(mountElement.style.height).toBe('1200px');
+
+    // Simulate a font-size increase: cells become 12×24.
+    mockRenderService(term, 12, 24);
+    manager.recompute();
+
+    // term cols/rows still 200×60 (not changed by fontSize).
+    expect(mountElement.style.width).toBe('2400px');   // 200 * 12
+    expect(mountElement.style.height).toBe('1440px');  // 60 * 24
+    manager.dispose();
+  });
+
+  it('handleResize is a no-op after dispose', () => {
     const resizeSpy = vi.spyOn(term, 'resize');
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
-
+    const manager = new TerminalSizeManager(term, mountElement);
     manager.dispose();
+
     manager.handleResize(80, 24);
 
     expect(resizeSpy).not.toHaveBeenCalled();
-    expect(mountElement.style.width).toBe('');
-    expect(mountElement.style.height).toBe('');
   });
 
-  it('updates dimensions on successive handleResize calls', () => {
-    mockRenderService(term, 9, 18);
-    const manager = new TerminalSizeManager(term, scrollContainer, mountElement);
-
+  it('recompute is a no-op after dispose', () => {
+    mockRenderService(term, 10, 20);
+    const manager = new TerminalSizeManager(term, mountElement);
     manager.handleResize(80, 24);
-    expect(mountElement.style.width).toBe('720px');
-    expect(mountElement.style.height).toBe('432px');
-
-    manager.handleResize(120, 40);
-    expect(mountElement.style.width).toBe('1080px');
-    expect(mountElement.style.height).toBe('720px');
-
     manager.dispose();
-  });
+    // Use a valid but distinctive CSS length that recompute could never
+    // produce (cols=80, rows=24, cell=10x20 would give 800px x 480px).
+    mountElement.style.width = '4321px';
+    mountElement.style.height = '4321px';
 
-  it('can be constructed with scrollContainer and mountElement references', () => {
-    // Verify constructor accepts the expected parameters without throwing
-    expect(() => new TerminalSizeManager(term, scrollContainer, mountElement)).not.toThrow();
+    manager.recompute();
+
+    expect(mountElement.style.width).toBe('4321px');
+    expect(mountElement.style.height).toBe('4321px');
   });
 });

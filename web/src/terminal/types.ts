@@ -44,7 +44,7 @@ export interface DeviceProfile {
 export interface TerminalHandle {
   sendText: (text: string) => void;
   refit: () => void;
-  scalingManager: import('./ScalingManager').ScalingManager | null;
+  fontSizeManager: import('./FontSizeManager').FontSizeManager | null;
 }
 
 /** Props for the Terminal React component — unchanged from current API. */

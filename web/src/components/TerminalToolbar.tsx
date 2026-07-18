@@ -10,44 +10,35 @@ import {
   saveUserCommands,
   type QuickCommand,
 } from './quickCommands';
-import type { ScalingManager } from '@/terminal/ScalingManager';
+import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 export interface TerminalToolbarProps {
   sendText: (text: string) => void;
   disabled?: boolean;
-  scalingManager?: ScalingManager | null;
+  fontSizeManager?: FontSizeManager | null;
 }
 
 interface ZoomControlsProps {
-  scalingManager: ScalingManager;
+  fontSizeManager: FontSizeManager;
   disabled: boolean;
 }
 
-function ZoomControls({ scalingManager, disabled }: ZoomControlsProps) {
-  const [scale, setScale] = useState(() => scalingManager.getScale());
+function ZoomControls({ fontSizeManager, disabled }: ZoomControlsProps) {
+  const [size, setSize] = useState(() => fontSizeManager.getSize());
 
   const handleZoomIn = () => {
-    if (!scalingManager) {
-      return;
-    }
-    scalingManager.zoomIn();
-    setScale(scalingManager.getScale());
+    fontSizeManager.zoomIn();
+    setSize(fontSizeManager.getSize());
   };
 
   const handleZoomOut = () => {
-    if (!scalingManager) {
-      return;
-    }
-    scalingManager.zoomOut();
-    setScale(scalingManager.getScale());
+    fontSizeManager.zoomOut();
+    setSize(fontSizeManager.getSize());
   };
 
   const handleZoomReset = () => {
-    if (!scalingManager) {
-      return;
-    }
-    scalingManager.reset();
-    setScale(scalingManager.getScale());
+    fontSizeManager.reset();
+    setSize(fontSizeManager.getSize());
   };
 
   return (
@@ -63,7 +54,7 @@ function ZoomControls({ scalingManager, disabled }: ZoomControlsProps) {
         <Minus className="h-3.5 w-3.5" />
       </Button>
       <span className="text-xs font-mono min-w-[3rem] text-center">
-        {Math.round(scale * 100)}%
+        {size}px
       </span>
       <Button
         variant="ghost"
@@ -89,7 +80,7 @@ function ZoomControls({ scalingManager, disabled }: ZoomControlsProps) {
   );
 }
 
-export function TerminalToolbar({ sendText, disabled = false, scalingManager }: TerminalToolbarProps) {
+export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }: TerminalToolbarProps) {
   const [userCommands, setUserCommands] = useState<QuickCommand[]>(() => loadUserCommands());
   const [showAddForm, setShowAddForm] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -190,8 +181,8 @@ export function TerminalToolbar({ sendText, disabled = false, scalingManager }: 
             onClick={sendInput} disabled={disabled}>
             <SendHorizontal className="h-3.5 w-3.5" />
           </Button>
-          {scalingManager && (
-            <ZoomControls scalingManager={scalingManager} disabled={disabled} />
+          {fontSizeManager && (
+            <ZoomControls fontSizeManager={fontSizeManager} disabled={disabled} />
           )}
         </div>
       </div>

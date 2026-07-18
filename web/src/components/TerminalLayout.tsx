@@ -3,7 +3,7 @@ import { FileTabs } from './FileTabs';
 import { EnvPanel } from './env/EnvPanel';
 import { TerminalToolbar } from './TerminalToolbar';
 import type { FileOps } from '../services/fileOps';
-import type { ScalingManager } from '@/terminal/ScalingManager';
+import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 interface TerminalLayoutProps {
   terminalElement: React.ReactNode;
@@ -16,7 +16,7 @@ interface TerminalLayoutProps {
   toolbarDisabled: boolean;
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
-  scalingManager?: ScalingManager | null;
+  fontSizeManager?: FontSizeManager | null;
 }
 
 /**
@@ -34,11 +34,11 @@ export function TerminalLayout({
   toolbarDisabled,
   fileOps,
   onTerminalReveal,
-  scalingManager,
+  fontSizeManager,
 }: TerminalLayoutProps) {
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const commandsPanel = (
-    <TerminalToolbar sendText={sendText} disabled={toolbarDisabled} scalingManager={scalingManager} />
+    <TerminalToolbar sendText={sendText} disabled={toolbarDisabled} fontSizeManager={fontSizeManager} />
   );
 
   if (fileOps) {
