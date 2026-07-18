@@ -36,7 +36,7 @@ export class TerminalView {
     scalingWrapper.style.cssText = 'position: relative; width: 100%; height: 100%; overflow: hidden;';
 
     const scrollContainer = document.createElement('div');
-    scrollContainer.style.cssText = 'width: 100%; height: 100%; overflow: auto;';
+    scrollContainer.style.cssText = 'display: inline-block; overflow: auto;';
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position: relative;';
@@ -98,6 +98,30 @@ export class TerminalView {
 
     // 5. Open terminal in DOM.
     this.terminal.open(mountElement);
+
+    // 5b. Initialize mount element size and fit to viewport.
+    // This ensures the container has explicit pixel dimensions and the terminal
+    // is scaled to fill the available viewport space.
+    requestAnimationFrame(() => {
+      if (!this.isDisposed) {
+        const cols = this.terminal.cols;
+        const rows = this.terminal.rows;
+        this.size.handleResize(cols, rows);
+
+        // Use actual mount element dimensions for accurate scaling
+        const terminalWidth = mountElement.clientWidth;
+        const terminalHeight = mountElement.clientHeight;
+
+        // Use the outer container (scaling wrapper's parent) dimensions for scaling reference
+        // This is the actual visible area where the terminal should fit
+        const outerContainer = scalingWrapper.parentElement;
+        const containerWidth = outerContainer?.clientWidth ?? window.innerWidth;
+        const containerHeight = outerContainer?.clientHeight ?? window.innerHeight;
+
+        // Scale to fit container
+        this.scaling.fitToViewport(terminalWidth, terminalHeight, containerWidth, containerHeight);
+      }
+    });
 
     // 6. Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {

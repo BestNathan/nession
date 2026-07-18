@@ -206,44 +206,39 @@ describe('ScalingManager', () => {
       expect(wrapper.style.transformOrigin).toBe('top left');
     });
 
-    it('adjusts wrapper width to inverse of scale', () => {
+    it('does not set explicit width on wrapper', () => {
       setViewportWidth(375);
       const wrapper = createWrapper();
       new ScalingManager(wrapper);
-      // mobile default is 0.6, inverse is 1/0.6 * 100 = 166.666...%
-      const expectedWidth = `${(1 / 0.6) * 100}%`;
-      expect(wrapper.style.width).toBe(expectedWidth);
+      // Width is not set - wrapper sizes to content
+      expect(wrapper.style.width).toBe('');
     });
 
-    it('adjusts wrapper height to inverse of scale', () => {
+    it('does not set explicit height on wrapper', () => {
       setViewportWidth(375);
       const wrapper = createWrapper();
       new ScalingManager(wrapper);
-      const expectedHeight = `${(1 / 0.6) * 100}%`;
-      expect(wrapper.style.height).toBe(expectedHeight);
+      // Height is not set - wrapper sizes to content
+      expect(wrapper.style.height).toBe('');
     });
 
-    it('updates wrapper styles on zoomIn', () => {
+    it('updates transform on zoomIn', () => {
       setViewportWidth(1440);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
       manager.zoomIn();
       expect(wrapper.style.transform).toBe('scale(1.1)');
-      const expectedWidth = `${(1 / 1.1) * 100}%`;
-      expect(wrapper.style.width).toBe(expectedWidth);
     });
 
-    it('updates wrapper styles on zoomOut', () => {
+    it('updates transform on zoomOut', () => {
       setViewportWidth(1440);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
       manager.zoomOut();
       expect(wrapper.style.transform).toBe('scale(0.9)');
-      const expectedWidth = `${(1 / 0.9) * 100}%`;
-      expect(wrapper.style.width).toBe(expectedWidth);
     });
 
-    it('updates wrapper styles on reset', () => {
+    it('updates transform on reset', () => {
       setViewportWidth(1440);
       const wrapper = createWrapper();
       const manager = new ScalingManager(wrapper);
@@ -251,8 +246,6 @@ describe('ScalingManager', () => {
       manager.zoomIn();
       manager.reset();
       expect(wrapper.style.transform).toBe('scale(1)');
-      expect(wrapper.style.width).toBe('100%');
-      expect(wrapper.style.height).toBe('100%');
     });
   });
 });

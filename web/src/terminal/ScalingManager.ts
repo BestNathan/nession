@@ -8,6 +8,10 @@ const MAX_SCALE = 3.0;
  * Manages CSS transform scaling for terminal display.
  * Provides device-based auto-scaling and manual zoom controls.
  * Scaling is visual only — does not affect xterm.js internal dimensions.
+ *
+ * The auto-scale calculates a "fit-to-viewport" scale that makes the terminal
+ * fill the available space while maintaining the tmux dimensions. Users can
+ * override with manual zoom controls.
  */
 export class ScalingManager {
   private scale: number;
@@ -40,6 +44,30 @@ export class ScalingManager {
     }
   }
 
+  /**
+   * Calculate a scale that fits the terminal content to the container.
+   * This ensures the terminal fills the available space while maintaining
+   * the tmux dimensions (cols × rows).
+   */
+  fitToViewport(terminalWidth: number, terminalHeight: number, containerWidth?: number, containerHeight?: number): void {
+    // Use container dimensions if provided, otherwise fall back to viewport
+    const width = containerWidth ?? window.innerWidth;
+    const height = containerHeight ?? window.innerHeight;
+
+    // Calculate scale to fit width and height, then use the smaller one
+    const scaleX = width / terminalWidth;
+    const scaleY = height / terminalHeight;
+
+    // Use the smaller scale to ensure the terminal fits entirely
+    let fitScale = Math.min(scaleX, scaleY);
+
+    // Clamp to reasonable bounds
+    fitScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, fitScale));
+
+    this.scale = Math.round(fitScale * 10) / 10;
+    this.applyScale();
+  }
+
   zoomIn(): void {
     // Round to avoid IEEE 754 floating-point drift from repeated +0.1 steps
     this.scale = Math.min(MAX_SCALE, Math.round((this.scale + ZOOM_STEP) * 10) / 10);
@@ -67,9 +95,9 @@ export class ScalingManager {
   private applyScale(): void {
     this.wrapperElement.style.transform = `scale(${this.scale})`;
     this.wrapperElement.style.transformOrigin = 'top left';
-    const inverseScale = 1 / this.scale;
-    this.wrapperElement.style.width = `${inverseScale * 100}%`;
-    this.wrapperElement.style.height = `${inverseScale * 100}%`;
+    // Let the wrapper size to its content - no explicit width/height needed
+    // The transform will scale the visual size, and the parent's overflow
+    // handling will show scrollbars if needed.
   }
 
   getScale(): number {
