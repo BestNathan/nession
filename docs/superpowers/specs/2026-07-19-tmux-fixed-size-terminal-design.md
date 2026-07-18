@@ -70,13 +70,13 @@ Browser: if viewport < mountElement, native scrollbars appear;
 
 | Component | Responsibility | Change |
 |-----------|---------------|--------|
-| **Agent — `session/create`** | Create tmux session with fixed size + lock | **New: append `-x -y` + `set-option window-size manual` + `resize-window`** |
-| **Protocol — `CreateSessionPayload`** | Carry optional `cols` / `rows` | **New optional fields with `#[serde(default)]`** for future flexibility. Current web UI does not send them; agent defaults to 200×60 when absent |
+| **Agent — `session/create`** | Create tmux session with fixed size + lock | **Small: add `set-option window-size manual` after existing `new-session`**. Size constants already exist |
+| **Protocol** | — | **No change** — payload already carries width/height (ignored by agent) |
 | **Server** | Broker `terminal.resize` broadcasts | **No change** |
 | **`ConnectionManager`** | Emit `onResize` from received `terminal.resize` | **No change** (already implemented) |
-| **`TerminalSizeManager`** | Set xterm grid + mountElement pixel size on resize | **Simplify:** remove any mode detection, remove ScalingManager coordination |
+| **`TerminalSizeManager`** | Set xterm grid + mountElement pixel size on resize | **Simplify:** remove `_scrollContainer` param, remove any FontSize/Scaling coordination hooks; expose `recompute()` for font-size changes |
 | **`TerminalView` (DOM)** | Own `scrollContainer` + `mountElement` structure | **Simplify:** remove `scalingWrapper` (no more CSS transform); `scrollContainer` is `100%×100%; overflow:auto` |
-| **`ScalingManager`** | (Removed) | **Delete** |
+| **`ScalingManager`** | (Removed) | **Delete** file and tests |
 | **`FontSizeManager` (new)** | Font-size zoom in/out/reset; notify `TerminalSizeManager` to recompute mount pixels when cell size changes | **New** — replaces `ScalingManager`. Never uses CSS transform |
 | **`TerminalToolbar` zoom controls** | Call `FontSizeManager` methods instead of `ScalingManager` | **Rewire only** |
 | **`CreateSessionDialog` / `useDashboardHandlers`** | Kick off session creation | **No change** — no dimensions sent |
@@ -102,58 +102,31 @@ Two facts guaranteed by this structure:
 
 ### 5.1 Agent: Session Creation
 
-Current session-create logic executes something like:
-```bash
-tmux new-session -d -s <name>
-```
+**Current state (as of `feat/terminal-architecture-restructure`, already correct):**
+- `crates/nession-agent/src/tmux/manager.rs` defines `SESSION_WIDTH = 200`, `SESSION_HEIGHT = 60`
+- `create_session()` runs `tmux new-session -d -s <name> -x 200 -y 60 -c <workdir> [-e KEY=VAL...]`
+- The `_width` and `_height` parameters are documented as ignored
+- `ControlModeSession::resize` is a no-op (only bookkeeping)
 
-New logic (pseudocode; actual implementation in Rust):
+**Missing:** `set-option -t <name> window-size manual`. Without it, tmux's default `window-size = latest` still allows an attaching CLI client to shrink the pane. Add one command after `new-session` succeeds:
+
 ```rust
-async fn create_session(name: &str, cols: u16, rows: u16) -> Result<()> {
-    let cols = cols.max(MIN_COLS).min(MAX_COLS);   // clamp for sanity
-    let rows = rows.max(MIN_ROWS).min(MAX_ROWS);
-
-    // 1. Create at the requested size.
-    run(&["tmux", "new-session", "-d", "-s", name,
-          "-x", &cols.to_string(), "-y", &rows.to_string()])?;
-
-    // 2. Lock: pane size no longer follows any client.
-    run(&["tmux", "set-option", "-t", name, "window-size", "manual"])?;
-
-    // 3. Belt-and-braces: some tmux versions honor -x/-y only after the first
-    //    attach, so explicitly resize the window to the target size now.
-    run(&["tmux", "resize-window", "-t", name,
-          "-x", &cols.to_string(), "-y", &rows.to_string()])?;
-
+async fn lock_session_size(&self, name: &str) -> Result<()> {
+    let status = Command::new("tmux")
+        .args(["set-option", "-t", name, "window-size", "manual"])
+        .status().await?;
+    if !status.success() {
+        anyhow::bail!("Failed to lock window-size on session: {name}");
+    }
     Ok(())
 }
 ```
 
-**Constants** (in `nession-common`):
-```rust
-pub const DEFAULT_TMUX_COLS: u16 = 200;
-pub const DEFAULT_TMUX_ROWS: u16 = 60;
-pub const MIN_COLS: u16 = 80;   // don't accept smaller than legacy VT default
-pub const MAX_COLS: u16 = 500;  // sanity ceiling
-pub const MIN_ROWS: u16 = 24;
-pub const MAX_ROWS: u16 = 200;
-```
+Call it from `create_session` after the successful `new-session`. If `set-option` fails (old tmux), session creation fails loudly — this is acceptable, agent Docker images ship tmux ≥ 3.3a which supports it.
 
-**Protocol change** — `CreateSessionPayload` gets two optional fields:
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateSessionPayload {
-    // ... existing fields ...
-    #[serde(default)]
-    pub cols: Option<u16>,
-    #[serde(default)]
-    pub rows: Option<u16>,
-}
-```
+**Protocol:** no changes. `ServerSessionCreatePayload` keeps its `width`/`height` fields for backward compatibility; agent continues to ignore them.
 
-When both are `None` (current web UI behavior), the agent uses `DEFAULT_TMUX_COLS`/`DEFAULT_TMUX_ROWS`.
-
-**Existing sessions** created before this change stay at whatever size they had. Applying `window-size manual` retroactively is not attempted — old sessions render at their own size and continue to work.
+**Retroactive migration:** none. Sessions that predate this change stay at whatever size they had.
 
 ### 5.2 Web: TerminalView DOM
 
@@ -282,26 +255,9 @@ If the visible "flicker" is objectionable, `TerminalView` can defer showing the 
 
 ## 6. Protocol
 
-### 6.1 CreateSessionPayload additions
+**No changes.** `ServerSessionCreatePayload` already carries `width`/`height` with `#[serde(default)]`; agent ignores them and uses `SESSION_WIDTH`/`SESSION_HEIGHT` constants (200×60). This spec keeps the payload as-is for backward compatibility.
 
-Serde-compatible additive change:
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateSessionPayload {
-    // ... existing ...
-    #[serde(default)]
-    pub cols: Option<u16>,
-    #[serde(default)]
-    pub rows: Option<u16>,
-}
-```
-
-Old clients (no `cols`/`rows` in the JSON) → `None` → agent uses defaults. New clients that pass values (future feature) → agent uses them, clamped to `[MIN, MAX]`.
-
-### 6.2 No new inbound messages
-
-There is no `client.resize` from browser to server, no `session.resize` request. The web client is purely reactive.
+There is no `client.resize` from browser to server. The web client is purely reactive.
 
 ## 7. UX Behavior Matrix
 
@@ -366,9 +322,7 @@ Yes, but that's a `CreateSessionDialog` enhancement. This spec's constants are a
 
 ## 11. Rollout Plan
 
-1. Land protocol changes (backward compatible)
-2. Land agent session-create changes
-3. Land web TerminalView + TerminalSizeManager simplification
-4. Land FontSizeManager, wire into TerminalToolbar
-5. Delete ScalingManager
-6. Playwright verification + PR
+1. Land agent `window-size manual` lock (one-line change with integration test)
+2. Land web `TerminalView` DOM simplification + `TerminalSizeManager` slim
+3. Land `FontSizeManager`, delete `ScalingManager`, rewire `TerminalToolbar`
+4. Playwright verification + PR
