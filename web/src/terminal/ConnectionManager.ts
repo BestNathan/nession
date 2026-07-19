@@ -85,7 +85,7 @@ export class ConnectionManager {
           msg_type: 'terminal.resize',
           id: generateId(),
           timestamp: Math.floor(Date.now() / 1000),
-          payload: { cols, rows },
+          payload: { session_name: this.sessionName, cols, rows },
         });
       } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
         this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);

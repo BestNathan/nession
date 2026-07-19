@@ -155,7 +155,7 @@ describe('ConnectionManager', () => {
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({
           msg_type: 'terminal.resize',
-          payload: { cols: 120, rows: 40 },
+          payload: { session_name: 'test', cols: 120, rows: 40 },
         }),
       );
       manager.dispose();
