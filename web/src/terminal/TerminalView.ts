@@ -15,6 +15,25 @@ const DEFAULT_FONT =
   "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
 const DEFAULT_FONT_SIZE = 14;
 
+/**
+ * Shape of xterm.js's undocumented internal state that exposes the current
+ * cell pixel dimensions. Mirrors the same interface in TerminalSizeManager.
+ */
+interface XtermInternals {
+  _core?: {
+    _renderService?: {
+      dimensions?: {
+        css?: {
+          cell?: {
+            width: number;
+            height: number;
+          };
+        };
+      };
+    };
+  };
+}
+
 export class TerminalView {
   readonly terminal: Terminal;
 
@@ -120,6 +139,24 @@ export class TerminalView {
       return;
     }
     this.connection.send(text);
+  }
+
+  /** Send client viewport resize to the agent so tmux can resize its window. */
+  sendResize(cols: number, rows: number): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this.connection.sendResize(cols, rows);
+  }
+
+  /** Current cell pixel dimensions — used by ResizeObserver to calculate cols/rows. */
+  get cellDimensions(): { width: number; height: number } {
+    // Read cell pixel size from xterm's internal render service.
+    // Falls back to 8×16 (14px monospace defaults) if unavailable.
+    const renderService = (this.terminal as unknown as XtermInternals)._core?._renderService;
+    const width: number = renderService?.dimensions?.css?.cell?.width ?? 8;
+    const height: number = renderService?.dimensions?.css?.cell?.height ?? 16;
+    return { width, height };
   }
 
   /** No-op: TerminalSizeManager is driven by tmux resize events, not viewport fits. */
