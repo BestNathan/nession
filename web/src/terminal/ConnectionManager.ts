@@ -76,6 +76,25 @@ export class ConnectionManager {
     }
   }
 
+  /** Send a terminal resize to the agent (client → tmux direction). */
+  sendResize(cols: number, rows: number): void {
+    if (this.disposed) { return; }
+    try {
+      if (this.mode === 'p2p' && this.p2pConnection?.connectionState === 'connected') {
+        this.p2pConnection.sendMessage({
+          msg_type: 'terminal.resize',
+          id: generateId(),
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: { cols, rows },
+        });
+      } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+        this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);
+      }
+    } catch (err) {
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   async attach(): Promise<void> {
     if (this.disposed) { return; }
     if (this.mode === 'p2p' && this.p2pConnection) {
