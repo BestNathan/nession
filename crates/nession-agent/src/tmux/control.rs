@@ -38,10 +38,10 @@ pub struct ControlModeSession {
 impl ControlModeSession {
     /// Attach to a tmux session in control mode.
     ///
-    /// Spawns `tmux -C attach -t <session_name>` and starts a background task
+    /// First resizes the tmux window to `width`×`height`, then spawns
+    /// `tmux -C attach -t <session_name>` and starts a background task
     /// that parses `%output` messages and sends unescaped ANSI bytes on the
-    /// returned channel. `width`/`height` are only recorded on the session
-    /// for reporting; xterm.js handles all viewport rendering.
+    /// returned channel.
     ///
     /// Returns `(session, output_receiver, resize_receiver)`. The output
     /// receiver yields raw ANSI byte chunks ready to forward to xterm.js.
@@ -55,6 +55,29 @@ impl ControlModeSession {
         width: u16,
         height: u16,
     ) -> Result<(Self, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<(u16, u16)>)> {
+        // Resize tmux window to client's requested size BEFORE attaching.
+        // This ensures tmux renders at the correct dimensions from the first
+        // frame, avoiding a flash of wrong-sized content.
+        let resize_status = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                session_name,
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
+            ])
+            .status()
+            .await
+            .with_context(|| format!("failed to resize tmux window for session {session_name}"))?;
+
+        if !resize_status.success() {
+            anyhow::bail!(
+                "tmux resize-window exited with non-zero status for session {session_name}"
+            );
+        }
+
         let mut child = Command::new("tmux")
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
