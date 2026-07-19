@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
@@ -46,7 +46,14 @@ interface TerminalViewProps {
 export function TerminalView({ session, onBack, onDisconnect, onError }: TerminalViewProps) {
   const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer } = session;
   const wsService = useWebSocket();
-  const terminalRef = useRef<TerminalHandle>(null);
+  // Callback ref backed by state so the parent re-renders when the child
+  // populates the imperative handle. Without this, `fontSizeManager` on
+  // the handle would stay null on first render and the zoom controls
+  // would never mount. See docs/.../fixed-size-terminal spec.
+  const [terminalHandle, setTerminalHandle] = useState<TerminalHandle | null>(null);
+  const terminalRef = useCallback((handle: TerminalHandle | null) => {
+    setTerminalHandle(handle);
+  }, []);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -131,11 +138,11 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
           sheetOpen={sheetOpen}
           onSheetToggle={setSheetOpen}
           sessionId={sessionId}
-          sendText={(text) => terminalRef.current?.sendText(text)}
+          sendText={(text) => terminalHandle?.sendText(text)}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
-          onTerminalReveal={() => terminalRef.current?.refit()}
-          fontSizeManager={terminalRef.current?.fontSizeManager ?? null}
+          onTerminalReveal={() => terminalHandle?.refit()}
+          fontSizeManager={terminalHandle?.fontSizeManager ?? null}
         />
       </div>
     </div>
