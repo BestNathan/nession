@@ -126,30 +126,6 @@ impl TmuxManager {
             anyhow::bail!("Failed to create session: {name}");
         }
 
-        // Lock pane size so no attaching client can resize it. Applied AFTER
-        // new-session succeeds; on failure we roll back by killing the session
-        // so we don't leave a half-configured session lying around.
-        if let Err(e) = self.lock_window_size(name).await {
-            let _ = Command::new("tmux")
-                .args(["kill-session", "-t", name])
-                .status()
-                .await;
-            return Err(e);
-        }
-
-        Ok(())
-    }
-
-    /// Lock the pane size on this session so no attaching client can resize it.
-    /// Requires tmux ≥ 2.9 (`window-size manual`). Docker images ship tmux 3.3+.
-    async fn lock_window_size(&self, name: &str) -> Result<()> {
-        let status = Command::new("tmux")
-            .args(["set-option", "-t", name, "window-size", "manual"])
-            .status()
-            .await?;
-        if !status.success() {
-            anyhow::bail!("Failed to lock window-size on session: {name}");
-        }
         Ok(())
     }
 
@@ -447,7 +423,7 @@ mod window_size_lock_tests {
     }
 
     #[tokio::test]
-    async fn create_session_locks_window_size_to_manual() {
+    async fn create_session_does_not_lock_window_size() {
         // Skip on machines without tmux (CI covers it).
         if Command::new("tmux").arg("-V").status().await.is_err() {
             eprintln!("tmux not available, skipping");
@@ -455,15 +431,20 @@ mod window_size_lock_tests {
         }
 
         let mgr = TmuxManager::new();
-        let name = unique_name("lock-test");
+        let name = unique_name("no-lock-test");
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
         mgr.create_session(&name, 200, 60, &cwd, &[])
             .await
             .expect("create");
 
+        // window-size should NOT be explicitly set, leaving it at tmux default
+        // so that clients can resize the window.
         let val = read_window_size_option(&name).await.expect("show-option");
-        assert_eq!(val, "manual", "expected window-size=manual, got {val:?}");
+        assert!(
+            val.is_empty(),
+            "expected window-size to be unset, got {val:?}"
+        );
 
         // Cleanup — swallow errors, best-effort.
         let _ = Command::new("tmux")
