@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '../ConnectionManager';
-import type { P2PConnection } from '../../hooks/useP2PConnection';
+import type { P2PConnection, P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';
 
 function makeMockP2P(): P2PConnection {
@@ -18,6 +18,7 @@ function makeMockWs(): WebSocketService {
   return {
     sendTerminalInput: vi.fn(),
     onTerminalOutput: vi.fn().mockReturnValue(() => {}),
+    onTerminalResize: vi.fn().mockReturnValue(() => {}),
     onConnectionChange: vi.fn().mockReturnValue(() => {}),
     requestAttach: vi.fn().mockResolvedValue({ mode: 'relay' }),
     isConnected: () => true,
@@ -79,6 +80,29 @@ describe('ConnectionManager', () => {
       const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length;
       vi.advanceTimersByTime(60_000);
       expect((p2p.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(calls);
+    });
+
+    it('should call onResize callback when terminal.resize message received', () => {
+      const onResize = vi.fn();
+      let messageHandler: (msg: P2PMessage) => void = () => {};
+      const p2p = makeMockP2P();
+      p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
+
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', p2pConnection: p2p,
+      });
+      cm.onResize = onResize;
+
+      // Simulate receiving terminal.resize message
+      messageHandler({
+        msg_type: 'terminal.resize',
+        id: 'test-1',
+        timestamp: Date.now(),
+        payload: { cols: 120, rows: 40 },
+      } as P2PMessage);
+
+      expect(onResize).toHaveBeenCalledWith(120, 40);
+      cm.dispose();
     });
 
     it('attach sends only client.attach, never a synthetic terminal.input (no phantom Enter)', async () => {
@@ -150,6 +174,31 @@ describe('ConnectionManager', () => {
       expect(states.filter((s) => s === 'lost').length).toBe(1);
       vi.advanceTimersByTime(3000);
       expect(onDisconnect).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    it('subscribes to terminal resize and invokes onResize callback', () => {
+      const onResize = vi.fn();
+      let resizeHandler: (cols: number, rows: number) => void = () => {};
+      const ws = makeMockWs();
+      (ws.onTerminalResize as ReturnType<typeof vi.fn>).mockImplementation(
+        (_sid: string, cb: (cols: number, rows: number) => void) => {
+          resizeHandler = cb;
+          return () => {};
+        },
+      );
+
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
+      });
+      cm.onResize = onResize;
+
+      expect(ws.onTerminalResize).toHaveBeenCalledWith('sess-1', expect.any(Function));
+
+      // Simulate server broadcasting terminal.resize for this session
+      resizeHandler(120, 40);
+
+      expect(onResize).toHaveBeenCalledWith(120, 40);
       cm.dispose();
     });
   });

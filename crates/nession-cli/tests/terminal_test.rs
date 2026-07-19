@@ -48,8 +48,8 @@ async fn test_terminal_resize_message_format() {
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
     assert_eq!(v["msg_type"], "terminal.resize");
     assert_eq!(v["payload"]["session_name"], "sess");
-    assert_eq!(v["payload"]["width"], 120);
-    assert_eq!(v["payload"]["height"], 40);
+    assert_eq!(v["payload"]["cols"], 120);
+    assert_eq!(v["payload"]["rows"], 40);
 }
 
 #[tokio::test]
@@ -178,6 +178,6 @@ async fn test_resize_message_routing() {
     let msg = build_terminal_resize_message("session1", 132, 50);
     let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
     assert_eq!(v["msg_type"], "terminal.resize");
-    assert_eq!(v["payload"]["width"], 132);
-    assert_eq!(v["payload"]["height"], 50);
+    assert_eq!(v["payload"]["cols"], 132);
+    assert_eq!(v["payload"]["rows"], 50);
 }

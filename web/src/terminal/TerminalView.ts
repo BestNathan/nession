@@ -1,9 +1,8 @@
 import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { AddonManager } from './AddonManager';
 import { Renderer } from './Renderer';
 import { ThemeManager } from './ThemeManager';
-import { ViewportManager } from './ViewportManager';
+import { TerminalSizeManager } from './TerminalSizeManager';
+import { FontSizeManager } from './FontSizeManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
 import type {
@@ -14,12 +13,13 @@ import type {
 
 const DEFAULT_FONT =
   "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
+const DEFAULT_FONT_SIZE = 14;
 
 export class TerminalView {
   readonly terminal: Terminal;
 
-  private addons: AddonManager;
-  private viewport: ViewportManager;
+  private size: TerminalSizeManager;
+  private fontSize: FontSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
 
@@ -32,44 +32,50 @@ export class TerminalView {
   onDisconnect: (() => void) | null = null;
 
   constructor(container: HTMLElement, options: TerminalViewOptions) {
-    // 1. Create xterm instance.
+    // DOM: container → scrollContainer(overflow:auto) → mountElement
+    // scrollContainer fills its parent; mountElement is sized to
+    // cols*cellW × rows*cellH by TerminalSizeManager. When mount > scroll,
+    // browser-native scrollbars appear. When mount < scroll, container
+    // background (#1e1e2e, set on `container` by the React component) fills
+    // the remainder — no transform, no wrapper.
+    const scrollContainer = document.createElement('div');
+    scrollContainer.style.cssText = 'width:100%; height:100%; overflow:auto;';
+
+    const mountElement = document.createElement('div');
+    mountElement.style.cssText = 'position:relative;';
+
+    scrollContainer.appendChild(mountElement);
+    container.appendChild(scrollContainer);
+
+    const initialFontSize = options.deviceProfile?.fontSize ?? DEFAULT_FONT_SIZE;
+
     this.terminal = new Terminal({
       cursorBlink: true,
-      fontSize: options.deviceProfile?.fontSize ?? 14,
+      fontSize: initialFontSize,
       fontFamily: DEFAULT_FONT,
       theme: options.theme,
       allowProposedApi: true,
       scrollback: options.deviceProfile?.scrollback ?? 10000,
     });
 
-    // 2. Create managers.
-    this.addons = new AddonManager(this.terminal);
-
-    // Renderer and ThemeManager are created for their constructor side-effects.
+    // Renderer/ThemeManager created for constructor side effects.
     new Renderer(this.terminal, options.rendererType);
     new ThemeManager(this.terminal, options.theme);
 
-    const fitAddon = this.addons.register(new FitAddon());
-    this.viewport = new ViewportManager(
+    this.size = new TerminalSizeManager(this.terminal, mountElement);
+    this.fontSize = new FontSizeManager(
       this.terminal,
-      fitAddon,
-      container,
-      { profile: options.deviceProfile },
+      () => this.size.recompute(),
+      initialFontSize,
     );
-    if (options.targetColumns) {
-      this.viewport.setTargetColumns(options.targetColumns);
-    }
-
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
 
-    // 3. Wire managers together.
+    // Wire managers.
     this.input.onData((data: string) => {
       if (!this.isDisposed) { this.connection.send(data); }
     });
-    this.input.onCtrlD(() => {
-      this.onCtrlD?.();
-    });
+    this.input.onCtrlD(() => { this.onCtrlD?.(); });
 
     this.connection.onOutput = (data: string) => {
       if (!this.isDisposed) { this.terminal.write(data); }
@@ -83,22 +89,25 @@ export class TerminalView {
         isConnected: state === 'connected',
       });
     };
-    this.connection.onError = (err: Error) => {
-      this.onError?.(err);
+    this.connection.onError = (err: Error) => { this.onError?.(err); };
+    this.connection.onDisconnect = () => { this.onDisconnect?.(); };
+    this.connection.onResize = (cols: number, rows: number) => {
+      if (!this.isDisposed) { this.size.handleResize(cols, rows); }
     };
-    this.connection.onDisconnect = () => {
-      this.onDisconnect?.();
-    };
 
-    // 4. Open terminal in DOM.
-    this.terminal.open(container);
+    this.terminal.open(mountElement);
 
-    // 4b. Start viewport observation — MUST happen after open() so the
-    //     ResizeObserver never fires while the render service is uninitialised
-    //     (syncScrollArea crashes on undefined _renderService otherwise).
-    this.viewport.start();
+    // Prime mount pixel size from xterm's default cols/rows (typically 80×24)
+    // so the DOM has explicit dimensions before the first tmux resize arrives.
+    // Once that arrives (usually < 100ms after client.attach) size flips to
+    // the real pane size (typically 200×60).
+    requestAnimationFrame(() => {
+      if (!this.isDisposed) {
+        this.size.handleResize(this.terminal.cols, this.terminal.rows);
+      }
+    });
 
-    // 5. Deferred attach (survives React StrictMode double-mount).
+    // Deferred attach (survives React StrictMode double-mount).
     this.attachTimer = setTimeout(() => {
       if (!this.isDisposed) {
         this.connection.attach().catch(() => {});
@@ -107,20 +116,27 @@ export class TerminalView {
   }
 
   sendText(text: string): void {
-    if (this.isDisposed) { return; }
+    if (this.isDisposed) {
+      return;
+    }
     this.connection.send(text);
   }
 
+  /** No-op: TerminalSizeManager is driven by tmux resize events, not viewport fits. */
   refit(): void {
-    if (this.isDisposed) { return; }
-    requestAnimationFrame(() => {
-      if (!this.isDisposed) { this.viewport.fit(); }
-    });
+    // Kept on the handle for API compatibility; nothing to do.
+  }
+
+  /** Get the font-size manager for external zoom controls. */
+  get fontSizeManager(): FontSizeManager {
+    return this.fontSize;
   }
 
   /** Push a banner state from an external observer (e.g. React watching P2P). */
   setExternalBanner(banner: 'none' | 'reconnecting' | 'failed', attempt: number): void {
-    if (this.isDisposed) { return; }
+    if (this.isDisposed) {
+      return;
+    }
     this.onStateChange?.({
       banner,
       reconnectAttempt: attempt,
@@ -130,7 +146,9 @@ export class TerminalView {
 
   /** Re-issue attach (tmux redraw) after a transport reconnect. */
   reattach(): void {
-    if (this.isDisposed) { return; }
+    if (this.isDisposed) {
+      return;
+    }
     this.connection.reattach().catch(() => {});
   }
 
@@ -138,7 +156,7 @@ export class TerminalView {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.input.dispose();
-    this.viewport.dispose();
+    this.size.dispose();
     this.connection.dispose();
     this.terminal.dispose();
   }

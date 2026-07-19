@@ -20,6 +20,9 @@ use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 
+/// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
+const RESIZE_CHANNEL_CAPACITY: usize = 16;
+
 /// tmux control mode session — one per attached web client.
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
@@ -41,14 +44,18 @@ impl ControlModeSession {
     /// returned channel. `width`/`height` are only recorded on the session
     /// for reporting; xterm.js handles all viewport rendering.
     ///
-    /// Returns `(session, output_receiver)`. The receiver yields raw ANSI
-    /// byte chunks ready to forward to xterm.js. When the tmux subprocess
-    /// exits (or the reader task drops the sender), the receiver closes.
+    /// Returns `(session, output_receiver, resize_receiver)`. The output
+    /// receiver yields raw ANSI byte chunks ready to forward to xterm.js.
+    /// The resize receiver yields `(cols, rows)` pairs each time tmux emits
+    /// a `%window-resize` event so the caller can propagate the new size to
+    /// clients (e.g. as a `terminal.resize` message). When the tmux
+    /// subprocess exits (or the reader task drops the senders), both
+    /// receivers close.
     pub async fn attach(
         session_name: &str,
         width: u16,
         height: u16,
-    ) -> Result<(Self, mpsc::Receiver<Vec<u8>>)> {
+    ) -> Result<(Self, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<(u16, u16)>)> {
         let mut child = Command::new("tmux")
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
@@ -61,7 +68,8 @@ impl ControlModeSession {
         let stdout = child.stdout.take().context("child stdout was not piped")?;
 
         let (output_tx, output_rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
-        tokio::spawn(read_output_loop(stdout, output_tx));
+        let (resize_tx, resize_rx) = mpsc::channel(RESIZE_CHANNEL_CAPACITY);
+        tokio::spawn(read_output_loop(stdout, output_tx, resize_tx));
 
         let session = Self {
             session_name: session_name.to_string(),
@@ -70,7 +78,7 @@ impl ControlModeSession {
             viewport: (width, height),
         };
 
-        Ok((session, output_rx))
+        Ok((session, output_rx, resize_rx))
     }
 
     /// Send raw input bytes to the tmux session using `send-keys -H` (hex).
@@ -139,8 +147,13 @@ impl Drop for ControlModeSession {
     }
 }
 
-/// Background reader: parse control mode lines, forward ANSI bytes.
-async fn read_output_loop(stdout: ChildStdout, output_tx: mpsc::Sender<Vec<u8>>) {
+/// Background reader: parse control mode lines, forward ANSI bytes and
+/// window-resize events.
+async fn read_output_loop(
+    stdout: ChildStdout,
+    output_tx: mpsc::Sender<Vec<u8>>,
+    resize_tx: mpsc::Sender<(u16, u16)>,
+) {
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     loop {
@@ -158,6 +171,12 @@ async fn read_output_loop(stdout: ChildStdout, output_tx: mpsc::Sender<Vec<u8>>)
                             // Receiver dropped - session is being torn down.
                             break;
                         }
+                    }
+                    ControlMessage::WindowResize { cols, rows, .. } => {
+                        // Best-effort: if the receiver is gone the client
+                        // has detached but we keep reading output until
+                        // the output channel also closes.
+                        let _ = resize_tx.send((cols, rows)).await;
                     }
                     ControlMessage::Exit => break,
                     _ => {} // Ignore other messages (begin/end/session-changed/etc.)

@@ -126,6 +126,30 @@ impl TmuxManager {
             anyhow::bail!("Failed to create session: {name}");
         }
 
+        // Lock pane size so no attaching client can resize it. Applied AFTER
+        // new-session succeeds; on failure we roll back by killing the session
+        // so we don't leave a half-configured session lying around.
+        if let Err(e) = self.lock_window_size(name).await {
+            let _ = Command::new("tmux")
+                .args(["kill-session", "-t", name])
+                .status()
+                .await;
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    /// Lock the pane size on this session so no attaching client can resize it.
+    /// Requires tmux ≥ 2.9 (`window-size manual`). Docker images ship tmux 3.3+.
+    async fn lock_window_size(&self, name: &str) -> Result<()> {
+        let status = Command::new("tmux")
+            .args(["set-option", "-t", name, "window-size", "manual"])
+            .status()
+            .await?;
+        if !status.success() {
+            anyhow::bail!("Failed to lock window-size on session: {name}");
+        }
         Ok(())
     }
 
@@ -398,5 +422,53 @@ mod tests {
     async fn cleanup_client_scripts_no_match_is_noop() {
         let mgr = TmuxManager::new();
         mgr.cleanup_client_scripts("nonexistent-client-xyz").await;
+    }
+}
+
+#[cfg(test)]
+mod window_size_lock_tests {
+    use super::*;
+
+    fn unique_name(prefix: &str) -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("{prefix}-{nanos}")
+    }
+
+    async fn read_window_size_option(session: &str) -> Result<String> {
+        let out = Command::new("tmux")
+            .args(["show-option", "-t", session, "-v", "window-size"])
+            .output()
+            .await?;
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    #[tokio::test]
+    async fn create_session_locks_window_size_to_manual() {
+        // Skip on machines without tmux (CI covers it).
+        if Command::new("tmux").arg("-V").status().await.is_err() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+
+        let mgr = TmuxManager::new();
+        let name = unique_name("lock-test");
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+        mgr.create_session(&name, 200, 60, &cwd, &[])
+            .await
+            .expect("create");
+
+        let val = read_window_size_option(&name).await.expect("show-option");
+        assert_eq!(val, "manual", "expected window-size=manual, got {val:?}");
+
+        // Cleanup — swallow errors, best-effort.
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", &name])
+            .status()
+            .await;
     }
 }

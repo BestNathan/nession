@@ -33,6 +33,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalView | null>(null);
+  // Bump this each time viewRef.current is populated or cleared. The
+  // useImperativeHandle below reads viewRef.current at build time (for the
+  // fontSizeManager snapshot); without a dep to invalidate the handle when the
+  // view resolves, ZoomControls would never see a non-null manager. We can't
+  // depend on viewRef directly (a ref update doesn't re-render), so we track
+  // its identity with a counter.
+  const [viewGeneration, setViewGeneration] = useState(0);
   const [banner, setBanner] = useState<ReconnectBanner>('none');
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
@@ -119,24 +126,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     view.onDisconnect = () => onDisconnectRef.current?.();
 
     viewRef.current = view;
+    setViewGeneration((g) => g + 1);
 
     return () => {
       view.dispose();
       viewRef.current = null;
+      setViewGeneration((g) => g + 1);
     };
   }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
 
-  // Imperative handle for parent components.
+  // Imperative handle for parent components. Depends on `viewGeneration` so
+  // the handle regenerates when viewRef.current populates (via useEffect) or
+  // clears (via effect cleanup) — this makes `fontSizeManager` propagate to
+  // consumers instead of being snapshotted as `null` at first mount.
   const isBlocked = banner !== 'none';
   useImperativeHandle(
     ref,
-    () => ({
-      sendText: (text: string) => {
-        if (!isBlocked) { viewRef.current?.sendText(text); }
-      },
-      refit: () => viewRef.current?.refit(),
-    }),
-    [isBlocked],
+    () => {
+      // Read viewGeneration so ESLint knows the value is used; the actual
+      // handle contents come from viewRef.current at build time.
+      void viewGeneration;
+      return {
+        sendText: (text: string) => {
+          if (!isBlocked) { viewRef.current?.sendText(text); }
+        },
+        refit: () => viewRef.current?.refit(),
+        fontSizeManager: viewRef.current?.fontSizeManager ?? null,
+      };
+    },
+    [isBlocked, viewGeneration],
   );
 
   return (
@@ -163,13 +181,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           )}
         </div>
       )}
-      {/* Mount point for xterm. A terminal-coloured background hides the
-          sub-row remainder FitAddon leaves (it floors rows, so
-          containerHeight mod cellHeight px go unpainted): the leftover shows
-          the terminal's own colour instead of a light strip exposing the page
-          background. Only background-color is set — it does NOT change the box
-          model, so (unlike display:flex) it can't race with xterm's renderer
-          init during terminal.open(). */}
+      {/* Mount point for xterm. A terminal-coloured background paints whatever
+          part of the scroll container is not covered by the mount element
+          (mount is sized to exactly cols*cellW × rows*cellH by
+          TerminalSizeManager, so anything larger than the tmux pane fills
+          with this colour instead of exposing the page background). Only
+          background-color is set — it does NOT change the box model, so
+          (unlike display:flex) it can't race with xterm's renderer init
+          during terminal.open(). */}
       <div
         ref={containerRef}
         className="h-full w-full"

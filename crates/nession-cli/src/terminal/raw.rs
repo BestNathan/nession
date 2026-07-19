@@ -244,11 +244,11 @@ pub fn build_terminal_input_message(session_name: &str, data: &[u8]) -> String {
 }
 
 /// Build a `terminal.resize` message.
-pub fn build_terminal_resize_message(session_name: &str, width: u16, height: u16) -> String {
+pub fn build_terminal_resize_message(session_name: &str, cols: u16, rows: u16) -> String {
     let payload = TerminalResizePayload {
         session_name: session_name.to_string(),
-        width,
-        height,
+        cols,
+        rows,
     };
     let msg = Message {
         msg_type: msg_types::TERMINAL_RESIZE.to_string(),
@@ -660,8 +660,8 @@ mod tests {
         let msg = build_terminal_resize_message("s", 120, 40);
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
         assert_eq!(v["msg_type"], "terminal.resize");
-        assert_eq!(v["payload"]["width"], 120);
-        assert_eq!(v["payload"]["height"], 40);
+        assert_eq!(v["payload"]["cols"], 120);
+        assert_eq!(v["payload"]["rows"], 40);
     }
 
     #[test]

@@ -34,6 +34,7 @@ export class ConnectionManager {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
+  private relayUnsubResize: (() => void) | null = null;
   private p2pUnsubMessage: (() => void) | null = null;
   private disposed = false;
 
@@ -41,6 +42,7 @@ export class ConnectionManager {
   onOutput: ((data: string) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
+  onResize: ((cols: number, rows: number) => void) | null = null;
 
   constructor(options: ConnectionOptions) {
     this.mode = options.mode;
@@ -120,10 +122,12 @@ export class ConnectionManager {
     this.p2pUnsubMessage?.();
     this.relayUnsubOutput?.();
     this.relayUnsubState?.();
+    this.relayUnsubResize?.();
     this.onStateChange = null;
     this.onOutput = null;
     this.onError = null;
     this.onDisconnect = null;
+    this.onResize = null;
   }
 
   private setupP2P(): void {
@@ -143,6 +147,11 @@ export class ConnectionManager {
           if (data) {
             this.onOutput?.(decodeB64(data));
           }
+          break;
+        }
+        case 'terminal.resize': {
+          const { cols, rows } = msg.payload as { cols: number; rows: number };
+          this.onResize?.(cols, rows);
           break;
         }
         case 'ok':
@@ -179,6 +188,15 @@ export class ConnectionManager {
         this.onOutput?.(data);
       }
     });
+
+    this.relayUnsubResize = svc.onTerminalResize(
+      this.sessionId,
+      (cols: number, rows: number) => {
+        if (!this.disposed) {
+          this.onResize?.(cols, rows);
+        }
+      },
+    );
 
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }

@@ -264,7 +264,9 @@ async fn background_check_all_scenarios() {
     assert!(msg.contains("Update available"));
     assert!(msg.contains("0.5.0"));
 
-    // Scenario 2: Stale cache, no network → returns None
+    // Scenario 2: Stale cache, network failure → returns None
+    // Use an invalid URL to simulate network failure (connection refused)
+    std::env::set_var("NESSION_UPDATE_API_URL", "http://127.0.0.1:1");
     cache::write_cache(&UpdateCache {
         checked_at: Utc::now() - Duration::minutes(60),
         latest_version: "0.6.0".into(),
@@ -276,8 +278,9 @@ async fn background_check_all_scenarios() {
         nession_cli::update::check::background_check()
             .await
             .is_none(),
-        "stale cache + no network should return None"
+        "stale cache + network failure should return None"
     );
+    std::env::remove_var("NESSION_UPDATE_API_URL");
 
     // Scenario 3: Mock API, stale cache → fetches latest
     let server = Server::run();

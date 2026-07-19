@@ -573,6 +573,31 @@ pub struct AgentEnvStatePayload {
     pub sourced_files: Vec<EnvFileRef>,
 }
 
+// ============================================================================
+// Terminal resize events
+// ============================================================================
+
+/// Agent → Server: tmux session resized.
+/// Agent parses tmux control mode `%window-resize` events and sends this
+/// payload with the session id and new dimensions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTerminalResizePayload {
+    pub session_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Server → Client: broadcast terminal resize to all attached clients.
+/// Reuses the message type name already used by CLI (`terminal.resize`).
+/// The `session_id` lets each client route to its per-session callback —
+/// clients may be attached to multiple sessions on the same WebSocket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerTerminalResizePayload {
+    pub session_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,5 +716,33 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         let deserialized: EnvFileRef = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.agent_id, Some("agent-1".to_string()));
+    }
+
+    #[test]
+    fn test_terminal_resize_payload_serde() {
+        let payload = AgentTerminalResizePayload {
+            session_id: "session-123".to_string(),
+            cols: 120,
+            rows: 40,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: AgentTerminalResizePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "session-123");
+        assert_eq!(deserialized.cols, 120);
+        assert_eq!(deserialized.rows, 40);
+    }
+
+    #[test]
+    fn test_server_terminal_resize_payload_serde() {
+        let payload = ServerTerminalResizePayload {
+            session_id: "session-123".to_string(),
+            cols: 120,
+            rows: 40,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: ServerTerminalResizePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "session-123");
+        assert_eq!(deserialized.cols, 120);
+        assert_eq!(deserialized.rows, 40);
     }
 }

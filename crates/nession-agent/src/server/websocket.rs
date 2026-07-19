@@ -185,8 +185,8 @@ pub struct TerminalInputPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalResizePayload {
     pub session_name: String,
-    pub width: u16,
-    pub height: u16,
+    pub cols: u16,
+    pub rows: u16,
 }
 
 fn default_width() -> u16 {
@@ -407,6 +407,67 @@ fn parse_listen_address(addr: &str) -> (String, u16) {
             ("127.0.0.1".to_string(), 9090)
         }
     }
+}
+
+/// Query tmux for the current window size of `session_name` using
+/// `tmux display-message -p -t <session> '#{window_width} #{window_height}'`.
+///
+/// Returns `(cols, rows)`. Errors if the command fails, the output cannot
+/// be parsed, or the two dimensions cannot both be read as `u16`.
+async fn query_window_size(session_name: &str) -> Result<(u16, u16)> {
+    let output = tokio::process::Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            session_name,
+            "#{window_width} #{window_height}",
+        ])
+        .output()
+        .await
+        .with_context(|| format!("failed to spawn tmux display-message for {session_name}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux display-message exited with status {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut parts = text.split_whitespace();
+    let cols: u16 = parts
+        .next()
+        .context("no width in display-message output")?
+        .parse()
+        .context("failed to parse window width")?;
+    let rows: u16 = parts
+        .next()
+        .context("no height in display-message output")?
+        .parse()
+        .context("failed to parse window height")?;
+    Ok((cols, rows))
+}
+
+/// Send a single `terminal.resize` message on the shared WebSocket sink.
+/// Returns `true` on success, `false` if the sink is closed (in which case
+/// the caller should stop forwarding).
+async fn send_terminal_resize_msg(
+    sink: &Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    session_name: &str,
+    cols: u16,
+    rows: u16,
+) -> bool {
+    let payload = TerminalResizePayload {
+        session_name: session_name.to_string(),
+        cols,
+        rows,
+    };
+    let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return true;
+    };
+    let mut s = sink.lock().await;
+    s.send(WsMessage::Text(json)).await.is_ok()
 }
 
 pub fn new_message<P: Serialize>(msg_type: &str, payload: P) -> Message<P> {
@@ -850,7 +911,7 @@ impl AgentServer {
                 )
                 .await
                 {
-                    Ok((session, mut output_rx)) => {
+                    Ok((session, mut output_rx, mut resize_rx)) => {
                         let session_name = payload.session_name.clone();
                         sessions.lock().await.insert(session_name.clone(), session);
 
@@ -879,6 +940,55 @@ impl AgentServer {
                             }
                             // Channel closed — tmux subprocess exited or
                             // session was closed by the detach handler.
+                        });
+
+                        // Spawn a second task that emits an initial
+                        // `terminal.resize` (so xterm.js can size its grid
+                        // to match the tmux pane before any output flows
+                        // in) and then forwards ongoing `%window-resize`
+                        // events on the same message type.
+                        //
+                        // TODO(follow-up): also forward these events upstream
+                        // to the central server via
+                        // `sync::terminal::send_terminal_resize` so relay
+                        // clients (browser → server → agent) see the same
+                        // size updates. That requires threading a
+                        // `TransportSink` through here and is intentionally
+                        // deferred to keep this diff focused on the P2P path.
+                        let sink_resize = Arc::clone(&sink);
+                        let session_name_resize = session_name.clone();
+                        tokio::spawn(async move {
+                            // Initial resize: query tmux for the pane's
+                            // current size and forward it as one message.
+                            // Runs inside the spawned task so the attach
+                            // OK response reaches the client first.
+                            match query_window_size(&session_name_resize).await {
+                                Ok((cols, rows)) => {
+                                    send_terminal_resize_msg(
+                                        &sink_resize,
+                                        &session_name_resize,
+                                        cols,
+                                        rows,
+                                    )
+                                    .await;
+                                }
+                                Err(e) => warn!(
+                                    "failed to query initial window size for {}: {:#}",
+                                    session_name_resize, e
+                                ),
+                            }
+                            while let Some((cols, rows)) = resize_rx.recv().await {
+                                if !send_terminal_resize_msg(
+                                    &sink_resize,
+                                    &session_name_resize,
+                                    cols,
+                                    rows,
+                                )
+                                .await
+                                {
+                                    break;
+                                }
+                            }
                         });
 
                         let resp = ClientAttachResponse {
@@ -948,7 +1058,7 @@ impl AgentServer {
                 };
                 let mut sessions_guard = sessions.lock().await;
                 match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.resize(payload.width, payload.height).await {
+                    Some(session) => match session.resize(payload.cols, payload.rows).await {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("resize_error", &e.to_string()),
                     },
@@ -2384,8 +2494,8 @@ mod tests {
 
         let resize_payload = TerminalResizePayload {
             session_name: "no-such-session".to_string(),
-            width: 120,
-            height: 40,
+            cols: 120,
+            rows: 40,
         };
         let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
