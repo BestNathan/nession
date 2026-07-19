@@ -15,6 +15,12 @@ pub enum ControlMessage {
     SessionChanged { session_id: String, name: String },
     /// 布局变化: %layout-change <window_id> <layout> <flags> <active_pane>
     LayoutChange { window_id: String, layout: String },
+    /// 窗口尺寸变化: %window-resize @<window_id> <cols> <rows>
+    WindowResize {
+        window_id: String,
+        cols: u16,
+        rows: u16,
+    },
     /// tmux 退出: %exit
     Exit,
 }
@@ -43,6 +49,12 @@ pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
         parse_session_changed(line)
     } else if line.starts_with("%layout-change ") {
         parse_layout_change(line)
+    } else if line.starts_with("%window-resize ") {
+        super::control_mode::parse_window_resize(line).map(|ev| ControlMessage::WindowResize {
+            window_id: ev.window_id,
+            cols: ev.cols,
+            rows: ev.rows,
+        })
     } else if line == "%exit" || line.starts_with("%exit ") {
         Some(ControlMessage::Exit)
     } else {
@@ -227,6 +239,16 @@ mod tests {
             msg,
             Some(ControlMessage::LayoutChange { window_id, layout })
             if window_id == "@0" && layout == "b25d,80x24,0,0,0"
+        ));
+    }
+
+    #[test]
+    fn test_parse_window_resize() {
+        let msg = parse_control_line("%window-resize @1 200 60");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::WindowResize { window_id, cols: 200, rows: 60 })
+            if window_id == "@1"
         ));
     }
 

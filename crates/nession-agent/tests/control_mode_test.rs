@@ -56,7 +56,8 @@ async fn test_attach_and_receive_output() -> Result<()> {
     create_session(session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, mut rx) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut session, mut rx, _resize_rx) =
+        ControlModeSession::attach(session_name, 80, 24).await?;
 
     // Drain any startup output (initial screen redraw from refresh-client).
     let _ = drain_bytes(&mut rx, 500).await;
@@ -85,7 +86,7 @@ async fn test_resize_updates_viewport() -> Result<()> {
     create_session(session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(session_name, 80, 24).await?;
 
     assert_eq!(session.viewport(), (80, 24));
 
@@ -107,8 +108,8 @@ async fn test_multiple_clients_independent_viewport() -> Result<()> {
     create_session(session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut client1, _rx1) = ControlModeSession::attach(session_name, 80, 24).await?;
-    let (mut client2, _rx2) = ControlModeSession::attach(session_name, 120, 40).await?;
+    let (mut client1, _rx1, _rz1) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut client2, _rx2, _rz2) = ControlModeSession::attach(session_name, 120, 40).await?;
 
     assert_eq!(client1.viewport(), (80, 24));
     assert_eq!(client2.viewport(), (120, 40));
@@ -132,7 +133,7 @@ async fn test_close_is_idempotent() -> Result<()> {
     create_session(session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(session_name, 80, 24).await?;
 
     session.close().await?;
     session.close().await?;
