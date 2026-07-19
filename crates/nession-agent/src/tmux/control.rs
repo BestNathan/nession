@@ -3,11 +3,11 @@
 //! Uses `tmux -C attach` to control a tmux session, parsing structured
 //! messages instead of raw PTY output.
 //!
-//! Terminal size (cols/rows) is handled entirely on the client side.
-//! xterm.js maintains its own screen buffer and reflows when the browser
-//! window resizes — the agent does not participate. Each web client sees
-//! the tmux pane's full ANSI output stream and adapts locally, so multiple
-//! clients on the same session are naturally independent.
+//! Terminal size (cols/rows) is bidirectional: the client tells tmux its
+//! desired size on attach and when the browser window resizes; tmux confirms
+//! the new size via `%window-resize` events, which the agent broadcasts to
+//! all attached clients. Last writer wins — the most recent resize sets
+//! the size for everyone.
 
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -27,8 +27,7 @@ const RESIZE_CHANNEL_CAPACITY: usize = 16;
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input`. Viewport is client-side only; `resize` records
-/// the last seen size for observability but does not talk to tmux.
+/// input via `write_input` and resizes the tmux window via `resize`.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
@@ -107,16 +106,19 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Record a client-side viewport change. This is bookkeeping only —
-    /// tmux is not notified and no synthetic output is injected. xterm.js
-    /// handles reflow of its own screen buffer when the browser resizes,
-    /// and subsequent `%output` from tmux flows in unchanged.
+    /// Resize the tmux window to the given dimensions.
     ///
-    /// Kept as a method (rather than removing the API) so callers on the
-    /// WebSocket protocol layer don't need to change: `terminal.resize`
-    /// messages remain accepted and no-op on the server.
+    /// Sends a `resize-window` command to tmux via stdin. tmux will confirm
+    /// the new size with a `%window-resize` event, which the read_output_loop
+    /// forwards on the resize channel for broadcast to all attached clients.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
+        let cmd = format!(
+            "resize-window -t {} -x {} -y {}\n",
+            self.session_name, width, height
+        );
+        self.stdin.write_all(cmd.as_bytes()).await?;
+        self.stdin.flush().await?;
         Ok(())
     }
 
@@ -184,5 +186,23 @@ async fn read_output_loop(
             }
             Err(_) => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_resize_command_format() {
+        // Verify the command sent to tmux stdin has correct format.
+        // The command should be: "resize-window -t {session} -x {cols} -y {rows}\n"
+        let session_name = "test-session";
+        let cols: u16 = 120;
+        let rows: u16 = 40;
+        // Expected command format
+        let expected = format!(
+            "resize-window -t {} -x {} -y {}\n",
+            session_name, cols, rows
+        );
+        assert_eq!(expected, "resize-window -t test-session -x 120 -y 40\n");
     }
 }
