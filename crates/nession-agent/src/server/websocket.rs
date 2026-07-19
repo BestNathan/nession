@@ -185,8 +185,8 @@ pub struct TerminalInputPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalResizePayload {
     pub session_name: String,
-    pub width: u16,
-    pub height: u16,
+    pub cols: u16,
+    pub rows: u16,
 }
 
 fn default_width() -> u16 {
@@ -459,8 +459,8 @@ async fn send_terminal_resize_msg(
 ) -> bool {
     let payload = TerminalResizePayload {
         session_name: session_name.to_string(),
-        width: cols,
-        height: rows,
+        cols,
+        rows,
     };
     let msg = new_message(msg_types::TERMINAL_RESIZE, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
@@ -1058,7 +1058,7 @@ impl AgentServer {
                 };
                 let mut sessions_guard = sessions.lock().await;
                 match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.resize(payload.width, payload.height).await {
+                    Some(session) => match session.resize(payload.cols, payload.rows).await {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("resize_error", &e.to_string()),
                     },
@@ -2494,8 +2494,8 @@ mod tests {
 
         let resize_payload = TerminalResizePayload {
             session_name: "no-such-session".to_string(),
-            width: 120,
-            height: 40,
+            cols: 120,
+            rows: 40,
         };
         let req = new_message(msg_types::TERMINAL_RESIZE, resize_payload);
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
