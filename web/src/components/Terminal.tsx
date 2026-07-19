@@ -181,13 +181,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           )}
         </div>
       )}
-      {/* Mount point for xterm. A terminal-coloured background hides the
-          sub-row remainder FitAddon leaves (it floors rows, so
-          containerHeight mod cellHeight px go unpainted): the leftover shows
-          the terminal's own colour instead of a light strip exposing the page
-          background. Only background-color is set — it does NOT change the box
-          model, so (unlike display:flex) it can't race with xterm's renderer
-          init during terminal.open(). */}
+      {/* Mount point for xterm. A terminal-coloured background paints whatever
+          part of the scroll container is not covered by the mount element
+          (mount is sized to exactly cols*cellW × rows*cellH by
+          TerminalSizeManager, so anything larger than the tmux pane fills
+          with this colour instead of exposing the page background). Only
+          background-color is set — it does NOT change the box model, so
+          (unlike display:flex) it can't race with xterm's renderer init
+          during terminal.open(). */}
       <div
         ref={containerRef}
         className="h-full w-full"

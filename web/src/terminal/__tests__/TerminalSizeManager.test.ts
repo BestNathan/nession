@@ -4,8 +4,17 @@ import { TerminalSizeManager } from '../TerminalSizeManager';
 
 /** Attach a fake _renderService with given cell dimensions. */
 function mockRenderService(term: Terminal, cellWidth: number, cellHeight: number): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const t = term as any;
+  // Reach into xterm's private state so tests can control the cell dimensions
+  // getCellDimensions reads via `_core._renderService`. Kept in a narrow type
+  // so it doesn't leak `any` and TypeScript still verifies the assignment.
+  interface XtermInternals {
+    _core?: {
+      _renderService?: {
+        dimensions: { css: { cell: { width: number; height: number } } };
+      };
+    };
+  }
+  const t = term as unknown as XtermInternals;
   t._core = t._core ?? {};
   t._core._renderService = {
     dimensions: { css: { cell: { width: cellWidth, height: cellHeight } } },

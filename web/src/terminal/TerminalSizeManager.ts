@@ -17,13 +17,33 @@ interface CellDimensions {
 }
 
 /**
+ * Shape of xterm.js's undocumented internal state that exposes the current
+ * cell pixel dimensions. Only the path we actually read is typed here — the
+ * real `_core` has far more, but keeping this narrow avoids `any` and gives
+ * TypeScript some ability to notice if the shape drifts.
+ */
+interface XtermInternals {
+  _core?: {
+    _renderService?: {
+      dimensions?: {
+        css?: {
+          cell?: {
+            width: number;
+            height: number;
+          };
+        };
+      };
+    };
+  };
+}
+
+/**
  * Reads cell pixel dimensions from xterm's internal render service.
  * Falls back to defaults (8x16) when the internal API is unavailable
  * (e.g. terminal not yet opened, or internal structure changes).
  */
 function getCellDimensions(term: Terminal): CellDimensions {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderService = (term as any)._core?._renderService;
+  const renderService = (term as unknown as XtermInternals)._core?._renderService;
   const width = renderService?.dimensions?.css?.cell?.width;
   const height = renderService?.dimensions?.css?.cell?.height;
   if (width === undefined || height === undefined) {
