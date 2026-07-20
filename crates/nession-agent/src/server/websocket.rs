@@ -39,24 +39,32 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{error, info, warn};
 
-/// Union type for attached sessions — either a plain PTY session or a
-/// control-mode session.
+/// A plain PTY session shared by all attached clients.
+/// Created on first attach, destroyed on last detach.
+struct SharedSession {
+    pty: crate::tmux::pty::PtySession,
+    /// Unbounded senders — one per subscribed client.  The reader
+    /// thread clones output to all of them.
+    subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+}
+
+/// Keep the control-mode variant for the `attach_mode = "control"` path.
 enum AttachedSession {
-    Plain(crate::tmux::pty::PtySession),
+    Shared(SharedSession),
     Control(crate::tmux::control::ControlModeSession),
 }
 
 impl AttachedSession {
     async fn write_input(&mut self, data: &[u8]) -> Result<()> {
         match self {
-            AttachedSession::Plain(s) => s.write(data),
+            AttachedSession::Shared(s) => s.pty.write(data),
             AttachedSession::Control(s) => s.write_input(data).await,
         }
     }
 
     async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         match self {
-            AttachedSession::Plain(s) => s.resize(cols, rows),
+            AttachedSession::Shared(s) => s.pty.resize(cols, rows),
             AttachedSession::Control(s) => s.resize(cols, rows).await,
         }
     }
