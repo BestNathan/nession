@@ -646,8 +646,27 @@ export class WebSocketService {
   }
 
   private handleTerminalOutput(payload: Record<string, unknown>): void {
-    const sessionId = payload.session_id as string;
-    const data = payload.data as string;
+    // Agent protocol uses session_name; server protocol uses session_id.
+    // Accept either so both relay (agent protocol) and P2P work.
+    const sessionId = (payload.session_name ?? payload.session_id) as string;
+    const rawData = (payload.data ?? '') as string;
+
+    // Relay mode: agent sends base64 via the server relay. Decode it.
+    // Detect relay by presence of session_name without session_id.
+    const isRelay = typeof payload.session_name === 'string' && typeof payload.session_id !== 'string';
+    let data: string;
+    if (isRelay && rawData) {
+      try {
+        const binary = atob(rawData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        data = new TextDecoder().decode(bytes);
+      } catch {
+        data = rawData;
+      }
+    } else {
+      data = rawData;
+    }
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
     if (callbacks) {
@@ -656,7 +675,8 @@ export class WebSocketService {
   }
 
   private handleTerminalResize(payload: Record<string, unknown>): void {
-    const sessionId = payload.session_id as string;
+    // Agent protocol uses session_name; server protocol uses session_id.
+    const sessionId = (payload.session_name ?? payload.session_id) as string;
     const cols = payload.cols as number;
     const rows = payload.rows as number;
 

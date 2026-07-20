@@ -195,14 +195,16 @@ export class ConnectionManager {
   private setupRelay(): void {
     const svc = this.serverConnection!;
 
-    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionId, (data: string) => {
+    // Use sessionName for relay subscriptions — agent protocol messages
+    // carry session_name (short name), not session_id (agent:name format).
+    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionName, (data: string) => {
       if (!this.disposed) {
         this.onOutput?.(data);
       }
     });
 
     this.relayUnsubResize = svc.onTerminalResize(
-      this.sessionId,
+      this.sessionName,
       (cols: number, rows: number) => {
         if (!this.disposed) {
           this.onResize?.(cols, rows);

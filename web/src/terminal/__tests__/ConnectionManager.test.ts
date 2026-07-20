@@ -180,7 +180,7 @@ describe('ConnectionManager', () => {
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
       });
-      expect(ws.onTerminalOutput).toHaveBeenCalledWith('a:test', expect.any(Function));
+      expect(ws.onTerminalOutput).toHaveBeenCalledWith('test', expect.any(Function));
       cm.dispose();
     });
 
@@ -236,7 +236,7 @@ describe('ConnectionManager', () => {
       });
       cm.onResize = onResize;
 
-      expect(ws.onTerminalResize).toHaveBeenCalledWith('sess-1', expect.any(Function));
+      expect(ws.onTerminalResize).toHaveBeenCalledWith('test', expect.any(Function));
 
       // Simulate server broadcasting terminal.resize for this session
       resizeHandler(120, 40);
