@@ -11,6 +11,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tracing::error;
 
 /// Buffer size for reading from the PTY master — 4 KiB per read.
 const READ_BUF_SIZE: usize = 4096;
@@ -55,6 +56,7 @@ impl PtySession {
         // and spawn it on the slave side of the PTY.
         let mut cmd = CommandBuilder::new("tmux");
         cmd.args(["attach", "-t", session_name]);
+        cmd.env("TERM", "xterm-256color");
         let child = pty
             .slave
             .spawn_command(cmd)
@@ -77,13 +79,18 @@ impl PtySession {
 
         // Spawn a blocking reader task — PTY I/O is synchronous, so we
         // use std::thread::spawn to avoid blocking the async runtime.
+        let session_name_owned = session_name.to_string();
         std::thread::spawn(move || {
             let mut buf = vec![0u8; READ_BUF_SIZE];
             loop {
-                let n = reader.read(&mut buf).unwrap_or(0);
-                if n == 0 {
-                    break; // EOF — tmux subprocess exited
-                }
+                let n = match reader.read(&mut buf) {
+                    Ok(0) => break, // EOF — tmux subprocess exited
+                    Ok(n) => n,
+                    Err(e) => {
+                        error!("PTY read error for session {}: {e}", session_name_owned);
+                        break;
+                    }
+                };
                 let chunk = buf.get(..n).unwrap_or(&[]);
                 if tx.blocking_send(chunk.to_vec()).is_err() {
                     break; // receiver dropped
