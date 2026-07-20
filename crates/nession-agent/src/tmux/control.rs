@@ -23,6 +23,28 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
 
+/// Run a tmux subcommand against a named session.
+///
+/// Spawns `tmux <args> -t <session>` and waits for completion.  Returns
+/// `Ok(())` on success, or an error with the command description and exit
+/// status on failure.
+///
+/// Prefer this over ad-hoc `Command::new("tmux")` calls — it ensures
+/// consistent error reporting (including the exit status in the message).
+async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new("tmux");
+    cmd.args(args).arg("-t").arg(session);
+    let desc = format!("tmux {} -t {session}", args.join(" "));
+    let status = cmd
+        .status()
+        .await
+        .with_context(|| format!("failed to spawn {desc}"))?;
+    if !status.success() {
+        anyhow::bail!("{desc} exited with status: {status}");
+    }
+    Ok(())
+}
+
 /// tmux control mode session — one per attached web client.
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
@@ -58,25 +80,17 @@ impl ControlModeSession {
         // Resize tmux window to client's requested size BEFORE attaching.
         // This ensures tmux renders at the correct dimensions from the first
         // frame, avoiding a flash of wrong-sized content.
-        let resize_status = Command::new("tmux")
-            .args([
+        run_tmux_command(
+            session_name,
+            &[
                 "resize-window",
-                "-t",
-                session_name,
                 "-x",
                 &width.to_string(),
                 "-y",
                 &height.to_string(),
-            ])
-            .status()
-            .await
-            .with_context(|| format!("failed to resize tmux window for session {session_name}"))?;
-
-        if !resize_status.success() {
-            anyhow::bail!(
-                "tmux resize-window exited with non-zero status for session {session_name}"
-            );
-        }
+            ],
+        )
+        .await?;
 
         let mut child = Command::new("tmux")
             .args(["-C", "attach", "-t", session_name])
@@ -137,31 +151,17 @@ impl ControlModeSession {
     /// on the resize channel for broadcast to attached P2P clients.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
-        let status = Command::new("tmux")
-            .args([
+        run_tmux_command(
+            &self.session_name,
+            &[
                 "resize-window",
-                "-t",
-                &self.session_name,
                 "-x",
                 &width.to_string(),
                 "-y",
                 &height.to_string(),
-            ])
-            .status()
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to spawn tmux resize-window for session {}",
-                    self.session_name
-                )
-            })?;
-        if !status.success() {
-            anyhow::bail!(
-                "tmux resize-window for session {} exited with status: {status}",
-                self.session_name
-            );
-        }
-        Ok(())
+            ],
+        )
+        .await
     }
 
     /// Current viewport (width, height).
