@@ -1006,7 +1006,7 @@ impl AgentServer {
                         payload.height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
-                            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                            let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
                             let shared = SharedSession {
                                 pty: pty_session,
                                 subscribers: vec![tx],
@@ -1014,6 +1014,28 @@ impl AgentServer {
                             sessions_guard
                                 .insert(session_name.clone(), AttachedSession::Shared(shared));
                             drop(sessions_guard);
+
+                            // Spawn forwarding task for the first subscriber.
+                            let sink_first = Arc::clone(&sink);
+                            let session_name_first = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = first_rx.recv().await {
+                                    use base64::Engine;
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let output = TerminalOutputPayload {
+                                        session_name: session_name_first.clone(),
+                                        data: encoded,
+                                    };
+                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let mut s = sink_first.lock().await;
+                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
 
                             // Spawn ONE broadcast task for this session.
                             // It reads from output_rx and fans out to ALL subscribers.
