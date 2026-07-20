@@ -284,6 +284,10 @@ pub struct ClientSessionAttachPayload {
     /// sees "p2p" or "relay" in practice.
     #[serde(default = "default_attach_mode")]
     pub preferred_mode: String,
+    /// Resolved env-file snapshots for attach-time injection (relay mode).
+    /// Empty (default) preserves the pre-env-feature behaviour.
+    #[serde(default)]
+    pub env_snapshots: Vec<EnvSnapshot>,
 }
 
 fn default_attach_mode() -> String {
@@ -744,5 +748,35 @@ mod tests {
         assert_eq!(deserialized.session_id, "session-123");
         assert_eq!(deserialized.cols, 120);
         assert_eq!(deserialized.rows, 40);
+    }
+
+    #[test]
+    fn test_client_session_attach_payload_default_env_snapshots() {
+        let json = serde_json::json!({
+            "session_id": "agent:session",
+            "preferred_mode": "relay"
+        });
+        let payload: ClientSessionAttachPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(payload.session_id, "agent:session");
+        assert_eq!(payload.preferred_mode, "relay");
+        assert!(payload.env_snapshots.is_empty());
+    }
+
+    #[test]
+    fn test_client_session_attach_payload_with_env_snapshots() {
+        let json = serde_json::json!({
+            "session_id": "agent:session",
+            "preferred_mode": "relay",
+            "env_snapshots": [{
+                "name": "staging.env",
+                "source": "server",
+                "vars": [["NODE_ENV", "staging"], ["DEBUG", "true"]],
+                "warnings": []
+            }]
+        });
+        let payload: ClientSessionAttachPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(payload.env_snapshots.len(), 1);
+        assert_eq!(payload.env_snapshots[0].name, "staging.env");
+        assert_eq!(payload.env_snapshots[0].vars.len(), 2);
     }
 }
