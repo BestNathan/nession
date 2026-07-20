@@ -131,17 +131,36 @@ impl ControlModeSession {
 
     /// Resize the tmux window to the given dimensions.
     ///
-    /// Sends a `resize-window` command to tmux via stdin. tmux will confirm
-    /// the new size with a `%window-resize` event, which the read_output_loop
-    /// forwards on the resize channel for broadcast to all attached clients.
+    /// Spawns a separate `tmux resize-window` process (NOT sent via control-mode
+    /// stdin, which is reserved for pane keyboard input).  tmux will confirm the
+    /// new size with a `%window-resize` event that the read_output_loop forwards
+    /// on the resize channel for broadcast to attached P2P clients.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
-        let cmd = format!(
-            "resize-window -t {} -x {} -y {}\n",
-            self.session_name, width, height
-        );
-        self.stdin.write_all(cmd.as_bytes()).await?;
-        self.stdin.flush().await?;
+        let status = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &self.session_name,
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
+            ])
+            .status()
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to spawn tmux resize-window for session {}",
+                    self.session_name
+                )
+            })?;
+        if !status.success() {
+            anyhow::bail!(
+                "tmux resize-window for session {} exited with status: {status}",
+                self.session_name
+            );
+        }
         Ok(())
     }
 
@@ -212,20 +231,5 @@ async fn read_output_loop(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_resize_command_format() {
-        // Verify the command sent to tmux stdin has correct format.
-        // The command should be: "resize-window -t {session} -x {cols} -y {rows}\n"
-        let session_name = "test-session";
-        let cols: u16 = 120;
-        let rows: u16 = 40;
-        // Expected command format
-        let expected = format!(
-            "resize-window -t {} -x {} -y {}\n",
-            session_name, cols, rows
-        );
-        assert_eq!(expected, "resize-window -t test-session -x 120 -y 40\n");
-    }
-}
+// resize() spawns a separate `tmux resize-window` process; covered by
+// integration tests (test_resize_updates_viewport, etc.).
