@@ -69,7 +69,7 @@ export class ConnectionManager {
           payload: { session_name: this.sessionName, data: encodeB64(data) },
         });
       } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
-        this.serverConnection.sendTerminalInput(this.sessionId, data);
+        this.serverConnection.sendRelayInput(this.sessionName, data);
       }
     } catch (err) {
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -88,7 +88,7 @@ export class ConnectionManager {
           payload: { session_name: this.sessionName, cols, rows },
         });
       } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
-        this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);
+        this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
       }
     } catch (err) {
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
