@@ -143,25 +143,21 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Resize the tmux window to the given dimensions.
+    /// Resize the tmux window and trigger a full redraw.
     ///
-    /// Spawns a separate `tmux resize-window` process (NOT sent via control-mode
-    /// stdin, which is reserved for pane keyboard input).  tmux will confirm the
-    /// new size with a `%window-resize` event that the read_output_loop forwards
-    /// on the resize channel for broadcast to attached P2P clients.
+    /// Sends two commands via control-mode stdin:
+    /// 1. `resize-window` — changes the window size (affects all clients)
+    /// 2. `refresh-client` — triggers a full pane redraw so the reflowed
+    ///    content is sent as `%output` messages immediately
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
-        run_tmux_command(
-            &self.session_name,
-            &[
-                "resize-window",
-                "-x",
-                &width.to_string(),
-                "-y",
-                &height.to_string(),
-            ],
-        )
-        .await
+        let cmd = format!(
+            "resize-window -t {} -x {} -y {}\nrefresh-client\n",
+            self.session_name, width, height
+        );
+        self.stdin.write_all(cmd.as_bytes()).await?;
+        self.stdin.flush().await?;
+        Ok(())
     }
 
     /// Current viewport (width, height).
