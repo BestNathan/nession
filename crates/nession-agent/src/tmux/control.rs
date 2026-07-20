@@ -3,11 +3,11 @@
 //! Uses `tmux -C attach` to control a tmux session, parsing structured
 //! messages instead of raw PTY output.
 //!
-//! Terminal size (cols/rows) is handled entirely on the client side.
-//! xterm.js maintains its own screen buffer and reflows when the browser
-//! window resizes — the agent does not participate. Each web client sees
-//! the tmux pane's full ANSI output stream and adapts locally, so multiple
-//! clients on the same session are naturally independent.
+//! Terminal size (cols/rows) is bidirectional: the client tells tmux its
+//! desired size on attach and when the browser window resizes; tmux confirms
+//! the new size via `%window-resize` events, which the agent broadcasts to
+//! all attached clients. Last writer wins — the most recent resize sets
+//! the size for everyone.
 
 use anyhow::{Context, Result};
 use std::process::Stdio;
@@ -23,12 +23,62 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
 
+/// Capture the last `lines` lines of scrollback for a session's active pane,
+/// including ANSI escape sequences so xterm.js can render formatting.
+///
+/// Returns the raw ANSI bytes on success, or `None` if the capture fails
+/// (e.g. session has no panes, tmux not available).
+pub async fn capture_scrollback(session: &str, lines: u16) -> Option<Vec<u8>> {
+    let lines_str = lines.to_string();
+    let output = Command::new("tmux")
+        .args([
+            "capture-pane",
+            "-t",
+            session,
+            "-p",
+            "-S",
+            &format!("-{lines_str}"),
+            "-E",
+            "-",
+            "-e",
+        ])
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() && !output.stdout.is_empty() {
+        Some(output.stdout)
+    } else {
+        None
+    }
+}
+
+/// Run a tmux subcommand against a named session.
+///
+/// Spawns `tmux <args> -t <session>` and waits for completion.  Returns
+/// `Ok(())` on success, or an error with the command description and exit
+/// status on failure.
+///
+/// Prefer this over ad-hoc `Command::new("tmux")` calls — it ensures
+/// consistent error reporting (including the exit status in the message).
+async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new("tmux");
+    cmd.args(args).arg("-t").arg(session);
+    let desc = format!("tmux {} -t {session}", args.join(" "));
+    let status = cmd
+        .status()
+        .await
+        .with_context(|| format!("failed to spawn {desc}"))?;
+    if !status.success() {
+        anyhow::bail!("{desc} exited with status: {status}");
+    }
+    Ok(())
+}
+
 /// tmux control mode session — one per attached web client.
 ///
 /// Spawns a `tmux -C attach` subprocess and pipes structured messages
 /// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input`. Viewport is client-side only; `resize` records
-/// the last seen size for observability but does not talk to tmux.
+/// input via `write_input` and resizes the tmux window via `resize`.
 pub struct ControlModeSession {
     session_name: String,
     child: Child,
@@ -39,10 +89,10 @@ pub struct ControlModeSession {
 impl ControlModeSession {
     /// Attach to a tmux session in control mode.
     ///
-    /// Spawns `tmux -C attach -t <session_name>` and starts a background task
+    /// First resizes the tmux window to `width`×`height`, then spawns
+    /// `tmux -C attach -t <session_name>` and starts a background task
     /// that parses `%output` messages and sends unescaped ANSI bytes on the
-    /// returned channel. `width`/`height` are only recorded on the session
-    /// for reporting; xterm.js handles all viewport rendering.
+    /// returned channel.
     ///
     /// Returns `(session, output_receiver, resize_receiver)`. The output
     /// receiver yields raw ANSI byte chunks ready to forward to xterm.js.
@@ -56,6 +106,21 @@ impl ControlModeSession {
         width: u16,
         height: u16,
     ) -> Result<(Self, mpsc::Receiver<Vec<u8>>, mpsc::Receiver<(u16, u16)>)> {
+        // Resize tmux window to client's requested size BEFORE attaching.
+        // This ensures tmux renders at the correct dimensions from the first
+        // frame, avoiding a flash of wrong-sized content.
+        run_tmux_command(
+            session_name,
+            &[
+                "resize-window",
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
+            ],
+        )
+        .await?;
+
         let mut child = Command::new("tmux")
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
@@ -107,16 +172,20 @@ impl ControlModeSession {
         Ok(())
     }
 
-    /// Record a client-side viewport change. This is bookkeeping only —
-    /// tmux is not notified and no synthetic output is injected. xterm.js
-    /// handles reflow of its own screen buffer when the browser resizes,
-    /// and subsequent `%output` from tmux flows in unchanged.
+    /// Resize the tmux window and trigger a full redraw.
     ///
-    /// Kept as a method (rather than removing the API) so callers on the
-    /// WebSocket protocol layer don't need to change: `terminal.resize`
-    /// messages remain accepted and no-op on the server.
+    /// Sends two commands via control-mode stdin:
+    /// 1. `resize-window` — changes the window size (affects all clients)
+    /// 2. `refresh-client` — triggers a full pane redraw so the reflowed
+    ///    content is sent as `%output` messages immediately
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         self.viewport = (width, height);
+        let cmd = format!(
+            "resize-window -t {} -x {} -y {}\nrefresh-client\n",
+            self.session_name, width, height
+        );
+        self.stdin.write_all(cmd.as_bytes()).await?;
+        self.stdin.flush().await?;
         Ok(())
     }
 
@@ -186,3 +255,6 @@ async fn read_output_loop(
         }
     }
 }
+
+// resize() spawns a separate `tmux resize-window` process; covered by
+// integration tests (test_resize_updates_viewport, etc.).

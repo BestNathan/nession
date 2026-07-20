@@ -492,7 +492,7 @@ export class WebSocketService {
     this.ws.send(JSON.stringify(message));
   }
 
-  sendTerminalResize(sessionId: string, width: number, height: number): void {
+  sendTerminalResize(sessionId: string, cols: number, rows: number): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
@@ -503,8 +503,8 @@ export class WebSocketService {
       timestamp: Date.now(),
       payload: {
         session_id: sessionId,
-        width,
-        height,
+        cols,
+        rows,
       },
     };
 

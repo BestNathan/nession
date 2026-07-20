@@ -553,8 +553,8 @@ describe('WebSocketService', () => {
       expect(tResize).toBeTruthy();
       const msg = JSON.parse(tResize!);
       expect(msg.msg_type).toBe('terminal.resize');
-      expect(msg.payload.width).toBe(120);
-      expect(msg.payload.height).toBe(40);
+      expect(msg.payload.cols).toBe(120);
+      expect(msg.payload.rows).toBe(40);
     });
 
     it('throws when not connected for resize', () => {

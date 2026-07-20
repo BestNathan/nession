@@ -17,6 +17,7 @@ function makeMockP2P(): P2PConnection {
 function makeMockWs(): WebSocketService {
   return {
     sendTerminalInput: vi.fn(),
+    sendTerminalResize: vi.fn(),
     onTerminalOutput: vi.fn().mockReturnValue(() => {}),
     onTerminalResize: vi.fn().mockReturnValue(() => {}),
     onConnectionChange: vi.fn().mockReturnValue(() => {}),
@@ -131,6 +132,34 @@ describe('ConnectionManager', () => {
       expect(types).toContain('client.attach');
       cm.dispose();
     });
+
+    it('should send terminal.resize message in P2P mode', () => {
+      const mockSend = vi.fn();
+      const mockP2P: P2PConnection = {
+        connectionState: 'connected',
+        sendMessage: mockSend,
+        onMessage: vi.fn().mockReturnValue(() => {}),
+        waitForConnection: vi.fn().mockResolvedValue(undefined),
+        reconnectAttempt: 0,
+        close: vi.fn(),
+      };
+      const manager = new ConnectionManager({
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'sess-1',
+        p2pConnection: mockP2P,
+      });
+
+      manager.sendResize(120, 40);
+
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          msg_type: 'terminal.resize',
+          payload: { session_name: 'test', cols: 120, rows: 40 },
+        }),
+      );
+      manager.dispose();
+    });
   });
 
   describe('Relay mode', () => {
@@ -174,6 +203,18 @@ describe('ConnectionManager', () => {
       expect(states.filter((s) => s === 'lost').length).toBe(1);
       vi.advanceTimersByTime(3000);
       expect(onDisconnect).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
+    it('should send terminal.resize message in relay mode via sendTerminalResize', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
+      });
+
+      cm.sendResize(120, 40);
+
+      expect(ws.sendTerminalResize).toHaveBeenCalledWith('sess-1', 120, 40);
       cm.dispose();
     });
 

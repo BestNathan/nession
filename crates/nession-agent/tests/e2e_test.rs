@@ -9,6 +9,7 @@
 //! - Graceful shutdown
 
 use futures_util::{SinkExt, StreamExt};
+use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::{
     msg_types as agent_msg_types, new_message, AgentServer, ClientAttachPayload,
@@ -84,6 +85,7 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
+        AttachMode::Plain,
     )
     .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");
@@ -240,16 +242,28 @@ async fn test_terminal_io_through_full_chain() {
     let json = serde_json::to_string(&req).unwrap();
     sink.send(WsMessage::Text(json)).await.unwrap();
 
-    // Wait for attach response.
-    let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .expect("timeout")
-        .expect("stream ended")
-        .expect("error");
+    // Wait for attach response.  The agent may send terminal.output
+    // (scrollback capture) and terminal.resize (initial size query) before
+    // the ok response.  Read until we see ok.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for attach response")
+            .expect("stream ended")
+            .expect("error reading attach response");
 
-    if let WsMessage::Text(text) = response {
-        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed["msg_type"], agent_msg_types::OK);
+        if let WsMessage::Text(text) = response {
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let msg_type = parsed["msg_type"].as_str().unwrap_or("");
+            if msg_type == agent_msg_types::OK {
+                break;
+            }
+            // Skip scrollback capture and initial resize messages.
+        }
+        if tokio::time::Instant::now() > deadline {
+            panic!("timed out waiting for ok response to client.attach");
+        }
     }
 
     // Give output reader time to start.

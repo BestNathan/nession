@@ -44,6 +44,7 @@ export interface DeviceProfile {
 export interface TerminalHandle {
   sendText: (text: string) => void;
   refit: () => void;
+  sendResize: (cols: number, rows: number) => void;
   fontSizeManager: import('./FontSizeManager').FontSizeManager | null;
 }
 

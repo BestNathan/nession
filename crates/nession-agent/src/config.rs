@@ -63,6 +63,20 @@ impl AdvertiseAddress {
     }
 }
 
+/// How the agent attaches to tmux sessions.
+///
+/// - `plain`: Spawn `tmux attach` under a real PTY.  tmux handles resize,
+///   redraw, and multi-client natively.  One PTY shared per session.
+/// - `control`: Use `tmux -C attach` (control mode).  Per-client sessions
+///   with structured message parsing.  Preserved for backward compatibility.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachMode {
+    #[default]
+    Plain,
+    Control,
+}
+
 /// Agent configuration loaded from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -72,6 +86,9 @@ pub struct AgentConfig {
     pub server_url: String,
     /// Authentication token for the central server.
     pub auth_token: String,
+    /// How the agent attaches to tmux sessions.  Default: "plain".
+    #[serde(default)]
+    pub attach_mode: AttachMode,
     /// Address for the agent WebSocket server to listen on.
     #[serde(default = "default_listen_address")]
     pub listen_address: String,
@@ -129,6 +146,7 @@ impl Default for AgentConfig {
             agent_id: format!("agent-{}", uuid::Uuid::new_v4()),
             server_url: "ws://localhost:8443".to_string(),
             auth_token: String::new(),
+            attach_mode: AttachMode::Plain,
             listen_address: default_listen_address(),
             tls_cert_path: None,
             tls_key_path: None,
@@ -229,5 +247,32 @@ mod tests {
         assert_eq!(config.server_url, "ws://localhost:9090");
         assert_eq!(config.auth_token, "token123");
         assert_eq!(config.listen_address, "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn test_attach_mode_default_is_plain() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(config.attach_mode, AttachMode::Plain));
+    }
+
+    #[test]
+    fn test_attach_mode_control() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            attach_mode = "control"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(config.attach_mode, AttachMode::Control));
     }
 }

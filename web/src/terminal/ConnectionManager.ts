@@ -76,15 +76,28 @@ export class ConnectionManager {
     }
   }
 
-  async attach(): Promise<void> {
+  /** Send a terminal resize to the agent (client → tmux direction). */
+  sendResize(cols: number, rows: number): void {
+    if (this.disposed) { return; }
+    try {
+      if (this.mode === 'p2p' && this.p2pConnection?.connectionState === 'connected') {
+        this.p2pConnection.sendMessage({
+          msg_type: 'terminal.resize',
+          id: generateId(),
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: { session_name: this.sessionName, cols, rows },
+        });
+      } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+        this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);
+      }
+    } catch (err) {
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  async attach(width?: number, height?: number): Promise<void> {
     if (this.disposed) { return; }
     if (this.mode === 'p2p' && this.p2pConnection) {
-      // Wait for the socket to actually be OPEN before sending. The engine
-      // schedules attach() on a 50ms timer after terminal.open(), but a real
-      // network WebSocket handshake takes longer than that — sendMessage()
-      // silently no-ops while readyState !== OPEN, so firing immediately drops
-      // the client.attach frame and tmux never redraws (blank terminal). This
-      // mirrors fileOps.sendRequest, which already waits before sending.
       try {
         await this.p2pConnection.waitForConnection();
       } catch (err) {
@@ -92,15 +105,14 @@ export class ConnectionManager {
         return;
       }
       if (this.disposed) { return; }
-      // A bare `client.attach` is enough: the agent's `tmux attach-session`
-      // redraws the full screen on attach. We deliberately do NOT inject a
-      // trailing `\r` — that executed an empty command in the shell, leaving a
-      // stray blank prompt line on every (re)attach.
       this.p2pConnection.sendMessage({
         msg_type: 'client.attach',
         id: generateId(),
         timestamp: Math.floor(Date.now() / 1000),
-        payload: { session_name: this.sessionName },
+        payload: {
+          session_name: this.sessionName,
+          ...(width !== undefined && height !== undefined ? { width, height } : {}),
+        },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
       try {

@@ -311,8 +311,8 @@ where
                     }
                 }
                 _ = ping_ticker.tick() => {
-                    if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new())).await {
-                        error!("Failed to send WebSocket ping: {}", e);
+                    if write.send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new())).await.is_err() {
+                        // Connection closed — expected during shutdown, no need to log.
                         break;
                     }
                 }
@@ -323,19 +323,16 @@ where
     while let Some(msg) = read.next().await {
         let msg = msg?;
 
-        // Track agent registration changes
-        let prev_agent_id = handler.registered_agent_id().cloned();
-
         let action = handler.handle_message(msg).await?;
 
-        // If a new agent just registered, register its sender with CommandBroker
-        let new_agent_id = handler.registered_agent_id().cloned();
-        if let Some(ref agent_id) = new_agent_id {
-            if prev_agent_id.as_ref() != Some(agent_id) {
-                command_broker
-                    .register_agent(agent_id, sender.clone())
-                    .await;
-            }
+        // Register the agent's sender with CommandBroker.  Always replace
+        // the previous sender (if any) because on reconnect the old sender
+        // was already unregistered — failing to re-register here causes
+        // "agent not found" on the first command after reconnect.
+        if let Some(agent_id) = handler.registered_agent_id() {
+            command_broker
+                .register_agent(agent_id, sender.clone())
+                .await;
         }
 
         match action {

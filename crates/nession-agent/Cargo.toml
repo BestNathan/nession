@@ -29,6 +29,7 @@ futures-util.workspace = true
 tokio-rustls.workspace = true
 base64.workspace = true
 mime_guess.workspace = true
+portable-pty.workspace = true
 if-addrs.workspace = true
 
 [dev-dependencies]

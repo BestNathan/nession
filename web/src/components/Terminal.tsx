@@ -128,7 +128,42 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     viewRef.current = view;
     setViewGeneration((g) => g + 1);
 
+    // ResizeObserver: detect container size changes and push to tmux.
+    // The FIRST firing (on mount) is sent immediately so tmux gets the
+    // correct size before attach() runs at ~50ms.  Subsequent firings
+    // (user dragging the window) are debounced at 200ms to avoid flooding
+    // tmux with intermediate sizes.
+    let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+    let isFirstResize = true;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        const cell = view.cellDimensions;
+        if (cell.width === 0 || cell.height === 0) { continue; }
+        const cols = Math.max(1, Math.floor(width / cell.width));
+        const rows = Math.max(1, Math.floor(height / cell.height));
+        if (cols < 2 || rows < 2) { continue; }
+
+        if (isFirstResize) {
+          // First fire — send immediately so tmux is at the right size
+          // when attach() fires at 50ms.
+          isFirstResize = false;
+          view.sendResize(cols, rows);
+          continue;
+        }
+
+        if (resizeDebounce) { clearTimeout(resizeDebounce); }
+        resizeDebounce = setTimeout(() => {
+          if (!viewRef.current) { return; }
+          viewRef.current.sendResize(cols, rows);
+        }, 200);
+      }
+    });
+    resizeObserver.observe(container);
+
     return () => {
+      resizeObserver.disconnect();
+      if (resizeDebounce) { clearTimeout(resizeDebounce); }
       view.dispose();
       viewRef.current = null;
       setViewGeneration((g) => g + 1);
@@ -151,6 +186,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (!isBlocked) { viewRef.current?.sendText(text); }
         },
         refit: () => viewRef.current?.refit(),
+        sendResize: (cols: number, rows: number) => {
+          viewRef.current?.sendResize(cols, rows);
+        },
         fontSizeManager: viewRef.current?.fontSizeManager ?? null,
       };
     },

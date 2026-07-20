@@ -70,6 +70,7 @@ async fn main() -> Result<()> {
         tls_option,
         config.default_working_dir.clone(),
         file_root,
+        config.attach_mode.clone(),
     )
     .context("failed to create agent server")?;
     let server_handle = agent_server
