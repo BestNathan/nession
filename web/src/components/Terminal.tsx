@@ -129,9 +129,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setViewGeneration((g) => g + 1);
 
     // ResizeObserver: detect container size changes and push to tmux.
-    // Debounced — we only send when resizing STOPS (200ms quiet period)
-    // to avoid flooding tmux with intermediate sizes during drag.
+    // The FIRST firing (on mount) is sent immediately so tmux gets the
+    // correct size before attach() runs at ~50ms.  Subsequent firings
+    // (user dragging the window) are debounced at 200ms to avoid flooding
+    // tmux with intermediate sizes.
     let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+    let isFirstResize = true;
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
@@ -139,9 +142,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (cell.width === 0 || cell.height === 0) { continue; }
         const cols = Math.max(1, Math.floor(width / cell.width));
         const rows = Math.max(1, Math.floor(height / cell.height));
-        // Skip if dimensions haven't meaningfully changed (within 1 col/row).
-        // Also skip tiny sizes during initial layout.
         if (cols < 2 || rows < 2) { continue; }
+
+        if (isFirstResize) {
+          // First fire — send immediately so tmux is at the right size
+          // when attach() fires at 50ms.
+          isFirstResize = false;
+          view.sendResize(cols, rows);
+          continue;
+        }
 
         if (resizeDebounce) { clearTimeout(resizeDebounce); }
         resizeDebounce = setTimeout(() => {
