@@ -44,6 +44,8 @@ export class TerminalView {
 
   private isDisposed = false;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Latest resize dimensions from ResizeObserver — passed to attach(). */
+  private pendingResize: { cols: number; rows: number } | null = null;
 
   onStateChange: ((state: TerminalViewState) => void) | null = null;
   onCtrlD: (() => void) | null = null;
@@ -127,10 +129,14 @@ export class TerminalView {
     });
 
     // Deferred attach (survives React StrictMode double-mount).
+    // If the ResizeObserver fired before this timer, we pass the real
+    // viewport dimensions so the agent pre-resizes tmux correctly.
     this.attachTimer = setTimeout(() => {
-      if (!this.isDisposed) {
-        this.connection.attach().catch(() => {});
-      }
+      if (this.isDisposed) { return; }
+      const r = this.pendingResize;
+      this.connection
+        .attach(r?.cols, r?.rows)
+        .catch(() => {});
     }, 50);
   }
 
@@ -148,6 +154,7 @@ export class TerminalView {
     if (this.isDisposed) {
       return;
     }
+    this.pendingResize = { cols, rows };
     // Optimistic local update — xterm re-renders immediately.
     this.size.handleResize(cols, rows);
     // Then tell tmux (agent → tmux resize-window → %window-resize → broadcast).
