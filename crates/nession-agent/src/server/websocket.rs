@@ -831,8 +831,10 @@ impl AgentServer {
                         warn!("Error closing control session {}: {:#}", name, e);
                     }
                 }
-                AttachedSession::Plain(s) => {
-                    drop(s); // PtySession::Drop kills the child
+                AttachedSession::Shared(s) => {
+                    // Drop — PtySession::Drop kills the child, and all
+                    // subscriber senders are dropped, stopping the broadcast task.
+                    drop(s);
                 }
             }
         }
@@ -1172,20 +1174,26 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                let removed = sessions.lock().await.remove(&payload.session_name);
-                match removed {
+                let mut sessions_guard = sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
                     Some(session) => {
                         match session {
-                            AttachedSession::Control(mut s) => {
+                            AttachedSession::Shared(ref mut shared) => {
+                                // Remove dead subscribers, then check if empty.
+                                shared.subscribers.retain(|tx| !tx.is_closed());
+                                if shared.subscribers.is_empty() {
+                                    sessions_guard.remove(&payload.session_name);
+                                    // PtySession dropped → child killed
+                                }
+                            }
+                            AttachedSession::Control(ref mut s) => {
                                 if let Err(e) = s.close().await {
                                     warn!(
-                                        "Error closing control session for {}: {:#}",
+                                        "Error closing control session {}: {:#}",
                                         payload.session_name, e
                                     );
                                 }
-                            }
-                            AttachedSession::Plain(s) => {
-                                drop(s); // PtySession::Drop kills the child
+                                sessions_guard.remove(&payload.session_name);
                             }
                         }
                         let resp = ClientDetachResponse {
