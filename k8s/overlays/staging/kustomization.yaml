@@ -14,13 +14,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-fdada4d
+  newTag: agent-b4860c8
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-fdada4d
+  newTag: server-b4860c8
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-fdada4d
+  newTag: ui-b4860c8
 
 patches:
 - path: patch-ingress.yaml
