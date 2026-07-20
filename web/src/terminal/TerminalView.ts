@@ -118,6 +118,15 @@ export class TerminalView {
 
     this.terminal.open(mountElement);
 
+    // Capture wheel events before xterm.js to let the browser scroll the
+    // page naturally.  Without this, xterm.js consumes wheel events for its
+    // internal scrollback buffer, which conflicts with the scroll container.
+    mountElement.addEventListener(
+      'wheel',
+      (e) => { e.stopPropagation(); },
+      { capture: true },
+    );
+
     // Prime mount pixel size from xterm's default cols/rows (typically 80×24)
     // so the DOM has explicit dimensions before the first tmux resize arrives.
     // Once that arrives (usually < 100ms after client.attach) size flips to

@@ -52,6 +52,11 @@ impl PtySession {
             })
             .context("failed to open PTY")?;
 
+        // Hide the tmux status bar — the web UI has its own chrome.
+        let _ = std::process::Command::new("tmux")
+            .args(["set-option", "-g", "status", "off"])
+            .status();
+
         // Build the command using portable-pty's CommandBuilder
         // and spawn it on the slave side of the PTY.
         let mut cmd = CommandBuilder::new("tmux");
