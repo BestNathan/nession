@@ -305,6 +305,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         tls_option,
         config.default_working_dir.clone(),
         file_root,
+        config.attach_mode.clone(),
     )
     .context("failed to create agent server")?;
     let server_handle = agent_server

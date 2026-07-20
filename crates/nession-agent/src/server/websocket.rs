@@ -24,6 +24,7 @@
 //! | agent → client  | `error`          | Error response                   |
 //! | agent → client  | `ok`             | Success response (with payload)  |
 
+use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::tmux::manager::{SessionInfo, TmuxManager};
 use anyhow::{Context, Result};
@@ -38,8 +39,31 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{error, info, warn};
 
-/// Per-connection map of attached tmux control-mode sessions, keyed by session name.
-type SessionMap = std::collections::HashMap<String, crate::tmux::control::ControlModeSession>;
+/// Union type for attached sessions — either a plain PTY session or a
+/// control-mode session.
+enum AttachedSession {
+    Plain(crate::tmux::pty::PtySession),
+    Control(crate::tmux::control::ControlModeSession),
+}
+
+impl AttachedSession {
+    async fn write_input(&mut self, data: &[u8]) -> Result<()> {
+        match self {
+            AttachedSession::Plain(s) => s.write(data),
+            AttachedSession::Control(s) => s.write_input(data).await,
+        }
+    }
+
+    async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        match self {
+            AttachedSession::Plain(s) => s.resize(cols, rows),
+            AttachedSession::Control(s) => s.resize(cols, rows).await,
+        }
+    }
+}
+
+/// Per-connection map of attached sessions, keyed by session name.
+type SessionMap = std::collections::HashMap<String, AttachedSession>;
 
 /// A stream that can be either plain TCP or TLS-wrapped.
 #[allow(clippy::large_enum_variant)]
@@ -528,6 +552,8 @@ pub struct AgentServer {
     agent_id: String,
     /// Default working directory for new tmux sessions created via P2P.
     default_working_dir: String,
+    /// How the agent attaches to tmux sessions (plain PTY or control mode).
+    attach_mode: AttachMode,
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -557,6 +583,7 @@ impl AgentServer {
     /// Pass `None` for `tls` to run without TLS (plain WebSocket).
     /// `default_working_dir` is the working directory for new tmux sessions.
     /// `file_root` is the sandbox root for file operations.
+    /// `attach_mode` controls whether to use plain PTY or control-mode tmux attach.
     pub fn new(
         listen_address: impl Into<String>,
         agent_id: impl Into<String>,
@@ -566,6 +593,7 @@ impl AgentServer {
         )>,
         default_working_dir: String,
         file_root: &str,
+        attach_mode: AttachMode,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -593,6 +621,7 @@ impl AgentServer {
             listen_address: listen_address.into(),
             agent_id: agent_id.into(),
             default_working_dir,
+            attach_mode,
         })
     }
 
@@ -618,6 +647,7 @@ impl AgentServer {
         let default_working_dir = self.default_working_dir.clone();
         let listen_address = self.listen_address.clone();
         let agent_id = self.agent_id.clone();
+        let attach_mode = self.attach_mode.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -638,9 +668,10 @@ impl AgentServer {
                                 let wd = default_working_dir.clone();
                                 let la = listen_address.clone();
                                 let aid = agent_id.clone();
+                                let am = attach_mode.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid).await
+                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am).await
                                     {
                                         warn!("connection error from {}: {:#}", addr, e);
                                     }
@@ -675,6 +706,7 @@ impl AgentServer {
         file_ops: Arc<FileOps>,
         listen_address: &str,
         agent_id: &str,
+        attach_mode: AttachMode,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -717,6 +749,7 @@ impl AgentServer {
             file_ops,
             listen_address,
             agent_id,
+            attach_mode,
         )
         .await
     }
@@ -734,6 +767,7 @@ impl AgentServer {
         file_ops: Arc<FileOps>,
         listen_address: &str,
         agent_id: &str,
+        attach_mode: AttachMode,
     ) -> Result<()> {
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -756,6 +790,7 @@ impl AgentServer {
                         file_ops.clone(),
                         listen_address,
                         agent_id,
+                        attach_mode.clone(),
                     )
                     .await;
                     let mut s = sink.lock().await;
@@ -781,9 +816,16 @@ impl AgentServer {
         // connection so that the underlying tmux attach children are
         // terminated promptly.
         let mut sessions_guard = sessions.lock().await;
-        for (name, mut session) in sessions_guard.drain() {
-            if let Err(e) = session.close().await {
-                warn!("Error closing control session {}: {:#}", name, e);
+        for (name, session) in sessions_guard.drain() {
+            match session {
+                AttachedSession::Control(mut s) => {
+                    if let Err(e) = s.close().await {
+                        warn!("Error closing control session {}: {:#}", name, e);
+                    }
+                }
+                AttachedSession::Plain(s) => {
+                    drop(s); // PtySession::Drop kills the child
+                }
             }
         }
 
@@ -810,6 +852,7 @@ impl AgentServer {
         file_ops: Arc<FileOps>,
         listen_address: &str,
         agent_id: &str,
+        attach_mode: AttachMode,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
@@ -904,121 +947,173 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                match crate::tmux::control::ControlModeSession::attach(
-                    &payload.session_name,
-                    payload.width,
-                    payload.height,
-                )
-                .await
-                {
-                    Ok((session, mut output_rx, mut resize_rx)) => {
-                        let session_name = payload.session_name.clone();
-                        sessions.lock().await.insert(session_name.clone(), session);
 
-                        // Capture scrollback BEFORE starting the live output stream.
-                        // Done synchronously (not spawned) to guarantee it arrives
-                        // before any live output from the control-mode attach.
-                        let scrollback_bytes =
-                            crate::tmux::control::capture_scrollback(&session_name, 2000).await;
+                if matches!(attach_mode, AttachMode::Plain) {
+                    // ---- Plain PTY path ----
+                    match crate::tmux::pty::PtySession::attach(
+                        &payload.session_name,
+                        payload.width,
+                        payload.height,
+                    ) {
+                        Ok((pty_session, mut output_rx)) => {
+                            let session_name = payload.session_name.clone();
+                            sessions
+                                .lock()
+                                .await
+                                .insert(session_name.clone(), AttachedSession::Plain(pty_session));
 
-                        // Send captured scrollback so xterm.js can pre-fill its buffer.
-                        if let Some(bytes) = scrollback_bytes {
-                            use base64::Engine;
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                            let output = TerminalOutputPayload {
-                                session_name: session_name.clone(),
-                                data: encoded,
+                            // Spawn output forwarding task
+                            let sink_output = Arc::clone(&sink);
+                            let session_name_output = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = output_rx.recv().await {
+                                    use base64::Engine;
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let output = TerminalOutputPayload {
+                                        session_name: session_name_output.clone(),
+                                        data: encoded,
+                                    };
+                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let mut s = sink_output.lock().await;
+                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+
+                            let resp = ClientAttachResponse {
+                                session_name: payload.session_name,
                             };
-                            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                            if let Ok(json) = serde_json::to_string(&msg) {
-                                let mut s = sink.lock().await;
-                                let _ = s.send(WsMessage::Text(json)).await;
-                            }
+                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                                .unwrap_or_default()
                         }
+                        Err(e) => err("attach_failed", &e.to_string()),
+                    }
+                } else {
+                    // ---- Control mode path ----
+                    match crate::tmux::control::ControlModeSession::attach(
+                        &payload.session_name,
+                        payload.width,
+                        payload.height,
+                    )
+                    .await
+                    {
+                        Ok((session, mut output_rx, mut resize_rx)) => {
+                            let session_name = payload.session_name.clone();
+                            sessions
+                                .lock()
+                                .await
+                                .insert(session_name.clone(), AttachedSession::Control(session));
 
-                        // Spawn a background task that consumes the output
-                        // channel from the control-mode subprocess and
-                        // forwards bytes to the client as `terminal.output`
-                        // messages.
-                        let sink_clone = Arc::clone(&sink);
-                        let session_name_clone = session_name.clone();
-                        tokio::spawn(async move {
-                            while let Some(bytes) = output_rx.recv().await {
+                            // Capture scrollback BEFORE starting the live output stream.
+                            // Done synchronously (not spawned) to guarantee it arrives
+                            // before any live output from the control-mode attach.
+                            let scrollback_bytes =
+                                crate::tmux::control::capture_scrollback(&session_name, 2000).await;
+
+                            // Send captured scrollback so xterm.js can pre-fill its buffer.
+                            if let Some(bytes) = scrollback_bytes {
                                 use base64::Engine;
                                 let encoded =
                                     base64::engine::general_purpose::STANDARD.encode(&bytes);
                                 let output = TerminalOutputPayload {
-                                    session_name: session_name_clone.clone(),
+                                    session_name: session_name.clone(),
                                     data: encoded,
                                 };
                                 let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
                                 if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = sink_clone.lock().await;
-                                    if s.send(WsMessage::Text(json)).await.is_err() {
-                                        break;
-                                    }
+                                    let mut s = sink.lock().await;
+                                    let _ = s.send(WsMessage::Text(json)).await;
                                 }
                             }
-                            // Channel closed — tmux subprocess exited or
-                            // session was closed by the detach handler.
-                        });
 
-                        // Spawn a second task that emits an initial
-                        // `terminal.resize` (so xterm.js can size its grid
-                        // to match the tmux pane before any output flows
-                        // in) and then forwards ongoing `%window-resize`
-                        // events on the same message type.
-                        //
-                        // TODO(follow-up): also forward these events upstream
-                        // to the central server via
-                        // `sync::terminal::send_terminal_resize` so relay
-                        // clients (browser → server → agent) see the same
-                        // size updates. That requires threading a
-                        // `TransportSink` through here and is intentionally
-                        // deferred to keep this diff focused on the P2P path.
-                        let sink_resize = Arc::clone(&sink);
-                        let session_name_resize = session_name.clone();
-                        tokio::spawn(async move {
-                            // Initial resize: query tmux for the pane's
-                            // current size and forward it as one message.
-                            // Runs inside the spawned task so the attach
-                            // OK response reaches the client first.
-                            match query_window_size(&session_name_resize).await {
-                                Ok((cols, rows)) => {
-                                    send_terminal_resize_msg(
+                            // Spawn a background task that consumes the output
+                            // channel from the control-mode subprocess and
+                            // forwards bytes to the client as `terminal.output`
+                            // messages.
+                            let sink_clone = Arc::clone(&sink);
+                            let session_name_clone = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = output_rx.recv().await {
+                                    use base64::Engine;
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let output = TerminalOutputPayload {
+                                        session_name: session_name_clone.clone(),
+                                        data: encoded,
+                                    };
+                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let mut s = sink_clone.lock().await;
+                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Channel closed — tmux subprocess exited or
+                                // session was closed by the detach handler.
+                            });
+
+                            // Spawn a second task that emits an initial
+                            // `terminal.resize` (so xterm.js can size its grid
+                            // to match the tmux pane before any output flows
+                            // in) and then forwards ongoing `%window-resize`
+                            // events on the same message type.
+                            //
+                            // TODO(follow-up): also forward these events upstream
+                            // to the central server via
+                            // `sync::terminal::send_terminal_resize` so relay
+                            // clients (browser → server → agent) see the same
+                            // size updates. That requires threading a
+                            // `TransportSink` through here and is intentionally
+                            // deferred to keep this diff focused on the P2P path.
+                            let sink_resize = Arc::clone(&sink);
+                            let session_name_resize = session_name.clone();
+                            tokio::spawn(async move {
+                                // Initial resize: query tmux for the pane's
+                                // current size and forward it as one message.
+                                // Runs inside the spawned task so the attach
+                                // OK response reaches the client first.
+                                match query_window_size(&session_name_resize).await {
+                                    Ok((cols, rows)) => {
+                                        send_terminal_resize_msg(
+                                            &sink_resize,
+                                            &session_name_resize,
+                                            cols,
+                                            rows,
+                                        )
+                                        .await;
+                                    }
+                                    Err(e) => warn!(
+                                        "failed to query initial window size for {}: {:#}",
+                                        session_name_resize, e
+                                    ),
+                                }
+                                while let Some((cols, rows)) = resize_rx.recv().await {
+                                    if !send_terminal_resize_msg(
                                         &sink_resize,
                                         &session_name_resize,
                                         cols,
                                         rows,
                                     )
-                                    .await;
+                                    .await
+                                    {
+                                        break;
+                                    }
                                 }
-                                Err(e) => warn!(
-                                    "failed to query initial window size for {}: {:#}",
-                                    session_name_resize, e
-                                ),
-                            }
-                            while let Some((cols, rows)) = resize_rx.recv().await {
-                                if !send_terminal_resize_msg(
-                                    &sink_resize,
-                                    &session_name_resize,
-                                    cols,
-                                    rows,
-                                )
-                                .await
-                                {
-                                    break;
-                                }
-                            }
-                        });
+                            });
 
-                        let resp = ClientAttachResponse {
-                            session_name: payload.session_name,
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
+                            let resp = ClientAttachResponse {
+                                session_name: payload.session_name,
+                            };
+                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                                .unwrap_or_default()
+                        }
+                        Err(e) => err("attach_failed", &e.to_string()),
                     }
-                    Err(e) => err("attach_failed", &e.to_string()),
                 }
             }
 
@@ -1029,12 +1124,19 @@ impl AgentServer {
                 };
                 let removed = sessions.lock().await.remove(&payload.session_name);
                 match removed {
-                    Some(mut session) => {
-                        if let Err(e) = session.close().await {
-                            warn!(
-                                "Error closing control session for {}: {:#}",
-                                payload.session_name, e
-                            );
+                    Some(session) => {
+                        match session {
+                            AttachedSession::Control(mut s) => {
+                                if let Err(e) = s.close().await {
+                                    warn!(
+                                        "Error closing control session for {}: {:#}",
+                                        payload.session_name, e
+                                    );
+                                }
+                            }
+                            AttachedSession::Plain(s) => {
+                                drop(s); // PtySession::Drop kills the child
+                            }
                         }
                         let resp = ClientDetachResponse {
                             session_name: payload.session_name,
@@ -1454,6 +1556,7 @@ mod tests {
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
+            AttachMode::Plain,
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -1483,6 +1586,7 @@ mod tests {
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
+            AttachMode::Plain,
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -1565,6 +1669,7 @@ mod tests {
             None,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
+            AttachMode::Plain,
         )
         .unwrap();
         let handle = server.start().await.unwrap();

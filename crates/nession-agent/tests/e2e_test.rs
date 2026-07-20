@@ -9,6 +9,7 @@
 //! - Graceful shutdown
 
 use futures_util::{SinkExt, StreamExt};
+use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::{
     msg_types as agent_msg_types, new_message, AgentServer, ClientAttachPayload,
@@ -84,6 +85,7 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
+        AttachMode::Plain,
     )
     .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");

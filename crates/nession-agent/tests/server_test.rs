@@ -5,6 +5,7 @@
 //! working tmux installation (same as the tmux manager / pty tests).
 
 use futures_util::{SinkExt, StreamExt};
+use nession_agent::config::AttachMode;
 use nession_agent::server::websocket::{
     msg_types, new_message, AgentServer, ClientAttachPayload, ClientAttachResponse,
     ClientDetachPayload, ClientDetachResponse, OkPayload, SessionCreatePayload,
@@ -26,6 +27,7 @@ async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHa
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
+        AttachMode::Plain,
     )
     .expect("server creation should succeed");
     let handle = server.start().await.expect("start should succeed");
