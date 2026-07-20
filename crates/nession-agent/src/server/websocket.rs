@@ -915,6 +915,27 @@ impl AgentServer {
                         let session_name = payload.session_name.clone();
                         sessions.lock().await.insert(session_name.clone(), session);
 
+                        // Capture scrollback BEFORE starting the live output stream.
+                        // Done synchronously (not spawned) to guarantee it arrives
+                        // before any live output from the control-mode attach.
+                        let scrollback_bytes =
+                            crate::tmux::control::capture_scrollback(&session_name, 2000).await;
+
+                        // Send captured scrollback so xterm.js can pre-fill its buffer.
+                        if let Some(bytes) = scrollback_bytes {
+                            use base64::Engine;
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            let output = TerminalOutputPayload {
+                                session_name: session_name.clone(),
+                                data: encoded,
+                            };
+                            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                            if let Ok(json) = serde_json::to_string(&msg) {
+                                let mut s = sink.lock().await;
+                                let _ = s.send(WsMessage::Text(json)).await;
+                            }
+                        }
+
                         // Spawn a background task that consumes the output
                         // channel from the control-mode subprocess and
                         // forwards bytes to the client as `terminal.output`

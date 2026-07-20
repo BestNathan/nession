@@ -23,6 +23,35 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
 
+/// Capture the last `lines` lines of scrollback for a session's active pane,
+/// including ANSI escape sequences so xterm.js can render formatting.
+///
+/// Returns the raw ANSI bytes on success, or `None` if the capture fails
+/// (e.g. session has no panes, tmux not available).
+pub async fn capture_scrollback(session: &str, lines: u16) -> Option<Vec<u8>> {
+    let lines_str = lines.to_string();
+    let output = Command::new("tmux")
+        .args([
+            "capture-pane",
+            "-t",
+            session,
+            "-p",
+            "-S",
+            &format!("-{lines_str}"),
+            "-E",
+            "-",
+            "-e",
+        ])
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() && !output.stdout.is_empty() {
+        Some(output.stdout)
+    } else {
+        None
+    }
+}
+
 /// Run a tmux subcommand against a named session.
 ///
 /// Spawns `tmux <args> -t <session>` and waits for completion.  Returns
