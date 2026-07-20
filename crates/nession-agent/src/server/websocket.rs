@@ -957,37 +957,79 @@ impl AgentServer {
                 };
 
                 if matches!(attach_mode, AttachMode::Plain) {
-                    // ---- Plain PTY path ----
+                    // ---- Plain PTY path (session-shared) ----
+                    let session_name = payload.session_name.clone();
+                    let mut sessions_guard = sessions.lock().await;
+
+                    if let Some(AttachedSession::Shared(shared)) =
+                        sessions_guard.get_mut(&session_name)
+                    {
+                        // Session already exists: add a new subscriber.
+                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                        shared.subscribers.push(tx);
+                        drop(sessions_guard);
+
+                        let sink_output = Arc::clone(&sink);
+                        let session_name_output = session_name.clone();
+                        tokio::spawn(async move {
+                            while let Some(bytes) = rx.recv().await {
+                                use base64::Engine;
+                                let encoded =
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                let output = TerminalOutputPayload {
+                                    session_name: session_name_output.clone(),
+                                    data: encoded,
+                                };
+                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                if let Ok(json) = serde_json::to_string(&msg) {
+                                    let mut s = sink_output.lock().await;
+                                    if s.send(WsMessage::Text(json)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+
+                        let resp = ClientAttachResponse {
+                            session_name: payload.session_name,
+                        };
+                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+
+                    // Session doesn't exist yet: create PtySession + first subscriber.
                     match crate::tmux::pty::PtySession::attach(
-                        &payload.session_name,
+                        &session_name,
                         payload.width,
                         payload.height,
                     ) {
                         Ok((pty_session, mut output_rx)) => {
-                            let session_name = payload.session_name.clone();
-                            sessions
-                                .lock()
-                                .await
-                                .insert(session_name.clone(), AttachedSession::Plain(pty_session));
+                            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                            let shared = SharedSession {
+                                pty: pty_session,
+                                subscribers: vec![tx],
+                            };
+                            sessions_guard
+                                .insert(session_name.clone(), AttachedSession::Shared(shared));
+                            drop(sessions_guard);
 
-                            // Spawn output forwarding task
-                            let sink_output = Arc::clone(&sink);
-                            let session_name_output = session_name.clone();
+                            // Spawn ONE broadcast task for this session.
+                            // It reads from output_rx and fans out to ALL subscribers.
+                            let sessions_clone = Arc::clone(&sessions);
+                            let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_output.clone(),
-                                        data: encoded,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_output.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                    let mut guard = sessions_clone.lock().await;
+                                    if let Some(AttachedSession::Shared(s)) =
+                                        guard.get_mut(&session_name_clone)
+                                    {
+                                        // Broadcast to all subscribers; prune dead ones.
+                                        s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
+                                        if s.subscribers.is_empty() {
                                             break;
                                         }
+                                    } else {
+                                        break; // session removed
                                     }
                                 }
                             });
