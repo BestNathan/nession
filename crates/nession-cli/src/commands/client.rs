@@ -169,6 +169,7 @@ pub async fn attach_session(
                     session_name: p2p_info.session_name.clone(),
                     width: cols,
                     height: rows,
+                    env_snapshots: Vec::new(),
                 },
             };
             let attach_json = serde_json::to_string(&attach_msg)?;
@@ -233,6 +234,7 @@ pub async fn attach_session(
                     session_name: session_name.to_string(),
                     width: cols,
                     height: rows,
+                    env_snapshots: Vec::new(),
                 },
             };
             let attach_json = serde_json::to_string(&attach_msg)?;

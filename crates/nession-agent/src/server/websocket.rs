@@ -29,6 +29,7 @@ use crate::fs::ops::FileOps;
 use crate::tmux::manager::{SessionInfo, TmuxManager};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use nession_common::protocol::EnvSnapshot;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -200,6 +201,10 @@ pub struct ClientAttachPayload {
     pub width: u16,
     #[serde(default = "default_height")]
     pub height: u16,
+    /// Resolved env-file snapshots to apply via `tmux set-environment`
+    /// before PTY creation. Empty (default) preserves pre-env behaviour.
+    #[serde(default)]
+    pub env_snapshots: Vec<EnvSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,6 +567,30 @@ pub struct AgentServer {
     default_working_dir: String,
     /// How the agent attaches to tmux sessions (plain PTY or control mode).
     attach_mode: AttachMode,
+}
+
+/// Apply env snapshots to a tmux session via `set-environment`.
+/// Returns warnings for keys that failed (non-fatal).
+async fn apply_env_snapshots(
+    tmux: &TmuxManager,
+    session_name: &str,
+    snapshots: &[EnvSnapshot],
+) -> Vec<String> {
+    if snapshots.is_empty() {
+        return Vec::new();
+    }
+    // Collect all vars from all snapshots, deduplicating by key (last wins).
+    let mut seen = std::collections::HashMap::new();
+    for snap in snapshots {
+        for (k, v) in &snap.vars {
+            seen.insert(k.clone(), v.clone());
+        }
+    }
+    let deduped: Vec<(String, String)> = seen.into_iter().collect();
+    match tmux.set_environment(session_name, &deduped).await {
+        Ok(()) => Vec::new(),
+        Err(warnings) => warnings,
+    }
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -961,6 +990,19 @@ impl AgentServer {
                 if matches!(attach_mode, AttachMode::Plain) {
                     // ---- Plain PTY path (session-shared) ----
                     let session_name = payload.session_name.clone();
+
+                    // Apply env snapshots before PTY creation (non-fatal).
+                    let env_warnings =
+                        apply_env_snapshots(&tmux, &session_name, &payload.env_snapshots).await;
+                    if !env_warnings.is_empty() {
+                        for w in &env_warnings {
+                            warn!(
+                                "env set-environment warning for session {}: {w}",
+                                session_name
+                            );
+                        }
+                    }
+
                     let mut sessions_guard = sessions.lock().await;
 
                     if let Some(AttachedSession::Shared(shared)) =
@@ -1068,6 +1110,20 @@ impl AgentServer {
                     }
                 } else {
                     // ---- Control mode path ----
+
+                    // Apply env snapshots before control-mode attach (non-fatal).
+                    let env_warnings =
+                        apply_env_snapshots(&tmux, &payload.session_name, &payload.env_snapshots)
+                            .await;
+                    if !env_warnings.is_empty() {
+                        for w in &env_warnings {
+                            warn!(
+                                "env set-environment warning for session {}: {w}",
+                                payload.session_name
+                            );
+                        }
+                    }
+
                     match crate::tmux::control::ControlModeSession::attach(
                         &payload.session_name,
                         payload.width,
@@ -1839,6 +1895,7 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            env_snapshots: Vec::new(),
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -1880,6 +1937,7 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            env_snapshots: Vec::new(),
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let _attach_resp: Message<ClientAttachResponse> =
@@ -2334,6 +2392,7 @@ mod tests {
             session_name: session_name.to_string(),
             width: 80,
             height: 24,
+            env_snapshots: Vec::new(),
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &attach_req).await;
@@ -2473,6 +2532,29 @@ mod tests {
         assert_eq!(p.session_name, "s");
         assert_eq!(p.width, 80);
         assert_eq!(p.height, 24);
+        assert!(p.env_snapshots.is_empty());
+    }
+
+    #[test]
+    fn test_client_attach_payload_with_env_snapshots() {
+        let json = serde_json::json!({
+            "session_name": "s",
+            "width": 120,
+            "height": 40,
+            "env_snapshots": [{
+                "name": "test.env",
+                "source": "server",
+                "vars": [["KEY", "VAL"]],
+                "warnings": []
+            }]
+        });
+        let p: ClientAttachPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.env_snapshots.len(), 1);
+        assert_eq!(p.env_snapshots[0].name, "test.env");
+        assert_eq!(
+            p.env_snapshots[0].vars[0],
+            ("KEY".to_string(), "VAL".to_string())
+        );
     }
 
     #[test]
