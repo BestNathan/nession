@@ -694,6 +694,26 @@ impl ConnectionHandler {
             }
             self.attached_session_id = Some(session_id.to_string());
             self.attached_client_id = Some(client_id.clone());
+
+            // Send attach response to browser BEFORE entering relay mode,
+            // so the browser's requestAttach() resolves instead of timing out.
+            if let Some(ref sender) = self.client_sender {
+                let response = Message::Text(
+                    serde_json::json!({
+                        "msg_type": "client.session.attach.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "success",
+                            "mode": "relay",
+                            "session_name": session_name,
+                        }
+                    })
+                    .to_string(),
+                );
+                let _ = sender.send(response);
+            }
+
             Ok(HandlerAction::Relay {
                 agent_ws_url,
                 session_id: session_id.to_string(),

@@ -40,12 +40,10 @@ interface AttachDialogProps {
   probeCache: import('../../hooks/useAddressProbeCache').AddressProbeCache;
 }
 
-// Relay is intentionally omitted as a forced mode: the server's relay attach
-// path is not wired to return a response here, so "Auto" reaches relay only via
-// P2P fallback. Users choose Auto (browser picks best P2P) or P2P (advanced).
 const MODES: { value: AttachMode; label: string; hint: string }[] = [
   { value: 'auto', label: 'Auto', hint: 'Test paths, pick fastest, fall back to relay' },
   { value: 'p2p', label: 'P2P', hint: 'Direct to agent (choose a path below)' },
+  { value: 'relay', label: 'Relay', hint: 'Proxy through server (works behind NAT/firewalls)' },
 ];
 
 const AUTO_URL = '__auto__';
@@ -91,7 +89,10 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     setAttachInfo(null);
     void (async () => {
       try {
-        const info = await wsService.requestAttach(session.session_id, 'p2p');
+        // "auto" resolves to "p2p" first (falls back to relay only when P2P
+        // fails). Explicit "relay" goes directly to the server relay path.
+        const requestedMode = mode === 'auto' ? 'p2p' : mode;
+        const info = await wsService.requestAttach(session.session_id, requestedMode);
         if (!cancelled) {
           setAttachInfo(info);
         }
@@ -104,7 +105,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     return () => {
       cancelled = true;
     };
-  }, [isOpen, session, wsService]);
+  }, [isOpen, session, wsService, mode]);
 
   const cached = agentId ? probeCache.getProbe(agentId) : undefined;
   const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);
@@ -134,8 +135,9 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
 
-          {/* Candidate address list with cached browser-measured latency. */}
-          {candidates.length > 1 ? (
+          {/* Candidate address list with cached browser-measured latency.
+              Hidden in relay mode — the server proxies terminal I/O. */}
+          {mode !== 'relay' && candidates.length > 1 ? (
             <PathList
               candidates={candidates}
               latencyByUrl={latencyByUrl}
@@ -166,7 +168,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
 /** The two connection-mode buttons (Auto / P2P). */
 function ModeToggle({ mode, onChange }: { mode: AttachMode; onChange: (m: AttachMode) => void }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-3 gap-2">
       {MODES.map((m) => (
         <button
           key={m.value}

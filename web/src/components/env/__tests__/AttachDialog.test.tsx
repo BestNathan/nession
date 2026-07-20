@@ -83,7 +83,7 @@ describe('AttachDialog', () => {
     );
   });
 
-  it('does not offer a forced Relay mode', () => {
+  it('offers Auto, P2P, and Relay modes', () => {
     const ws = mockWs(attachInfo());
     render(
       <WebSocketContext.Provider value={ws}>
@@ -98,7 +98,7 @@ describe('AttachDialog', () => {
     );
     expect(screen.getByText('Auto')).toBeInTheDocument();
     expect(screen.getByText('P2P')).toBeInTheDocument();
-    expect(screen.queryByText('Relay')).not.toBeInTheDocument();
+    expect(screen.getByText('Relay')).toBeInTheDocument();
   });
 
   it('shows candidate paths and lets the user pick one', async () => {
