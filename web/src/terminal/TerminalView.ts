@@ -141,11 +141,16 @@ export class TerminalView {
     this.connection.send(text);
   }
 
-  /** Send client viewport resize to the agent so tmux can resize its window. */
+  /** Send client viewport resize to the agent so tmux can resize its window.
+   *  Updates the local xterm grid immediately (optimistic) so there's no
+   *  flash of blank space while waiting for tmux to confirm. */
   sendResize(cols: number, rows: number): void {
     if (this.isDisposed) {
       return;
     }
+    // Optimistic local update — xterm re-renders immediately.
+    this.size.handleResize(cols, rows);
+    // Then tell tmux (agent → tmux resize-window → %window-resize → broadcast).
     this.connection.sendResize(cols, rows);
   }
 
