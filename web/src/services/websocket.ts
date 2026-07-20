@@ -511,6 +511,65 @@ export class WebSocketService {
     this.ws.send(JSON.stringify(message));
   }
 
+  // ── Relay mode terminal I/O (agent protocol format) ──
+
+  /** Base64-encode a UTF-8 string for agent protocol compatibility. */
+  private encodeBase64(data: string): string {
+    const bytes = new TextEncoder().encode(data);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Send terminal input in agent protocol format for relay mode.
+   * Uses `session_name` (short name) and base64-encoded data,
+   * matching the agent's expected wire format for `terminal.input`.
+   */
+  sendRelayInput(sessionName: string, data: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'terminal.input',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: {
+        session_name: sessionName,
+        data: this.encodeBase64(data),
+      },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Send terminal resize in agent protocol format for relay mode.
+   * Uses `session_name` (short name), matching the agent's expected
+   * wire format for `terminal.resize`.
+   */
+  sendRelayResize(sessionName: string, cols: number, rows: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'terminal.resize',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: {
+        session_name: sessionName,
+        cols,
+        rows,
+      },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   // P2P Support
 
   getP2PConnectionInfo(attachInfo: AttachInfo): { url: string; token: string } | null {
