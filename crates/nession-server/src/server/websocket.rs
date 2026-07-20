@@ -11,6 +11,7 @@ use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
+use nession_common::protocol::EnvSnapshot;
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -345,9 +346,18 @@ where
             HandlerAction::Relay {
                 agent_ws_url,
                 session_id: _,
+                session_name,
                 client_id: _,
+                env_snapshots,
             } => {
-                relay_bidirectional_via_channel(&mut read, sender.clone(), &agent_ws_url).await?;
+                relay_bidirectional_via_channel(
+                    &mut read,
+                    sender.clone(),
+                    &agent_ws_url,
+                    &session_name,
+                    &env_snapshots,
+                )
+                .await?;
                 break;
             }
             HandlerAction::Close => {
@@ -383,6 +393,8 @@ async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::command_broker::WsMessageSender,
     agent_ws_url: &str,
+    _session_name: &str,
+    _env_snapshots: &[EnvSnapshot],
 ) -> anyhow::Result<()>
 where
     RS: futures_util::Stream<

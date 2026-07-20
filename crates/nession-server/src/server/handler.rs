@@ -22,10 +22,14 @@ pub enum HandlerAction {
     /// at the given WebSocket address.
     Relay {
         agent_ws_url: String,
-        /// Session being attached to (for client registry tracking).
+        /// Session id ("agent_id:session_name") for client registry tracking.
         session_id: String,
+        /// Short session name for agent protocol messages (client.attach, etc.).
+        session_name: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
+        /// Resolved env snapshots to inject via client.attach to the agent.
+        env_snapshots: Vec<EnvSnapshot>,
     },
     /// Close the connection.
     Close,
@@ -662,10 +666,21 @@ impl ConnectionHandler {
         );
 
         if preferred_mode == "relay" {
-            // For relay mode, the server will proxy I/O between client and agent.
-            // The handler loop must transition into relay mode.
-            // Register this client with the ClientRegistry so the server can
-            // broadcast events (e.g. terminal resize) to all attached clients.
+            // Resolve env snapshots if provided in the attach request.
+            let attach_env_snapshots: Vec<EnvSnapshot> = msg
+                .payload
+                .get("env_snapshots")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            if !attach_env_snapshots.is_empty() {
+                info!(
+                    "Relay attach with {} env snapshot(s) for session {}",
+                    attach_env_snapshots.len(),
+                    session_name
+                );
+            }
+
             let client_id = uuid::Uuid::new_v4().to_string();
             if let Some(ref sender) = self.client_sender {
                 self.client_registry
@@ -682,7 +697,9 @@ impl ConnectionHandler {
             Ok(HandlerAction::Relay {
                 agent_ws_url,
                 session_id: session_id.to_string(),
+                session_name: session_name.clone(),
                 client_id,
+                env_snapshots: attach_env_snapshots,
             })
         } else {
             // P2P mode: return the full candidate list (with probe status) plus
@@ -2665,9 +2682,13 @@ mod tests {
             HandlerAction::Relay {
                 agent_ws_url,
                 session_id: _,
+                session_name,
                 client_id: _,
+                env_snapshots,
             } => {
                 assert!(agent_ws_url.contains("1.2.3.4"));
+                assert_eq!(session_name, "dev");
+                assert!(env_snapshots.is_empty());
             }
             _ => panic!("expected Relay action"),
         }
