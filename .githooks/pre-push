@@ -7,51 +7,80 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}→ pre-push: running full checks...${NC}"
+# ── Determine what changed ──────────────────────────────────────────────────
+HAS_RUST=0
+HAS_WEB=0
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # First push — run everything
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    HAS_RUST=1
+    HAS_WEB=1
+    break
+  fi
+
+  changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)
+  if echo "$changed" | grep -q '\.rs$'; then
+    HAS_RUST=1
+  fi
+  if echo "$changed" | grep -qE '^(web/|\.(ts|tsx|js|css)$)'; then
+    HAS_WEB=1
+  fi
+done
+
+# ── Skip if nothing relevant changed ────────────────────────────────────────
+if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ]; then
+  echo -e "${GREEN}→ pre-push: no Rust/Web changes, skipping tests${NC}"
+  exit 0
+fi
+
+echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB)${NC}"
 echo ""
 
 HAS_ERROR=0
 
-# Rust: test
-echo -e "${YELLOW}→ just test${NC}"
-if just test; then
-  echo -e "${GREEN}✓ just test${NC}"
-else
-  echo -e "${RED}✗ just test${NC}"
-  HAS_ERROR=1
+# ── Rust ────────────────────────────────────────────────────────────────────
+if [ $HAS_RUST -eq 1 ]; then
+  echo -e "${YELLOW}→ just test${NC}"
+  if just test; then
+    echo -e "${GREEN}✓ just test${NC}"
+  else
+    echo -e "${RED}✗ just test${NC}"
+    HAS_ERROR=1
+  fi
+
+  echo ""
+
+  echo -e "${YELLOW}→ just coverage${NC}"
+  if just coverage; then
+    echo -e "${GREEN}✓ just coverage${NC}"
+  else
+    echo -e "${RED}✗ just coverage${NC}"
+    HAS_ERROR=1
+  fi
 fi
 
-echo ""
+# ── Web ──────────────────────────────────────────────────────────────────────
+if [ $HAS_WEB -eq 1 ]; then
+  echo ""
 
-# Rust: coverage
-echo -e "${YELLOW}→ just coverage${NC}"
-if just coverage; then
-  echo -e "${GREEN}✓ just coverage${NC}"
-else
-  echo -e "${RED}✗ just coverage${NC}"
-  HAS_ERROR=1
-fi
+  echo -e "${YELLOW}→ just web-test${NC}"
+  if just web-test; then
+    echo -e "${GREEN}✓ just web-test${NC}"
+  else
+    echo -e "${RED}✗ just web-test${NC}"
+    HAS_ERROR=1
+  fi
 
-echo ""
+  echo ""
 
-# Web: test
-echo -e "${YELLOW}→ just web-test${NC}"
-if just web-test; then
-  echo -e "${GREEN}✓ just web-test${NC}"
-else
-  echo -e "${RED}✗ just web-test${NC}"
-  HAS_ERROR=1
-fi
-
-echo ""
-
-# Web: coverage
-echo -e "${YELLOW}→ just web-coverage${NC}"
-if just web-coverage; then
-  echo -e "${GREEN}✓ just web-coverage${NC}"
-else
-  echo -e "${RED}✗ just web-coverage${NC}"
-  HAS_ERROR=1
+  echo -e "${YELLOW}→ just web-coverage${NC}"
+  if just web-coverage; then
+    echo -e "${GREEN}✓ just web-coverage${NC}"
+  else
+    echo -e "${RED}✗ just web-coverage${NC}"
+    HAS_ERROR=1
+  fi
 fi
 
 echo ""
