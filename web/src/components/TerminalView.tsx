@@ -60,6 +60,16 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
   });
   const isP2P = effectiveMode === 'p2p';
 
+  // End relay synchronously before navigating away, so that the
+  // server's relay loop exits and subsequent messages (e.g. sessions.list)
+  // are processed by the server handler rather than forwarded to the agent.
+  const handleBack = useCallback(() => {
+    if (effectiveMode === 'relay' && wsService?.isConnected()) {
+      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
+    }
+    onBack();
+  }, [effectiveMode, wsService, sessionId, onBack]);
+
   // Stable across re-renders. The hook returns a fresh object literal each
   // render, but its transport methods are useCallback-stable for the
   // connection's lifetime and fileOps uses only those — not the mutating
@@ -97,7 +107,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
   return (
     <div className="h-[100dvh] flex flex-col bg-background">
       <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={handleBack}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Back
         </Button>
         <span className="text-sm text-muted-foreground">

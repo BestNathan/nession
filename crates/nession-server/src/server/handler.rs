@@ -137,6 +137,11 @@ impl ConnectionHandler {
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
             "client.session.attach" => self.handle_client_session_attach(msg).await,
             "client.session.relay.begin" => self.handle_client_session_relay_begin(msg).await,
+            // client.session.relay.end is intercepted by the relay function
+            // (relay_bidirectional_via_channel) and never reaches here during
+            // active relay.  After relay exits the duplicate lands here; it is
+            // a safe no-op.
+            "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
             "client.session.create" => self.handle_client_session_create(msg).await,
             "client.session.kill" => self.handle_client_session_kill(msg).await,
             "client.env.list" => self.handle_client_env_list(msg).await,

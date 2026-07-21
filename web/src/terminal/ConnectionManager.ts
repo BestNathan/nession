@@ -144,6 +144,8 @@ export class ConnectionManager {
     return this.attach();
   }
 
+  private relayEnded = false;
+
   dispose(): void {
     this.disposed = true;
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
@@ -152,10 +154,13 @@ export class ConnectionManager {
     this.relayUnsubState?.();
     this.relayUnsubResize?.();
 
-    // Tell the server to stop relay forwarding so the relay loop exits
-    // and the server sends client.detach to the agent (best-effort).
-    if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
-      try { this.serverConnection.endRelay(this.sessionId); } catch { /* ws already closing */ }
+    // Tell the server to stop relay forwarding. The Back button handler
+    // in TerminalView sends endRelay synchronously before navigation, so
+    // this is a no-op in the normal back flow. For non-click unmounts
+    // (browser back, URL change, etc.) this is the primary path.
+    if (this.mode === 'relay' && this.serverConnection?.isConnected() && !this.relayEnded) {
+      this.relayEnded = true;
+      try { this.serverConnection.endRelay(this.sessionId); } catch { /* ws closing */ }
     }
 
     this.onStateChange = null;
