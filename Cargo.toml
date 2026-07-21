@@ -11,6 +11,14 @@ resolver = "2"
 version = "0.8.0"
 edition = "2021"
 
+[profile.dev]
+debug = "line-tables-only"         # keep line numbers for panic location, drop full DWARF
+incremental = true
+
+[profile.test]
+debug = 0                          # test binaries: zero debug info, fastest compile
+opt-level = 0
+
 [workspace.dependencies]
 tokio = { version = "1.35", features = ["full"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
