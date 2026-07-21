@@ -687,7 +687,7 @@ impl ConnectionHandler {
                 .payload
                 .get("relay_url")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+                .map(str::to_string);
 
             // Build candidate URL list for the server to try when
             // connecting to the agent.  If the browser specified a
