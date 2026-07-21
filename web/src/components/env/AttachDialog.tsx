@@ -80,6 +80,12 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     setError(null);
   }, [isOpen, webglSupported]);
 
+  // Manual relay URL override — only relevant in relay mode.
+  const relayUrl = useMemo(
+    () => (mode === 'relay' && selectedUrl !== AUTO_URL ? selectedUrl : undefined),
+    [mode, selectedUrl],
+  );
+
   // Fetch attach info for the connection token + candidate list. No live probing
   // here — latency comes from the address probe cache.
   useEffect(() => {
@@ -95,8 +101,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
         // fails). Explicit "relay" goes directly to the server relay path,
         // optionally with a manually selected endpoint URL.
         const requestedMode = mode === 'auto' ? 'p2p' : mode;
-        const url = mode === 'relay' && selectedUrl !== AUTO_URL ? selectedUrl : undefined;
-        const info = await wsService.requestAttach(session.session_id, requestedMode, url);
+        const info = await wsService.requestAttach(session.session_id, requestedMode, relayUrl);
         if (!cancelled) {
           setAttachInfo(info);
         }
@@ -109,7 +114,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     return () => {
       cancelled = true;
     };
-  }, [isOpen, session, wsService, mode]);
+  }, [isOpen, session, wsService, mode, relayUrl]);
 
   const cached = agentId ? probeCache.getProbe(agentId) : undefined;
   const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);

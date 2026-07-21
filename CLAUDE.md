@@ -192,6 +192,55 @@ cd web && npx shadcn@latest add <component-name> --yes
 ```
 Components land in `web/src/components/ui/` and are committed to git.
 
+### Quality Gates
+
+**Every commit must pass the pre-commit hook.** The hook runs automatically on `git commit`. All checks are **blocking** — a failure prevents the commit.
+
+#### Pre-commit Hook (`.git/hooks/pre-commit`)
+
+| Gate | Command | What It Catches |
+|------|---------|-----------------|
+| Rust fmt | `cargo fmt --all -- --check` | Formatting violations |
+| Rust clippy | `cargo clippy --workspace -- -D warnings` | Lint errors, unused code |
+| Rust tests | `cargo test` | Broken tests |
+| Rust coverage | `./scripts/check-coverage.sh` | Coverage below per-crate threshold |
+| Web ESLint | `cd web && npx eslint . --max-warnings 0` | Lint errors + warnings |
+| Web TypeScript | `cd web && npx tsc --noEmit` | Type errors |
+| Web tests | `cd web && npx vitest run` | Broken web tests |
+| Web coverage | `cd web && npx vitest run --coverage` | Web coverage < 80% |
+
+#### ⛔ Iron Law: Never `--no-verify` to Bypass Coverage
+
+| 规则 | 说明 |
+|------|------|
+| **`git commit --no-verify` 禁止用于绕过覆盖率** | 覆盖率不达标必须写测试补齐，不能跳过 |
+| **覆盖率阈值不可降低** | 80% 是硬底线。降低阈值等于隐藏问题 |
+| **Rust 单 crate 覆盖率不达标** | 给那个 crate 写测试，不是改 `check-coverage.sh` |
+| **`#[allow(clippy::*)]` 禁止** | 修复 lint 警告，不允许 suppress |
+
+#### CI (GitHub Actions)
+
+CI 在 push 到 `feat/**` 或 `fix/**` 分支时触发，检查内容与 pre-commit 一致：
+
+| Job | Checks |
+|-----|--------|
+| `rust-check` | `cargo fmt`, `cargo clippy`, `cargo test` |
+| `web-check` | `npm run lint`, `npx tsc --noEmit`, `npm test` |
+
+**⚠ CI 和 pre-commit 必须一致。** 如果 CI 跑 checks 而 pre-commit 没跑（或反之），就会出现"本地通过、CI 挂掉"的情况。新增 check 必须两边同步更新。
+
+#### Coverage Thresholds
+
+| Crate | Threshold | Current |
+|-------|-----------|---------|
+| `nession-common` | 90% | ✅ |
+| `nession-server` | 80% | ⚠ 59% |
+| `nession-agent` | 80% | ✅ |
+| `nession-cli` | 80% | ✅ |
+| `web/` | 80% | ✅ 82.84% |
+
+**nession-server 覆盖率缺口需要逐步补齐。** 每个 PR 如果修改了 nession-server，必须同时补充测试使覆盖率不下降（或至少维持当前水平）。
+
 ### Docker Builds
 
 Multi-stage builds. To build locally:

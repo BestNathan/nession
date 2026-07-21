@@ -11,13 +11,13 @@
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
+use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::AgentMetadata;
-use nession_agent::connection::ServerClient;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
@@ -90,7 +90,7 @@ async fn start_agent(
     let server = AgentServer::new(
         &addr_str,
         agent_id,
-        None,       // no TLS
+        None, // no TLS
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
@@ -140,11 +140,15 @@ async fn register_agent(
 /// Send a JSON text frame and return the next text frame (skipping non-text).
 async fn send_and_recv(
     sink: &mut futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         WsMessage,
     >,
     stream: &mut futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
     >,
     request: &serde_json::Value,
 ) -> serde_json::Value {
@@ -212,7 +216,9 @@ async fn relay_attach_and_terminal_io() {
         1, // 1s interval for fast test
     );
     let heartbeat_shutdown = heartbeat.shutdown_handle();
-    tokio::spawn(async move { let _ = heartbeat.run().await; });
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
 
     // 3c. Start session watcher so the tmux session syncs to the server.
     let watcher = SessionWatcher::new(
@@ -221,7 +227,9 @@ async fn relay_attach_and_terminal_io() {
         1, // 1s poll for fast test
     );
     let watcher_shutdown = watcher.shutdown_handle();
-    tokio::spawn(async move { let _ = watcher.run().await; });
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
 
     // Give heartbeat + session sync time to propagate.
     tokio::time::sleep(Duration::from_millis(2000)).await;
@@ -232,21 +240,34 @@ async fn relay_attach_and_terminal_io() {
     let (mut sink, mut stream) = ws.split();
 
     // 5. Authenticate.
-    let auth_req = msg("client.auth", "auth-1", serde_json::json!({
-        "auth_token": "test-token",
-    }));
+    let auth_req = msg(
+        "client.auth",
+        "auth-1",
+        serde_json::json!({
+            "auth_token": "test-token",
+        }),
+    );
     let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req).await;
-    assert_eq!(auth_resp["payload"]["status"], "success", "auth failed: {auth_resp}");
+    assert_eq!(
+        auth_resp["payload"]["status"], "success",
+        "auth failed: {auth_resp}"
+    );
 
     // 6. Request relay-mode attach.
     let session_id = format!("relay-test-agent:{session_name}");
-    let attach_req = msg("client.session.attach", "attach-1", serde_json::json!({
-        "session_id": session_id,
-        "preferred_mode": "relay",
-    }));
+    let attach_req = msg(
+        "client.session.attach",
+        "attach-1",
+        serde_json::json!({
+            "session_id": session_id,
+            "preferred_mode": "relay",
+        }),
+    );
     let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req).await;
-    assert_eq!(attach_resp["payload"]["status"], "success",
-        "attach failed: {attach_resp}");
+    assert_eq!(
+        attach_resp["payload"]["status"], "success",
+        "attach failed: {attach_resp}"
+    );
     assert_eq!(attach_resp["payload"]["mode"], "relay");
     assert_eq!(attach_resp["payload"]["session_name"], session_name);
 
@@ -256,12 +277,15 @@ async fn relay_attach_and_terminal_io() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // 8. Send terminal.input (base64-encoded) through the relay.
-    let input_data = base64::engine::general_purpose::STANDARD
-        .encode(b"echo RELAY_TEST_MARKER\n");
-    let input_msg = msg("terminal.input", "input-1", serde_json::json!({
-        "session_name": session_name,
-        "data": input_data,
-    }));
+    let input_data = base64::engine::general_purpose::STANDARD.encode(b"echo RELAY_TEST_MARKER\n");
+    let input_msg = msg(
+        "terminal.input",
+        "input-1",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": input_data,
+        }),
+    );
     sink.send(WsMessage::Text(input_msg.to_string()))
         .await
         .expect("send terminal.input");
@@ -272,14 +296,11 @@ async fn relay_attach_and_terminal_io() {
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
             Ok(Some(Ok(WsMessage::Text(text)))) => {
-                let parsed: serde_json::Value =
-                    serde_json::from_str(&text).unwrap_or_default();
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
                 let msg_type = parsed["msg_type"].as_str().unwrap_or("");
                 if msg_type == "terminal.output" {
                     let b64 = parsed["payload"]["data"].as_str().unwrap_or("");
-                    if let Ok(decoded) =
-                        base64::engine::general_purpose::STANDARD.decode(b64)
-                    {
+                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
                         let output = String::from_utf8_lossy(&decoded);
                         if output.contains("RELAY_TEST_MARKER") {
                             got_output = true;
