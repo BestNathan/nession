@@ -136,7 +136,9 @@ export class TerminalView {
     // preventDefault in the capture phase.
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Accumulate sub-pixel deltas so trackpad / high-res wheels feel smooth.
+      e.stopPropagation();
+      // Drive the scrollContainer viewport.  sub-pixel deltas are accumulated
+      // natively by element.scrollTop/scrollLeft so trackpads feel smooth.
       this.scrollContainer.scrollTop += e.deltaY;
       this.scrollContainer.scrollLeft += e.deltaX;
     };

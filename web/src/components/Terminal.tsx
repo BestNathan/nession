@@ -130,12 +130,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setViewGeneration((g) => g + 1);
 
     // ResizeObserver: detect container size changes and push to tmux.
-    // The FIRST firing (on mount) is sent immediately so tmux gets the
-    // correct size before attach() runs at ~50ms.  Subsequent firings
-    // (user dragging the window) are debounced at 200ms to avoid flooding
-    // tmux with intermediate sizes.
+    // Uses a grow-only strategy so the scrollContainer can actually overflow:
+    // after the initial size is locked in (first fire), subsequent viewport
+    // shrinks are NOT forwarded to tmux.  tmux keeps the larger size, the
+    // mountElement stays tall, the scrollContainer overflows, and wheel/
+    // scrollbar viewport panning works.  When the viewport grows we DO tell
+    // tmux so the terminal can expand to use more space — it only shrinks
+    // on a browser-reload (fresh attach).
     let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
     let isFirstResize = true;
+    let lastSentCols = 0;
+    let lastSentRows = 0;
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
@@ -149,14 +154,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // First fire — send immediately so tmux is at the right size
           // when attach() fires at 50ms.
           isFirstResize = false;
+          lastSentCols = cols;
+          lastSentRows = rows;
           view.sendResize(cols, rows);
           continue;
         }
 
+        // Grow-only: skip when the viewport is not larger than what we
+        // already told tmux.  The mountElement stays at tmux's (larger)
+        // size, giving the scrollContainer overflow to pan.
+        if (cols <= lastSentCols && rows <= lastSentRows) { continue; }
+
+        const newCols = Math.max(cols, lastSentCols);
+        const newRows = Math.max(rows, lastSentRows);
+        lastSentCols = newCols;
+        lastSentRows = newRows;
+
         if (resizeDebounce) { clearTimeout(resizeDebounce); }
         resizeDebounce = setTimeout(() => {
           if (!viewRef.current) { return; }
-          viewRef.current.sendResize(cols, rows);
+          viewRef.current.sendResize(newCols, newRows);
         }, 200);
       }
     });
