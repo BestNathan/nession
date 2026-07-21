@@ -31,6 +31,11 @@ export class ConnectionManager {
 
   private reconnectAttempt = 0;
   private relayLost = false;
+  /** True once the initial relay has been established.
+   *  Resets on disconnect so reconnection re-sends the attach request. */
+  private relayInitiallyAttached = false;
+  /** Manual relay endpoint URL from the attach dialog. */
+  private relayUrl: string | null | undefined;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
@@ -50,6 +55,7 @@ export class ConnectionManager {
     this.sessionId = options.sessionId;
     this.p2pConnection = options.p2pConnection;
     this.serverConnection = options.serverConnection;
+    this.relayUrl = options.relayUrl;
 
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.setupP2P();
@@ -69,7 +75,7 @@ export class ConnectionManager {
           payload: { session_name: this.sessionName, data: encodeB64(data) },
         });
       } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
-        this.serverConnection.sendTerminalInput(this.sessionId, data);
+        this.serverConnection.sendRelayInput(this.sessionName, data);
       }
     } catch (err) {
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -88,7 +94,7 @@ export class ConnectionManager {
           payload: { session_name: this.sessionName, cols, rows },
         });
       } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
-        this.serverConnection.sendTerminalResize(this.sessionId, cols, rows);
+        this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
       }
     } catch (err) {
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -115,8 +121,23 @@ export class ConnectionManager {
         },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
+      // Phase 2 of relay attach: the Terminal is now mounted and subscribed
+      // to terminal.output.  Tell the server to enter relay forwarding.
+      // No await — beginRelay is fire-and-forget; terminal data flows
+      // through the existing WebSocket.
+      if (!this.relayInitiallyAttached) {
+        this.relayInitiallyAttached = true;
+        this.serverConnection.beginRelay(
+          this.sessionId,
+          this.relayUrl ?? undefined,
+          width,
+          height,
+        );
+        return;
+      }
+      // Reconnection: re-send beginRelay.
       try {
-        await this.serverConnection.requestAttach(this.sessionId, 'relay');
+        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined);
       } catch (err) {
         this.onError?.(err instanceof Error ? err : new Error(String(err)));
       }
@@ -195,14 +216,16 @@ export class ConnectionManager {
   private setupRelay(): void {
     const svc = this.serverConnection!;
 
-    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionId, (data: string) => {
+    // Use sessionName for relay subscriptions — agent protocol messages
+    // carry session_name (short name), not session_id (agent:name format).
+    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionName, (data: string) => {
       if (!this.disposed) {
         this.onOutput?.(data);
       }
     });
 
     this.relayUnsubResize = svc.onTerminalResize(
-      this.sessionId,
+      this.sessionName,
       (cols: number, rows: number) => {
         if (!this.disposed) {
           this.onResize?.(cols, rows);
@@ -213,6 +236,10 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'disconnected' || status === 'connecting') {
+        // Reset so reconnection re-sends the relay attach request.
+        if (status === 'disconnected') {
+          this.relayInitiallyAttached = false;
+        }
         if (this.relayLost) { return; }
         const next = this.reconnectAttempt + 1;
         if (next > RELAY_MAX_ATTEMPTS) {

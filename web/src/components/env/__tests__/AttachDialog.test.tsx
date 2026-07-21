@@ -76,14 +76,14 @@ describe('AttachDialog', () => {
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
     await waitFor(() => expect(attachBtn).toBeEnabled());
     await user.click(attachBtn);
-    expect(ws.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p');
+    expect(ws.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p', undefined);
     expect(onConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ session_id: 'agent-1:dev' }),
       expect.objectContaining({ mode: 'auto', selectedUrl: null }),
     );
   });
 
-  it('does not offer a forced Relay mode', () => {
+  it('offers Auto, P2P, and Relay modes', () => {
     const ws = mockWs(attachInfo());
     render(
       <WebSocketContext.Provider value={ws}>
@@ -98,7 +98,7 @@ describe('AttachDialog', () => {
     );
     expect(screen.getByText('Auto')).toBeInTheDocument();
     expect(screen.getByText('P2P')).toBeInTheDocument();
-    expect(screen.queryByText('Relay')).not.toBeInTheDocument();
+    expect(screen.getByText('Relay')).toBeInTheDocument();
   });
 
   it('shows candidate paths and lets the user pick one', async () => {

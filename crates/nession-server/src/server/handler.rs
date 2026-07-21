@@ -10,22 +10,31 @@ use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
-    AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot, EnvSource,
-    ProtocolMessage, ServerTerminalResizePayload,
+    AddressStatus, AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
+    EnvSource, ProtocolMessage, ServerTerminalResizePayload,
 };
 
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
     /// Send an optional reply message back to the sender.
     Reply(Option<Message>),
-    /// Enter relay mode: forward messages between this client and the agent
-    /// at the given WebSocket address.
+    /// Enter relay mode: forward messages between this client and the agent.
+    /// The server tries each URL in order with a fast timeout until one connects.
     Relay {
-        agent_ws_url: String,
-        /// Session being attached to (for client registry tracking).
+        /// Candidate agent WebSocket URLs, best-first (Reachable > Unknown > Unreachable).
+        agent_ws_urls: Vec<String>,
+        /// Session id ("agent_id:session_name") for client registry tracking.
         session_id: String,
+        /// Short session name for agent protocol messages (client.attach, etc.).
+        session_name: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
+        /// Resolved env snapshots to inject via client.attach to the agent.
+        env_snapshots: Vec<EnvSnapshot>,
+        /// Terminal columns for the initial tmux resize (from browser viewport).
+        cols: u16,
+        /// Terminal rows for the initial tmux resize (from browser viewport).
+        rows: u16,
     },
     /// Close the connection.
     Close,
@@ -131,6 +140,12 @@ impl ConnectionHandler {
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
             "client.session.attach" => self.handle_client_session_attach(msg).await,
+            "client.session.relay.begin" => self.handle_client_session_relay_begin(msg).await,
+            // client.session.relay.end is intercepted by the relay function
+            // (relay_bidirectional_via_channel) and never reaches here during
+            // active relay.  After relay exits the duplicate lands here; it is
+            // a safe no-op.
+            "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
             "client.session.create" => self.handle_client_session_create(msg).await,
             "client.session.kill" => self.handle_client_session_kill(msg).await,
             "client.env.list" => self.handle_client_env_list(msg).await,
@@ -662,10 +677,71 @@ impl ConnectionHandler {
         );
 
         if preferred_mode == "relay" {
-            // For relay mode, the server will proxy I/O between client and agent.
-            // The handler loop must transition into relay mode.
-            // Register this client with the ClientRegistry so the server can
-            // broadcast events (e.g. terminal resize) to all attached clients.
+            // Resolve env snapshots if provided in the attach request.
+            let attach_env_snapshots: Vec<EnvSnapshot> = msg
+                .payload
+                .get("env_snapshots")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            if !attach_env_snapshots.is_empty() {
+                info!(
+                    "Relay attach with {} env snapshot(s) for session {}",
+                    attach_env_snapshots.len(),
+                    session_name
+                );
+            }
+
+            // Honour a manually-selected relay address from the browser.
+            let _manual_relay_url: Option<String> = msg
+                .payload
+                .get("relay_url")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+
+            // Build candidate URL list for the server to try when
+            // connecting to the agent.  If the browser specified a
+            // relay_url, use only that one.  Otherwise auto-select:
+            // Reachable > Unknown > Unreachable > legacy fallback.
+            let _relay_urls: Vec<String> = if let Some(ref url) = _manual_relay_url {
+                info!(
+                    "Relay mode: using manual URL {} for session {}",
+                    url, session_name
+                );
+                vec![url.clone()]
+            } else {
+                let mut urls: Vec<String> = agent
+                    .addresses
+                    .iter()
+                    .filter(|p| p.status == AddressStatus::Reachable)
+                    .map(|p| p.address.url.clone())
+                    .chain(
+                        agent
+                            .addresses
+                            .iter()
+                            .filter(|p| p.status == AddressStatus::Unknown)
+                            .map(|p| p.address.url.clone()),
+                    )
+                    .chain(
+                        agent
+                            .addresses
+                            .iter()
+                            .filter(|p| p.status == AddressStatus::Unreachable)
+                            .map(|p| p.address.url.clone()),
+                    )
+                    .collect();
+                if urls.is_empty() {
+                    urls.push(agent_ws_url.clone());
+                }
+                info!(
+                    "Relay mode: {} candidate URL(s) for agent {} (session {})",
+                    urls.len(),
+                    agent_id,
+                    session_name
+                );
+                urls
+            };
+
             let client_id = uuid::Uuid::new_v4().to_string();
             if let Some(ref sender) = self.client_sender {
                 self.client_registry
@@ -679,11 +755,35 @@ impl ConnectionHandler {
             }
             self.attached_session_id = Some(session_id.to_string());
             self.attached_client_id = Some(client_id.clone());
-            Ok(HandlerAction::Relay {
-                agent_ws_url,
-                session_id: session_id.to_string(),
-                client_id,
-            })
+
+            // Send attach response to browser BEFORE entering relay mode,
+            // so the browser's requestAttach() resolves instead of timing out.
+            if let Some(ref sender) = self.client_sender {
+                let response = Message::Text(
+                    serde_json::json!({
+                        "msg_type": "client.session.attach.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "status": "success",
+                            "mode": "relay",
+                            "session_name": session_name,
+                            // Server TCP probe results — the browser shows these
+                            // so the user can pick a specific relay endpoint.
+                            "addresses": addresses_json,
+                        }
+                    })
+                    .to_string(),
+                );
+                let _ = sender.send(response);
+            }
+
+            // Phase 1 complete — relay info returned to browser.
+            // The browser will send client.session.relay.begin when the
+            // Terminal is mounted and ready to receive terminal output.
+            // This avoids the race between server entering relay mode and
+            // the browser subscribing to terminal.output.
+            Ok(HandlerAction::Reply(None))
         } else {
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
@@ -705,6 +805,160 @@ impl ConnectionHandler {
                 .to_string(),
             ))))
         }
+    }
+
+    /// Handle `client.session.relay.begin` — Phase 2 of relay attach.
+    ///
+    /// Phase 1 (client.session.attach, relay mode) returned the candidate
+    /// addresses but did NOT enter relay forwarding.  Now the Terminal is
+    /// mounted and subscribed — the browser sends this to actually start
+    /// the relay data flow.
+    async fn handle_client_session_relay_begin(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.relay.begin.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": { "status": "error", "message": "Not authenticated" }
+                })
+                .to_string(),
+            ))));
+        }
+
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let (agent_id, session_name) = match session_id.split_once(':') {
+            Some((aid, sname)) => (aid.to_string(), sname.to_string()),
+            None => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.relay.begin.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": { "status": "error", "message": "Invalid session_id format" }
+                    })
+                    .to_string(),
+                ))));
+            }
+        };
+
+        let session = self.session_registry.get(session_id).await;
+        if session.is_none() {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.session.relay.begin.response",
+                    "id": msg.id, "timestamp": current_timestamp(),
+                    "payload": { "status": "error", "message": format!("Session not found: {session_id}") }
+                }).to_string(),
+            ))));
+        }
+
+        let agent = self.agent_registry.get(&agent_id).await;
+        let agent = match agent {
+            Some(a) if a.status == AgentStatus::Online => a,
+            _ => {
+                return Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.session.relay.begin.response",
+                        "id": msg.id, "timestamp": current_timestamp(),
+                        "payload": { "status": "error", "message": format!("Agent '{agent_id}' is offline") }
+                    }).to_string(),
+                ))));
+            }
+        };
+
+        // Manual relay URL override from the browser.
+        let manual_relay_url: Option<String> = msg
+            .payload
+            .get("relay_url")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        // Build URL list: respect manual override, otherwise auto-select.
+        let agent_ws_url = crate::registry::legacy_agent_address(&agent.addresses)
+            .or_else(|| agent.connect_url.clone())
+            .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
+
+        let relay_urls: Vec<String> = if let Some(ref url) = manual_relay_url {
+            vec![url.clone()]
+        } else {
+            let mut urls: Vec<String> = agent
+                .addresses
+                .iter()
+                .filter(|p| p.status == AddressStatus::Reachable)
+                .map(|p| p.address.url.clone())
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unknown)
+                        .map(|p| p.address.url.clone()),
+                )
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unreachable)
+                        .map(|p| p.address.url.clone()),
+                )
+                .collect();
+            if urls.is_empty() {
+                urls.push(agent_ws_url);
+            }
+            urls
+        };
+
+        info!(
+            "Relay begin: {} URL(s) for session '{}'",
+            relay_urls.len(),
+            session_name
+        );
+
+        let client_id = uuid::Uuid::new_v4().to_string();
+        if let Some(ref sender) = self.client_sender {
+            self.client_registry
+                .register(session_id, &client_id, sender.clone())
+                .await;
+        }
+        self.attached_session_id = Some(session_id.to_string());
+        self.attached_client_id = Some(client_id.clone());
+
+        // No separate response — the server enters relay forwarding immediately.
+        // terminal.output flows back through this WebSocket.
+
+        // Terminal dimensions from the browser viewport (via ResizeObserver).
+        // Default to 80×24 if the browser hasn't sent them yet.
+        let cols = u16::try_from(
+            msg.payload
+                .get("cols")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(80),
+        )
+        .unwrap_or(80);
+        let rows = u16::try_from(
+            msg.payload
+                .get("rows")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(24),
+        )
+        .unwrap_or(24);
+
+        Ok(HandlerAction::Relay {
+            agent_ws_urls: relay_urls,
+            session_id: session_id.to_string(),
+            session_name,
+            client_id,
+            env_snapshots: Vec::new(),
+            cols,
+            rows,
+        })
     }
 
     /// Handle `client.session.create` — create a new session on a target agent.
@@ -2654,6 +2908,7 @@ mod tests {
         .await
         .unwrap();
 
+        // Phase 1: query relay — returns info but does NOT enter relay forwarding.
         let action = h
             .handle_message(proto_msg(
                 "client.session.attach",
@@ -2661,13 +2916,33 @@ mod tests {
             ))
             .await
             .unwrap();
+        assert!(
+            matches!(action, HandlerAction::Reply(None)),
+            "Phase 1 should return Reply(None)"
+        );
+
+        // Phase 2: begin relay — actually enters relay forwarding.
+        let action = h
+            .handle_message(proto_msg(
+                "client.session.relay.begin",
+                json!({ "session_id": "a1:dev" }),
+            ))
+            .await
+            .unwrap();
         match action {
             HandlerAction::Relay {
-                agent_ws_url,
+                agent_ws_urls,
                 session_id: _,
+                session_name,
                 client_id: _,
+                env_snapshots,
+                cols: _,
+                rows: _,
             } => {
-                assert!(agent_ws_url.contains("1.2.3.4"));
+                assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
+                assert!(agent_ws_urls[0].contains("1.2.3.4"));
+                assert_eq!(session_name, "dev");
+                assert!(env_snapshots.is_empty());
             }
             _ => panic!("expected Relay action"),
         }

@@ -15,24 +15,11 @@ export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
   sessionName: string;
-  /**
-   * Browser-tested candidate URLs, best-first, resolved in the attach dialog.
-   * The connection layer uses these directly (no re-testing) and rotates
-   * through them on failure. Empty → straight to relay.
-   */
   orderedUrls?: string[];
-  /**
-   * Per-URL latency the BROWSER measured at attach time. Used to render the
-   * runtime path selector with the browser's own numbers (not the server's
-   * probe results, which are a different vantage point).
-   */
   latencies?: AddressLatency[];
-  /**
-   * User-selected P2P address (manual override). When set, auto latency
-   * selection is skipped and this exact URL is used (no address rotation).
-   */
   selectedAddress?: string;
-  /** Renderer chosen in the attach dialog. */
+  /** Manual relay endpoint URL from the attach dialog (null = auto). */
+  relayUrl?: string | null;
   renderer?: 'webgl' | 'canvas';
 }
 
@@ -44,7 +31,7 @@ interface TerminalViewProps {
 }
 
 export function TerminalView({ session, onBack, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer } = session;
+  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer, relayUrl } = session;
   const wsService = useWebSocket();
   // Callback ref backed by state so the parent re-renders when the child
   // populates the imperative handle. Without this, `fontSizeManager` on
@@ -73,6 +60,16 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
   });
   const isP2P = effectiveMode === 'p2p';
 
+  // End relay synchronously before navigating away, so that the
+  // server's relay loop exits and subsequent messages (e.g. sessions.list)
+  // are processed by the server handler rather than forwarded to the agent.
+  const handleBack = useCallback(() => {
+    if (effectiveMode === 'relay' && wsService?.isConnected()) {
+      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
+    }
+    onBack();
+  }, [effectiveMode, wsService, sessionId, onBack]);
+
   // Stable across re-renders. The hook returns a fresh object literal each
   // render, but its transport methods are useCallback-stable for the
   // connection's lifetime and fileOps uses only those — not the mutating
@@ -98,6 +95,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
       mode={effectiveMode}
       p2pConnection={isP2P ? p2pConnection : undefined}
       serverConnection={!isP2P ? wsService : undefined}
+      relayUrl={relayUrl}
       onDisconnect={onDisconnect}
       onError={onError}
       onBannerChange={setToolbarDisabled}
@@ -109,7 +107,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
   return (
     <div className="h-[100dvh] flex flex-col bg-background">
       <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={handleBack}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Back
         </Button>
         <span className="text-sm text-muted-foreground">

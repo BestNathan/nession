@@ -318,3 +318,11 @@ When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "fea
 - `docs:` — documentation
 
 All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.com>`
+
+## 3. Quality Gates
+
+- **`.githooks/pre-commit`** 是唯一 hooks 入口（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这个文件。
+- **Pre-commit 全部 blocking**：`cargo fmt` → `cargo clippy` → `cargo test --no-run` → `cargo test` → coverage（仅变更 crate）→ `eslint` → `tsc --noEmit` → `vitest run` → `vitest coverage`
+- **CI 触发**：push `feat/**` / `fix/**`。`rust-check`（fmt + clippy + test）+ `web-check`（lint + tsc + test）。与 pre-commit 必须一致。
+- **⛔ `git commit --no-verify` 禁止绕过覆盖率**。不达标写测试，不降阈值，不 suppress lint。
+- **覆盖率阈值**：`nession-common` 90%，其余 Rust crate 80%，web 80%。

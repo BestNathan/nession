@@ -1,0 +1,3 @@
+# Cargo configuration for Nession project.
+# sccache is configured via justfile (RUSTC_WRAPPER env var) — local only.
+# CI uses actions-rust-lang's cache-workspaces instead.

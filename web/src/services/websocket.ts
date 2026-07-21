@@ -236,18 +236,72 @@ export class WebSocketService {
 
   async requestAttach(
     sessionId: string,
-    mode: 'p2p' | 'relay' = 'p2p'
+    mode: 'p2p' | 'relay' = 'p2p',
+    relayUrl?: string,
   ): Promise<AttachInfo> {
     if (!this.authenticated) {
       throw new Error('Not authenticated');
     }
 
-    const response = await this.request<AttachInfo>('client.session.attach', {
+    const payload: Record<string, unknown> = {
       session_id: sessionId,
       preferred_mode: mode,
-    });
+    };
+    if (relayUrl) {
+      payload.relay_url = relayUrl;
+    }
+
+    const response = await this.request<AttachInfo>('client.session.attach', payload);
 
     return response;
+  }
+
+  /**
+   * Phase 2 of relay attach: tell the server to enter relay forwarding.
+   * The Terminal is now mounted and subscribed to terminal.output.
+   * No response — the server enters relay and terminal data flows.
+   *
+   * @param cols  Terminal columns from the browser viewport (ResizeObserver).
+   * @param rows  Terminal rows from the browser viewport (ResizeObserver).
+   */
+  beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const payload: Record<string, unknown> = { session_id: sessionId };
+    if (relayUrl) { payload.relay_url = relayUrl; }
+    if (cols !== undefined) { payload.cols = cols; }
+    if (rows !== undefined) { payload.rows = rows; }
+
+    const message: WebSocketMessage = {
+      msg_type: 'client.session.relay.begin',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload,
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Tell the server to stop relay forwarding for the given session.
+   * Called when the user navigates away from the terminal view.
+   * Fire-and-forget — the server cleans up relay state on receipt.
+   */
+  endRelay(sessionId: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'client.session.relay.end',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: { session_id: sessionId },
+    };
+
+    this.ws.send(JSON.stringify(message));
   }
 
   async createSession(
@@ -511,6 +565,65 @@ export class WebSocketService {
     this.ws.send(JSON.stringify(message));
   }
 
+  // ── Relay mode terminal I/O (agent protocol format) ──
+
+  /** Base64-encode a UTF-8 string for agent protocol compatibility. */
+  private encodeBase64(data: string): string {
+    const bytes = new TextEncoder().encode(data);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Send terminal input in agent protocol format for relay mode.
+   * Uses `session_name` (short name) and base64-encoded data,
+   * matching the agent's expected wire format for `terminal.input`.
+   */
+  sendRelayInput(sessionName: string, data: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'terminal.input',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: {
+        session_name: sessionName,
+        data: this.encodeBase64(data),
+      },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Send terminal resize in agent protocol format for relay mode.
+   * Uses `session_name` (short name), matching the agent's expected
+   * wire format for `terminal.resize`.
+   */
+  sendRelayResize(sessionName: string, cols: number, rows: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'terminal.resize',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: {
+        session_name: sessionName,
+        cols,
+        rows,
+      },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   // P2P Support
 
   getP2PConnectionInfo(attachInfo: AttachInfo): { url: string; token: string } | null {
@@ -578,8 +691,19 @@ export class WebSocketService {
           }
           break;
 
+        case 'error': {
+          const errMsg = (message.payload as Record<string, unknown>)?.message as string | undefined;
+          console.error('[relay] Server error:', errMsg ?? 'unknown error', message.payload);
+          break;
+        }
+
+        case 'ok':
+          // Agent responses forwarded through relay (e.g. to terminal.input).
+          // These are acknowledgements; no action needed.
+          break;
+
         default:
-          console.warn('Unhandled message type:', message.msg_type);
+          console.warn('Unhandled message type:', message.msg_type, message.payload);
       }
     } catch (error) {
       console.error('Failed to parse WebSocket message:', error);
@@ -587,8 +711,27 @@ export class WebSocketService {
   }
 
   private handleTerminalOutput(payload: Record<string, unknown>): void {
-    const sessionId = payload.session_id as string;
-    const data = payload.data as string;
+    // Agent protocol uses session_name; server protocol uses session_id.
+    // Accept either so both relay (agent protocol) and P2P work.
+    const sessionId = (payload.session_name ?? payload.session_id) as string;
+    const rawData = (payload.data ?? '') as string;
+
+    // Relay mode: agent sends base64 via the server relay. Decode it.
+    // Detect relay by presence of session_name without session_id.
+    const isRelay = typeof payload.session_name === 'string' && typeof payload.session_id !== 'string';
+    let data: string;
+    if (isRelay && rawData) {
+      try {
+        const binary = atob(rawData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        data = new TextDecoder().decode(bytes);
+      } catch {
+        data = rawData;
+      }
+    } else {
+      data = rawData;
+    }
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
     if (callbacks) {
@@ -597,7 +740,8 @@ export class WebSocketService {
   }
 
   private handleTerminalResize(payload: Record<string, unknown>): void {
-    const sessionId = payload.session_id as string;
+    // Agent protocol uses session_name; server protocol uses session_id.
+    const sessionId = (payload.session_name ?? payload.session_id) as string;
     const cols = payload.cols as number;
     const rows = payload.rows as number;
 

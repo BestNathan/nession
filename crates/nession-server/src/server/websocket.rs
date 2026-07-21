@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::handler::{ConnectionHandler, HandlerAction};
 use crate::db::Database;
@@ -11,6 +11,7 @@ use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use nession_common::config::ServerConfig;
+use nession_common::protocol::EnvSnapshot;
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -343,12 +344,29 @@ where
                 // No response needed, continue
             }
             HandlerAction::Relay {
-                agent_ws_url,
-                session_id: _,
-                client_id: _,
+                agent_ws_urls,
+                session_id,
+                session_name,
+                client_id,
+                env_snapshots,
+                cols,
+                rows,
             } => {
-                relay_bidirectional_via_channel(&mut read, sender.clone(), &agent_ws_url).await?;
-                break;
+                relay_bidirectional_via_channel(
+                    &mut read,
+                    sender.clone(),
+                    &agent_ws_urls,
+                    &session_name,
+                    &env_snapshots,
+                    cols,
+                    rows,
+                )
+                .await?;
+                // Relay ended — clean up the client registration so the
+                // cleanup block below (WS-close path) doesn't double-free.
+                client_registry.unregister(&session_id, &client_id).await;
+                // Don't break — the WebSocket stays open for dashboard use.
+                continue;
             }
             HandlerAction::Close => {
                 break;
@@ -379,10 +397,18 @@ where
 
 /// Relay mode using channel-based sender for client writes.
 /// Used when the write sink is managed by a relay task.
+///
+/// Tries each URL in `agent_ws_urls` with a fast 2s connect timeout
+/// until one succeeds.  This avoids long hangs when the first address
+/// is unreachable (common in k8s where pod IPs are not routable).
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::command_broker::WsMessageSender,
-    agent_ws_url: &str,
+    agent_ws_urls: &[String],
+    session_name: &str,
+    env_snapshots: &[EnvSnapshot],
+    cols: u16,
+    rows: u16,
 ) -> anyhow::Result<()>
 where
     RS: futures_util::Stream<
@@ -396,14 +422,144 @@ where
     use futures_util::StreamExt;
 
     info!(
-        "Entering relay mode, connecting to agent at {}",
-        agent_ws_url
+        "Entering relay mode for session '{}', {} candidate URL(s)",
+        session_name,
+        agent_ws_urls.len()
     );
 
-    let (agent_ws, _) = tokio_tungstenite::connect_async(agent_ws_url).await?;
+    // Fast-retry: try each URL with a 2s connect timeout.  The list is
+    // sorted best-first (Reachable → Unknown → Unreachable) by the
+    // handler so the first success is the best available endpoint.
+    let mut agent_ws = None;
+    let mut connected_url: Option<String> = None;
+    for url in agent_ws_urls {
+        info!("Relay: trying {}", url);
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tokio_tungstenite::connect_async(url),
+        )
+        .await
+        {
+            Ok(Ok((ws, _))) => {
+                info!("Relay: connected to {}", url);
+                agent_ws = Some(ws);
+                connected_url = Some(url.clone());
+                break;
+            }
+            Ok(Err(ref e)) => {
+                warn!("Relay: connect to {} failed: {:#}", url, e);
+            }
+            Err(_) => {
+                warn!("Relay: connect to {} timed out (2s)", url);
+            }
+        }
+    }
+
+    let agent_ws = match agent_ws {
+        Some(ws) => ws,
+        None => {
+            anyhow::bail!(
+                "Could not connect to agent for session '{}': tried {} URL(s)",
+                session_name,
+                agent_ws_urls.len()
+            );
+        }
+    };
+
     let (mut agent_write, mut agent_read) = agent_ws.split();
 
-    info!("Relay connection established");
+    // ── Step 1: Send client.attach to the agent ──
+    let attach_msg = serde_json::json!({
+        "msg_type": "client.attach",
+        "id": uuid::Uuid::new_v4().to_string(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "payload": {
+            "session_name": session_name,
+            "width": cols,
+            "height": rows,
+            "env_snapshots": env_snapshots,
+        }
+    });
+    agent_write
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            attach_msg.to_string(),
+        ))
+        .await?;
+
+    // Wait for ok/error response from agent (10s timeout).
+    let attach_response =
+        tokio::time::timeout(std::time::Duration::from_secs(10), agent_read.next()).await;
+    match attach_response {
+        Ok(Some(Ok(msg))) => {
+            if let Ok(text) = msg.to_text() {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                    let resp_type = parsed
+                        .get("msg_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if resp_type == "error" {
+                        let err_msg = parsed
+                            .get("payload")
+                            .and_then(|p| p.get("message"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("attach failed");
+                        error!(
+                            "Agent rejected attach for session '{}': {}",
+                            session_name, err_msg
+                        );
+                        // Forward error to the browser client
+                        let client_error = tokio_tungstenite::tungstenite::Message::Text(
+                            serde_json::json!({
+                                "msg_type": "error",
+                                "id": uuid::Uuid::new_v4().to_string(),
+                                "timestamp": std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                "payload": {
+                                    "code": "attach_failed",
+                                    "message": format!(
+                                        "Failed to attach to session '{}': {}",
+                                        session_name, err_msg
+                                    ),
+                                }
+                            })
+                            .to_string(),
+                        );
+                        let _ = sender.send(client_error);
+                        return Ok(());
+                    }
+                    info!(
+                        "Agent confirmed attach for session '{}' (msg_type={})",
+                        session_name, resp_type
+                    );
+                }
+            }
+        }
+        Ok(Some(Err(e))) => {
+            error!("WebSocket error waiting for attach response: {}", e);
+            return Err(anyhow::anyhow!("Agent connection error during attach: {e}",));
+        }
+        Ok(None) => {
+            error!("Agent closed connection during attach");
+            return Err(anyhow::anyhow!(
+                "Agent closed connection before accepting attach"
+            ));
+        }
+        Err(_) => {
+            error!("Timeout waiting for agent attach response (10s)");
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for agent to accept attach for session '{session_name}'",
+            ));
+        }
+    }
+
+    info!("Relay established for session '{}'", session_name);
+
+    // ── Step 2: Bidirectional forwarding ──
 
     // Helper: detect terminal.input JSON messages.
     fn is_terminal_input(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
@@ -413,10 +569,17 @@ where
             .unwrap_or(false)
     }
 
+    // Helper: detect client.session.relay.end — client wants to stop the
+    // relay without closing the WebSocket.
+    fn is_relay_end(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+        msg.to_text()
+            .ok()
+            .map(|t| t.contains("\"client.session.relay.end\""))
+            .unwrap_or(false)
+    }
+
     // Forward client -> agent, with trailing-edge rate limiting on
-    // terminal.input to protect against mouse-tracking floods.  Keyboard
-    // input (also carried as terminal.input) is naturally slow enough
-    // (< 20 Hz) that it always passes on the leading edge.
+    // terminal.input to protect against mouse-tracking floods.
     const INPUT_THROTTLE_MS: u64 = 16;
     let mut last_terminal_input = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(60))
@@ -434,6 +597,11 @@ where
 
             // Non-terminal.input passes through immediately.
             if !is_terminal_input(&msg) {
+                // Client wants to stop relay without closing the WebSocket.
+                if is_relay_end(&msg) {
+                    info!("Client requested relay end for session '{}'", session_name);
+                    return;
+                }
                 if let Err(e) = agent_write.send(msg).await {
                     error!("Failed to forward client message to agent: {}", e);
                     break;
@@ -441,10 +609,7 @@ where
                 continue;
             }
 
-            // Terminal.input: trailing-edge throttle.  If within the window
-            // from the last send, drain additional mouse events and keep
-            // only the latest position.  Non-mouse messages that arrive
-            // during the drain are forwarded immediately.
+            // Terminal.input: trailing-edge throttle.
             let elapsed = last_terminal_input.elapsed();
             if elapsed < std::time::Duration::from_millis(INPUT_THROTTLE_MS) {
                 let drain_deadline =
@@ -514,13 +679,46 @@ where
 
     tokio::select! {
         _ = client_to_agent => {
-            info!("Client to agent relay ended");
+            info!("Client to agent relay ended for session '{}'", session_name);
         }
         _ = agent_to_client => {
-            info!("Agent to client relay ended");
+            info!("Agent to client relay ended for session '{}'", session_name);
         }
     }
 
-    info!("Relay mode ended");
+    // ── Step 3: Send client.detach on exit (best-effort, fresh connection) ──
+    // The original agent WS was split+consumed, so we open a fresh connection
+    // to the same URL that worked for the attach.
+    if let Some(ref url) = connected_url {
+        if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
+            let detach_msg = serde_json::json!({
+                "msg_type": "client.detach",
+                "id": uuid::Uuid::new_v4().to_string(),
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                "payload": {
+                    "session_name": session_name,
+                }
+            });
+            let _ = detach_ws
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    detach_msg.to_string(),
+                ))
+                .await;
+            info!(
+                "Sent client.detach for session '{}' (best-effort)",
+                session_name
+            );
+        } else {
+            warn!(
+                "Could not connect to agent for client.detach for session '{}'",
+                session_name
+            );
+        }
+    }
+
+    info!("Relay mode ended for session '{}'", session_name);
     Ok(())
 }

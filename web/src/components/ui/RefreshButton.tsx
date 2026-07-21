@@ -25,7 +25,7 @@ export function RefreshButton({
     <Button
       variant={variant}
       size="sm"
-      onClick={onClick}
+      onClick={() => onClick()}
       disabled={disabled || loading}
       aria-label={ariaLabel}
       className={cn('min-h-11 min-w-11 md:min-h-7 md:min-w-0', className)}

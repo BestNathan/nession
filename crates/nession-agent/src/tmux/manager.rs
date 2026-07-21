@@ -129,6 +129,45 @@ impl TmuxManager {
         Ok(())
     }
 
+    /// Set tmux-level environment variables on a running session.
+    /// Uses `tmux set-environment -t <session> -e KEY=VALUE` which makes
+    /// variables available to new windows/panes in that session.
+    /// Non-fatal: errors are returned as warnings rather than failing the
+    /// whole operation so that a single bad env var doesn't block attach.
+    pub async fn set_environment(
+        &self,
+        session_name: &str,
+        vars: &[(String, String)],
+    ) -> Result<(), Vec<String>> {
+        let mut warnings = Vec::new();
+        for (key, value) in vars {
+            let status = Command::new("tmux")
+                .args([
+                    "set-environment",
+                    "-t",
+                    session_name,
+                    "-e",
+                    &format!("{key}={value}"),
+                ])
+                .status()
+                .await;
+            match status {
+                Ok(s) if !s.success() => {
+                    warnings.push(format!("set-environment {key}={value} failed"));
+                }
+                Err(e) => {
+                    warnings.push(format!("set-environment {key}={value}: {e}"));
+                }
+                _ => {}
+            }
+        }
+        if warnings.is_empty() {
+            Ok(())
+        } else {
+            Err(warnings)
+        }
+    }
+
     /// Write a shell script with `export` lines and source it into the
     /// session. The command line is cleared afterwards via ANSI escape so
     /// it barely flashes on screen.
@@ -398,6 +437,21 @@ mod tests {
     async fn cleanup_client_scripts_no_match_is_noop() {
         let mgr = TmuxManager::new();
         mgr.cleanup_client_scripts("nonexistent-client-xyz").await;
+    }
+
+    #[tokio::test]
+    async fn set_environment_on_nonexistent_session_returns_warnings() {
+        let mgr = TmuxManager::new();
+        let result = mgr
+            .set_environment(
+                "nession_nonexistent_xyz_123",
+                &[("TEST_KEY".to_string(), "TEST_VALUE".to_string())],
+            )
+            .await;
+        // Should return warnings (session doesn't exist) but not panic.
+        assert!(result.is_err());
+        let warnings = result.unwrap_err();
+        assert!(!warnings.is_empty());
     }
 }
 

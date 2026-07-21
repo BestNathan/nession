@@ -18,6 +18,8 @@ function makeMockWs(): WebSocketService {
   return {
     sendTerminalInput: vi.fn(),
     sendTerminalResize: vi.fn(),
+    sendRelayInput: vi.fn(),
+    sendRelayResize: vi.fn(),
     onTerminalOutput: vi.fn().mockReturnValue(() => {}),
     onTerminalResize: vi.fn().mockReturnValue(() => {}),
     onConnectionChange: vi.fn().mockReturnValue(() => {}),
@@ -163,13 +165,13 @@ describe('ConnectionManager', () => {
   });
 
   describe('Relay mode', () => {
-    it('send routes data via serverConnection.sendTerminalInput', () => {
+    it('send routes data via serverConnection.sendRelayInput', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
       });
       cm.send('hello');
-      expect(ws.sendTerminalInput).toHaveBeenCalledWith('a:test', 'hello');
+      expect(ws.sendRelayInput).toHaveBeenCalledWith('test', 'hello');
       cm.dispose();
     });
 
@@ -178,7 +180,7 @@ describe('ConnectionManager', () => {
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
       });
-      expect(ws.onTerminalOutput).toHaveBeenCalledWith('a:test', expect.any(Function));
+      expect(ws.onTerminalOutput).toHaveBeenCalledWith('test', expect.any(Function));
       cm.dispose();
     });
 
@@ -206,7 +208,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('should send terminal.resize message in relay mode via sendTerminalResize', () => {
+    it('should send terminal.resize message in relay mode via sendRelayResize', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
@@ -214,7 +216,7 @@ describe('ConnectionManager', () => {
 
       cm.sendResize(120, 40);
 
-      expect(ws.sendTerminalResize).toHaveBeenCalledWith('sess-1', 120, 40);
+      expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();
     });
 
@@ -234,7 +236,7 @@ describe('ConnectionManager', () => {
       });
       cm.onResize = onResize;
 
-      expect(ws.onTerminalResize).toHaveBeenCalledWith('sess-1', expect.any(Function));
+      expect(ws.onTerminalResize).toHaveBeenCalledWith('test', expect.any(Function));
 
       // Simulate server broadcasting terminal.resize for this session
       resizeHandler(120, 40);
