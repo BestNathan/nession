@@ -1,7 +1,3 @@
-# Cargo configuration for Nession project
-# Run `brew install sccache` first (macOS) or `apt install sccache` (Linux)
-
-[build]
-rustc-wrapper = "sccache"
-# Increase codegen units for faster dev compilation (default for opt-level=0)
-# codegen-units is already 256 for dev builds — no need to override
+# Cargo configuration for Nession project.
+# sccache is configured via justfile (RUSTC_WRAPPER env var) — local only.
+# CI uses actions-rust-lang's cache-workspaces instead.

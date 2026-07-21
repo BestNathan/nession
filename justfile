@@ -1,3 +1,7 @@
+# Use sccache for faster Rust compilation if installed (brew install sccache).
+# Empty string → cargo ignores the wrapper, no-op if sccache is missing.
+export RUSTC_WRAPPER := `which sccache 2>/dev/null || echo ""`
+
 # ── Rust ────────────────────────────────────────────────────────────────────
 
 # Format check (fast, safe to run on every commit)
