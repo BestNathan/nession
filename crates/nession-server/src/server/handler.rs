@@ -820,7 +820,11 @@ impl ConnectionHandler {
             ))));
         }
 
-        let session_id = msg.payload.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
@@ -862,8 +866,11 @@ impl ConnectionHandler {
         };
 
         // Manual relay URL override from the browser.
-        let manual_relay_url: Option<String> = msg.payload.get("relay_url")
-            .and_then(|v| v.as_str()).map(str::to_string);
+        let manual_relay_url: Option<String> = msg
+            .payload
+            .get("relay_url")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
 
         // Build URL list: respect manual override, otherwise auto-select.
         let agent_ws_url = crate::registry::legacy_agent_address(&agent.addresses)
@@ -873,25 +880,43 @@ impl ConnectionHandler {
         let relay_urls: Vec<String> = if let Some(ref url) = manual_relay_url {
             vec![url.clone()]
         } else {
-            let mut urls: Vec<String> = agent.addresses.iter()
+            let mut urls: Vec<String> = agent
+                .addresses
+                .iter()
                 .filter(|p| p.status == AddressStatus::Reachable)
                 .map(|p| p.address.url.clone())
-                .chain(agent.addresses.iter()
-                    .filter(|p| p.status == AddressStatus::Unknown)
-                    .map(|p| p.address.url.clone()))
-                .chain(agent.addresses.iter()
-                    .filter(|p| p.status == AddressStatus::Unreachable)
-                    .map(|p| p.address.url.clone()))
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unknown)
+                        .map(|p| p.address.url.clone()),
+                )
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unreachable)
+                        .map(|p| p.address.url.clone()),
+                )
                 .collect();
-            if urls.is_empty() { urls.push(agent_ws_url); }
+            if urls.is_empty() {
+                urls.push(agent_ws_url);
+            }
             urls
         };
 
-        info!("Relay begin: {} URL(s) for session '{}'", relay_urls.len(), session_name);
+        info!(
+            "Relay begin: {} URL(s) for session '{}'",
+            relay_urls.len(),
+            session_name
+        );
 
         let client_id = uuid::Uuid::new_v4().to_string();
         if let Some(ref sender) = self.client_sender {
-            self.client_registry.register(session_id, &client_id, sender.clone()).await;
+            self.client_registry
+                .register(session_id, &client_id, sender.clone())
+                .await;
         }
         self.attached_session_id = Some(session_id.to_string());
         self.attached_client_id = Some(client_id.clone());

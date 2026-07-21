@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -86,22 +86,24 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     [mode, selectedUrl],
   );
 
-  // Fetch attach info for the connection token + candidate list. No live probing
-  // here — latency comes from the address probe cache.
+  // Track previous requested mode so we only clear attachInfo when switching
+  // modes (e.g. Auto → Relay), not when re-selecting an address in the list.
+  const prevRequestedMode = useRef<string | null>(null);
+
+  // Fetch attach info for the connection token + candidate list.
   useEffect(() => {
     if (!isOpen || !session) {
       return;
     }
     let cancelled = false;
     setError(null);
-    // "auto" resolves to "p2p" first (falls back to relay only when P2P
-    // fails). Explicit "relay" goes directly to the server relay path.
     const requestedMode = mode === 'auto' ? 'p2p' : mode;
     // Only clear attachInfo on mode/session change, not on address re-select.
     // Otherwise PathList disappears while the re-fetch is in flight.
-    if (!attachInfo || attachInfo.mode !== requestedMode) {
+    if (prevRequestedMode.current !== null && prevRequestedMode.current !== requestedMode) {
       setAttachInfo(null);
     }
+    prevRequestedMode.current = requestedMode;
     void (async () => {
       try {
         const info = await wsService.requestAttach(session.session_id, requestedMode, relayUrl);
