@@ -196,18 +196,23 @@ Components land in `web/src/components/ui/` and are committed to git.
 
 **Every commit must pass the pre-commit hook.** The hook runs automatically on `git commit`. All checks are **blocking** — a failure prevents the commit.
 
-#### Pre-commit Hook (`.git/hooks/pre-commit`)
+#### Pre-commit Hook
+
+**Hooks 目录是 `.githooks/`**（不是 `.git/hooks/`）。`git config core.hooksPath` 已配置为 `.githooks`，该目录下的 hook 文件随仓库版本控制。**修改 hook 必须改 `.githooks/pre-commit`，不要改 `.git/hooks/pre-commit`。**
 
 | Gate | Command | What It Catches |
 |------|---------|-----------------|
 | Rust fmt | `cargo fmt --all -- --check` | Formatting violations |
 | Rust clippy | `cargo clippy --workspace -- -D warnings` | Lint errors, unused code |
+| Rust test compile | `cargo test --no-run` | Test compilation errors |
 | Rust tests | `cargo test` | Broken tests |
-| Rust coverage | `./scripts/check-coverage.sh` | Coverage below per-crate threshold |
+| Rust coverage | `./scripts/check-coverage.sh <changed-crates>` | 仅检查有 staged 变更的 crate |
 | Web ESLint | `cd web && npx eslint . --max-warnings 0` | Lint errors + warnings |
 | Web TypeScript | `cd web && npx tsc --noEmit` | Type errors |
 | Web tests | `cd web && npx vitest run` | Broken web tests |
 | Web coverage | `cd web && npx vitest run --coverage` | Web coverage < 80% |
+
+**覆盖率智能检查**：Rust coverage 只对有 staged `.rs` 文件的 crate 执行。如果只改了 `nession-agent`，就不会检查 `nession-server` 的覆盖率。Web coverage 只在有 staged `web/` 文件时检查。
 
 #### ⛔ Iron Law: Never `--no-verify` to Bypass Coverage
 
