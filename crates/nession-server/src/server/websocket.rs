@@ -344,7 +344,7 @@ where
                 // No response needed, continue
             }
             HandlerAction::Relay {
-                agent_ws_url,
+                agent_ws_urls,
                 session_id: _,
                 session_name,
                 client_id: _,
@@ -353,7 +353,7 @@ where
                 relay_bidirectional_via_channel(
                     &mut read,
                     sender.clone(),
-                    &agent_ws_url,
+                    &agent_ws_urls,
                     &session_name,
                     &env_snapshots,
                 )
@@ -389,10 +389,14 @@ where
 
 /// Relay mode using channel-based sender for client writes.
 /// Used when the write sink is managed by a relay task.
+///
+/// Tries each URL in `agent_ws_urls` with a fast 2s connect timeout
+/// until one succeeds.  This avoids long hangs when the first address
+/// is unreachable (common in k8s where pod IPs are not routable).
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::command_broker::WsMessageSender,
-    agent_ws_url: &str,
+    agent_ws_urls: &[String],
     session_name: &str,
     env_snapshots: &[EnvSnapshot],
 ) -> anyhow::Result<()>
@@ -408,11 +412,50 @@ where
     use futures_util::StreamExt;
 
     info!(
-        "Entering relay mode for session '{}', connecting to agent at {}",
-        session_name, agent_ws_url
+        "Entering relay mode for session '{}', {} candidate URL(s)",
+        session_name,
+        agent_ws_urls.len()
     );
 
-    let (agent_ws, _) = tokio_tungstenite::connect_async(agent_ws_url).await?;
+    // Fast-retry: try each URL with a 2s connect timeout.  The list is
+    // sorted best-first (Reachable → Unknown → Unreachable) by the
+    // handler so the first success is the best available endpoint.
+    let mut agent_ws = None;
+    let mut connected_url: Option<String> = None;
+    for url in agent_ws_urls {
+        info!("Relay: trying {}", url);
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tokio_tungstenite::connect_async(url),
+        )
+        .await
+        {
+            Ok(Ok((ws, _))) => {
+                info!("Relay: connected to {}", url);
+                agent_ws = Some(ws);
+                connected_url = Some(url.clone());
+                break;
+            }
+            Ok(Err(ref e)) => {
+                warn!("Relay: connect to {} failed: {:#}", url, e);
+            }
+            Err(_) => {
+                warn!("Relay: connect to {} timed out (2s)", url);
+            }
+        }
+    }
+
+    let agent_ws = match agent_ws {
+        Some(ws) => ws,
+        None => {
+            anyhow::bail!(
+                "Could not connect to agent for session '{}': tried {} URL(s)",
+                session_name,
+                agent_ws_urls.len()
+            );
+        }
+    };
+
     let (mut agent_write, mut agent_read) = agent_ws.split();
 
     // ── Step 1: Send client.attach to the agent ──
@@ -620,33 +663,36 @@ where
     }
 
     // ── Step 3: Send client.detach on exit (best-effort, fresh connection) ──
-    // The original agent WS was split+consumed, so we open a fresh connection.
-    if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(agent_ws_url).await {
-        let detach_msg = serde_json::json!({
-            "msg_type": "client.detach",
-            "id": uuid::Uuid::new_v4().to_string(),
-            "timestamp": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            "payload": {
-                "session_name": session_name,
-            }
-        });
-        let _ = detach_ws
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                detach_msg.to_string(),
-            ))
-            .await;
-        info!(
-            "Sent client.detach for session '{}' (best-effort)",
-            session_name
-        );
-    } else {
-        warn!(
-            "Could not connect to agent for client.detach for session '{}'",
-            session_name
-        );
+    // The original agent WS was split+consumed, so we open a fresh connection
+    // to the same URL that worked for the attach.
+    if let Some(ref url) = connected_url {
+        if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
+            let detach_msg = serde_json::json!({
+                "msg_type": "client.detach",
+                "id": uuid::Uuid::new_v4().to_string(),
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                "payload": {
+                    "session_name": session_name,
+                }
+            });
+            let _ = detach_ws
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    detach_msg.to_string(),
+                ))
+                .await;
+            info!(
+                "Sent client.detach for session '{}' (best-effort)",
+                session_name
+            );
+        } else {
+            warn!(
+                "Could not connect to agent for client.detach for session '{}'",
+                session_name
+            );
+        }
     }
 
     info!("Relay mode ended for session '{}'", session_name);

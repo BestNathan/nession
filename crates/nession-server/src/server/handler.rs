@@ -10,18 +10,19 @@ use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
-    AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot, EnvSource,
-    ProtocolMessage, ServerTerminalResizePayload,
+    AddressStatus, AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
+    EnvSource, ProtocolMessage, ServerTerminalResizePayload,
 };
 
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
     /// Send an optional reply message back to the sender.
     Reply(Option<Message>),
-    /// Enter relay mode: forward messages between this client and the agent
-    /// at the given WebSocket address.
+    /// Enter relay mode: forward messages between this client and the agent.
+    /// The server tries each URL in order with a fast timeout until one connects.
     Relay {
-        agent_ws_url: String,
+        /// Candidate agent WebSocket URLs, best-first (Reachable > Unknown > Unreachable).
+        agent_ws_urls: Vec<String>,
         /// Session id ("agent_id:session_name") for client registry tracking.
         session_id: String,
         /// Short session name for agent protocol messages (client.attach, etc.).
@@ -681,6 +682,42 @@ impl ConnectionHandler {
                 );
             }
 
+            // Build candidate URL list for the server to try when
+            // connecting to the agent.  Reachable addresses first, then
+            // Unknown, then Unreachable (best-effort last resort).  Fall
+            // back to connect_url / ip:port when the agent advertised
+            // nothing.
+            let mut relay_urls: Vec<String> = agent
+                .addresses
+                .iter()
+                .filter(|p| p.status == AddressStatus::Reachable)
+                .map(|p| p.address.url.clone())
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unknown)
+                        .map(|p| p.address.url.clone()),
+                )
+                .chain(
+                    agent
+                        .addresses
+                        .iter()
+                        .filter(|p| p.status == AddressStatus::Unreachable)
+                        .map(|p| p.address.url.clone()),
+                )
+                .collect();
+            if relay_urls.is_empty() {
+                // No advertised addresses — use the legacy fallback.
+                relay_urls.push(agent_ws_url.clone());
+            }
+            info!(
+                "Relay mode: {} candidate URL(s) for agent {} (session {})",
+                relay_urls.len(),
+                agent_id,
+                session_name
+            );
+
             let client_id = uuid::Uuid::new_v4().to_string();
             if let Some(ref sender) = self.client_sender {
                 self.client_registry
@@ -715,7 +752,7 @@ impl ConnectionHandler {
             }
 
             Ok(HandlerAction::Relay {
-                agent_ws_url,
+                agent_ws_urls: relay_urls,
                 session_id: session_id.to_string(),
                 session_name: session_name.clone(),
                 client_id,
@@ -2700,13 +2737,14 @@ mod tests {
             .unwrap();
         match action {
             HandlerAction::Relay {
-                agent_ws_url,
+                agent_ws_urls,
                 session_id: _,
                 session_name,
                 client_id: _,
                 env_snapshots,
             } => {
-                assert!(agent_ws_url.contains("1.2.3.4"));
+                assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
+                assert!(agent_ws_urls[0].contains("1.2.3.4"));
                 assert_eq!(session_name, "dev");
                 assert!(env_snapshots.is_empty());
             }
