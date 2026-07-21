@@ -31,6 +31,10 @@ pub enum HandlerAction {
         client_id: String,
         /// Resolved env snapshots to inject via client.attach to the agent.
         env_snapshots: Vec<EnvSnapshot>,
+        /// Terminal columns for the initial tmux resize (from browser viewport).
+        cols: u16,
+        /// Terminal rows for the initial tmux resize (from browser viewport).
+        rows: u16,
     },
     /// Close the connection.
     Close,
@@ -928,12 +932,32 @@ impl ConnectionHandler {
 
         // No separate response — the server enters relay forwarding immediately.
         // terminal.output flows back through this WebSocket.
+
+        // Terminal dimensions from the browser viewport (via ResizeObserver).
+        // Default to 80×24 if the browser hasn't sent them yet.
+        let cols = u16::try_from(
+            msg.payload
+                .get("cols")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(80),
+        )
+        .unwrap_or(80);
+        let rows = u16::try_from(
+            msg.payload
+                .get("rows")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(24),
+        )
+        .unwrap_or(24);
+
         Ok(HandlerAction::Relay {
             agent_ws_urls: relay_urls,
             session_id: session_id.to_string(),
             session_name,
             client_id,
             env_snapshots: Vec::new(),
+            cols,
+            rows,
         })
     }
 
@@ -2912,6 +2936,8 @@ mod tests {
                 session_name,
                 client_id: _,
                 env_snapshots,
+                cols: _,
+                rows: _,
             } => {
                 assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
                 assert!(agent_ws_urls[0].contains("1.2.3.4"));

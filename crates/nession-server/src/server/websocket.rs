@@ -349,6 +349,8 @@ where
                 session_name,
                 client_id,
                 env_snapshots,
+                cols,
+                rows,
             } => {
                 relay_bidirectional_via_channel(
                     &mut read,
@@ -356,6 +358,8 @@ where
                     &agent_ws_urls,
                     &session_name,
                     &env_snapshots,
+                    cols,
+                    rows,
                 )
                 .await?;
                 // Relay ended — clean up the client registration so the
@@ -403,6 +407,8 @@ async fn relay_bidirectional_via_channel<RS>(
     agent_ws_urls: &[String],
     session_name: &str,
     env_snapshots: &[EnvSnapshot],
+    cols: u16,
+    rows: u16,
 ) -> anyhow::Result<()>
 where
     RS: futures_util::Stream<
@@ -472,8 +478,8 @@ where
             .as_secs(),
         "payload": {
             "session_name": session_name,
-            "width": 80,
-            "height": 24,
+            "width": cols,
+            "height": rows,
             "env_snapshots": env_snapshots,
         }
     });

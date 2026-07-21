@@ -260,14 +260,19 @@ export class WebSocketService {
    * Phase 2 of relay attach: tell the server to enter relay forwarding.
    * The Terminal is now mounted and subscribed to terminal.output.
    * No response — the server enters relay and terminal data flows.
+   *
+   * @param cols  Terminal columns from the browser viewport (ResizeObserver).
+   * @param rows  Terminal rows from the browser viewport (ResizeObserver).
    */
-  beginRelay(sessionId: string, relayUrl?: string): void {
+  beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
 
     const payload: Record<string, unknown> = { session_id: sessionId };
     if (relayUrl) { payload.relay_url = relayUrl; }
+    if (cols !== undefined) { payload.cols = cols; }
+    if (rows !== undefined) { payload.rows = rows; }
 
     const message: WebSocketMessage = {
       msg_type: 'client.session.relay.begin',

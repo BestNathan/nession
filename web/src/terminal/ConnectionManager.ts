@@ -127,7 +127,12 @@ export class ConnectionManager {
       // through the existing WebSocket.
       if (!this.relayInitiallyAttached) {
         this.relayInitiallyAttached = true;
-        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined);
+        this.serverConnection.beginRelay(
+          this.sessionId,
+          this.relayUrl ?? undefined,
+          width,
+          height,
+        );
         return;
       }
       // Reconnection: re-send beginRelay.
