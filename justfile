@@ -8,9 +8,9 @@ fmt:
 lint:
     cargo clippy --workspace -- -D warnings
 
-# Full test suite
+# Full test suite (only shows failures + summary)
 test:
-    cargo test --workspace
+    ./scripts/filtered-test.sh
 
 # Per-crate coverage check against thresholds
 coverage:
