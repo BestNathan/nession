@@ -58,6 +58,8 @@ export class WebSocketService {
   private sessionsChangeCallbacks: SessionsChangeCallback[] = [];
   private terminalOutputCallbacks = new Map<string, TerminalOutputCallback[]>();
   private terminalResizeCallbacks = new Map<string, TerminalResizeCallback[]>();
+  /** Buffer terminal.output until a callback subscribes (race condition fix). */
+  private outputBuffer = new Map<string, string[]>();
 
   // Authentication state
   private authenticated = false;
@@ -441,6 +443,15 @@ export class WebSocketService {
     }
     this.terminalOutputCallbacks.get(sessionId)!.push(callback);
 
+    // Flush buffered output — replay anything that arrived before we subscribed.
+    const buf = this.outputBuffer.get(sessionId);
+    if (buf && buf.length > 0) {
+      for (const data of buf) {
+        callback(data);
+      }
+      this.outputBuffer.delete(sessionId);
+    }
+
     return () => {
       const callbacks = this.terminalOutputCallbacks.get(sessionId);
       if (callbacks) {
@@ -686,8 +697,21 @@ export class WebSocketService {
     }
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
-    if (callbacks) {
+    if (callbacks && callbacks.length > 0) {
       callbacks.forEach((callback) => callback(data));
+    } else {
+      // Buffer until a callback subscribes.  Relay mode establishes the PTY
+      // before the Terminal mounts, so the initial shell prompt arrives in a
+      // race with React rendering.  Replay the buffer when onTerminalOutput
+      // is called so nothing is lost.
+      let buf = this.outputBuffer.get(sessionId);
+      if (!buf) {
+        buf = [];
+        this.outputBuffer.set(sessionId, buf);
+      }
+      if (buf.length < 64) {
+        buf.push(data);
+      }
     }
   }
 
