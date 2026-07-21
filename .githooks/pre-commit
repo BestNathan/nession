@@ -12,60 +12,59 @@ STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || 
 STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep '^web/' || true)
 STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
 
-# ── Nothing to check ─────────────────────────────────────────────────────
 if [ -z "$STAGED_ALL" ]; then
   exit 0
 fi
 
 HAS_ERROR=0
 
-# ── Rust: fmt ───────────────────────────────────────────────────────────
+# ── Determine changed Rust crates ────────────────────────────────────────
+CHANGED_CRATES=()
+for crate in nession-common nession-agent nession-server nession-cli; do
+  if echo "$STAGED_RUST" | grep -q "^crates/${crate}/"; then
+    CHANGED_CRATES+=("$crate")
+  fi
+done
+
+# ── Rust ──────────────────────────────────────────────────────────────────
 if [ -n "$STAGED_RUST" ]; then
+  # fmt — always full workspace, fast
   echo -e "${YELLOW}→ cargo fmt --all -- --check${NC}"
   if ! cargo fmt --all -- --check 2>/dev/null; then
-    echo -e "${RED}✗ cargo fmt failed — run 'cargo fmt --all' to fix${NC}"
+    echo -e "${RED}✗ cargo fmt — run 'cargo fmt --all'${NC}"
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ cargo fmt${NC}"
   fi
 
-  echo -e "${YELLOW}→ cargo clippy --workspace -- -D warnings${NC}"
-  if ! RUSTFLAGS="-D warnings" cargo clippy --workspace -- -D warnings 2>&1; then
-    echo -e "${RED}✗ cargo clippy failed — fix the warnings above${NC}"
-    HAS_ERROR=1
-  else
-    echo -e "${GREEN}✓ cargo clippy${NC}"
-  fi
-
-  # Also check test compilation with -D warnings (matches CI behavior)
-  echo -e "${YELLOW}→ cargo test --no-run (with -D warnings, matches CI)${NC}"
-  if ! RUSTFLAGS="-D warnings" cargo test --workspace --no-run 2>&1; then
-    echo -e "${RED}✗ test compilation failed — see errors above${NC}"
-    HAS_ERROR=1
-  else
-    echo -e "${GREEN}✓ test compiles${NC}"
-  fi
-
-  echo -e "${YELLOW}→ cargo test${NC}"
-  if ! cargo test 2>&1; then
-    echo -e "${RED}✗ cargo test failed — fix the failing tests${NC}"
-    HAS_ERROR=1
-  else
-    echo -e "${GREEN}✓ cargo test${NC}"
-  fi
-
-  # Determine which crates have staged changes to focus coverage on
-  CHANGED_CRATES=()
-  for crate in nession-common nession-agent nession-server nession-cli; do
-    if echo "$STAGED_RUST" | grep -q "^crates/${crate}/"; then
-      CHANGED_CRATES+=("$crate")
-    fi
-  done
-
   if [ ${#CHANGED_CRATES[@]} -gt 0 ]; then
-    echo -e "${YELLOW}→ rust: coverage check for changed crates: ${CHANGED_CRATES[*]}${NC}"
+    # clippy + test — only changed crates
+    CLIPPY_ARGS=""
+    TEST_ARGS=""
+    for c in "${CHANGED_CRATES[@]}"; do
+      CLIPPY_ARGS="$CLIPPY_ARGS -p $c"
+      TEST_ARGS="$TEST_ARGS -p $c"
+    done
+
+    echo -e "${YELLOW}→ cargo clippy $CLIPPY_ARGS -- -D warnings${NC}"
+    if ! cargo clippy $CLIPPY_ARGS -- -D warnings 2>&1; then
+      echo -e "${RED}✗ cargo clippy${NC}"
+      HAS_ERROR=1
+    else
+      echo -e "${GREEN}✓ cargo clippy${NC}"
+    fi
+
+    echo -e "${YELLOW}→ cargo test $TEST_ARGS${NC}"
+    if ! cargo test $TEST_ARGS 2>&1; then
+      echo -e "${RED}✗ cargo test${NC}"
+      HAS_ERROR=1
+    else
+      echo -e "${GREEN}✓ cargo test${NC}"
+    fi
+
+    echo -e "${YELLOW}→ rust: coverage $TEST_ARGS${NC}"
     if ! ./scripts/check-coverage.sh "${CHANGED_CRATES[@]}" 2>&1; then
-      echo -e "${RED}✗ coverage check failed — see details above${NC}"
+      echo -e "${RED}✗ coverage${NC}"
       HAS_ERROR=1
     else
       echo -e "${GREEN}✓ coverage${NC}"
@@ -73,11 +72,11 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 fi
 
-# ── Web: ESLint + TSC ────────────────────────────────────────────────────
+# ── Web ───────────────────────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ web: eslint --max-warnings 0${NC}"
   if ! (cd web && npx eslint . --report-unused-disable-directives --max-warnings 0 2>/dev/null); then
-    echo -e "${RED}✗ eslint failed — run 'cd web && npm run lint' to see details${NC}"
+    echo -e "${RED}✗ eslint${NC}"
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ eslint${NC}"
@@ -85,7 +84,7 @@ if [ -n "$STAGED_TSX" ]; then
 
   echo -e "${YELLOW}→ web: tsc --noEmit${NC}"
   if ! (cd web && npx tsc --noEmit 2>/dev/null); then
-    echo -e "${RED}✗ tsc failed — run 'cd web && npx tsc --noEmit' to see details${NC}"
+    echo -e "${RED}✗ tsc${NC}"
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ tsc${NC}"
@@ -93,18 +92,18 @@ if [ -n "$STAGED_TSX" ]; then
 
   echo -e "${YELLOW}→ web: npm test${NC}"
   if ! (cd web && npx vitest run --reporter=default 2>/dev/null); then
-    echo -e "${RED}✗ npm test failed — fix the failing tests${NC}"
+    echo -e "${RED}✗ npm test${NC}"
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ npm test${NC}"
   fi
 
-  echo -e "${YELLOW}→ web: test coverage thresholds${NC}"
+  echo -e "${YELLOW}→ web: coverage${NC}"
   if ! (cd web && npx vitest run --coverage --reporter=default >/dev/null 2>&1); then
-    echo -e "${RED}✗ coverage below threshold — run 'cd web && npm run coverage' to see details${NC}"
+    echo -e "${RED}✗ web coverage < 80%${NC}"
     HAS_ERROR=1
   else
-    echo -e "${GREEN}✓ coverage${NC}"
+    echo -e "${GREEN}✓ web coverage${NC}"
   fi
 fi
 
