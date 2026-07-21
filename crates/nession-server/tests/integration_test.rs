@@ -32,7 +32,14 @@ impl TestServer {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let db_path = format!("./test_integration_{}_{}.db", current_timestamp(), id);
+        let db_path = std::env::temp_dir()
+            .join(format!(
+                "nession_test_integration_{}_{}.db",
+                current_timestamp(),
+                id
+            ))
+            .to_string_lossy()
+            .to_string();
 
         let config = nession_common::config::ServerConfig {
             listen_address: "127.0.0.1:0".to_string(),

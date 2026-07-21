@@ -53,7 +53,10 @@ async fn start_server(
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let db_path = format!("./test_relay_{}_{}.db", ts(), id);
+    let db_path = std::env::temp_dir()
+        .join(format!("nession_test_relay_{}_{}.db", ts(), id))
+        .to_string_lossy()
+        .to_string();
 
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
