@@ -94,13 +94,16 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     }
     let cancelled = false;
     setError(null);
-    setAttachInfo(null);
+    // "auto" resolves to "p2p" first (falls back to relay only when P2P
+    // fails). Explicit "relay" goes directly to the server relay path.
+    const requestedMode = mode === 'auto' ? 'p2p' : mode;
+    // Only clear attachInfo on mode/session change, not on address re-select.
+    // Otherwise PathList disappears while the re-fetch is in flight.
+    if (!attachInfo || attachInfo.mode !== requestedMode) {
+      setAttachInfo(null);
+    }
     void (async () => {
       try {
-        // "auto" resolves to "p2p" first (falls back to relay only when P2P
-        // fails). Explicit "relay" goes directly to the server relay path,
-        // optionally with a manually selected endpoint URL.
-        const requestedMode = mode === 'auto' ? 'p2p' : mode;
         const info = await wsService.requestAttach(session.session_id, requestedMode, relayUrl);
         if (!cancelled) {
           setAttachInfo(info);

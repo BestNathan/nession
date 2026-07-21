@@ -253,7 +253,8 @@ async fn relay_attach_and_terminal_io() {
         "auth failed: {auth_resp}"
     );
 
-    // 6. Request relay-mode attach.
+    // 6. Phase 1: query relay — returns addresses + session_name,
+    //    but does NOT enter relay forwarding.
     let session_id = format!("relay-test-agent:{session_name}");
     let attach_req = msg(
         "client.session.attach",
@@ -271,9 +272,19 @@ async fn relay_attach_and_terminal_io() {
     assert_eq!(attach_resp["payload"]["mode"], "relay");
     assert_eq!(attach_resp["payload"]["session_name"], session_name);
 
-    // 7. Give the server time to connect to the agent, send client.attach,
-    //    and set up bidirectional forwarding.  The agent needs ~100ms to
-    //    spawn the PTY and the broadcast task.
+    // 7. Phase 2: begin relay — actually enters relay forwarding.
+    //    The Terminal is now "mounted" and subscribed to terminal.output.
+    let begin_req = msg(
+        "client.session.relay.begin",
+        "begin-1",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // Give the server time to connect to the agent, send client.attach,
+    // and set up bidirectional forwarding.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // 8. Send terminal.input (base64-encoded) through the relay.

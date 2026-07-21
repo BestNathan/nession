@@ -58,8 +58,6 @@ export class WebSocketService {
   private sessionsChangeCallbacks: SessionsChangeCallback[] = [];
   private terminalOutputCallbacks = new Map<string, TerminalOutputCallback[]>();
   private terminalResizeCallbacks = new Map<string, TerminalResizeCallback[]>();
-  /** Buffer terminal.output until a callback subscribes (race condition fix). */
-  private outputBuffer = new Map<string, string[]>();
 
   // Authentication state
   private authenticated = false;
@@ -258,6 +256,29 @@ export class WebSocketService {
     return response;
   }
 
+  /**
+   * Phase 2 of relay attach: tell the server to enter relay forwarding.
+   * The Terminal is now mounted and subscribed to terminal.output.
+   * No response — the server enters relay and terminal data flows.
+   */
+  beginRelay(sessionId: string, relayUrl?: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const payload: Record<string, unknown> = { session_id: sessionId };
+    if (relayUrl) { payload.relay_url = relayUrl; }
+
+    const message: WebSocketMessage = {
+      msg_type: 'client.session.relay.begin',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload,
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   async createSession(
     agentId: string,
     name: string,
@@ -442,15 +463,6 @@ export class WebSocketService {
       this.terminalOutputCallbacks.set(sessionId, []);
     }
     this.terminalOutputCallbacks.get(sessionId)!.push(callback);
-
-    // Flush buffered output — replay anything that arrived before we subscribed.
-    const buf = this.outputBuffer.get(sessionId);
-    if (buf && buf.length > 0) {
-      for (const data of buf) {
-        callback(data);
-      }
-      this.outputBuffer.delete(sessionId);
-    }
 
     return () => {
       const callbacks = this.terminalOutputCallbacks.get(sessionId);
@@ -697,21 +709,8 @@ export class WebSocketService {
     }
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);
-    if (callbacks && callbacks.length > 0) {
+    if (callbacks) {
       callbacks.forEach((callback) => callback(data));
-    } else {
-      // Buffer until a callback subscribes.  Relay mode establishes the PTY
-      // before the Terminal mounts, so the initial shell prompt arrives in a
-      // race with React rendering.  Replay the buffer when onTerminalOutput
-      // is called so nothing is lost.
-      let buf = this.outputBuffer.get(sessionId);
-      if (!buf) {
-        buf = [];
-        this.outputBuffer.set(sessionId, buf);
-      }
-      if (buf.length < 64) {
-        buf.push(data);
-      }
     }
   }
 

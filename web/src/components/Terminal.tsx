@@ -23,6 +23,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     mode,
     p2pConnection,
     serverConnection,
+    relayUrl,
     onDisconnect,
     onError,
     onBannerChange,
@@ -101,7 +102,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     const connOpts = mode === 'p2p'
       ? { mode: 'p2p' as const, sessionName, sessionId, p2pConnection: p2pConnection ?? undefined }
-      : { mode: 'relay' as const, sessionName, sessionId, serverConnection };
+      : { mode: 'relay' as const, sessionName, sessionId, serverConnection, relayUrl };
 
     const profile = detectProfile(container.clientWidth || window.innerWidth);
     // A stored renderer preference of 'webgl' must still be clamped when the
@@ -168,7 +169,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       viewRef.current = null;
       setViewGeneration((g) => g + 1);
     };
-  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
+  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, relayUrl, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
 
   // Imperative handle for parent components. Depends on `viewGeneration` so
   // the handle regenerates when viewRef.current populates (via useEffect) or

@@ -31,9 +31,11 @@ export class ConnectionManager {
 
   private reconnectAttempt = 0;
   private relayLost = false;
-  /** True once the initial relay has been established (by the AttachDialog).
+  /** True once the initial relay has been established.
    *  Resets on disconnect so reconnection re-sends the attach request. */
   private relayInitiallyAttached = false;
+  /** Manual relay endpoint URL from the attach dialog. */
+  private relayUrl: string | null | undefined;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
@@ -53,6 +55,7 @@ export class ConnectionManager {
     this.sessionId = options.sessionId;
     this.p2pConnection = options.p2pConnection;
     this.serverConnection = options.serverConnection;
+    this.relayUrl = options.relayUrl;
 
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.setupP2P();
@@ -118,16 +121,18 @@ export class ConnectionManager {
         },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
-      // Initial attach: the relay was already established by the AttachDialog
-      // (the server is in relay forwarding mode).  Just mark as attached.
-      // Reconnection: the setupRelay callback resets the flag and calls
-      // attach() again, which reaches the block below.
+      // Phase 2 of relay attach: the Terminal is now mounted and subscribed
+      // to terminal.output.  Tell the server to enter relay forwarding.
+      // No await — beginRelay is fire-and-forget; terminal data flows
+      // through the existing WebSocket.
       if (!this.relayInitiallyAttached) {
         this.relayInitiallyAttached = true;
+        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined);
         return;
       }
+      // Reconnection: re-send beginRelay.
       try {
-        await this.serverConnection.requestAttach(this.sessionId, 'relay');
+        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined);
       } catch (err) {
         this.onError?.(err instanceof Error ? err : new Error(String(err)));
       }

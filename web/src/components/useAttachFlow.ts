@@ -46,6 +46,7 @@ export function useAttachFlow(
       orderedUrls: choice.orderedUrls,
       latencies: choice.latencies,
       selectedAddress: choice.selectedUrl ?? undefined,
+      relayUrl: choice.relayUrl,
       renderer: choice.renderer,
     });
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);

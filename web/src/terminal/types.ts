@@ -22,6 +22,8 @@ export interface ConnectionOptions {
   sessionId: string;
   p2pConnection?: P2PConnection;
   serverConnection?: WebSocketService;
+  /** Manual relay endpoint URL from the attach dialog. */
+  relayUrl?: string | null;
 }
 
 /** Options passed to TerminalView constructor. */
@@ -55,6 +57,7 @@ export interface TerminalProps {
   mode: 'p2p' | 'relay';
   p2pConnection?: P2PConnection | null;
   serverConnection?: WebSocketService;
+  relayUrl?: string | null;
   onDisconnect?: () => void;
   onError?: (error: Error) => void;
   onBannerChange?: (blocked: boolean) => void;
