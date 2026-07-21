@@ -46,6 +46,14 @@ if [ -n "$STAGED_RUST" ]; then
     echo -e "${GREEN}✓ test compiles${NC}"
   fi
 
+  echo -e "${YELLOW}→ cargo test${NC}"
+  if ! cargo test 2>&1; then
+    echo -e "${RED}✗ cargo test failed — fix the failing tests${NC}"
+    HAS_ERROR=1
+  else
+    echo -e "${GREEN}✓ cargo test${NC}"
+  fi
+
   # Determine which crates have staged changes to focus coverage on
   CHANGED_CRATES=()
   for crate in nession-common nession-agent nession-server nession-cli; do
@@ -81,6 +89,14 @@ if [ -n "$STAGED_TSX" ]; then
     HAS_ERROR=1
   else
     echo -e "${GREEN}✓ tsc${NC}"
+  fi
+
+  echo -e "${YELLOW}→ web: npm test${NC}"
+  if ! (cd web && npx vitest run --reporter=default 2>/dev/null); then
+    echo -e "${RED}✗ npm test failed — fix the failing tests${NC}"
+    HAS_ERROR=1
+  else
+    echo -e "${GREEN}✓ npm test${NC}"
   fi
 
   echo -e "${YELLOW}→ web: test coverage thresholds${NC}"
