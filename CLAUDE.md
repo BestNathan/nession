@@ -192,60 +192,6 @@ cd web && npx shadcn@latest add <component-name> --yes
 ```
 Components land in `web/src/components/ui/` and are committed to git.
 
-### Quality Gates
-
-**Every commit must pass the pre-commit hook.** The hook runs automatically on `git commit`. All checks are **blocking** — a failure prevents the commit.
-
-#### Pre-commit Hook
-
-**Hooks 目录是 `.githooks/`**（不是 `.git/hooks/`）。`git config core.hooksPath` 已配置为 `.githooks`，该目录下的 hook 文件随仓库版本控制。**修改 hook 必须改 `.githooks/pre-commit`，不要改 `.git/hooks/pre-commit`。**
-
-| Gate | Command | What It Catches |
-|------|---------|-----------------|
-| Rust fmt | `cargo fmt --all -- --check` | Formatting violations |
-| Rust clippy | `cargo clippy --workspace -- -D warnings` | Lint errors, unused code |
-| Rust test compile | `cargo test --no-run` | Test compilation errors |
-| Rust tests | `cargo test` | Broken tests |
-| Rust coverage | `./scripts/check-coverage.sh <changed-crates>` | 仅检查有 staged 变更的 crate |
-| Web ESLint | `cd web && npx eslint . --max-warnings 0` | Lint errors + warnings |
-| Web TypeScript | `cd web && npx tsc --noEmit` | Type errors |
-| Web tests | `cd web && npx vitest run` | Broken web tests |
-| Web coverage | `cd web && npx vitest run --coverage` | Web coverage < 80% |
-
-**覆盖率智能检查**：Rust coverage 只对有 staged `.rs` 文件的 crate 执行。如果只改了 `nession-agent`，就不会检查 `nession-server` 的覆盖率。Web coverage 只在有 staged `web/` 文件时检查。
-
-#### ⛔ Iron Law: Never `--no-verify` to Bypass Coverage
-
-| 规则 | 说明 |
-|------|------|
-| **`git commit --no-verify` 禁止用于绕过覆盖率** | 覆盖率不达标必须写测试补齐，不能跳过 |
-| **覆盖率阈值不可降低** | 80% 是硬底线。降低阈值等于隐藏问题 |
-| **Rust 单 crate 覆盖率不达标** | 给那个 crate 写测试，不是改 `check-coverage.sh` |
-| **`#[allow(clippy::*)]` 禁止** | 修复 lint 警告，不允许 suppress |
-
-#### CI (GitHub Actions)
-
-CI 在 push 到 `feat/**` 或 `fix/**` 分支时触发，检查内容与 pre-commit 一致：
-
-| Job | Checks |
-|-----|--------|
-| `rust-check` | `cargo fmt`, `cargo clippy`, `cargo test` |
-| `web-check` | `npm run lint`, `npx tsc --noEmit`, `npm test` |
-
-**⚠ CI 和 pre-commit 必须一致。** 如果 CI 跑 checks 而 pre-commit 没跑（或反之），就会出现"本地通过、CI 挂掉"的情况。新增 check 必须两边同步更新。
-
-#### Coverage Thresholds
-
-| Crate | Threshold | Current |
-|-------|-----------|---------|
-| `nession-common` | 90% | ✅ |
-| `nession-server` | 80% | ⚠ 59% |
-| `nession-agent` | 80% | ✅ |
-| `nession-cli` | 80% | ✅ |
-| `web/` | 80% | ✅ 82.84% |
-
-**nession-server 覆盖率缺口需要逐步补齐。** 每个 PR 如果修改了 nession-server，必须同时补充测试使覆盖率不下降（或至少维持当前水平）。
-
 ### Docker Builds
 
 Multi-stage builds. To build locally:
@@ -372,3 +318,45 @@ When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "fea
 - `docs:` — documentation
 
 All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.com>`
+
+## 3. Quality Gates
+
+### Pre-commit Hook
+
+**Hooks 目录：`.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hook 只改这个文件。
+
+提交时自动运行，**全部 blocking**：
+
+| Rust | Web |
+|------|-----|
+| `cargo fmt --all -- --check` | `npx eslint . --max-warnings 0` |
+| `cargo clippy --workspace -- -D warnings` | `npx tsc --noEmit` |
+| `cargo test --no-run` | `npx vitest run` |
+| `cargo test` | `npx vitest run --coverage` (≥80%) |
+| `./scripts/check-coverage.sh` (仅变更的 crate) | |
+
+### ⛔ Iron Laws
+
+- **`git commit --no-verify` 禁止用于绕过覆盖率** — 不达标就写测试
+- **`#[allow(clippy::*)]` 禁止** — 修复 lint，不要 suppress
+- **覆盖率阈值不可降低** — 80% 是硬底线
+- **CI 与 pre-commit 必须同步** — CI 新增 check 必须同步到 `.githooks/pre-commit`
+
+### Coverage Thresholds
+
+| Crate | Threshold |
+|-------|-----------|
+| `nession-common` | 90% |
+| `nession-server` | 80% (⚠ 目前 59%) |
+| `nession-agent` | 80% |
+| `nession-cli` | 80% |
+| `web/` | 80% |
+
+### CI (GitHub Actions)
+
+Push 到 `feat/**` / `fix/**` 时触发：
+
+| Job | Checks |
+|-----|--------|
+| `rust-check` | `cargo fmt`, `cargo clippy`, `cargo test` |
+| `web-check` | `npm run lint`, `npx tsc --noEmit`, `npm test` |
