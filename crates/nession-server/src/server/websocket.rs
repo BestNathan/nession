@@ -345,9 +345,9 @@ where
             }
             HandlerAction::Relay {
                 agent_ws_urls,
-                session_id: _,
+                session_id,
                 session_name,
-                client_id: _,
+                client_id,
                 env_snapshots,
             } => {
                 relay_bidirectional_via_channel(
@@ -358,7 +358,11 @@ where
                     &env_snapshots,
                 )
                 .await?;
-                break;
+                // Relay ended — clean up the client registration so the
+                // cleanup block below (WS-close path) doesn't double-free.
+                client_registry.unregister(&session_id, &client_id).await;
+                // Don't break — the WebSocket stays open for dashboard use.
+                continue;
             }
             HandlerAction::Close => {
                 break;
@@ -559,6 +563,15 @@ where
             .unwrap_or(false)
     }
 
+    // Helper: detect client.session.relay.end — client wants to stop the
+    // relay without closing the WebSocket.
+    fn is_relay_end(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+        msg.to_text()
+            .ok()
+            .map(|t| t.contains("\"client.session.relay.end\""))
+            .unwrap_or(false)
+    }
+
     // Forward client -> agent, with trailing-edge rate limiting on
     // terminal.input to protect against mouse-tracking floods.
     const INPUT_THROTTLE_MS: u64 = 16;
@@ -578,6 +591,11 @@ where
 
             // Non-terminal.input passes through immediately.
             if !is_terminal_input(&msg) {
+                // Client wants to stop relay without closing the WebSocket.
+                if is_relay_end(&msg) {
+                    info!("Client requested relay end for session '{}'", session_name);
+                    return;
+                }
                 if let Err(e) = agent_write.send(msg).await {
                     error!("Failed to forward client message to agent: {}", e);
                     break;

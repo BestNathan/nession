@@ -279,6 +279,26 @@ export class WebSocketService {
     this.ws.send(JSON.stringify(message));
   }
 
+  /**
+   * Tell the server to stop relay forwarding for the given session.
+   * Called when the user navigates away from the terminal view.
+   * Fire-and-forget — the server cleans up relay state on receipt.
+   */
+  endRelay(sessionId: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const message: WebSocketMessage = {
+      msg_type: 'client.session.relay.end',
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload: { session_id: sessionId },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   async createSession(
     agentId: string,
     name: string,

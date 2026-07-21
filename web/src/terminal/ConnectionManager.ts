@@ -151,6 +151,13 @@ export class ConnectionManager {
     this.relayUnsubOutput?.();
     this.relayUnsubState?.();
     this.relayUnsubResize?.();
+
+    // Tell the server to stop relay forwarding so the relay loop exits
+    // and the server sends client.detach to the agent (best-effort).
+    if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+      try { this.serverConnection.endRelay(this.sessionId); } catch { /* ws already closing */ }
+    }
+
     this.onStateChange = null;
     this.onOutput = null;
     this.onError = null;
