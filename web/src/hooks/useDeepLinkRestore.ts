@@ -49,6 +49,7 @@ export function useDeepLinkRestore(opts: {
         orderedUrls: [],
         latencies: [],
         selectedUrl: null,
+        relayUrl: null,
         renderer: 'webgl',
       });
       // Mark only after a successful (synchronous) confirm. (#71 #5)

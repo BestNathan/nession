@@ -17,7 +17,7 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {
-  /** The mode the user picked in the dialog ('auto' | 'p2p'). */
+  /** The mode the user picked in the dialog ('auto' | 'p2p' | 'relay'). */
   mode: AttachMode;
   attachInfo: AttachInfo;
   /** Browser-tested candidate URLs, best-first. Empty for relay. */
@@ -26,6 +26,8 @@ export interface AttachChoice {
   latencies: AddressLatency[];
   /** Manual single-address override, or null for automatic (best) selection. */
   selectedUrl: string | null;
+  /** For relay mode: manually chosen relay endpoint, or null for auto. */
+  relayUrl?: string | null;
   /** Renderer the user picked (webgl/canvas). */
   renderer: 'webgl' | 'canvas';
 }
@@ -90,9 +92,11 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     void (async () => {
       try {
         // "auto" resolves to "p2p" first (falls back to relay only when P2P
-        // fails). Explicit "relay" goes directly to the server relay path.
+        // fails). Explicit "relay" goes directly to the server relay path,
+        // optionally with a manually selected endpoint URL.
         const requestedMode = mode === 'auto' ? 'p2p' : mode;
-        const info = await wsService.requestAttach(session.session_id, requestedMode);
+        const url = mode === 'relay' && selectedUrl !== AUTO_URL ? selectedUrl : undefined;
+        const info = await wsService.requestAttach(session.session_id, requestedMode, url);
         if (!cancelled) {
           setAttachInfo(info);
         }
@@ -118,7 +122,8 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
       return;
     }
     const manual = selectedUrl === AUTO_URL ? null : selectedUrl;
-    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, renderer });
+    const relayUrl = mode === 'relay' ? manual : null;
+    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer });
   }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm]);
 
   const candidates = attachInfo?.addresses ?? [];
@@ -135,16 +140,20 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
 
-          {/* Candidate address list with cached browser-measured latency.
-              Hidden in relay mode — the server proxies terminal I/O. */}
-          {mode !== 'relay' && candidates.length > 1 ? (
+          {/* Candidate address list.
+              P2P mode: browser-measured latency.
+              Relay mode: server TCP probe results (RTT + Reachable/Unreachable). */}
+          {candidates.length > 0 ? (
             <PathList
               candidates={candidates}
-              latencyByUrl={latencyByUrl}
+              latencyByUrl={mode === 'relay'
+                ? new Map(candidates.map(a => [a.url, a.rtt_ms ?? null]))
+                : latencyByUrl}
               bestUrl={bestUrl}
               selectedUrl={selectedUrl}
               onSelect={setSelectedUrl}
-              onRetest={agentId ? () => probeCache.refreshAgent(agentId) : undefined}
+              onRetest={mode !== 'relay' && agentId ? () => probeCache.refreshAgent(agentId) : undefined}
+              isRelay={mode === 'relay'}
             />
           ) : null}
 
@@ -240,14 +249,18 @@ interface PathListProps {
   onSelect: (url: string) => void;
   /** Force a fresh probe of the agent's addresses; hidden when unavailable. */
   onRetest?: () => void;
+  /** When true, use server probe data (rtt_ms, Reachable/Unreachable) labels. */
+  isRelay?: boolean;
 }
 
 /** The "Connection Path" section: Auto row + one row per candidate address. */
-function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, onRetest }: PathListProps) {
+function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, onRetest, isRelay }: PathListProps) {
   const bestLatency = bestUrl ? latencyByUrl.get(bestUrl) : undefined;
-  const autoSublabel = bestUrl
-    ? `fastest reachable path${bestLatency !== null && bestLatency !== undefined ? ` · ${bestLatency}ms` : ''}`
-    : 'browser will decide / relay';
+  const autoSublabel = isRelay
+    ? 'server auto-selects (Reachable > Unknown > Unreachable)'
+    : bestUrl
+      ? `fastest reachable path${bestLatency !== null && bestLatency !== undefined ? ` · ${bestLatency}ms` : ''}`
+      : 'browser will decide / relay';
 
   return (
     <div className="space-y-2">
@@ -272,7 +285,14 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
         />
         {candidates.map((addr) => {
           const latency = latencyByUrl.get(addr.url);
-          const reachable = latency !== null && latency !== undefined;
+          // Relay mode: use server probe status (Reachable/Unreachable/Unknown).
+          // P2P mode: use browser test result (latency != null → reachable).
+          const reachable = isRelay
+            ? addr.status === 'reachable'
+            : latency !== null && latency !== undefined;
+          const statusLabel = isRelay
+            ? (addr.status === 'reachable' ? 'reachable' : addr.status === 'unreachable' ? 'unreachable' : 'unknown')
+            : undefined;
           return (
             <AddressRow
               key={addr.url}
@@ -280,6 +300,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
               badge={addr.network_type}
               sublabel={addr.url}
               reachable={reachable}
+              statusLabel={statusLabel}
               latencyMs={latency ?? undefined}
               selected={selectedUrl === addr.url}
               onSelect={() => onSelect(addr.url)}
@@ -297,12 +318,14 @@ interface AddressRowProps {
   sublabel: string;
   selected: boolean;
   onSelect: () => void;
-  /** undefined = no cached probe; true/false = browser reachability. */
+  /** undefined = no cached probe; true/false = reachability. */
   reachable?: boolean;
   latencyMs?: number;
+  /** Server probe status label (relay mode). */
+  statusLabel?: string;
 }
 
-function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, latencyMs }: AddressRowProps) {
+function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, latencyMs, statusLabel }: AddressRowProps) {
   return (
     <button
       type="button"
@@ -332,6 +355,12 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
       </div>
       {latencyMs !== undefined ? (
         <span className="text-[10px] text-muted-foreground shrink-0">{latencyMs}ms</span>
+      ) : null}
+      {statusLabel ? (
+        <span className={cn(
+          'text-[10px] shrink-0',
+          statusLabel === 'reachable' ? 'text-green-500' : 'text-red-500',
+        )}>{statusLabel}</span>
       ) : null}
     </button>
   );

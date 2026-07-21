@@ -236,16 +236,22 @@ export class WebSocketService {
 
   async requestAttach(
     sessionId: string,
-    mode: 'p2p' | 'relay' = 'p2p'
+    mode: 'p2p' | 'relay' = 'p2p',
+    relayUrl?: string,
   ): Promise<AttachInfo> {
     if (!this.authenticated) {
       throw new Error('Not authenticated');
     }
 
-    const response = await this.request<AttachInfo>('client.session.attach', {
+    const payload: Record<string, unknown> = {
       session_id: sessionId,
       preferred_mode: mode,
-    });
+    };
+    if (relayUrl) {
+      payload.relay_url = relayUrl;
+    }
+
+    const response = await this.request<AttachInfo>('client.session.attach', payload);
 
     return response;
   }
@@ -637,8 +643,19 @@ export class WebSocketService {
           }
           break;
 
+        case 'error': {
+          const errMsg = (message.payload as Record<string, unknown>)?.message as string | undefined;
+          console.error('[relay] Server error:', errMsg ?? 'unknown error', message.payload);
+          break;
+        }
+
+        case 'ok':
+          // Agent responses forwarded through relay (e.g. to terminal.input).
+          // These are acknowledgements; no action needed.
+          break;
+
         default:
-          console.warn('Unhandled message type:', message.msg_type);
+          console.warn('Unhandled message type:', message.msg_type, message.payload);
       }
     } catch (error) {
       console.error('Failed to parse WebSocket message:', error);

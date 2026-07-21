@@ -288,6 +288,11 @@ pub struct ClientSessionAttachPayload {
     /// Empty (default) preserves the pre-env-feature behaviour.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// When set, the server connects to this exact URL for relay mode instead
+    /// of auto-selecting from the agent's advertised addresses.  The URL must
+    /// be one of the addresses returned in the attach response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_url: Option<String>,
 }
 
 fn default_attach_mode() -> String {

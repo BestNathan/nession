@@ -682,41 +682,55 @@ impl ConnectionHandler {
                 );
             }
 
+            // Honour a manually-selected relay address from the browser.
+            let manual_relay_url: Option<String> = msg
+                .payload
+                .get("relay_url")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
             // Build candidate URL list for the server to try when
-            // connecting to the agent.  Reachable addresses first, then
-            // Unknown, then Unreachable (best-effort last resort).  Fall
-            // back to connect_url / ip:port when the agent advertised
-            // nothing.
-            let mut relay_urls: Vec<String> = agent
-                .addresses
-                .iter()
-                .filter(|p| p.status == AddressStatus::Reachable)
-                .map(|p| p.address.url.clone())
-                .chain(
-                    agent
-                        .addresses
-                        .iter()
-                        .filter(|p| p.status == AddressStatus::Unknown)
-                        .map(|p| p.address.url.clone()),
-                )
-                .chain(
-                    agent
-                        .addresses
-                        .iter()
-                        .filter(|p| p.status == AddressStatus::Unreachable)
-                        .map(|p| p.address.url.clone()),
-                )
-                .collect();
-            if relay_urls.is_empty() {
-                // No advertised addresses — use the legacy fallback.
-                relay_urls.push(agent_ws_url.clone());
-            }
-            info!(
-                "Relay mode: {} candidate URL(s) for agent {} (session {})",
-                relay_urls.len(),
-                agent_id,
-                session_name
-            );
+            // connecting to the agent.  If the browser specified a
+            // relay_url, use only that one.  Otherwise auto-select:
+            // Reachable > Unknown > Unreachable > legacy fallback.
+            let relay_urls: Vec<String> = if let Some(ref url) = manual_relay_url {
+                info!(
+                    "Relay mode: using manual URL {} for session {}",
+                    url, session_name
+                );
+                vec![url.clone()]
+            } else {
+                let mut urls: Vec<String> = agent
+                    .addresses
+                    .iter()
+                    .filter(|p| p.status == AddressStatus::Reachable)
+                    .map(|p| p.address.url.clone())
+                    .chain(
+                        agent
+                            .addresses
+                            .iter()
+                            .filter(|p| p.status == AddressStatus::Unknown)
+                            .map(|p| p.address.url.clone()),
+                    )
+                    .chain(
+                        agent
+                            .addresses
+                            .iter()
+                            .filter(|p| p.status == AddressStatus::Unreachable)
+                            .map(|p| p.address.url.clone()),
+                    )
+                    .collect();
+                if urls.is_empty() {
+                    urls.push(agent_ws_url.clone());
+                }
+                info!(
+                    "Relay mode: {} candidate URL(s) for agent {} (session {})",
+                    urls.len(),
+                    agent_id,
+                    session_name
+                );
+                urls
+            };
 
             let client_id = uuid::Uuid::new_v4().to_string();
             if let Some(ref sender) = self.client_sender {
@@ -744,6 +758,9 @@ impl ConnectionHandler {
                             "status": "success",
                             "mode": "relay",
                             "session_name": session_name,
+                            // Server TCP probe results — the browser shows these
+                            // so the user can pick a specific relay endpoint.
+                            "addresses": addresses_json,
                         }
                     })
                     .to_string(),

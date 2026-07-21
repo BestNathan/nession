@@ -315,7 +315,7 @@ describe('WebSocketService', () => {
         data: JSON.stringify({ msg_type: 'unknown.type', id: 'xyz', timestamp: Date.now(), payload: {} }),
       }));
 
-      expect(consoleSpy).toHaveBeenCalledWith('Unhandled message type:', 'unknown.type');
+      expect(consoleSpy).toHaveBeenCalledWith('Unhandled message type:', 'unknown.type', expect.any(Object));
       consoleSpy.mockRestore();
     });
 

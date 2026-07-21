@@ -76,7 +76,7 @@ describe('AttachDialog', () => {
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
     await waitFor(() => expect(attachBtn).toBeEnabled());
     await user.click(attachBtn);
-    expect(ws.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p');
+    expect(ws.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p', undefined);
     expect(onConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ session_id: 'agent-1:dev' }),
       expect.objectContaining({ mode: 'auto', selectedUrl: null }),
