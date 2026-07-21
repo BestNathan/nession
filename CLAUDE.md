@@ -321,42 +321,8 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 
 ## 3. Quality Gates
 
-### Pre-commit Hook
-
-**Hooks 目录：`.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hook 只改这个文件。
-
-提交时自动运行，**全部 blocking**：
-
-| Rust | Web |
-|------|-----|
-| `cargo fmt --all -- --check` | `npx eslint . --max-warnings 0` |
-| `cargo clippy --workspace -- -D warnings` | `npx tsc --noEmit` |
-| `cargo test --no-run` | `npx vitest run` |
-| `cargo test` | `npx vitest run --coverage` (≥80%) |
-| `./scripts/check-coverage.sh` (仅变更的 crate) | |
-
-### ⛔ Iron Laws
-
-- **`git commit --no-verify` 禁止用于绕过覆盖率** — 不达标就写测试
-- **`#[allow(clippy::*)]` 禁止** — 修复 lint，不要 suppress
-- **覆盖率阈值不可降低** — 80% 是硬底线
-- **CI 与 pre-commit 必须同步** — CI 新增 check 必须同步到 `.githooks/pre-commit`
-
-### Coverage Thresholds
-
-| Crate | Threshold |
-|-------|-----------|
-| `nession-common` | 90% |
-| `nession-server` | 80% (⚠ 目前 59%) |
-| `nession-agent` | 80% |
-| `nession-cli` | 80% |
-| `web/` | 80% |
-
-### CI (GitHub Actions)
-
-Push 到 `feat/**` / `fix/**` 时触发：
-
-| Job | Checks |
-|-----|--------|
-| `rust-check` | `cargo fmt`, `cargo clippy`, `cargo test` |
-| `web-check` | `npm run lint`, `npx tsc --noEmit`, `npm test` |
+- **`.githooks/pre-commit`** 是唯一 hooks 入口（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这个文件。
+- **Pre-commit 全部 blocking**：`cargo fmt` → `cargo clippy` → `cargo test --no-run` → `cargo test` → coverage（仅变更 crate）→ `eslint` → `tsc --noEmit` → `vitest run` → `vitest coverage`
+- **CI 触发**：push `feat/**` / `fix/**`。`rust-check`（fmt + clippy + test）+ `web-check`（lint + tsc + test）。与 pre-commit 必须一致。
+- **⛔ `git commit --no-verify` 禁止绕过覆盖率**。不达标写测试，不降阈值，不 suppress lint。
+- **覆盖率阈值**：`nession-common` 90%，其余 Rust crate 80%，web 80%。
