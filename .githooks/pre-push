@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── Colors ──────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${YELLOW}→ pre-push: running full checks...${NC}"
+echo ""
+
+HAS_ERROR=0
+
+# Rust: test
+echo -e "${YELLOW}→ just test${NC}"
+if just test; then
+  echo -e "${GREEN}✓ just test${NC}"
+else
+  echo -e "${RED}✗ just test${NC}"
+  HAS_ERROR=1
+fi
+
+echo ""
+
+# Rust: coverage
+echo -e "${YELLOW}→ just coverage${NC}"
+if just coverage; then
+  echo -e "${GREEN}✓ just coverage${NC}"
+else
+  echo -e "${RED}✗ just coverage${NC}"
+  HAS_ERROR=1
+fi
+
+echo ""
+
+# Web: test
+echo -e "${YELLOW}→ just web-test${NC}"
+if just web-test; then
+  echo -e "${GREEN}✓ just web-test${NC}"
+else
+  echo -e "${RED}✗ just web-test${NC}"
+  HAS_ERROR=1
+fi
+
+echo ""
+
+# Web: coverage
+echo -e "${YELLOW}→ just web-coverage${NC}"
+if just web-coverage; then
+  echo -e "${GREEN}✓ just web-coverage${NC}"
+else
+  echo -e "${RED}✗ just web-coverage${NC}"
+  HAS_ERROR=1
+fi
+
+echo ""
+
+if [ $HAS_ERROR -eq 1 ]; then
+  echo -e "${RED}Push blocked — fix issues above${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}All pre-push checks passed ✓${NC}"
+exit 0
