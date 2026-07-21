@@ -31,6 +31,9 @@ export class ConnectionManager {
 
   private reconnectAttempt = 0;
   private relayLost = false;
+  /** True once the initial relay has been established (by the AttachDialog).
+   *  Resets on disconnect so reconnection re-sends the attach request. */
+  private relayInitiallyAttached = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubState: (() => void) | null = null;
@@ -115,6 +118,14 @@ export class ConnectionManager {
         },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
+      // Initial attach: the relay was already established by the AttachDialog
+      // (the server is in relay forwarding mode).  Just mark as attached.
+      // Reconnection: the setupRelay callback resets the flag and calls
+      // attach() again, which reaches the block below.
+      if (!this.relayInitiallyAttached) {
+        this.relayInitiallyAttached = true;
+        return;
+      }
       try {
         await this.serverConnection.requestAttach(this.sessionId, 'relay');
       } catch (err) {
@@ -215,6 +226,10 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'disconnected' || status === 'connecting') {
+        // Reset so reconnection re-sends the relay attach request.
+        if (status === 'disconnected') {
+          this.relayInitiallyAttached = false;
+        }
         if (this.relayLost) { return; }
         const next = this.reconnectAttempt + 1;
         if (next > RELAY_MAX_ATTEMPTS) {
