@@ -29,13 +29,13 @@ web-lint:
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 
-# Unit tests (pre-push)
+# Unit tests (pre-push) — jsdom noise filtered
 web-test:
-    cd web && npx vitest run --reporter=default
+    ./scripts/filtered-web-test.sh
 
-# Coverage check (pre-push, >= 80% threshold)
+# Coverage check (pre-push, >= 80% threshold) — jsdom noise filtered
 web-coverage:
-    cd web && npx vitest run --coverage --reporter=default
+    ./scripts/filtered-web-test.sh --coverage
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
 pre-push: test coverage web-test web-coverage
