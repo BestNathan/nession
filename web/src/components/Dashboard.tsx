@@ -32,7 +32,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     showCreateModal, sessionToKill, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     isSearchActive, sortField, sortDirection, toggleSort, selectedAgent, setSelectedAgent,
     getHeartbeatHistory, setShowCreateModal, setSessionToKill, handleSessionKilled,
-    handleSessionCreated, fetchSessions, clearError,
+    handleSessionCreated, fetchSessions, clearError, updateAgent,
   } = useDashboardHandlers();
 
   const {
@@ -104,6 +104,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           setSelectedAgent={setSelectedAgent}
           onlineCount={onlineCount}
           offlineCount={offlineCount}
+          onAgentRename={updateAgent}
         />
 
         {/* Sessions */}

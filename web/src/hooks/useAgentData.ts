@@ -45,6 +45,11 @@ export function useAgentData(wsService: WebSocketService) {
     trackHeartbeats(newAgents, heartbeatHistory.current);
   }, []);
 
+  /** Replace a single agent in the list (used after rename). */
+  const updateAgent = useCallback((updated: Agent) => {
+    setAgents((prev) => prev.map((a) => (a.agent_id === updated.agent_id ? updated : a)));
+  }, []);
+
   return {
     agents, setAgents,
     loadingAgents,
@@ -52,5 +57,6 @@ export function useAgentData(wsService: WebSocketService) {
     fetchAgents,
     getHeartbeatHistory,
     applyAgentUpdate,
+    updateAgent,
   };
 }

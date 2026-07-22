@@ -82,6 +82,10 @@ pub enum AttachMode {
 pub struct AgentConfig {
     /// Unique identifier for this agent.
     pub agent_id: String,
+    /// Human-readable display name shown in the web UI.
+    /// When absent the UI falls back to the machine hostname.
+    #[serde(default)]
+    pub display_name: Option<String>,
     /// Central server WebSocket URL (e.g., "ws://localhost:8443").
     pub server_url: String,
     /// Authentication token for the central server.
@@ -144,6 +148,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             agent_id: format!("agent-{}", uuid::Uuid::new_v4()),
+            display_name: None,
             server_url: "ws://localhost:8443".to_string(),
             auth_token: String::new(),
             attach_mode: AttachMode::Plain,
@@ -208,6 +213,7 @@ mod tests {
         assert!(config.advertise_addresses.is_empty());
         assert!(!config.disable_address_autodetect);
         assert!(config.file_root.is_none());
+        assert!(config.display_name.is_none());
     }
 
     #[test]
@@ -274,5 +280,32 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(config.attach_mode, AttachMode::Control));
+    }
+
+    #[test]
+    fn test_display_name_from_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            display_name = "🏠 家庭服务器"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.display_name, Some("🏠 家庭服务器".to_string()));
+    }
+
+    #[test]
+    fn test_display_name_absent() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            "#,
+        )
+        .unwrap();
+        assert!(config.display_name.is_none());
     }
 }

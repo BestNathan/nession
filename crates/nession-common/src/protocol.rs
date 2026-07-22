@@ -31,6 +31,10 @@ pub struct AgentRegisterPayload {
     pub metadata: AgentMetadata,
     #[serde(default = "default_protocol_version")]
     pub protocol_version: String,
+    /// Human-readable display name (set via agent config or Web UI rename).
+    /// When absent the UI falls back to hostname.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Public WebSocket URL clients use to connect (e.g. "wss://agent.example.com/ws").
     /// When empty, the server constructs a URL from ip_address:port with `/ws` path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -691,6 +695,7 @@ mod tests {
                 nession_version: "0.1.0".to_string(),
             },
             protocol_version: "1.0".to_string(),
+            display_name: Some("my-agent".to_string()),
             connect_url: None,
             addresses: vec![],
         };
@@ -699,6 +704,27 @@ mod tests {
         assert_eq!(deserialized.agent_id, "agent-1");
         assert_eq!(deserialized.port, 8080);
         assert!(deserialized.connect_url.is_none());
+    }
+
+    #[test]
+    fn test_agent_register_payload_no_display_name() {
+        // Old agents without display_name should deserialize to None (backward compat)
+        let json = serde_json::json!({
+            "agent_id": "agent-1",
+            "hostname": "host",
+            "ip_address": "127.0.0.1",
+            "port": 8080,
+            "auth_token": "token",
+            "addresses": [],
+            "metadata": {
+                "tmux_version": "3.4",
+                "os_version": "linux",
+                "nession_version": "0.1.0"
+            }
+        });
+        let payload: AgentRegisterPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(payload.agent_id, "agent-1");
+        assert!(payload.display_name.is_none());
     }
 
     #[test]

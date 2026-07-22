@@ -19,6 +19,9 @@ pub struct AgentRow {
     pub status: String,
     pub auth_token_hash: String,
     pub metadata: String,
+    /// Human-readable display name (nullable). Set via agent config or Web UI
+    /// rename. When NULL the UI falls back to hostname.
+    pub display_name: Option<String>,
     /// Public WebSocket URL (nullable). Persisted so it survives restarts
     /// (previously in-memory only — issue #43).
     pub connect_url: Option<String>,
@@ -37,6 +40,7 @@ pub struct AgentInsert<'a> {
     pub port: u16,
     pub auth_token_hash: &'a str,
     pub metadata: &'a str,
+    pub display_name: Option<&'a str>,
     pub connect_url: Option<&'a str>,
     /// JSON-encoded `Vec<AgentAddress>`.
     pub addresses: &'a str,
@@ -71,6 +75,7 @@ impl Database {
                 status TEXT NOT NULL,
                 auth_token_hash TEXT NOT NULL,
                 metadata TEXT,
+                display_name TEXT,
                 connect_url TEXT,
                 addresses TEXT
             );
@@ -94,6 +99,7 @@ impl Database {
         // Lightweight migrations for DBs created before these columns existed.
         // There is no migration runner; `ADD COLUMN` on an existing column
         // errors, so we add them best-effort and ignore the duplicate error.
+        Self::add_column_if_missing(&conn, "agents", "display_name", "TEXT");
         Self::add_column_if_missing(&conn, "agents", "connect_url", "TEXT");
         Self::add_column_if_missing(&conn, "agents", "addresses", "TEXT");
 
@@ -123,8 +129,8 @@ impl Database {
         let now = chrono::Utc::now().timestamp();
 
         conn.execute(
-            "INSERT OR REPLACE INTO agents (agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, connect_url, addresses)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', ?6, ?7, ?8, ?9)",
+            "INSERT OR REPLACE INTO agents (agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, display_name, connect_url, addresses)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'online', ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 agent.agent_id,
                 agent.hostname,
@@ -133,6 +139,7 @@ impl Database {
                 now,
                 agent.auth_token_hash,
                 agent.metadata,
+                agent.display_name,
                 agent.connect_url,
                 agent.addresses
             ],
@@ -141,10 +148,25 @@ impl Database {
         Ok(())
     }
 
+    /// Update (or clear) the display name for an agent.  Pass `None` to
+    /// remove the override and fall back to the config/hostname chain.
+    pub async fn update_agent_display_name(
+        &self,
+        agent_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE agents SET display_name = ?1 WHERE agent_id = ?2",
+            rusqlite::params![display_name, agent_id],
+        )?;
+        Ok(())
+    }
+
     pub async fn list_agents(&self) -> Result<Vec<AgentRow>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, connect_url, addresses FROM agents"
+            "SELECT agent_id, hostname, ip_address, port, registered_at, last_heartbeat, status, auth_token_hash, metadata, display_name, connect_url, addresses FROM agents"
         )?;
 
         let agents = stmt
@@ -159,8 +181,9 @@ impl Database {
                     status: row.get(6)?,
                     auth_token_hash: row.get(7)?,
                     metadata: row.get(8)?,
-                    connect_url: row.get(9)?,
-                    addresses: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                    display_name: row.get(9)?,
+                    connect_url: row.get(10)?,
+                    addresses: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
                 })
             })?
             .collect::<Result<Vec<_>>>()?;

@@ -30,6 +30,7 @@ async fn test_agent_persistence() {
         port: 8080,
         auth_token_hash: "hashed_token",
         metadata: r#"{"tmux_version": "3.3a"}"#,
+        display_name: None,
         connect_url: Some("wss://agent.example.com/ws"),
         addresses: r#"[{"url":"wss://agent.example.com/ws","network_type":"tunnel","priority":30}]"#,
     })

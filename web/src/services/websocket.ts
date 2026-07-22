@@ -405,6 +405,28 @@ export class WebSocketService {
     });
   }
 
+  /** Rename an agent's display name. Pass null to clear (reset to config/hostname). */
+  async renameAgent(agentId: string, displayName: string | null): Promise<Agent> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await this.request<{
+      success: boolean;
+      error?: string;
+      agent?: Agent;
+    }>('client.agent.rename', {
+      agent_id: agentId,
+      display_name: displayName,
+    });
+
+    if (!response.success || !response.agent) {
+      throw new Error(response.error || 'Rename failed');
+    }
+
+    return response.agent;
+  }
+
   async queryAgentEnvState(sessionId: string): Promise<SessionEnvQueryResponse> {
     if (!this.authenticated) {
       throw new Error('Not authenticated');

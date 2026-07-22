@@ -13,6 +13,9 @@ pub struct AgentInfo {
     pub hostname: String,
     pub ip_address: String,
     pub port: u16,
+    /// Human-readable display name. Set via agent config or Web UI rename.
+    /// When `None` the UI falls back to hostname.
+    pub display_name: Option<String>,
     /// Public WebSocket URL clients use to connect to this agent.
     /// When `None`, the server constructs `ws://{ip_address}:{port}/ws`.
     pub connect_url: Option<String>,
@@ -74,6 +77,7 @@ impl AgentRegistry {
                         hostname: row.hostname,
                         ip_address: row.ip_address,
                         port: row.port,
+                        display_name: row.display_name,
                         connect_url: row.connect_url,
                         addresses,
                         registered_at,
@@ -110,6 +114,7 @@ impl AgentRegistry {
                 // post-auth. Persist an empty hash placeholder for now.
                 auth_token_hash: "",
                 metadata: &metadata_json,
+                display_name: info.display_name.as_deref(),
                 connect_url: info.connect_url.as_deref(),
                 addresses: &addresses_json,
             })
@@ -129,6 +134,35 @@ impl AgentRegistry {
             agent.status = AgentStatus::Online;
             agent.session_count = session_count;
             agent.active_sessions = active_sessions;
+        }
+    }
+
+    /// Update (or clear) the display name for an agent in memory and in the DB.
+    /// Returns the updated AgentInfo, or None if the agent doesn't exist.
+    pub async fn update_display_name(
+        &self,
+        agent_id: &str,
+        display_name: Option<String>,
+    ) -> Option<AgentInfo> {
+        // Write-through to SQLite
+        if let Err(e) = self
+            .db
+            .update_agent_display_name(agent_id, display_name.as_deref())
+            .await
+        {
+            tracing::error!(
+                "Failed to persist display_name for agent {}: {:#}",
+                agent_id,
+                e
+            );
+        }
+
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.display_name = display_name;
+            Some(agent.clone())
+        } else {
+            None
         }
     }
 

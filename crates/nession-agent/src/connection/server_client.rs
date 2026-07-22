@@ -99,6 +99,8 @@ pub struct ServerClient {
     /// All advertised endpoints (detected NICs + config-declared), finalised
     /// (deduped, priority-ordered, capped). Sent in the register payload.
     addresses: Vec<AgentAddress>,
+    /// Human-readable display name for the web UI (from agent config).
+    display_name: Option<String>,
     /// Default working directory for new tmux sessions.
     default_working_dir: String,
     /// Agent metadata.
@@ -232,6 +234,7 @@ impl ServerClient {
         port: u16,
         connect_url: Option<String>,
         addresses: Vec<AgentAddress>,
+        display_name: Option<String>,
         metadata: AgentMetadata,
         tmux: Arc<TmuxManager>,
         default_working_dir: String,
@@ -247,6 +250,7 @@ impl ServerClient {
             port,
             connect_url,
             addresses,
+            display_name,
             default_working_dir,
             metadata,
             tmux,
@@ -390,6 +394,7 @@ impl ServerClient {
             auth_token: self.auth_token.clone(),
             metadata: self.metadata.clone(),
             protocol_version: "1.0".to_string(),
+            display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),
         };
@@ -930,6 +935,7 @@ mod tests {
             8080,
             None,   // connect_url
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -974,6 +980,7 @@ mod tests {
             8080,
             None,   // connect_url
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1028,6 +1035,7 @@ mod tests {
             8080,
             None,   // connect_url
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1110,6 +1118,7 @@ mod tests {
             8080,
             None,   // connect_url
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1187,6 +1196,7 @@ mod tests {
             8080,
             None,   // connect_url
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1288,6 +1298,7 @@ mod tests {
             8080,
             None,
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1396,6 +1407,7 @@ mod tests {
             8080,
             None,
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1486,6 +1498,7 @@ mod tests {
             8080,
             None,
             vec![], // addresses
+            None,   // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1735,6 +1748,7 @@ mod tests {
             8080,
             None,
             vec![],
+            None, // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1819,6 +1833,7 @@ mod tests {
             8080,
             None,
             vec![],
+            None, // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1914,6 +1929,7 @@ mod tests {
             8080,
             None,
             vec![],
+            None, // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
@@ -1960,6 +1976,7 @@ mod tests {
             8080,
             None,
             vec![],
+            None, // display_name
             metadata,
             Arc::new(TmuxManager::new()),
             "/tmp".to_string(),
