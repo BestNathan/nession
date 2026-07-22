@@ -66,8 +66,7 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
-      imagePullSecrets:
-        - name: ghcr-bestnathan
+      # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public
       volumes:
         - name: data
           emptyDir: {}
