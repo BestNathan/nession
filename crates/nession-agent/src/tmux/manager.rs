@@ -128,30 +128,25 @@ impl TmuxManager {
             }
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
-        let ps1_value = if has_ps1 {
-            None
-        } else {
-            Some(DEFAULT_PS1.to_string())
-        };
+
+        // Default short PS1, applied invisibly via PROMPT_COMMAND so the user
+        // never sees an export command typed into their terminal.
+        //
+        // Debian's /etc/bash.bashrc unconditionally overwrites PS1, so a plain
+        // `-e PS1=…` is not enough.  PROMPT_COMMAND runs *after* bashrc, right
+        // before the first prompt, so it wins.  After applying PS1 it unsets
+        // itself from the local shell env (not tmux), so the overhead is a
+        // single no-op test on subsequent prompts.
+        if !has_ps1 {
+            cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
+            cmd.arg("-e")
+                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }; ${PROMPT_COMMAND:+$PROMPT_COMMAND}");
+        }
 
         let status = cmd.status().await?;
 
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
-        }
-
-        // Apply the default PS1 inside the session's shell.  `-e PS1=…` at
-        // creation time is often overridden by the distro's /etc/bash.bashrc,
-        // so we type the export directly into the initial window — pure
-        // session-level management, no files written.
-        if let Some(ref ps1) = ps1_value {
-            // Escape single quotes in the PS1 value for the shell.
-            let escaped = ps1.replace('\'', "'\\''");
-            let export_cmd = format!("export PS1='{escaped}'");
-            let _ = Command::new("tmux")
-                .args(["send-keys", "-t", name, &export_cmd, "Enter"])
-                .status()
-                .await;
         }
 
         Ok(())
