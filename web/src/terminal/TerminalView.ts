@@ -31,6 +31,9 @@ interface XtermInternals {
         };
       };
     };
+    _selectionService?: {
+      shouldForceSelection: (e: MouseEvent) => boolean;
+    };
   };
 }
 
@@ -117,6 +120,14 @@ export class TerminalView {
     };
 
     this.terminal.open(mountElement);
+
+    // Always use local text selection even when tmux SGR mouse mode is
+    // active.  Without this, xterm.js sends button events to the PTY as
+    // SGR sequences — tmux captures them for copy-mode selection, and
+    // the user can't select text without holding Shift.  Wheel events
+    // are unaffected and still reach tmux for copy-mode scroll.
+    const sel = (this.terminal as unknown as XtermInternals)._core?._selectionService;
+    if (sel) { sel.shouldForceSelection = () => true; }
 
     // Prime mount pixel size from xterm's default cols/rows (typically 80×24)
     // so the DOM has explicit dimensions before the first tmux resize arrives.
