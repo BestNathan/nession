@@ -35,6 +35,7 @@ export interface DashboardState {
   handleSessionCreated: () => void;
   fetchSessions: (agentId?: string) => Promise<void>;
   getHeartbeatHistory: (agentId: string) => string[];
+  updateAgent: (updated: Agent) => void;
   clearError: () => void;
 }
 
@@ -166,6 +167,7 @@ export function useDashboardHandlers(_wsService?: WebSocketService): DashboardSt
     handleSessionCreated,
     fetchSessions,
     getHeartbeatHistory: agentData.getHeartbeatHistory,
+    updateAgent: agentData.updateAgent,
     clearError,
   };
 }

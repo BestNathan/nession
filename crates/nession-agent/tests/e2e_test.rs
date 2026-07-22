@@ -117,6 +117,7 @@ async fn register_agent_with_server(
         agent_port,
         None,   // connect_url
         vec![], // addresses
+        None,   // display_name
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),

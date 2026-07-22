@@ -132,6 +132,7 @@ async fn main() -> Result<()> {
             port,
             config.connect_url.clone(),
             addresses,
+            config.display_name.clone(),
             metadata,
             tmux_for_client,
             config.default_working_dir.clone(),

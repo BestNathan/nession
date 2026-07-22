@@ -347,6 +347,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         port,
         None, // connect_url — not used in CLI bare-metal agent mode
         addresses,
+        None, // display_name — not used in CLI bare-metal agent mode
         metadata,
         Arc::new(TmuxManager::new()),
         config.default_working_dir.clone(),
