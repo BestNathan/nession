@@ -295,7 +295,11 @@ jobs:
           fi
 
   # ═══════════════════════════════════════════════════════════════════
-  # Cleanup — keep last 5 GHCR hash-tagged versions
+  # Cleanup — keep last 50 GHCR package versions.
+  # Each CI run creates ~9 versions (server/agent/ui × amd64/arm64 ×
+  # hash + 3 multi-arch manifests), so 50 covers ~5 runs of headroom.
+  # Below 9, freshly pushed images risk being deleted before the pod
+  # can even pull them.
   # ═══════════════════════════════════════════════════════════════════
   cleanup-ghcr:
     needs: merge
@@ -303,7 +307,7 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old package versions (keep last 5)
+      - name: Delete old package versions (keep last 50)
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           PACKAGE="nession"
@@ -321,7 +325,7 @@ jobs:
           COUNT=0
           for ID in $VERSIONS; do
             COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
+            if [ $COUNT -gt 50 ]; then
               echo "Deleting version ${ID} (position: ${COUNT})"
               gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
                 -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
@@ -330,4 +334,4 @@ jobs:
             fi
           done
 
-          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."
+          echo "Cleanup complete. Deleted $((COUNT > 50 ? COUNT - 50 : 0)) old versions."
