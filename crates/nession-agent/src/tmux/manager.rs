@@ -149,6 +149,14 @@ impl TmuxManager {
             anyhow::bail!("Failed to create session: {name}");
         }
 
+        // Enable mouse support so the client's SGR mouse wheel events scroll
+        // tmux copy-mode history instead of being translated to ↑↓ arrow keys
+        // (which bash interprets as command history).
+        let _ = Command::new("tmux")
+            .args(["set-option", "-t", name, "mouse", "on"])
+            .status()
+            .await;
+
         Ok(())
     }
 

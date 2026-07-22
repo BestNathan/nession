@@ -41,14 +41,11 @@ export class TerminalView {
   private fontSize: FontSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
-  private scrollContainer: HTMLElement;
 
   private isDisposed = false;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
   /** Latest resize dimensions from ResizeObserver — passed to attach(). */
   private pendingResize: { cols: number; rows: number } | null = null;
-  /** Cleanup for the wheel-into-scroll shim. */
-  private wheelDisposer: (() => void) | null = null;
 
   onStateChange: ((state: TerminalViewState) => void) | null = null;
   onCtrlD: (() => void) | null = null;
@@ -64,7 +61,6 @@ export class TerminalView {
     // the remainder — no transform, no wrapper.
     const scrollContainer = document.createElement('div');
     scrollContainer.style.cssText = 'width:100%; height:100%; overflow:auto;';
-    this.scrollContainer = scrollContainer;
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position:relative;';
@@ -121,29 +117,6 @@ export class TerminalView {
     };
 
     this.terminal.open(mountElement);
-
-    // Shim wheel events so they scroll the scrollContainer viewport instead of
-    // xterm.js's internal scrollback buffer.  The scrollContainer is a native
-    // overflow:auto box whose child (mountElement) is sized to the full tmux
-    // pane grid by TerminalSizeManager.  When the tmux grid exceeds the
-    // visible area the scrollContainer shows scrollbars, and wheel→scroll
-    // pans the viewport over the oversize terminal content exactly like a
-    // native scrollable region.
-    //
-    // We must preventDefault early (capture phase) so xterm.js never sees the
-    // events and thus cannot wrestle scrolling towards its own internal
-    // scrollback buffer.  `passive: false` is required so the browser honours
-    // preventDefault in the capture phase.
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Drive the scrollContainer viewport.  sub-pixel deltas are accumulated
-      // natively by element.scrollTop/scrollLeft so trackpads feel smooth.
-      this.scrollContainer.scrollTop += e.deltaY;
-      this.scrollContainer.scrollLeft += e.deltaX;
-    };
-    mountElement.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    this.wheelDisposer = () => mountElement.removeEventListener('wheel', onWheel, { capture: true });
 
     // Prime mount pixel size from xterm's default cols/rows (typically 80×24)
     // so the DOM has explicit dimensions before the first tmux resize arrives.
@@ -231,8 +204,6 @@ export class TerminalView {
   dispose(): void {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
-    this.wheelDisposer?.();
-    this.wheelDisposer = null;
     this.input.dispose();
     this.size.dispose();
     this.connection.dispose();

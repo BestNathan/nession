@@ -130,21 +130,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setViewGeneration((g) => g + 1);
 
     // ResizeObserver: detect container size changes and push to tmux.
-    // Uses a grow-only strategy so the scrollContainer can actually overflow:
-    //
-    // The FIRST fire only records the viewport extent for later grow
-    // decisions — it does NOT push a resize to tmux.  That way tmux keeps
-    // its session-native size (200×60), mountElement gets sized from the
-    // tmux resize event, and the scrollContainer genuinely overflows on any
-    // viewport smaller than the tmux pane.
-    //
-    // Subsequent fires are grow-only: when the viewport grows we tell tmux
-    // so the terminal can expand to use more space; shrinks are ignored so
-    // tmux stays larger than the viewport and overflow is preserved.
+    // The FIRST firing (on mount) is sent immediately so tmux gets the
+    // correct size before attach() runs at ~50ms.  Subsequent firings
+    // (user dragging the window) are debounced at 200ms to avoid flooding
+    // tmux with intermediate sizes.
     let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
     let isFirstResize = true;
-    let lastSentCols = 0;
-    let lastSentRows = 0;
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
@@ -155,30 +146,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (cols < 2 || rows < 2) { continue; }
 
         if (isFirstResize) {
-          // First fire — record the viewport extent but do NOT push a
-          // resize to tmux.  tmux keeps its session-native size (200×60),
-          // which means mountElement (sized from tmux's %window-resize
-          // event) will overflow the scrollContainer on a small viewport.
+          // First fire — send immediately so tmux is at the right size
+          // when attach() fires at 50ms.
           isFirstResize = false;
-          lastSentCols = cols;
-          lastSentRows = rows;
+          view.sendResize(cols, rows);
           continue;
         }
-
-        // Grow-only: skip when the viewport is not larger than what we
-        // already told tmux.  The mountElement stays at tmux's (larger)
-        // size, giving the scrollContainer overflow to pan.
-        if (cols <= lastSentCols && rows <= lastSentRows) { continue; }
-
-        const newCols = Math.max(cols, lastSentCols);
-        const newRows = Math.max(rows, lastSentRows);
-        lastSentCols = newCols;
-        lastSentRows = newRows;
 
         if (resizeDebounce) { clearTimeout(resizeDebounce); }
         resizeDebounce = setTimeout(() => {
           if (!viewRef.current) { return; }
-          viewRef.current.sendResize(newCols, newRows);
+          viewRef.current.sendResize(cols, rows);
         }, 200);
       }
     });
