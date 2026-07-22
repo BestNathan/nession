@@ -104,8 +104,13 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - run: cargo build --release --bin nession-server --bin nession-agent
+      - name: cargo build (release)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
@@ -182,8 +187,13 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - run: cargo build --release --bin nession-server --bin nession-agent
+      - name: cargo build (release)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
