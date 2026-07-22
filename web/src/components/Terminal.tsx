@@ -131,12 +131,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // ResizeObserver: detect container size changes and push to tmux.
     // Uses a grow-only strategy so the scrollContainer can actually overflow:
-    // after the initial size is locked in (first fire), subsequent viewport
-    // shrinks are NOT forwarded to tmux.  tmux keeps the larger size, the
-    // mountElement stays tall, the scrollContainer overflows, and wheel/
-    // scrollbar viewport panning works.  When the viewport grows we DO tell
-    // tmux so the terminal can expand to use more space — it only shrinks
-    // on a browser-reload (fresh attach).
+    //
+    // The FIRST fire only records the viewport extent for later grow
+    // decisions — it does NOT push a resize to tmux.  That way tmux keeps
+    // its session-native size (200×60), mountElement gets sized from the
+    // tmux resize event, and the scrollContainer genuinely overflows on any
+    // viewport smaller than the tmux pane.
+    //
+    // Subsequent fires are grow-only: when the viewport grows we tell tmux
+    // so the terminal can expand to use more space; shrinks are ignored so
+    // tmux stays larger than the viewport and overflow is preserved.
     let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
     let isFirstResize = true;
     let lastSentCols = 0;
@@ -151,12 +155,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (cols < 2 || rows < 2) { continue; }
 
         if (isFirstResize) {
-          // First fire — send immediately so tmux is at the right size
-          // when attach() fires at 50ms.
+          // First fire — record the viewport extent but do NOT push a
+          // resize to tmux.  tmux keeps its session-native size (200×60),
+          // which means mountElement (sized from tmux's %window-resize
+          // event) will overflow the scrollContainer on a small viewport.
           isFirstResize = false;
           lastSentCols = cols;
           lastSentRows = rows;
-          view.sendResize(cols, rows);
           continue;
         }
 
