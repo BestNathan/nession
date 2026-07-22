@@ -17,7 +17,11 @@ jobs:
       - uses: extractions/setup-just@v2
       - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
-      - run: cargo install cargo-llvm-cov 2>/dev/null || true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-v1
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: just check
 
   web-check:
@@ -295,7 +299,14 @@ jobs:
           fi
 
   # ═══════════════════════════════════════════════════════════════════
-  # Cleanup — keep last 5 GHCR hash-tagged versions
+  # Cleanup — keep images for the last 5 commits (per component)
+  #
+  # Each CI run pushes ~9 Docker tags (server/agent/ui × amd64/arm64 ×
+  # hash + multi-arch manifests).  All arch variants of one logical
+  # version (e.g. server-01989cf-amd64, server-01989cf-arm64, and the
+  # multi-arch server-01989cf) count as ONE group — we strip the arch
+  # suffix to normalise, keep the 5 newest groups, and delete the rest.
+  # Moving tags (server-main, server-latest, etc.) are never touched.
   # ═══════════════════════════════════════════════════════════════════
   cleanup-ghcr:
     needs: merge
@@ -303,31 +314,50 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old package versions (keep last 5)
+      - name: Delete old package versions (keep last 5 logical versions)
+        env:
+          KEEP: 5
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           PACKAGE="nession"
 
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
+          # Return {id, created, norm_tag} for every hash-tagged version.
+          # norm_tag strips -amd64/-arm64 so arch variants of the same SHA
+          # group together.  Versions with null / missing tags are skipped.
           VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
-            --paginate \
-            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+              --paginate \
+              -q '.[] | (.metadata.container.tags // []) as $t |
+                  [ $t[] | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ] |
+                  if length > 0 then
+                    { id: .id,
+                      created: .created_at,
+                      norm: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
+                  else empty end' 2>/dev/null) || true
 
           if [ -z "$VERSIONS" ]; then
-            echo "No versions found — skipping cleanup."
+            echo "No hash-tagged versions found — skipping cleanup."
             exit 0
           fi
 
-          COUNT=0
-          for ID in $VERSIONS; do
-            COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
-              echo "Deleting version ${ID} (position: ${COUNT})"
-              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
-                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
-            else
-              echo "Keeping version ${ID} (position: ${COUNT})"
-            fi
+          # Group by norm_tag, keep the 5 newest groups, delete the rest.
+          TO_DELETE=$(echo "$VERSIONS" | jq -s \
+            "group_by(.norm) |
+             map({ ids: [.[].id] | unique, created: max_by(.created).created }) |
+             sort_by(.created) | reverse |
+             .[${KEEP}:] | [.[].ids[]]" 2>/dev/null) || true
+
+          if [ "$TO_DELETE" = "[]" ] || [ -z "$TO_DELETE" ]; then
+            echo "Nothing to delete (≤ ${KEEP} logical-version groups)."
+            exit 0
+          fi
+
+          echo "$TO_DELETE" | jq -r '.[]' | while read -r ID; do
+            [ -z "$ID" ] && continue
+            echo "Deleting version ${ID}"
+            gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
+              -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed"
           done
 
-          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."
+          DELETED=$(echo "$TO_DELETE" | jq 'length')
+          echo "Cleanup complete. Deleted ${DELETED} package versions."

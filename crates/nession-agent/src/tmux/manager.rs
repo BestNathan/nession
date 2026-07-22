@@ -9,6 +9,11 @@ use tokio::process::Command;
 /// to be large enough to accommodate all realistic client viewports.
 pub const SESSION_WIDTH: u16 = 200;
 
+/// Default shell prompt injected into every tmux session so the K8s pod
+/// hostname (e.g. `nession-agent-staging-84d4d8666f-zs5xj`) doesn't
+/// clutter the terminal.  `\u` = user, `\w` = working dir, `\$` = # or $.
+pub const DEFAULT_PS1: &str = r"\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ ";
+
 /// Fixed height for tmux sessions. See [`SESSION_WIDTH`] for rationale.
 pub const SESSION_HEIGHT: u16 = 60;
 
@@ -116,8 +121,24 @@ impl TmuxManager {
         // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
         // tmux the flag is rejected and session creation fails loudly rather
         // than silently dropping the environment.
+        let mut has_ps1 = false;
         for (key, value) in env {
+            if key == "PS1" {
+                has_ps1 = true;
+            }
             cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+
+        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
+        // overwrites PS1, so a plain `-e PS1=…` is not enough.  We set
+        // NESSION_PS1 (the value) and PROMPT_COMMAND (the mechanism).
+        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
+        // applies PS1, and unsets NESSION_PS1 so later prompts have zero
+        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
+        if !has_ps1 {
+            cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
+            cmd.arg("-e")
+                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }");
         }
 
         let status = cmd.status().await?;
@@ -125,6 +146,15 @@ impl TmuxManager {
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
         }
+
+        // Enable tmux mouse mode so wheel events reach tmux as SGR mouse
+        // sequences for copy-mode scroll.  The web client monkey-patches
+        // xterm.js's SelectionManager.shouldForceSelection → always true,
+        // so mouse button events stay local for text selection.
+        let _ = Command::new("tmux")
+            .args(["set-option", "-t", name, "mouse", "on"])
+            .status()
+            .await;
 
         Ok(())
     }

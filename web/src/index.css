@@ -135,6 +135,21 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* ── Mobile zoom prevention ──────────────────────────────────────────────
+   - touch-action: manipulation disables double-tap-to-zoom on all elements
+   - iOS Safari auto-zooms when focusing inputs with font-size < 16px;
+     bump every input / textarea / select to at least 16px on touch devices
+     only, so desktop layouts are unaffected.                            */
+html {
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  input, textarea, select {
+    font-size: max(16px, 1rem);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
