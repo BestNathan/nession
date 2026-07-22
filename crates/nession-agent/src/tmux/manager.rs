@@ -140,7 +140,7 @@ impl TmuxManager {
         if !has_ps1 {
             cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
             cmd.arg("-e")
-                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }; ${PROMPT_COMMAND:+$PROMPT_COMMAND}");
+                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }");
         }
 
         let status = cmd.status().await?;
@@ -148,14 +148,6 @@ impl TmuxManager {
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
         }
-
-        // Enable mouse support so the client's SGR mouse wheel events scroll
-        // tmux copy-mode history instead of being translated to ↑↓ arrow keys
-        // (which bash interprets as command history).
-        let _ = Command::new("tmux")
-            .args(["set-option", "-t", name, "mouse", "on"])
-            .status()
-            .await;
 
         Ok(())
     }
