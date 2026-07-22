@@ -129,18 +129,12 @@ impl TmuxManager {
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
 
-        // Default short PS1, applied invisibly via PROMPT_COMMAND so the user
-        // never sees an export command typed into their terminal.
-        //
-        // Debian's /etc/bash.bashrc unconditionally overwrites PS1, so a plain
-        // `-e PS1=…` is not enough.  PROMPT_COMMAND runs *after* bashrc, right
-        // before the first prompt, so it wins.  After applying PS1 it unsets
-        // itself from the local shell env (not tmux), so the overhead is a
-        // single no-op test on subsequent prompts.
+        // Default short PS1: set NESSION_PS1 to the prompt value and point
+        // PS1 at it so bash expands $NESSON_PS1 when rendering the prompt.
+        // If the caller already provides PS1 we skip the default.
         if !has_ps1 {
             cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
-            cmd.arg("-e")
-                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }");
+            cmd.arg("-e").arg("PS1=$NESSON_PS1");
         }
 
         let status = cmd.status().await?;
