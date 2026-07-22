@@ -295,11 +295,14 @@ jobs:
           fi
 
   # ═══════════════════════════════════════════════════════════════════
-  # Cleanup — keep last 50 GHCR package versions.
-  # Each CI run creates ~9 versions (server/agent/ui × amd64/arm64 ×
-  # hash + 3 multi-arch manifests), so 50 covers ~5 runs of headroom.
-  # Below 9, freshly pushed images risk being deleted before the pod
-  # can even pull them.
+  # Cleanup — keep images for the last 5 commits (per component)
+  #
+  # Each CI run pushes ~9 Docker tags (server/agent/ui × amd64/arm64 ×
+  # hash + multi-arch manifests).  All arch variants of one logical
+  # version (e.g. server-01989cf-amd64, server-01989cf-arm64, and the
+  # multi-arch server-01989cf) count as ONE group — we strip the arch
+  # suffix to normalise, keep the 5 newest groups, and delete the rest.
+  # Moving tags (server-main, server-latest, etc.) are never touched.
   # ═══════════════════════════════════════════════════════════════════
   cleanup-ghcr:
     needs: merge
@@ -307,7 +310,9 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old package versions (keep last 50)
+      - name: Delete old package versions (keep last 5 logical versions)
+        env:
+          KEEP: 5
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           PACKAGE="nession"
@@ -315,23 +320,53 @@ jobs:
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
           VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
             --paginate \
-            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+            -q '.[] | {id: .id, created: .created_at, tags: .metadata.container.tags}' 2>/dev/null)
 
           if [ -z "$VERSIONS" ]; then
             echo "No versions found — skipping cleanup."
             exit 0
           fi
 
-          COUNT=0
-          for ID in $VERSIONS; do
-            COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 50 ]; then
-              echo "Deleting version ${ID} (position: ${COUNT})"
-              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
-                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
-            else
-              echo "Keeping version ${ID} (position: ${COUNT})"
-            fi
+          # Build a JSONL file: one line per (version_id, created_at, logical_tag).
+          # logical_tag = hash-tag like "server-01989cf-amd64" with -amd64/-arm64
+          # stripped so arch variants group together.  Only hash-tagged versions
+          # (^server-...\h{7,}) are considered; moving tags (server, server-main,
+          # 0.3.2, …) are never deleted.
+          echo "$VERSIONS" | jq -c '
+            . as $v
+            | [ $v.tags[] | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ]
+            | if length > 0 then
+                { id: $v.id,
+                  created: $v.created,
+                  logical: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
+              else empty end
+          ' > /tmp/versions.jsonl
+
+          if [ ! -s /tmp/versions.jsonl ]; then
+            echo "No hash-tagged versions to clean up."
+            exit 0
+          fi
+
+          # Group by logical version, pick max created_at per group,
+          # sort newest-first, take IDs beyond KEEP.
+          TO_DELETE=$(jq -s \
+            "group_by(.logical) |
+             map({ logical: .[0].logical, created: max_by(.created).created, ids: [.[].id] | unique }) |
+             sort_by(.created) | reverse |
+             .[${KEEP}:] | [.[].ids[]]" \
+            /tmp/versions.jsonl)
+
+          if [ "$TO_DELETE" = "[]" ] || [ -z "$TO_DELETE" ]; then
+            echo "Nothing to delete (≤ ${KEEP} logical versions)."
+            exit 0
+          fi
+
+          echo "$TO_DELETE" | jq -r '.[]' | while read -r ID; do
+            [ -z "$ID" ] && continue
+            echo "Deleting version ${ID}"
+            gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
+              -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed"
           done
 
-          echo "Cleanup complete. Deleted $((COUNT > 50 ? COUNT - 50 : 0)) old versions."
+          DELETED=$(echo "$TO_DELETE" | jq 'length')
+          echo "Cleanup complete. Deleted ${DELETED} package versions."
