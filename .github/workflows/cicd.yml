@@ -17,7 +17,7 @@ jobs:
       - uses: extractions/setup-just@v2
       - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
-      - run: cargo install cargo-llvm-cov 2>/dev/null || true
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: just check
 
   web-check:
@@ -318,46 +318,33 @@ jobs:
           PACKAGE="nession"
 
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
+          # Return {id, created, norm_tag} for every hash-tagged version.
+          # norm_tag strips -amd64/-arm64 so arch variants of the same SHA
+          # group together.  Versions with null / missing tags are skipped.
           VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
-            --paginate \
-            -q '.[] | {id: .id, created: .created_at, tags: .metadata.container.tags}' 2>/dev/null)
+              --paginate \
+              -q '.[] | (.metadata.container.tags // []) as $t |
+                  [ $t[] | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ] |
+                  if length > 0 then
+                    { id: .id,
+                      created: .created_at,
+                      norm: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
+                  else empty end' 2>/dev/null) || true
 
           if [ -z "$VERSIONS" ]; then
-            echo "No versions found — skipping cleanup."
+            echo "No hash-tagged versions found — skipping cleanup."
             exit 0
           fi
 
-          # Build a JSONL file: one line per (version_id, created_at, logical_tag).
-          # logical_tag = hash-tag like "server-01989cf-amd64" with -amd64/-arm64
-          # stripped so arch variants group together.  Only hash-tagged versions
-          # (^server-...\h{7,}) are considered; moving tags (server, server-main,
-          # 0.3.2, …) are never deleted.
-          echo "$VERSIONS" | jq -c '
-            . as $v
-            | [ $v.tags[] | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ]
-            | if length > 0 then
-                { id: $v.id,
-                  created: $v.created,
-                  logical: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
-              else empty end
-          ' > /tmp/versions.jsonl
-
-          if [ ! -s /tmp/versions.jsonl ]; then
-            echo "No hash-tagged versions to clean up."
-            exit 0
-          fi
-
-          # Group by logical version, pick max created_at per group,
-          # sort newest-first, take IDs beyond KEEP.
-          TO_DELETE=$(jq -s \
-            "group_by(.logical) |
-             map({ logical: .[0].logical, created: max_by(.created).created, ids: [.[].id] | unique }) |
+          # Group by norm_tag, keep the 5 newest groups, delete the rest.
+          TO_DELETE=$(echo "$VERSIONS" | jq -s \
+            "group_by(.norm) |
+             map({ ids: [.[].id] | unique, created: max_by(.created).created }) |
              sort_by(.created) | reverse |
-             .[${KEEP}:] | [.[].ids[]]" \
-            /tmp/versions.jsonl)
+             .[${KEEP}:] | [.[].ids[]]" 2>/dev/null) || true
 
           if [ "$TO_DELETE" = "[]" ] || [ -z "$TO_DELETE" ]; then
-            echo "Nothing to delete (≤ ${KEEP} logical versions)."
+            echo "Nothing to delete (≤ ${KEEP} logical-version groups)."
             exit 0
           fi
 
