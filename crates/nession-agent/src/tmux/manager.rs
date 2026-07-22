@@ -9,6 +9,11 @@ use tokio::process::Command;
 /// to be large enough to accommodate all realistic client viewports.
 pub const SESSION_WIDTH: u16 = 200;
 
+/// Default shell prompt injected into every tmux session so the K8s pod
+/// hostname (e.g. `nession-agent-staging-84d4d8666f-zs5xj`) doesn't
+/// clutter the terminal.  `\u` = user, `\w` = working dir, `\$` = # or $.
+pub const DEFAULT_PS1: &str = r"\[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]\$ ";
+
 /// Fixed height for tmux sessions. See [`SESSION_WIDTH`] for rationale.
 pub const SESSION_HEIGHT: u16 = 60;
 
@@ -116,14 +121,37 @@ impl TmuxManager {
         // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
         // tmux the flag is rejected and session creation fails loudly rather
         // than silently dropping the environment.
+        let mut has_ps1 = false;
         for (key, value) in env {
+            if key == "PS1" {
+                has_ps1 = true;
+            }
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
+        let ps1_value = if has_ps1 {
+            None
+        } else {
+            Some(DEFAULT_PS1.to_string())
+        };
 
         let status = cmd.status().await?;
 
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
+        }
+
+        // Apply the default PS1 inside the session's shell.  `-e PS1=…` at
+        // creation time is often overridden by the distro's /etc/bash.bashrc,
+        // so we type the export directly into the initial window — pure
+        // session-level management, no files written.
+        if let Some(ref ps1) = ps1_value {
+            // Escape single quotes in the PS1 value for the shell.
+            let escaped = ps1.replace('\'', "'\\''");
+            let export_cmd = format!("export PS1='{escaped}'");
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", name, &export_cmd, "Enter"])
+                .status()
+                .await;
         }
 
         Ok(())
