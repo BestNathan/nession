@@ -17,9 +17,10 @@ interface AgentDetailPanelProps {
   onClose: () => void;
 }
 
-function computeUptime(heartbeatHistory: string[]): string | null {
-  if (heartbeatHistory.length === 0) {return null;}
-  const diffMs = Date.now() - new Date(heartbeatHistory[0]).getTime();
+function computeUptime(registeredAt?: string): string | null {
+  if (!registeredAt) {return null;}
+  const diffMs = Date.now() - new Date(registeredAt).getTime();
+  if (diffMs < 0) {return null;}
   const totalMinutes = Math.floor(diffMs / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -35,7 +36,7 @@ function getHeartbeatColor(iso: string): string {
 }
 
 function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
-  const uptime = computeUptime(heartbeatHistory);
+  const uptime = computeUptime(agent.registered_at);
   const lines = [
     `Agent: ${agentDisplayName(agent)}`,
     `Status: ${agent.status}`,
@@ -113,7 +114,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
-  const uptime = computeUptime(heartbeatHistory);
+  const uptime = computeUptime(agent.registered_at);
   const [copied, setCopied] = useState(false);
   // Tick every second so relative timestamps ("Xs ago") stay live.
   const [, setTick] = useState(0);
