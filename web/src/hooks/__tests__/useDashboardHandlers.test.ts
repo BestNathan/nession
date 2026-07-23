@@ -326,10 +326,10 @@ describe('useDashboardHandlers', () => {
       ]);
     });
 
-    it('caps heartbeat history at 10 entries', () => {
+    it('caps heartbeat history at 5 entries', () => {
       const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
 
-      for (let i = 1; i <= 12; i++) {
+      for (let i = 1; i <= 7; i++) {
         act(() => {
           agentsCallback!([
             makeAgent({ agent_id: 'a1', last_heartbeat: `2025-01-${String(i).padStart(2, '0')}T00:00:00Z` }),
@@ -338,10 +338,10 @@ describe('useDashboardHandlers', () => {
       }
 
       const history = result.current.getHeartbeatHistory('a1');
-      expect(history).toHaveLength(10);
-      // Should keep the most recent 10 (t3 through t12)
+      expect(history).toHaveLength(5);
+      // Should keep the most recent 5 (t3 through t7)
       expect(history[0]).toBe('2025-01-03T00:00:00Z');
-      expect(history[9]).toBe('2025-01-12T00:00:00Z');
+      expect(history[4]).toBe('2025-01-07T00:00:00Z');
     });
 
     it('returns empty array for unknown agents', () => {
