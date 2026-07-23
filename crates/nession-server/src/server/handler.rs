@@ -312,6 +312,10 @@ impl ConnectionHandler {
 
         // Push updated agent state to all connected web dashboard clients
         // so session counts, status, etc. stay current without polling.
+        info!(
+            "Broadcasting agents.changed after heartbeat from {}",
+            agent_id
+        );
         self.web_client_registry
             .broadcast_agents_changed(Arc::clone(&self.agent_registry))
             .await;
