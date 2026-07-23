@@ -201,6 +201,10 @@ pub enum AgentStatus {
 pub struct HeartbeatMetadata {
     pub uptime_seconds: u64,
     pub load_average: [f64; 3],
+    /// Agent version info — included in each heartbeat so the server
+    /// stays current after agent upgrades (previously only sent on register).
+    #[serde(default)]
+    pub agent: Option<AgentMetadata>,
 }
 
 // --- Server → Agent command payloads ---

@@ -293,6 +293,18 @@ impl ConnectionHandler {
             agent_id, session_count, active_sessions
         );
 
+        // Update agent metadata if provided (keeps version/tmux/OS current
+        // after agent upgrades — previously only sent on register).
+        if let Some(agent_meta) = payload
+            .get("metadata")
+            .and_then(|v| v.get("agent"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            self.agent_registry
+                .update_metadata(agent_id, agent_meta)
+                .await;
+        }
+
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;

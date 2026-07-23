@@ -187,6 +187,7 @@ fn test_agent_heartbeat_payload_serialization() {
         metadata: HeartbeatMetadata {
             uptime_seconds: 3600,
             load_average: [1.0, 2.0, 3.0],
+            agent: None,
         },
     };
 

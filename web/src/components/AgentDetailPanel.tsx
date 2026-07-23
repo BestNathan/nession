@@ -1,5 +1,5 @@
 import { Server, Clock, Terminal, Activity, Monitor, Copy, Check } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import type { Agent } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, agentDisplayName } from '../lib/format';
@@ -7,6 +7,9 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
+
+/** Max heartbeat entries to track and display. */
+const MAX_HEARTBEATS = 5;
 
 interface AgentDetailPanelProps {
   agent: Agent;
@@ -56,7 +59,7 @@ function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
     '── Heartbeat History ──',
     ...(heartbeatHistory.length === 0
       ? ['No heartbeat data yet']
-      : [...heartbeatHistory].reverse().slice(0, 10).map((iso) =>
+      : [...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso) =>
           `${formatRelativeTime(iso)} — ${formatAbsoluteTime(iso)}`)),
     '',
     `Active Sessions: ${agent.session_count}`,
@@ -110,6 +113,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
   const uptime = computeUptime(heartbeatHistory);
   const [copied, setCopied] = useState(false);
+  // Tick every second so relative timestamps ("Xs ago") stay live.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => { setTick((n) => n + 1); }, 1000);
+    return () => { clearInterval(id); };
+  }, []);
 
   const handleCopy = useCallback(() => {
     copyToClipboard(formatAgentDetails(agent, heartbeatHistory))
@@ -193,7 +202,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
               <p className="text-sm text-muted-foreground">No heartbeat data yet</p>
             ) : (
               <div className="space-y-1">
-                {[...heartbeatHistory].reverse().slice(0, 10).map((iso, i) => (
+                {[...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso, i) => (
                   <div key={i} className="flex items-center gap-2 py-1">
                     <span className={`w-2 h-2 rounded-full ${getHeartbeatColor(iso)}`} />
                     <span className="text-sm">{formatRelativeTime(iso)}</span>

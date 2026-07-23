@@ -137,6 +137,15 @@ impl AgentRegistry {
         }
     }
 
+    /// Update agent metadata in memory (version, tmux, OS).
+    /// Called on each heartbeat so the web UI stays current after agent upgrades.
+    pub async fn update_metadata(&self, agent_id: &str, metadata: AgentMetadata) {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.metadata = metadata;
+        }
+    }
+
     /// Update (or clear) the display name for an agent in memory and in the DB.
     /// Returns the updated AgentInfo, or None if the agent doesn't exist.
     pub async fn update_display_name(

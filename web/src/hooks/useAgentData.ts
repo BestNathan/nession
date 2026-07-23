@@ -8,7 +8,7 @@ function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
     if (!agent.last_heartbeat) { continue; }
     const history = map.get(agent.agent_id) ?? [];
     history.push(agent.last_heartbeat);
-    if (history.length > 10) { history.splice(0, history.length - 10); }
+    if (history.length > 5) { history.splice(0, history.length - 5); }
     map.set(agent.agent_id, history);
   }
 }

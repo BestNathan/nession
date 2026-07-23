@@ -2,7 +2,10 @@ import type { Agent } from '../types';
 
 export function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
-  const seconds = Math.floor(diff / 1000);
+  const seconds = Math.max(0, Math.floor(diff / 1000));
+  if (seconds < 1) {
+    return '刚刚';
+  }
   if (seconds < 60) {
     return `${seconds}s ago`;
   }
