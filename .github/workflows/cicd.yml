@@ -113,6 +113,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
+          IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
@@ -196,6 +197,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
+          IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
