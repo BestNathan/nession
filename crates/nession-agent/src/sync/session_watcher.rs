@@ -100,9 +100,15 @@ impl SessionWatcher {
         }
 
         // If the supervisor reconnected, the server-side session registry was
-        // wiped. Reset our previous state so every session is re-synced.
+        // wiped. Before resetting our state, report any sessions we knew about
+        // as gone so the server cleans up stale entries from the previous
+        // connection (e.g. after a pod restart where tmux was recreated).
         if self.handle.take_sync_needed() {
             debug!("Full session re-sync triggered after reconnection");
+            for name in self.prev_sessions.keys() {
+                debug!("Reporting stale session as gone: {}", name);
+                let _ = self.handle.send_session_update(name, "gone", 0, 0).await;
+            }
             self.prev_sessions.clear();
         }
 
