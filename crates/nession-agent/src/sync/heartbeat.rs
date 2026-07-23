@@ -6,7 +6,7 @@ use anyhow::Result;
 use nession_common::protocol::AgentStatus;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 /// Handle to request shutdown of a [`HeartbeatLoop`].
 #[derive(Clone)]
@@ -96,9 +96,9 @@ impl HeartbeatLoop {
         let uptime_seconds = get_uptime_seconds();
         let load_average = get_load_average();
 
-        debug!(
-            "Sending heartbeat: sessions={}, active={}, uptime={}s, load={:?}",
-            session_count, active_sessions, uptime_seconds, load_average
+        info!(
+            "Sending heartbeat: sessions={}, active={}, uptime={}s",
+            session_count, active_sessions, uptime_seconds
         );
 
         self.handle

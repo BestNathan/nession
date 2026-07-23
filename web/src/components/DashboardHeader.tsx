@@ -41,6 +41,9 @@ function formatUptimeCompact(seconds: number): string {
   return `${d}d${h % 24}h`;
 }
 
+// Web UI version baked at build time (import from package.json works in Vite)
+const WEB_VERSION = '0.10.0';
+
 function ServerInfoInline() {
   const ws = useWebSocket();
   const [info, setInfo] = useState<ServerInfo | null>(null);
@@ -57,14 +60,19 @@ function ServerInfoInline() {
 
   if (!info) {return null;}
 
+  const imageTag = info.image_tag && info.image_tag !== 'dev' && info.image_tag !== 'unknown'
+    ? info.image_tag
+    : null;
+
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
       <span className="flex items-center gap-1">
         <Server className="h-3 w-3" />
-        v{info.version}
-        {info.image_tag && info.image_tag !== 'dev' && info.image_tag !== 'unknown' && (
-          <span className="font-mono">({info.image_tag})</span>
-        )}
+        srv v{info.version}{imageTag && <span className="font-mono">({imageTag})</span>}
+      </span>
+      <span className="text-border">·</span>
+      <span className="flex items-center gap-1">
+        web v{WEB_VERSION}{imageTag && <span className="font-mono">({imageTag})</span>}
       </span>
       <span className="text-border">·</span>
       <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatUptimeCompact(info.uptime_seconds)}</span>

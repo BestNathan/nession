@@ -60,6 +60,11 @@ impl TmuxManager {
 
         if !output.status.success() {
             // tmux server not running, return empty list
+            tracing::warn!(
+                "tmux list-sessions exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
             return Ok(vec![]);
         }
 
@@ -86,6 +91,7 @@ impl TmuxManager {
             })
             .collect();
 
+        tracing::info!("tmux list-sessions: {} session(s) found", sessions.len());
         Ok(sessions)
     }
 
