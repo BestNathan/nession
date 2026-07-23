@@ -91,9 +91,10 @@ describe('AgentCard', () => {
 
   describe('formatRelativeTime', () => {
     it('shows seconds ago for recent heartbeat', () => {
+      const thirtySecAgo = new Date(Date.now() - 30000).toISOString();
       render(
         <AgentCard
-          agent={makeAgent({ last_heartbeat: new Date().toISOString() })}
+          agent={makeAgent({ last_heartbeat: thirtySecAgo })}
           onClick={vi.fn()}
         />,
       );

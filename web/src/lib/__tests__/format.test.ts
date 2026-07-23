@@ -31,9 +31,9 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(iso)).toBe('5d ago');
   });
 
-  it('shows 0s ago for current time', () => {
+  it('shows 刚刚 for current time', () => {
     const iso = new Date().toISOString();
-    expect(formatRelativeTime(iso)).toBe('0s ago');
+    expect(formatRelativeTime(iso)).toBe('刚刚');
   });
 });
 
