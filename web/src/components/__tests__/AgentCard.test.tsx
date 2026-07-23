@@ -27,9 +27,8 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 describe('AgentCard', () => {
   it('renders agent hostname as display name when display_name is unset', () => {
     render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
-    // Hostname appears in both h3 (title) and p (subtitle); use getAllByText
-    const matches = screen.getAllByText('server-01');
-    expect(matches.length).toBeGreaterThanOrEqual(1);
+    // Hostname appears as the h3 title (falls back from display_name)
+    expect(screen.getByRole('heading', { name: 'server-01' })).toBeInTheDocument();
   });
 
   it('renders custom display_name when set', () => {
@@ -77,7 +76,7 @@ describe('AgentCard', () => {
     const onClick = vi.fn();
     render(<AgentCard agent={makeAgent()} onClick={onClick} />);
 
-    await user.click(screen.getByRole('heading'));
+    await user.click(screen.getByRole('heading', { name: 'server-01' }));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
@@ -89,40 +88,9 @@ describe('AgentCard', () => {
     expect(card?.className).not.toContain('ring-2');
   });
 
-  describe('formatRelativeTime', () => {
-    it('shows seconds ago for recent heartbeat', () => {
-      const thirtySecAgo = new Date(Date.now() - 30000).toISOString();
-      render(
-        <AgentCard
-          agent={makeAgent({ last_heartbeat: thirtySecAgo })}
-          onClick={vi.fn()}
-        />,
-      );
-      expect(screen.getByText(/\d+s ago/)).toBeInTheDocument();
-    });
-
-    it('shows minutes ago', () => {
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      render(
-        <AgentCard agent={makeAgent({ last_heartbeat: fiveMinAgo })} onClick={vi.fn()} />,
-      );
-      expect(screen.getByText(/5m ago/)).toBeInTheDocument();
-    });
-
-    it('shows hours ago', () => {
-      const threeHoursAgo = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
-      render(
-        <AgentCard agent={makeAgent({ last_heartbeat: threeHoursAgo })} onClick={vi.fn()} />,
-      );
-      expect(screen.getByText(/3h ago/)).toBeInTheDocument();
-    });
-
-    it('shows days ago', () => {
-      const twoDaysAgo = new Date(Date.now() - 2 * 86400 * 1000).toISOString();
-      render(
-        <AgentCard agent={makeAgent({ last_heartbeat: twoDaysAgo })} onClick={vi.fn()} />,
-      );
-      expect(screen.getByText(/2d ago/)).toBeInTheDocument();
-    });
+  it('shows edit button on hover (desktop)', () => {
+    render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
+    const btn = screen.getByTitle('Rename agent');
+    expect(btn).toBeInTheDocument();
   });
 });

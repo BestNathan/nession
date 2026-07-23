@@ -103,9 +103,11 @@ function SectionHeader(props: { icon: React.ComponentType<{ className?: string }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between py-1">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
+    <div className="flex justify-between py-1 gap-2">
+      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
+      <span className="text-sm font-medium truncate max-w-[200px]" title={value}>
+        {value}
+      </span>
     </div>
   );
 }
