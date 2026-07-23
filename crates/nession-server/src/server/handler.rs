@@ -8,6 +8,7 @@ use crate::env::EnvService;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
+use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
@@ -46,10 +47,9 @@ pub struct ConnectionHandler {
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     client_registry: Arc<ClientRegistry>,
+    web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
-    server_auth_token: String,
-    /// Heartbeat interval (seconds) advertised to agents on registration.
-    heartbeat_interval_secs: u64,
+    config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
     /// Outgoing message sender for this client connection (set after construction).
@@ -60,24 +60,30 @@ pub struct ConnectionHandler {
     attached_client_id: Option<String>,
 }
 
+/// Immutable per-connection configuration.
+pub struct ConnectionHandlerConfig {
+    pub server_auth_token: String,
+    pub heartbeat_interval_secs: u64,
+}
+
 impl ConnectionHandler {
     pub fn new(
         agent_registry: Arc<AgentRegistry>,
         session_registry: Arc<SessionRegistry>,
         command_broker: Arc<CommandBroker>,
         client_registry: Arc<ClientRegistry>,
+        web_client_registry: Arc<WebClientRegistry>,
         env_service: Arc<EnvService>,
-        server_auth_token: String,
-        heartbeat_interval_secs: u64,
+        config: ConnectionHandlerConfig,
     ) -> Self {
         Self {
             agent_registry,
             session_registry,
             command_broker,
             client_registry,
+            web_client_registry,
             env_service,
-            server_auth_token,
-            heartbeat_interval_secs,
+            config,
             authenticated_client: false,
             registered_agent_id: None,
             client_sender: None,
@@ -172,8 +178,8 @@ impl ConnectionHandler {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
 
         // Empty server auth_token means no-auth mode: accept any agent
-        let auth_ok =
-            self.server_auth_token.is_empty() || payload.auth_token == self.server_auth_token;
+        let auth_ok = self.config.server_auth_token.is_empty()
+            || payload.auth_token == self.config.server_auth_token;
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
@@ -245,7 +251,7 @@ impl ConnectionHandler {
                 "payload": {
                     "status": "accepted",
                     "message": "Registration successful",
-                    "heartbeat_interval_secs": self.heartbeat_interval_secs
+                    "heartbeat_interval_secs": self.config.heartbeat_interval_secs
                 }
             })
             .to_string(),
@@ -289,6 +295,12 @@ impl ConnectionHandler {
 
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
+            .await;
+
+        // Push updated agent state to all connected web dashboard clients
+        // so session counts, status, etc. stay current without polling.
+        self.web_client_registry
+            .broadcast_agents_changed(Arc::clone(&self.agent_registry))
             .await;
 
         // Acknowledge so the agent can confirm the link is healthy in both
@@ -397,10 +409,17 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         // Empty server auth_token means no-auth mode: accept any client
-        let auth_ok = self.server_auth_token.is_empty() || auth_token == self.server_auth_token;
+        let auth_ok =
+            self.config.server_auth_token.is_empty() || auth_token == self.config.server_auth_token;
 
         if auth_ok {
             self.authenticated_client = true;
+            // Register web client for real-time push (agents.changed, etc.)
+            if let Some(ref sender) = self.client_sender {
+                self.web_client_registry
+                    .register(&msg.id, sender.clone())
+                    .await;
+            }
             info!("Client authenticated successfully");
 
             Ok(HandlerAction::Reply(Some(Message::Text(
@@ -2262,6 +2281,7 @@ mod tests {
         let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
         let command_broker = Arc::new(CommandBroker::new());
         let client_registry = Arc::new(ClientRegistry::new());
+        let web_client_registry = Arc::new(WebClientRegistry::new());
         let env_root = tempfile::tempdir().unwrap().keep();
         let env_service = EnvService::new(env_root);
         ConnectionHandler::new(
@@ -2269,9 +2289,12 @@ mod tests {
             session_registry,
             command_broker,
             client_registry,
+            web_client_registry,
             env_service,
-            auth_token.to_string(),
-            30,
+            ConnectionHandlerConfig {
+                server_auth_token: auth_token.to_string(),
+                heartbeat_interval_secs: 30,
+            },
         )
     }
 

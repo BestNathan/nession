@@ -10,6 +10,7 @@ use crate::env::EnvService;
 use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
+use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::EnvSnapshot;
 
@@ -19,6 +20,7 @@ pub struct WebSocketServer {
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     client_registry: Arc<ClientRegistry>,
+    web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
     db: Arc<Database>,
     listener: Option<TcpListener>,
@@ -41,6 +43,7 @@ impl WebSocketServer {
 
         let command_broker = Arc::new(CommandBroker::new());
         let client_registry = Arc::new(ClientRegistry::new());
+        let web_client_registry = Arc::new(WebClientRegistry::new());
 
         let env_root = nession_common::paths::server_envs_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/server/envs"));
@@ -52,6 +55,7 @@ impl WebSocketServer {
             session_registry,
             command_broker,
             client_registry,
+            web_client_registry,
             env_service,
             db,
             listener: Some(listener),
@@ -183,6 +187,7 @@ impl WebSocketServer {
                 session_registry: Arc::clone(&self.session_registry),
                 command_broker: Arc::clone(&self.command_broker),
                 client_registry: Arc::clone(&self.client_registry),
+                web_client_registry: Arc::clone(&self.web_client_registry),
                 env_service: Arc::clone(&self.env_service),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
@@ -237,6 +242,7 @@ struct ServerContext {
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     client_registry: Arc<ClientRegistry>,
+    web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
     auth_token: String,
     heartbeat_interval_secs: u64,
@@ -268,6 +274,7 @@ where
         session_registry,
         command_broker,
         client_registry,
+        web_client_registry,
         env_service,
         auth_token,
         heartbeat_interval_secs,
@@ -285,9 +292,12 @@ where
         session_registry,
         command_broker.clone(),
         client_registry.clone(),
+        web_client_registry.clone(),
         env_service,
-        auth_token,
-        heartbeat_interval_secs,
+        crate::server::handler::ConnectionHandlerConfig {
+            server_auth_token: auth_token,
+            heartbeat_interval_secs,
+        },
     );
     handler.set_client_sender(sender.clone());
 
