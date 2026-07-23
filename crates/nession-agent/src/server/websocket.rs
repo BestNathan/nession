@@ -1365,8 +1365,7 @@ impl AgentServer {
 
             msg_types::CLIENT_AGENTS_LIST => match tmux.list_sessions().await {
                 Ok(sessions_list) => {
-                    let hostname =
-                        std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                    let hostname = nession_common::system::get_hostname();
                     let (ip, port) = parse_listen_address(listen_address);
                     let agent = WebAgentInfo {
                         agent_id: agent_id.to_string(),

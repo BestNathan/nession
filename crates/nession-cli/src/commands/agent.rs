@@ -295,7 +295,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         .as_deref()
         .unwrap_or(&config.default_working_dir);
     let agent_id = if config.agent_id.is_empty() {
-        get_hostname()
+        nession_common::system::get_hostname()
     } else {
         config.agent_id.clone()
     };
@@ -318,7 +318,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     );
 
     // Connect to central server
-    let hostname = get_hostname();
+    let hostname = nession_common::system::get_hostname();
     let ip_address = get_ip_address();
     let port = extract_port(&config.listen_address);
     // Advertise all non-loopback NIC addresses so clients can pick the best
@@ -476,13 +476,6 @@ async fn wait_for_shutdown() -> anyhow::Result<()> {
         info!("Received Ctrl+C");
     }
     Ok(())
-}
-
-/// Get the system hostname.
-fn get_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("HOST"))
-        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 /// Get the local IP address.

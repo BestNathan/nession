@@ -1,7 +1,9 @@
-import { Server, Clock, Terminal, Activity, Monitor } from 'lucide-react';
+import { Server, Clock, Terminal, Activity, Monitor, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import type { Agent } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, agentDisplayName } from '../lib/format';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
 
@@ -26,6 +28,27 @@ function getHeartbeatColor(iso: string): string {
   if (seconds < 60) {return 'bg-green-500';}
   if (seconds < 180) {return 'bg-amber-500';}
   return 'bg-gray-500';
+}
+
+function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
+  const uptime = computeUptime(heartbeatHistory);
+  const lines = [
+    `Agent: ${agentDisplayName(agent)}`,
+    `Status: ${agent.status}`,
+    `Agent ID: ${agent.agent_id}`,
+    `Hostname: ${agent.hostname}`,
+    `IP Address: ${agent.ip_address}`,
+    `Port: ${agent.port}`,
+    '',
+    `Nession: ${agent.metadata?.nession_version ?? 'Unknown'}`,
+    `tmux: ${agent.metadata?.tmux_version ?? 'Unknown'}`,
+    `OS: ${agent.metadata?.os_version ?? 'Unknown'}`,
+    '',
+    uptime ? `Uptime: ${uptime} (since ${formatAbsoluteTime(heartbeatHistory[0])})` : 'Uptime: N/A',
+    '',
+    `Active Sessions: ${agent.session_count}`,
+  ];
+  return lines.join('\n');
 }
 
 function SectionHeader(props: { icon: React.ComponentType<{ className?: string }>; title: string }) {
@@ -54,15 +77,29 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
       <SheetContent side="right" className="w-full sm:w-[400px] md:w-[480px] max-w-[100vw] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 space-y-4">
-          {/* Header: Status badge + display name */}
-          <div>
-            <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
-              {agent.status}
-            </Badge>
-            <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
-            {agent.display_name && (
-              <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
-            )}
+          {/* Header: Status badge + display name + copy button */}
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
+                {agent.status}
+              </Badge>
+              <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
+              {agent.display_name && (
+                <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                navigator.clipboard.writeText(formatAgentDetails(agent, heartbeatHistory))
+                  .then(() => { toast.success('Agent details copied'); })
+                  .catch(() => { toast.error('Failed to copy'); });
+              }}
+              title="Copy agent details"
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
           </div>
 
           <Separator />
