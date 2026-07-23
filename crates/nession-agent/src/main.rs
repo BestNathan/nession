@@ -113,6 +113,7 @@ async fn main() -> Result<()> {
         tmux_version,
         os_version,
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
+        image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
     let tmux_for_client = Arc::new(TmuxManager::new());

@@ -34,6 +34,9 @@ export function ServerInfoBar() {
       <span className="flex items-center gap-1">
         <Server className="h-3 w-3" />
         Nession v{info.version}
+        {info.image_tag && info.image_tag !== 'dev' && info.image_tag !== 'unknown' && (
+          <span className="text-muted-foreground/50 font-mono">({info.image_tag})</span>
+        )}
       </span>
       <span className="text-muted-foreground/30">|</span>
       <span className="flex items-center gap-1">

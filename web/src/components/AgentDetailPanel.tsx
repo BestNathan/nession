@@ -49,6 +49,7 @@ function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
     '',
     '── Versions ──',
     `Nession: ${agent.metadata?.nession_version ?? 'Unknown'}`,
+    `Image: ${agent.metadata?.image_tag ?? 'unknown'}`,
     `tmux: ${agent.metadata?.tmux_version ?? 'Unknown'}`,
     `OS: ${agent.metadata?.os_version ?? 'Unknown'}`,
     '',
@@ -175,6 +176,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
           <div>
             <SectionHeader icon={Terminal} title="Versions" />
             <InfoRow label="Nession" value={agent.metadata?.nession_version ?? 'Unknown'} />
+            <InfoRow label="Image" value={agent.metadata?.image_tag ?? 'unknown'} />
             <InfoRow label="tmux" value={agent.metadata?.tmux_version ?? 'Unknown'} />
             <InfoRow label="OS" value={agent.metadata?.os_version ?? 'Unknown'} />
           </div>

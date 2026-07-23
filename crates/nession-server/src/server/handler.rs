@@ -553,6 +553,7 @@ impl ConnectionHandler {
                 "timestamp": current_timestamp(),
                 "payload": {
                     "version": env!("CARGO_PKG_VERSION"),
+                    "image_tag": option_env!("IMAGE_TAG").unwrap_or("dev"),
                     "uptime_seconds": crate::uptime_seconds(),
                     "agent_count": agents.len(),
                     "online_agent_count": online,

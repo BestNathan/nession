@@ -336,6 +336,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         tmux_version,
         os_version,
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
+        image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
     let server_client = ServerClient::new(

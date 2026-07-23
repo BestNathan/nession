@@ -928,6 +928,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -973,6 +974,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1028,6 +1030,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1112,6 +1115,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
             format!("ws://127.0.0.1:{}", port),
@@ -1190,6 +1194,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
             format!("ws://127.0.0.1:{}", port),
@@ -1291,6 +1296,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1400,6 +1406,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1491,6 +1498,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1637,6 +1645,7 @@ mod tests {
                 tmux_version: String::new(),
                 os_version: String::new(),
                 nession_version: String::new(),
+                image_tag: String::new(),
             },
             connected: Arc::new(AtomicBool::new(false)),
         };
@@ -1664,6 +1673,7 @@ mod tests {
                 tmux_version: String::new(),
                 os_version: String::new(),
                 nession_version: String::new(),
+                image_tag: String::new(),
             },
             sync_needed: Arc::new(AtomicBool::new(false)),
             connected: Arc::new(AtomicBool::new(false)),
@@ -1690,6 +1700,7 @@ mod tests {
                 tmux_version: String::new(),
                 os_version: String::new(),
                 nession_version: String::new(),
+                image_tag: String::new(),
             },
             sync_needed: Arc::new(AtomicBool::new(false)),
             connected: Arc::new(AtomicBool::new(false)),
@@ -1756,6 +1767,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1841,6 +1853,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1937,6 +1950,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1984,6 +1998,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(

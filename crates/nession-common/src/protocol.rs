@@ -154,6 +154,14 @@ pub struct AgentMetadata {
     pub tmux_version: String,
     pub os_version: String,
     pub nession_version: String,
+    /// Docker image tag (short sha) baked in at build time.
+    /// "dev" when running from `cargo run`, "unknown" when not set.
+    #[serde(default = "default_image_tag")]
+    pub image_tag: String,
+}
+
+fn default_image_tag() -> String {
+    "unknown".to_string()
 }
 
 /// Server → Agent response to `agent.register`.
@@ -625,6 +633,8 @@ pub struct ServerInfoRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoResponse {
     pub version: String,
+    #[serde(default = "default_image_tag")]
+    pub image_tag: String,
     pub uptime_seconds: u64,
     pub agent_count: usize,
     pub online_agent_count: usize,
@@ -713,6 +723,7 @@ mod tests {
                 tmux_version: "3.4".to_string(),
                 os_version: "linux".to_string(),
                 nession_version: "0.1.0".to_string(),
+                image_tag: "test".to_string(),
             },
             protocol_version: "1.0".to_string(),
             display_name: Some("my-agent".to_string()),

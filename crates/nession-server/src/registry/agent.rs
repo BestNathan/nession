@@ -70,6 +70,7 @@ impl AgentRegistry {
                             tmux_version: String::new(),
                             os_version: String::new(),
                             nession_version: String::new(),
+                            image_tag: String::new(),
                         });
                     let addresses = decode_addresses(&row.addresses);
                     let info = AgentInfo {
