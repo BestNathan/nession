@@ -14,6 +14,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     session_count: 3,
     active_sessions: 2,
     last_heartbeat: new Date().toISOString(),
+    registered_at: new Date(Date.now() - 3600 * 1000).toISOString(),
     metadata: {
       tmux_version: '3.3',
       os_version: 'Linux 6.1',
@@ -24,14 +25,31 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 }
 
 describe('AgentCard', () => {
-  it('renders agent hostname', () => {
+  it('renders agent hostname as display name when display_name is unset', () => {
     render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
-    expect(screen.getByText('server-01')).toBeInTheDocument();
+    // Hostname appears in both h3 (title) and p (subtitle); use getAllByText
+    const matches = screen.getAllByText('server-01');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders custom display_name when set', () => {
+    render(<AgentCard agent={makeAgent({ display_name: 'prod-box' })} onClick={vi.fn()} />);
+    expect(screen.getByText('prod-box')).toBeInTheDocument();
   });
 
   it('renders IP address info via session count text', () => {
     render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
     expect(screen.getByText(/3 sessions/)).toBeInTheDocument();
+  });
+
+  it('shows version info', () => {
+    render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
+    expect(screen.getByText(/v0\.3\.0/)).toBeInTheDocument();
+  });
+
+  it('shows uptime', () => {
+    render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
+    expect(screen.getByText(/up \d+[hm]/)).toBeInTheDocument();
   });
 
   it('shows online status badge', () => {
@@ -59,7 +77,7 @@ describe('AgentCard', () => {
     const onClick = vi.fn();
     render(<AgentCard agent={makeAgent()} onClick={onClick} />);
 
-    await user.click(screen.getByText('server-01'));
+    await user.click(screen.getByRole('heading'));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 

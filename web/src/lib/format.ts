@@ -68,3 +68,21 @@ export function formatRelativeTimeSeconds(ts: number): string {
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
+
+/** Format agent uptime from registered_at ISO timestamp. */
+export function formatUptime(registeredAtIso: string | undefined): string {
+  if (!registeredAtIso) {return '';}
+  const diff = Date.now() - new Date(registeredAtIso).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) {return `${seconds}s`;}
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {return `${minutes}m`;}
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {return `${hours}h`;}
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/** Resolve the effective display name for an agent. */
+export function agentDisplayName(agent: { display_name?: string; hostname: string }): string {
+  return agent.display_name || agent.hostname;
+}

@@ -14,9 +14,9 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from './ui/select';
 import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
+import { agentDisplayName } from '../lib/format';
 import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDialogReset } from '../hooks/useDialogReset';
@@ -40,17 +40,20 @@ function AgentSelect({
   onChange: (v: string) => void;
   disabled: boolean;
 }) {
+  const selectedAgent = agents.find((a) => a.agent_id === value);
+  const displayText = selectedAgent ? agentDisplayName(selectedAgent) : 'Select an agent';
+
   return (
     <div className="space-y-2">
       <Label htmlFor="agent">Agent</Label>
       <Select value={value} onValueChange={(v) => v && onChange(v)} disabled={disabled}>
-        <SelectTrigger id="agent">
-          <SelectValue placeholder="Select an agent" />
+        <SelectTrigger id="agent" className="w-full">
+          <span className={selectedAgent ? '' : 'text-muted-foreground'}>{displayText}</span>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
           {agents.map((agent) => (
             <SelectItem key={agent.agent_id} value={agent.agent_id}>
-              {agent.hostname} ({agent.agent_id})
+              {agentDisplayName(agent)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -136,7 +139,7 @@ export function CreateSessionDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create Session</DialogTitle>
         </DialogHeader>

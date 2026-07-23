@@ -3,12 +3,15 @@
 export interface Agent {
   agent_id: string;
   hostname: string;
+  /** Human-readable display name. Falls back to hostname when absent. */
+  display_name?: string;
   ip_address: string;
   port: number;
   status: 'online' | 'offline' | 'degraded';
   session_count: number;
   active_sessions?: number;
   last_heartbeat: string; // ISO 8601 timestamp
+  registered_at?: string; // ISO 8601 timestamp (added for uptime display)
   metadata?: {
     tmux_version: string;
     os_version: string;

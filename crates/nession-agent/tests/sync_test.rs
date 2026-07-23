@@ -69,6 +69,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         8080,
         None,   // connect_url
         vec![], // addresses
+        None,   // display_name
         metadata,
         Arc::new(TmuxManager::new()),
         "/tmp".to_string(),

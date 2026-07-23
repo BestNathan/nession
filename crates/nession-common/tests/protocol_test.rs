@@ -34,6 +34,7 @@ fn test_agent_register_payload_serialization() {
             nession_version: "0.3.2".to_string(),
         },
         protocol_version: "1.0".to_string(),
+        display_name: None,
         connect_url: Some("wss://agent.example.com/ws".to_string()),
         addresses: vec![],
     };
@@ -60,6 +61,7 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
             nession_version: "0.5.1".to_string(),
         },
         protocol_version: "1.0".to_string(),
+        display_name: None,
         connect_url: None,
         addresses: vec![
             AgentAddress {
@@ -135,6 +137,7 @@ fn test_agent_register_payload_without_connect_url() {
             nession_version: "0.2.0".to_string(),
         },
         protocol_version: "1.0".to_string(),
+        display_name: None,
         connect_url: None,
         addresses: vec![],
     };
@@ -354,6 +357,7 @@ fn test_message_wrapped_in_protocol_envelope() {
                 nession_version: "0.1.0".to_string(),
             },
             protocol_version: "1.0".to_string(),
+            display_name: None,
             connect_url: None,
             addresses: vec![],
         },

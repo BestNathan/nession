@@ -13,6 +13,7 @@ export function AgentSection({
   setSelectedAgent,
   onlineCount,
   offlineCount,
+  onAgentRename,
 }: {
   loadingAgents: boolean;
   agents: Agent[];
@@ -21,6 +22,7 @@ export function AgentSection({
   setSelectedAgent: (a: Agent | null) => void;
   onlineCount: number;
   offlineCount: number;
+  onAgentRename?: (updated: Agent) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const gridClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
@@ -57,7 +59,7 @@ export function AgentSection({
       ) : (
         <div className={cn(expanded ? 'grid' : 'hidden', 'md:grid gap-3', gridClass)}>
           {filteredAgents.map((a) => (
-            <AgentCard key={a.agent_id} agent={a} onClick={() => setSelectedAgent(a)} />
+            <AgentCard key={a.agent_id} agent={a} onClick={() => setSelectedAgent(a)} onRename={onAgentRename} />
           ))}
         </div>
       )}

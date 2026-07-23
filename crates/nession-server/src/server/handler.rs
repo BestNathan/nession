@@ -8,6 +8,7 @@ use crate::env::EnvService;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
+use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
     AddressStatus, AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
@@ -156,6 +157,7 @@ impl ConnectionHandler {
             "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
             "client.session.env.active" => self.handle_client_session_env_active(msg).await,
             "client.session.env.query" => self.handle_client_session_env_query(msg).await,
+            "client.agent.rename" => self.handle_client_agent_rename(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
                 Ok(HandlerAction::Reply(None))
@@ -201,11 +203,25 @@ impl ConnectionHandler {
             addresses.len()
         );
 
+        // Keep an existing display_name if it was manually set via Web UI
+        // (survives agent restart). Otherwise use the agent's config value.
+        let display_name = match self.agent_registry.get(&payload.agent_id).await {
+            Some(existing) if existing.display_name.is_some() => {
+                info!(
+                    "Agent {} keeping existing display_name: {:?}",
+                    payload.agent_id, existing.display_name
+                );
+                existing.display_name
+            }
+            _ => payload.display_name.clone(),
+        };
+
         let agent_info = AgentInfo {
             agent_id: payload.agent_id.clone(),
             hostname: payload.hostname,
             ip_address: payload.ip_address,
             port: payload.port,
+            display_name,
             connect_url: payload.connect_url.clone(),
             addresses,
             registered_at: chrono::Utc::now(),
@@ -446,6 +462,7 @@ impl ConnectionHandler {
                 json!({
                     "agent_id": a.agent_id,
                     "hostname": a.hostname,
+                    "display_name": a.display_name,
                     "ip_address": a.ip_address,
                     "port": a.port,
                     "status": match a.status {
@@ -456,6 +473,7 @@ impl ConnectionHandler {
                     "session_count": a.session_count,
                     "active_sessions": a.active_sessions,
                     "last_heartbeat": a.last_heartbeat.to_rfc3339(),
+                    "registered_at": a.registered_at.to_rfc3339(),
                     "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
                     "metadata": {
                         "nession_version": a.metadata.nession_version,
@@ -482,6 +500,151 @@ impl ConnectionHandler {
             })
             .to_string(),
         ))))
+    }
+
+    /// Handle `client.agent.rename` — update an agent's display name.
+    /// Accepts `agent_id` and `display_name` (string or null to clear).
+    /// Returns the updated agent info on success.
+    async fn handle_client_agent_rename(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.agent.rename.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "Not authenticated"
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
+        let agent_id = msg
+            .payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if agent_id.is_empty() {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.agent.rename.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": "agent_id is required"
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
+        // Resolve the new display_name: JSON null → clear, string → validate
+        let raw: Option<String> = msg
+            .payload
+            .get("display_name")
+            .and_then(|v| {
+                if v.is_null() {
+                    Some(None) // explicit null = clear
+                } else {
+                    v.as_str().map(|s| Some(s.to_string()))
+                }
+            })
+            .flatten();
+
+        let display_name = match raw {
+            Some(ref s) => match validate_display_name(s) {
+                Ok(Some(normalized)) => Some(normalized),
+                Ok(None) => None, // empty after trim → clear
+                Err(e) => {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": "client.agent.rename.response",
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "success": false,
+                                "error": e
+                            }
+                        })
+                        .to_string(),
+                    ))));
+                }
+            },
+            None => None, // explicit null → clear
+        };
+
+        info!(
+            "Rename agent {} display_name: {:?} -> {:?}",
+            agent_id,
+            self.agent_registry
+                .get(agent_id)
+                .await
+                .and_then(|a| a.display_name),
+            display_name
+        );
+
+        match self
+            .agent_registry
+            .update_display_name(agent_id, display_name.clone())
+            .await
+        {
+            Some(updated) => {
+                let agent_json = json!({
+                    "agent_id": updated.agent_id,
+                    "hostname": updated.hostname,
+                    "display_name": updated.display_name,
+                    "ip_address": updated.ip_address,
+                    "port": updated.port,
+                    "status": match updated.status {
+                        AgentStatus::Online => "online",
+                        AgentStatus::Offline => "offline",
+                        AgentStatus::Degraded => "degraded",
+                    },
+                    "session_count": updated.session_count,
+                    "active_sessions": updated.active_sessions,
+                    "last_heartbeat": updated.last_heartbeat.to_rfc3339(),
+                    "registered_at": updated.registered_at.to_rfc3339(),
+                    "addresses": serde_json::to_value(&updated.addresses).unwrap_or(json!([])),
+                    "metadata": {
+                        "nession_version": updated.metadata.nession_version,
+                        "tmux_version": updated.metadata.tmux_version,
+                        "os_version": updated.metadata.os_version,
+                    },
+                });
+
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": "client.agent.rename.response",
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "success": true,
+                            "agent": agent_json
+                        }
+                    })
+                    .to_string(),
+                ))))
+            }
+            None => Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "client.agent.rename.response",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "success": false,
+                        "error": format!("Agent '{}' not found", agent_id)
+                    }
+                })
+                .to_string(),
+            )))),
+        }
     }
 
     /// Handle `client.sessions.list` - returns all sessions, optionally filtered by agent_id.
