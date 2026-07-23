@@ -23,6 +23,9 @@ jobs:
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: just check
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
 
   web-check:
     runs-on: ubuntu-latest
