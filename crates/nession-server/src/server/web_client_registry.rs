@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::command_broker::WsMessageSender;
 
@@ -35,7 +35,7 @@ impl WebClientRegistry {
     pub async fn register(&self, client_id: &str, sender: WsMessageSender) {
         let mut clients = self.clients.write().await;
         clients.push((client_id.to_string(), sender));
-        info!(
+        debug!(
             "WebClientRegistry: registered client {} (total: {})",
             client_id,
             clients.len()
@@ -58,11 +58,9 @@ impl WebClientRegistry {
     pub async fn broadcast(&self, json: String) {
         let mut clients = self.clients.write().await;
         if clients.is_empty() {
-            info!("WebClientRegistry: broadcast skipped — no clients registered");
             return;
         }
         let msg = WsMessage::Text(json);
-        let before = clients.len();
         clients.retain(|(client_id, sender)| {
             if let Err(e) = sender.send(msg.clone()) {
                 warn!(
@@ -74,12 +72,6 @@ impl WebClientRegistry {
                 true
             }
         });
-        info!(
-            "WebClientRegistry: broadcast to {}/{} clients ({} removed)",
-            clients.len(),
-            before,
-            before - clients.len()
-        );
     }
 
     /// Build an `agents.changed` payload from an Arc<AgentRegistry> and
