@@ -841,4 +841,16 @@ mod tests {
         assert_eq!(payload.env_snapshots[0].name, "staging.env");
         assert_eq!(payload.env_snapshots[0].vars.len(), 2);
     }
+
+    #[test]
+    fn test_agent_metadata_image_tag_default() {
+        let json = r#"{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1.0"}"#;
+        let meta: AgentMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.image_tag, "unknown"); // serde default
+    }
+
+    #[test]
+    fn test_default_image_tag_is_unknown() {
+        assert_eq!(super::default_image_tag(), "unknown");
+    }
 }
