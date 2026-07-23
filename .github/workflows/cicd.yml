@@ -104,8 +104,13 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - run: cargo build --release --bin nession-server --bin nession-agent
+      - name: cargo build (release)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
@@ -126,8 +131,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -140,8 +145,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -154,8 +159,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -182,8 +187,13 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - run: cargo build --release --bin nession-server --bin nession-agent
+      - name: cargo build (release)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
           cp target/release/nession-server /tmp/server-bin/
@@ -204,8 +214,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -218,8 +228,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -232,8 +242,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nession-build
+          cache-to: type=gha,scope=nession-build,mode=max
           build-contexts: |
             web-dist=/tmp/web-dist
 

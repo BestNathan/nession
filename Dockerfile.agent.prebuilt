@@ -6,18 +6,18 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 
-# Binary from rust build (arch-specific)
-COPY --from=agent-bin /nession-agent /usr/local/bin/nession-agent
-
-# Web UI static files (built once, shared across archs)
-COPY --from=web-dist / /usr/share/nginx/html/
-
-# Deploy scripts
+# Stable files first — rarely change, always cache-hit
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-agent.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
 RUN mkdir -p /etc/nession
+
+# Volatile files last — only these layers rebuild on each commit
+# Web UI static files (built once, shared across archs)
+COPY --from=web-dist / /usr/share/nginx/html/
+# Binary from rust build (arch-specific)
+COPY --from=agent-bin /nession-agent /usr/local/bin/nession-agent
+
 WORKDIR /etc/nession
 
 EXPOSE 10080 19090
