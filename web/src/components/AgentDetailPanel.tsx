@@ -1,6 +1,6 @@
 import { Server, Clock, Terminal, Activity, Monitor } from 'lucide-react';
 import type { Agent } from '../types';
-import { formatRelativeTime, formatAbsoluteTime, getStatusVariant } from '../lib/format';
+import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, agentDisplayName } from '../lib/format';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
@@ -54,12 +54,15 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
       <SheetContent side="right" className="w-full sm:w-[400px] md:w-[480px] max-w-[100vw] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 space-y-4">
-          {/* Header: Status badge + hostname */}
+          {/* Header: Status badge + display name */}
           <div>
             <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
               {agent.status}
             </Badge>
-            <h2 className="font-semibold text-lg text-foreground">{agent.hostname}</h2>
+            <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
+            {agent.display_name && (
+              <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
+            )}
           </div>
 
           <Separator />
