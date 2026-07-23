@@ -12,6 +12,7 @@ import { RenderTerminal } from './RenderTerminal';
 import { EnvManager } from './env/EnvManager';
 import { SessionsSection } from './SessionsSection';
 import { AgentDetailPanel } from './AgentDetailPanel';
+import { ServerInfoBar } from './ServerInfoBar';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import { AttachDialog } from './env/AttachDialog';
@@ -94,6 +95,8 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         }}
         error={error}
       />
+
+      <ServerInfoBar />
 
       <div className="flex-1 min-h-0 flex flex-col p-3 gap-4 md:p-4 lg:p-6 lg:gap-6 pb-[env(safe-area-inset-bottom)] w-full max-w-[1920px] mx-auto">
         <AgentSection

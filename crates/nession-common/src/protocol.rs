@@ -615,6 +615,22 @@ pub struct ServerTerminalResizePayload {
     pub rows: u16,
 }
 
+// --- Server info ---
+
+/// Request payload for `client.server.info` — empty (protocol marker).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfoRequest {}
+
+/// Response payload for `client.server.info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfoResponse {
+    pub version: String,
+    pub uptime_seconds: u64,
+    pub agent_count: usize,
+    pub online_agent_count: usize,
+    pub session_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

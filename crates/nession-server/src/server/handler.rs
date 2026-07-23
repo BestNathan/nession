@@ -160,6 +160,7 @@ impl ConnectionHandler {
             "client.env.write" => self.handle_client_env_write(msg).await,
             "client.env.delete" => self.handle_client_env_delete(msg).await,
             "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
+            "client.server.info" => self.handle_client_server_info(msg).await,
             "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
             "client.session.env.active" => self.handle_client_session_env_active(msg).await,
             "client.session.env.query" => self.handle_client_session_env_query(msg).await,
@@ -527,6 +528,35 @@ impl ConnectionHandler {
                 "timestamp": current_timestamp(),
                 "payload": {
                     "agents": agents_json
+                }
+            })
+            .to_string(),
+        ))))
+    }
+
+    /// Handle `client.server.info` — return server version, uptime, and stats.
+    async fn handle_client_server_info(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let agents = self.agent_registry.list().await;
+        let online = agents
+            .iter()
+            .filter(|a| a.status == AgentStatus::Online)
+            .count();
+        let sessions = self.session_registry.list().await.len();
+
+        Ok(HandlerAction::Reply(Some(Message::Text(
+            json!({
+                "msg_type": "client.server.info.response",
+                "id": msg.id,
+                "timestamp": current_timestamp(),
+                "payload": {
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "uptime_seconds": crate::uptime_seconds(),
+                    "agent_count": agents.len(),
+                    "online_agent_count": online,
+                    "session_count": sessions,
                 }
             })
             .to_string(),

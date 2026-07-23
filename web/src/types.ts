@@ -177,3 +177,12 @@ export interface SessionEnvQueryResponse {
   sourced_files: EnvFileRef[];
   error?: string;
 }
+
+/** Server info returned by client.server.info. */
+export interface ServerInfo {
+  version: string;
+  uptime_seconds: number;
+  agent_count: number;
+  online_agent_count: number;
+  session_count: number;
+}
