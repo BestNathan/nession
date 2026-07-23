@@ -427,11 +427,9 @@ impl ConnectionHandler {
 
         if auth_ok {
             self.authenticated_client = true;
-            // Register web client for real-time push (agents.changed, etc.)
+            // Subscribe web client for real-time push (agents.changed, etc.)
             if let Some(ref sender) = self.client_sender {
-                self.web_client_registry
-                    .register(&msg.id, sender.clone())
-                    .await;
+                self.web_client_registry.subscribe(sender.clone());
             }
             info!("Client authenticated successfully");
 

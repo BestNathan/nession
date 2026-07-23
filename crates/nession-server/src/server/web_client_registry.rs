@@ -1,21 +1,21 @@
-//! Registry of connected web dashboard clients for push notifications.
+//! Broadcast channel for pushing agent state changes to web clients.
 //!
-//! When an agent's heartbeat updates its session count (or any other state),
-//! the server broadcasts an `agents.changed` message to all registered web
-//! clients so the dashboard stays current without polling.
+//! Uses a `tokio::sync::broadcast` channel so every authenticated web
+//! client connection subscribes once and receives `agents.changed` pushes
+//! without the server needing to track individual senders.
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, warn};
+use tracing::{debug, error, info};
 
 use super::command_broker::WsMessageSender;
 
-/// Tracks connected web dashboard clients so agent state changes can be
-/// pushed in real-time (no polling needed).
+/// Shared broadcast channel for agent state pushes. A single sender is held
+/// by the server; every web-client connection spawns a relay task that
+/// forwards each broadcast to its own `WsMessageSender`.
 pub struct WebClientRegistry {
-    /// client_id → sender
-    clients: RwLock<Vec<(String, WsMessageSender)>>,
+    tx: broadcast::Sender<String>,
 }
 
 impl Default for WebClientRegistry {
@@ -25,57 +25,56 @@ impl Default for WebClientRegistry {
 }
 
 impl WebClientRegistry {
+    /// Create a new registry with room for 16 unread messages per subscriber.
     pub fn new() -> Self {
-        Self {
-            clients: RwLock::new(Vec::new()),
-        }
+        let (tx, _) = broadcast::channel(16);
+        Self { tx }
     }
 
-    /// Register a web client connection (called after authentication).
-    pub async fn register(&self, client_id: &str, sender: WsMessageSender) {
-        let mut clients = self.clients.write().await;
-        clients.push((client_id.to_string(), sender));
-        debug!(
-            "WebClientRegistry: registered client {} (total: {})",
-            client_id,
-            clients.len()
-        );
-    }
-
-    /// Remove a web client connection.
-    pub async fn unregister(&self, client_id: &str) {
-        let mut clients = self.clients.write().await;
-        clients.retain(|(id, _)| id != client_id);
-        debug!(
-            "WebClientRegistry: unregistered client {} (total: {})",
-            client_id,
-            clients.len()
-        );
-    }
-
-    /// Broadcast a JSON text message to all registered web clients.
-    /// Dead senders (disconnected clients) are automatically removed.
-    pub async fn broadcast(&self, json: String) {
-        let mut clients = self.clients.write().await;
-        if clients.is_empty() {
-            return;
-        }
-        let msg = WsMessage::Text(json);
-        clients.retain(|(client_id, sender)| {
-            if let Err(e) = sender.send(msg.clone()) {
-                warn!(
-                    "WebClientRegistry: client {} disconnected, removing: {}",
-                    client_id, e
-                );
-                false
-            } else {
-                true
+    /// Subscribe a newly-authenticated web client. Spawns a background task
+    /// that forwards every broadcast to `sender` until the client disconnects
+    /// (the receiver is dropped / lagged).
+    pub fn subscribe(&self, sender: WsMessageSender) {
+        let mut rx = self.tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(json) => {
+                        if sender.send(WsMessage::Text(json)).is_err() {
+                            debug!("WebClientRegistry: subscriber sender closed");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        info!(
+                            "WebClientRegistry: subscriber lagged by {} messages, skipping",
+                            n
+                        );
+                        // Continue — the next recv will get the latest.
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
             }
         });
+        info!(
+            "WebClientRegistry: new subscriber (total capacity: {})",
+            self.tx.len()
+        );
     }
 
-    /// Build an `agents.changed` payload from an Arc<AgentRegistry> and
-    /// broadcast it to all connected web clients.
+    /// Push an `agents.changed` JSON payload to all connected web clients.
+    /// This is a non-blocking send — slow clients may miss messages (lagged).
+    pub fn broadcast(&self, json: String) {
+        match self.tx.send(json) {
+            Ok(n) => debug!("WebClientRegistry: broadcast to {} subscribers", n),
+            Err(broadcast::error::SendError(_)) => {
+                // No subscribers — perfectly normal, just skip.
+                debug!("WebClientRegistry: broadcast skipped — no subscribers");
+            }
+        }
+    }
+
+    /// Build an `agents.changed` payload from the agent registry and push it.
     pub async fn broadcast_agents_changed(
         &self,
         agent_registry: Arc<crate::registry::AgentRegistry>,
@@ -115,8 +114,12 @@ impl WebClientRegistry {
                 }).collect::<Vec<_>>(),
             }
         });
-        if let Ok(json) = serde_json::to_string(&payload) {
-            self.broadcast(json).await;
+        match serde_json::to_string(&payload) {
+            Ok(json) => self.broadcast(json),
+            Err(e) => error!(
+                "WebClientRegistry: failed to serialize agents.changed: {}",
+                e
+            ),
         }
     }
 }
