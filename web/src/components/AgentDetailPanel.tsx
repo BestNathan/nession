@@ -1,4 +1,5 @@
-import { Server, Clock, Terminal, Activity, Monitor, Copy } from 'lucide-react';
+import { Server, Clock, Terminal, Activity, Monitor, Copy, Check } from 'lucide-react';
+import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import type { Agent } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, agentDisplayName } from '../lib/format';
@@ -36,19 +37,55 @@ function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
     `Agent: ${agentDisplayName(agent)}`,
     `Status: ${agent.status}`,
     `Agent ID: ${agent.agent_id}`,
+    '',
+    '── Connection ──',
     `Hostname: ${agent.hostname}`,
     `IP Address: ${agent.ip_address}`,
     `Port: ${agent.port}`,
     '',
+    '── Versions ──',
     `Nession: ${agent.metadata?.nession_version ?? 'Unknown'}`,
     `tmux: ${agent.metadata?.tmux_version ?? 'Unknown'}`,
     `OS: ${agent.metadata?.os_version ?? 'Unknown'}`,
     '',
-    uptime ? `Uptime: ${uptime} (since ${formatAbsoluteTime(heartbeatHistory[0])})` : 'Uptime: N/A',
+    '── Uptime ──',
+    uptime
+      ? `${uptime} (since ${formatAbsoluteTime(heartbeatHistory[0])})`
+      : 'N/A',
+    '',
+    '── Heartbeat History ──',
+    ...(heartbeatHistory.length === 0
+      ? ['No heartbeat data yet']
+      : [...heartbeatHistory].reverse().slice(0, 10).map((iso) =>
+          `${formatRelativeTime(iso)} — ${formatAbsoluteTime(iso)}`)),
     '',
     `Active Sessions: ${agent.session_count}`,
   ];
   return lines.join('\n');
+}
+
+/** Copy text via clipboard API with execCommand fallback. */
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback for non-HTTPS / older browsers
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      if (document.execCommand('copy')) { resolve(); }
+      else { reject(new Error('execCommand returned false')); }
+    } catch (e) {
+      reject(e);
+    } finally {
+      document.body.removeChild(ta);
+    }
+  });
 }
 
 function SectionHeader(props: { icon: React.ComponentType<{ className?: string }>; title: string }) {
@@ -72,34 +109,42 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
   const uptime = computeUptime(heartbeatHistory);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    copyToClipboard(formatAgentDetails(agent, heartbeatHistory))
+      .then(() => {
+        setCopied(true);
+        toast.success('Agent details copied');
+        setTimeout(() => { setCopied(false); }, 1500);
+      })
+      .catch(() => { toast.error('Failed to copy'); });
+  }, [agent, heartbeatHistory]);
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
       <SheetContent side="right" className="w-full sm:w-[400px] md:w-[480px] max-w-[100vw] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 space-y-4">
-          {/* Header: Status badge + display name + copy button */}
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
-                {agent.status}
-              </Badge>
+          {/* Header: Status badge + display name */}
+          <div>
+            <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
+              {agent.status}
+            </Badge>
+            <div className="flex items-center gap-1.5">
               <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
-              {agent.display_name && (
-                <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
-              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleCopy}
+                title="Copy agent details"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                navigator.clipboard.writeText(formatAgentDetails(agent, heartbeatHistory))
-                  .then(() => { toast.success('Agent details copied'); })
-                  .catch(() => { toast.error('Failed to copy'); });
-              }}
-              title="Copy agent details"
-            >
-              <Copy className="w-4 h-4" />
-            </Button>
+            {agent.display_name && (
+              <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
+            )}
           </div>
 
           <Separator />
