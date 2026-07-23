@@ -40,12 +40,15 @@ function AgentSelect({
   onChange: (v: string) => void;
   disabled: boolean;
 }) {
+  const selectedAgent = agents.find((a) => a.agent_id === value);
+  const displayText = selectedAgent ? agentDisplayName(selectedAgent) : 'Select an agent';
+
   return (
     <div className="space-y-2">
       <Label htmlFor="agent">Agent</Label>
       <Select value={value} onValueChange={(v) => v && onChange(v)} disabled={disabled}>
         <SelectTrigger id="agent" className="w-full">
-          <SelectValue placeholder="Select an agent" />
+          <span className={selectedAgent ? '' : 'text-muted-foreground'}>{displayText}</span>
         </SelectTrigger>
         <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
           {agents.map((agent) => (
