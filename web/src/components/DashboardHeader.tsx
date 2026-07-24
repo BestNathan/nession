@@ -1,5 +1,5 @@
 import { X, FileCog, Server, Clock, Cpu } from 'lucide-react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ConnectionStatus, ServerInfo } from '../types';
 import type { StatusFilter } from './useDashboardHandlers';
 import { SearchBar } from './SearchBar';
@@ -47,18 +47,33 @@ const WEB_VERSION = '0.10.0';
 function ServerInfoInline() {
   const ws = useWebSocket();
   const [info, setInfo] = useState<ServerInfo | null>(null);
+  // Timestamp when the server info was fetched, used to compute live uptime.
+  const fetchedAtRef = useRef<number>(0);
+  const [, setTick] = useState(0);
 
   const fetch = useCallback(() => {
-    ws.serverInfo().then(setInfo).catch(() => {});
+    ws.serverInfo().then((s) => {
+      fetchedAtRef.current = Date.now();
+      setInfo(s);
+    }).catch(() => {});
   }, [ws]);
 
+  // Fetch server info every 30s for agent/session counts.
   useEffect(() => {
     fetch();
     const id = setInterval(fetch, 30_000);
     return () => { clearInterval(id); };
   }, [fetch]);
 
+  // Tick every second so uptime increments live.
+  useEffect(() => {
+    const id = setInterval(() => { setTick((n) => n + 1); }, 1000);
+    return () => { clearInterval(id); };
+  }, []);
+
   if (!info) {return null;}
+
+  const liveUptime = info.uptime_seconds + Math.max(0, Math.floor((Date.now() - fetchedAtRef.current) / 1000));
 
   const imageTag = info.image_tag && info.image_tag !== 'dev' && info.image_tag !== 'unknown'
     ? info.image_tag
@@ -75,7 +90,7 @@ function ServerInfoInline() {
         web v{WEB_VERSION}{imageTag && <span className="font-mono">({imageTag})</span>}
       </span>
       <span className="text-border">·</span>
-      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatUptimeCompact(info.uptime_seconds)}</span>
+      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatUptimeCompact(liveUptime)}</span>
       <span className="text-border">·</span>
       <span className="flex items-center gap-1"><Cpu className="h-3 w-3" />{info.online_agent_count}/{info.agent_count}</span>
       <span className="text-border">·</span>
