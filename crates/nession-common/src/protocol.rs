@@ -641,6 +641,19 @@ pub struct ServerInfoResponse {
     pub session_count: usize,
 }
 
+/// Agent → Server: update advertised addresses after network change.
+///
+/// Sent when the agent detects a network interface change (WiFi switch,
+/// VPN connect/disconnect, sleep/wake). The server replaces the agent's
+/// address list and re-probes reachability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentAddressUpdatePayload {
+    pub agent_id: String,
+    /// Raw un-finalised addresses from the agent (the server re-runs
+    /// finalisation to keep priorities consistent across updates).
+    pub addresses: Vec<AgentAddress>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,6 +679,25 @@ mod tests {
         let deserialized: Message<i32> = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.msg_type, "test");
         assert_eq!(deserialized.payload, 42);
+    }
+
+    #[test]
+    fn test_agent_address_update_payload_serde() {
+        let payload = AgentAddressUpdatePayload {
+            agent_id: "agent-1".to_string(),
+            addresses: vec![AgentAddress {
+                url: "ws://192.168.1.5:8080/ws".to_string(),
+                label: Some("LAN (eth0)".to_string()),
+                network_type: NetworkType::Lan,
+                priority: 10,
+            }],
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: AgentAddressUpdatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.agent_id, "agent-1");
+        assert_eq!(deserialized.addresses.len(), 1);
+        assert_eq!(deserialized.addresses[0].url, "ws://192.168.1.5:8080/ws");
+        assert_eq!(deserialized.addresses[0].network_type, NetworkType::Lan);
     }
 
     #[test]
