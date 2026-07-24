@@ -27,6 +27,7 @@
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::tmux::manager::{SessionInfo, TmuxManager};
+use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::EnvSnapshot;
@@ -40,35 +41,18 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::WebSocketStream;
 use tracing::{error, info, warn};
 
-/// A plain PTY session shared by all attached clients.
-/// Created on first attach, destroyed on last detach.
-struct SharedSession {
-    pty: crate::tmux::pty::PtySession,
-    /// Unbounded senders — one per subscribed client.  The reader
-    /// thread clones output to all of them.
+/// A tmux attach session, shared by all clients attached through this
+/// connection. Created on first attach, destroyed on last detach.
+///
+/// The `backend` is either a plain PTY or a control-mode session, hidden
+/// behind [`TmuxSession`] so callers dispatch input/resize/close uniformly.
+/// `subscribers` fans terminal output out to every attached client; the
+/// control-mode path forwards output directly and leaves this empty.
+struct AttachedSession {
+    backend: Box<dyn TmuxSession>,
+    /// Unbounded senders — one per subscribed client.  The broadcast task
+    /// clones output to all of them.
     subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
-}
-
-/// Keep the control-mode variant for the `attach_mode = "control"` path.
-enum AttachedSession {
-    Shared(SharedSession),
-    Control(crate::tmux::control::ControlModeSession),
-}
-
-impl AttachedSession {
-    async fn write_input(&mut self, data: &[u8]) -> Result<()> {
-        match self {
-            AttachedSession::Shared(s) => s.pty.write(data),
-            AttachedSession::Control(s) => s.write_input(data).await,
-        }
-    }
-
-    async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        match self {
-            AttachedSession::Shared(s) => s.pty.resize(cols, rows),
-            AttachedSession::Control(s) => s.resize(cols, rows).await,
-        }
-    }
 }
 
 /// Per-connection map of attached sessions, keyed by session name.
@@ -849,22 +833,14 @@ impl AgentServer {
             }
         }
 
-        // Close any PTY sessions that were attached through this
+        // Close any tmux sessions that were attached through this
         // connection so that the underlying tmux attach children are
-        // terminated promptly.
+        // terminated promptly. Closing also drops the subscriber senders,
+        // stopping each session's broadcast task.
         let mut sessions_guard = sessions.lock().await;
-        for (name, session) in sessions_guard.drain() {
-            match session {
-                AttachedSession::Control(mut s) => {
-                    if let Err(e) = s.close().await {
-                        warn!("Error closing control session {}: {:#}", name, e);
-                    }
-                }
-                AttachedSession::Shared(s) => {
-                    // Drop — PtySession::Drop kills the child, and all
-                    // subscriber senders are dropped, stopping the broadcast task.
-                    drop(s);
-                }
+        for (name, mut session) in sessions_guard.drain() {
+            if let Err(e) = session.backend.close().await {
+                warn!("Error closing session {}: {:#}", name, e);
             }
         }
 
@@ -1005,9 +981,7 @@ impl AgentServer {
 
                     let mut sessions_guard = sessions.lock().await;
 
-                    if let Some(AttachedSession::Shared(shared)) =
-                        sessions_guard.get_mut(&session_name)
-                    {
+                    if let Some(shared) = sessions_guard.get_mut(&session_name) {
                         // Session already exists: add a new subscriber.
                         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                         shared.subscribers.push(tx);
@@ -1049,12 +1023,11 @@ impl AgentServer {
                     ) {
                         Ok((pty_session, mut output_rx)) => {
                             let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
-                            let shared = SharedSession {
-                                pty: pty_session,
+                            let attached = AttachedSession {
+                                backend: Box::new(pty_session),
                                 subscribers: vec![tx],
                             };
-                            sessions_guard
-                                .insert(session_name.clone(), AttachedSession::Shared(shared));
+                            sessions_guard.insert(session_name.clone(), attached);
                             drop(sessions_guard);
 
                             // Spawn forwarding task for the first subscriber.
@@ -1086,9 +1059,7 @@ impl AgentServer {
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
                                     let mut guard = sessions_clone.lock().await;
-                                    if let Some(AttachedSession::Shared(s)) =
-                                        guard.get_mut(&session_name_clone)
-                                    {
+                                    if let Some(s) = guard.get_mut(&session_name_clone) {
                                         // Broadcast to all subscribers; prune dead ones.
                                         s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
                                         if s.subscribers.is_empty() {
@@ -1133,10 +1104,13 @@ impl AgentServer {
                     {
                         Ok((session, mut output_rx, mut resize_rx)) => {
                             let session_name = payload.session_name.clone();
-                            sessions
-                                .lock()
-                                .await
-                                .insert(session_name.clone(), AttachedSession::Control(session));
+                            sessions.lock().await.insert(
+                                session_name.clone(),
+                                AttachedSession {
+                                    backend: Box::new(session),
+                                    subscribers: Vec::new(),
+                                },
+                            );
 
                             // Capture scrollback BEFORE starting the live output stream.
                             // Done synchronously (not spawned) to guarantee it arrives
@@ -1255,23 +1229,20 @@ impl AgentServer {
                 let mut sessions_guard = sessions.lock().await;
                 match sessions_guard.get_mut(&payload.session_name) {
                     Some(session) => {
-                        match session {
-                            AttachedSession::Shared(ref mut shared) => {
-                                // Remove dead subscribers, then check if empty.
-                                shared.subscribers.retain(|tx| !tx.is_closed());
-                                if shared.subscribers.is_empty() {
-                                    sessions_guard.remove(&payload.session_name);
-                                    // PtySession dropped → child killed
-                                }
-                            }
-                            AttachedSession::Control(ref mut s) => {
-                                if let Err(e) = s.close().await {
+                        // Drop this client's dead subscriber senders. When no
+                        // live subscribers remain (always true for control
+                        // mode, which keeps none), close the backend and
+                        // remove the session so its tmux child is terminated.
+                        session.subscribers.retain(|tx| !tx.is_closed());
+                        if session.subscribers.is_empty() {
+                            if let Some(mut removed) = sessions_guard.remove(&payload.session_name)
+                            {
+                                if let Err(e) = removed.backend.close().await {
                                     warn!(
-                                        "Error closing control session {}: {:#}",
+                                        "Error closing session {}: {:#}",
                                         payload.session_name, e
                                     );
                                 }
-                                sessions_guard.remove(&payload.session_name);
                             }
                         }
                         let resp = ClientDetachResponse {
@@ -1299,7 +1270,7 @@ impl AgentServer {
                 };
                 let mut sessions_guard = sessions.lock().await;
                 match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.write_input(&data).await {
+                    Some(session) => match session.backend.write_input(&data).await {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("write_error", &e.to_string()),
                     },
@@ -1317,7 +1288,8 @@ impl AgentServer {
                 };
                 let mut sessions_guard = sessions.lock().await;
                 match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.resize(payload.cols, payload.rows).await {
+                    Some(session) => match session.backend.resize(payload.cols, payload.rows).await
+                    {
                         Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
                         Err(e) => err("resize_error", &e.to_string()),
                     },

@@ -157,6 +157,35 @@ impl Drop for PtySession {
     }
 }
 
+#[async_trait::async_trait]
+impl super::session::TmuxSession for PtySession {
+    async fn write_input(&mut self, data: &[u8]) -> Result<()> {
+        // PtySession::write takes &self (the writer is internally locked),
+        // so the &mut receiver here simply satisfies the trait signature.
+        self.write(data)
+    }
+
+    async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        PtySession::resize(self, cols, rows)
+    }
+
+    fn viewport(&self) -> (u16, u16) {
+        PtySession::viewport(self)
+    }
+
+    fn session_name(&self) -> &str {
+        PtySession::session_name(self)
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        // Terminate the tmux subprocess. Idempotent — Drop also kills, and
+        // kill/wait on an already-dead child is a no-op.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -216,6 +216,29 @@ impl Drop for ControlModeSession {
     }
 }
 
+#[async_trait::async_trait]
+impl super::session::TmuxSession for ControlModeSession {
+    async fn write_input(&mut self, data: &[u8]) -> Result<()> {
+        ControlModeSession::write_input(self, data).await
+    }
+
+    async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        ControlModeSession::resize(self, cols, rows).await
+    }
+
+    fn viewport(&self) -> (u16, u16) {
+        ControlModeSession::viewport(self)
+    }
+
+    fn session_name(&self) -> &str {
+        ControlModeSession::session_name(self)
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        ControlModeSession::close(self).await
+    }
+}
+
 /// Background reader: parse control mode lines, forward ANSI bytes and
 /// window-resize events.
 async fn read_output_loop(
