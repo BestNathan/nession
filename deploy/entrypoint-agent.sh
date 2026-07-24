@@ -44,10 +44,4 @@ echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
 echo "  Connect URL: ${AGENT_CONNECT_URL:-<auto>}"
 echo "  tmux:        $(tmux -V 2>/dev/null || echo 'not found')"
 
-# Start tmux server so list-sessions works even when there are 0 sessions.
-# Without this the agent heartbeat always reports session_count=0 because
-# the tmux socket doesn't exist until the first session is created.
-tmux start-server 2>/dev/null || true
-echo "  tmux server: started"
-
 exec /usr/local/bin/nession-agent /etc/nession/agent-config.toml
