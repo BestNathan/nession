@@ -46,6 +46,11 @@ pub fn agent_envs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("envs"))
 }
 
+/// Agent identity file path: ~/.nession/agent/identity
+pub fn agent_identity_path() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("identity"))
+}
+
 /// Agent default config path: ~/.nession/agent-config.toml
 pub fn agent_config_path() -> io::Result<PathBuf> {
     nession_home().map(|h| h.join("agent-config.toml"))
@@ -113,6 +118,13 @@ mod tests {
     fn test_agent_envs_dir() {
         let dir = agent_envs_dir().unwrap();
         assert!(dir.to_string_lossy().ends_with("envs"));
+    }
+
+    #[test]
+    fn test_agent_identity_path() {
+        let path = agent_identity_path().unwrap();
+        assert!(path.to_string_lossy().ends_with("identity"));
+        assert!(path.to_string_lossy().contains("agent"));
     }
 
     #[test]
