@@ -44,7 +44,7 @@ function formatUptimeCompact(seconds: number): string {
 // Web UI version baked at build time (import from package.json works in Vite)
 const WEB_VERSION = '0.10.0';
 
-function ServerInfoInline() {
+function ServerInfoInline({ refreshKey }: { refreshKey: number }) {
   const ws = useWebSocket();
   const [info, setInfo] = useState<ServerInfo | null>(null);
   // Timestamp when the server info was fetched, used to compute live uptime.
@@ -58,12 +58,12 @@ function ServerInfoInline() {
     }).catch(() => {});
   }, [ws]);
 
-  // Fetch server info every 30s for agent/session counts.
+  // Fetch server info every 30s, plus immediately when refreshKey changes.
   useEffect(() => {
     fetch();
     const id = setInterval(fetch, 30_000);
     return () => { clearInterval(id); };
-  }, [fetch]);
+  }, [fetch, refreshKey]);
 
   // Tick every second so uptime increments live.
   useEffect(() => {
@@ -104,7 +104,8 @@ export function DashboardHeader({
   searchProps,
   actionsProps,
   error,
-}: DashboardHeaderProps) {
+  serverRefreshKey,
+}: DashboardHeaderProps & { serverRefreshKey?: number }) {
   const { fetchSessions, onOpenEnv, loadingAgents, clearError } = actionsProps;
   return (
     <>
@@ -114,7 +115,7 @@ export function DashboardHeader({
           <ConnectionStatusBadge status={connectionStatus} />
         </div>
         <div className="flex-1 min-w-0 flex items-center gap-3">
-          <ServerInfoInline />
+          <ServerInfoInline refreshKey={serverRefreshKey ?? 0} />
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">

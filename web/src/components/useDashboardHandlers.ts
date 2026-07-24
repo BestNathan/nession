@@ -139,7 +139,8 @@ export function useDashboardHandlers(_wsService?: WebSocketService): DashboardSt
   const handleSessionCreated = useCallback(() => {
     setShowCreateModal(false);
     fetchSessions();
-  }, [fetchSessions]);
+    agentData.fetchAgents();
+  }, [fetchSessions, agentData]);
 
   return {
     agents: agentData.agents,
