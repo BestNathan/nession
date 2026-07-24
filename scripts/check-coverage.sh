@@ -24,6 +24,14 @@ declare -A THRESHOLDS=(
     ["nession-cli"]=40
 )
 
+# ── Fix instructions per crate ──────────────────────────────────────────
+declare -A FIX_HINTS=(
+    ["nession-common"]="Add unit tests in crates/nession-common/src/ (inline #[cfg(test)] modules)."
+    ["nession-agent"]="Add unit tests in crates/nession-agent/src/. Run: cargo test -p nession-agent"
+    ["nession-server"]="Add unit tests in crates/nession-server/src/. Run: cargo test -p nession-server"
+    ["nession-cli"]="CLI coverage target is 40%. Add tests in crates/nession-cli/."
+)
+
 # Filter to specified crates if arguments provided
 if [ $# -gt 0 ]; then
     declare -A FILTERED
@@ -32,7 +40,6 @@ if [ $# -gt 0 ]; then
             FILTERED[$arg]=${THRESHOLDS[$arg]}
         fi
     done
-    # Replace THRESHOLDS with filtered version
     unset THRESHOLDS
     declare -A THRESHOLDS
     for key in "${!FILTERED[@]}"; do
@@ -47,22 +54,37 @@ fi
 echo -e "${YELLOW}→ Checking Rust test coverage by crate...${NC}"
 echo ""
 
-# Build list of -p flags for llvm-cov to only test specified crates
+# ── Pre-flight: check dependencies ──────────────────────────────────────
+
+# Check jq
+if ! command -v jq &>/dev/null; then
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}  ✗ 'jq' is not installed — required to parse coverage JSON${NC}"
+    echo -e "${YELLOW}  Fix: brew install jq${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    exit 1
+fi
+
+# Build list of -p flags
 PACKAGE_FLAGS=""
 for crate in "${!THRESHOLDS[@]}"; do
     PACKAGE_FLAGS="$PACKAGE_FLAGS -p $crate"
 done
 
-# Run llvm-cov with JSON output on just the target crates (faster)
+# Run llvm-cov with JSON output on just the target crates
 JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
 
 if [ -z "$JSON" ]; then
-    echo -e "${RED}✗ cargo llvm-cov not installed or failed${NC}"
-    echo -e "${RED}  Install: cargo install cargo-llvm-cov${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run${NC}"
+    echo -e "${YELLOW}  Fix: cargo install cargo-llvm-cov${NC}"
+    echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     exit 1
 fi
 
 HAS_ERROR=0
+BELOW_THRESHOLD=()
 
 # Parse coverage per crate using jq
 for crate in "${!THRESHOLDS[@]}"; do
@@ -84,7 +106,7 @@ for crate in "${!THRESHOLDS[@]}"; do
     count=$(echo "$result" | awk '{print $2}')
 
     if [ "$count" -eq 0 ]; then
-        echo -e "${YELLOW}  ${crate}: no coverage data${NC}"
+        echo -e "${YELLOW}  ${crate}: no coverage data — test binary may not have produced coverage${NC}"
         continue
     fi
 
@@ -93,15 +115,29 @@ for crate in "${!THRESHOLDS[@]}"; do
     if [ $coverage -ge $threshold ]; then
         echo -e "${GREEN}  ✓ ${crate}: ${coverage}% (≥ ${threshold}%)  [${covered}/${count} lines]${NC}"
     else
-        echo -e "${RED}  ✗ ${crate}: ${coverage}% (< ${threshold}%)  [${covered}/${count} lines]${NC}"
+        gap=$((threshold - coverage))
+        hint=${FIX_HINTS[$crate]:-"Add tests for this crate."}
+        echo -e "${RED}  ✗ ${crate}: ${coverage}% (< ${threshold}%)  [${covered}/${count} lines, need ~${gap}% more]${NC}"
+        echo -e "${RED}     Fix: ${hint}${NC}"
         HAS_ERROR=1
+        BELOW_THRESHOLD+=("$crate")
     fi
 done
 
 echo ""
 
 if [ $HAS_ERROR -eq 1 ]; then
-    echo -e "${RED}✗ Coverage check failed — some crates below threshold${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}  ✗ Coverage check FAILED${NC}"
+    echo ""
+    echo -e "${YELLOW}  Crates below threshold: ${BELOW_THRESHOLD[*]}${NC}"
+    echo ""
+    echo -e "${YELLOW}  How to fix:${NC}"
+    echo -e "    1. Write unit tests for uncovered code in the failing crate(s)."
+    echo -e "    2. Run coverage locally: cargo llvm-cov -p <crate> --html"
+    echo -e "    3. Open target/llvm-cov/html/index.html to see uncovered lines."
+    echo -e "    4. Add tests, re-run: ./scripts/check-coverage.sh"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     exit 1
 else
     echo -e "${GREEN}✓ All crates meet coverage thresholds${NC}"
