@@ -12,8 +12,8 @@ use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
-    AddressStatus, AgentRegisterPayload, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
-    EnvSource, ProtocolMessage, ServerTerminalResizePayload,
+    AddressStatus, AgentAddressUpdatePayload, AgentRegisterPayload, AgentTerminalResizePayload,
+    EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage, ServerTerminalResizePayload,
 };
 
 /// Action returned by the connection handler after processing a message.
@@ -143,6 +143,7 @@ impl ConnectionHandler {
             "agent.session.update" => self.handle_agent_session_update(msg).await,
             "agent.session.command.response" => self.handle_agent_command_response(msg).await,
             "agent.terminal.resize" => self.handle_agent_terminal_resize(msg).await,
+            "agent.address_update" => self.handle_agent_address_update(msg).await,
             "client.auth" => self.handle_client_auth(msg).await,
             "client.agents.list" => self.handle_client_agents_list(msg).await,
             "client.sessions.list" => self.handle_client_sessions_list(msg).await,
@@ -1648,6 +1649,40 @@ impl ConnectionHandler {
             );
         }
 
+        Ok(HandlerAction::Reply(None))
+    }
+
+    /// Handle `agent.address_update` — update the agent's advertised
+    /// addresses after a network change on the agent host.
+    async fn handle_agent_address_update(
+        &self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let payload: AgentAddressUpdatePayload = serde_json::from_value(msg.payload)?;
+
+        let Some(mut agent) = self.agent_registry.get(&payload.agent_id).await else {
+            info!(
+                "agent.address_update from unknown agent '{}'; ignoring",
+                payload.agent_id
+            );
+            return Ok(HandlerAction::Reply(None));
+        };
+
+        let addresses = crate::registry::build_probed_addresses(
+            payload.addresses,
+            &agent.ip_address,
+            agent.port,
+            agent.connect_url.as_deref(),
+        );
+        agent.addresses = addresses;
+
+        info!(
+            "Updated {} address(es) for agent {}",
+            agent.addresses.len(),
+            payload.agent_id
+        );
+
+        self.agent_registry.register(agent).await;
         Ok(HandlerAction::Reply(None))
     }
 
@@ -3886,6 +3921,75 @@ mod tests {
             .handle_message(proto_msg(
                 "agent.terminal.resize",
                 json!({ "session_id": "a1:dev" }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- agent.address_update ----
+
+    #[tokio::test]
+    async fn agent_address_update_updates_addresses() {
+        let mut h = test_handler("").await;
+        // Register an agent with an initial address.
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [
+                    { "url": "ws://1.2.3.4:19091/ws", "network_type": "lan" }
+                ],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+
+        // Send an address update with new addresses.
+        let action = h
+            .handle_message(proto_msg(
+                "agent.address_update",
+                json!({
+                    "agent_id": "a1",
+                    "addresses": [
+                        { "url": "ws://10.0.0.5:19091/ws", "network_type": "lan" },
+                        { "url": "wss://tunnel.example.com/ws", "network_type": "tunnel" },
+                    ],
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(action, HandlerAction::Reply(None)));
+
+        // Verify the agent's addresses were updated.
+        let agent = h.agent_registry.get("a1").await.unwrap();
+        assert_eq!(agent.addresses.len(), 2);
+
+        let urls: Vec<&str> = agent
+            .addresses
+            .iter()
+            .map(|p| p.address.url.as_str())
+            .collect();
+        assert!(urls.contains(&"ws://10.0.0.5:19091/ws"));
+        assert!(urls.contains(&"wss://tunnel.example.com/ws"));
+    }
+
+    #[tokio::test]
+    async fn agent_address_update_unknown_agent_is_noop() {
+        let mut h = test_handler("").await;
+        let action = h
+            .handle_message(proto_msg(
+                "agent.address_update",
+                json!({
+                    "agent_id": "nonexistent",
+                    "addresses": [],
+                }),
             ))
             .await
             .unwrap();

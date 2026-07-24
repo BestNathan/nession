@@ -16,6 +16,7 @@ use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
 use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
+use nession_agent::netwatch;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
@@ -205,6 +206,11 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // 7.5. Start network change detector (sends address updates on interface changes).
+    if let Some(ref handle) = client_handle {
+        netwatch::spawn_watcher(handle.clone(), config.clone(), port);
+    }
 
     // 8. Wait for shutdown signal (Ctrl+C or SIGTERM)
     info!("Agent is running. Press Ctrl+C to stop.");
