@@ -1668,18 +1668,31 @@ impl ConnectionHandler {
             return Ok(HandlerAction::Reply(None));
         };
 
+        // Extract a display IP from the first LAN address so the legacy
+        // `ip_address` field (shown in the Web UI) stays in sync.
+        let primary_ip = payload
+            .addresses
+            .iter()
+            .find(|a| a.network_type == nession_common::protocol::NetworkType::Lan)
+            .or_else(|| payload.addresses.first())
+            .and_then(|a| extract_ip_from_url(&a.url));
+
         let addresses = crate::registry::build_probed_addresses(
             payload.addresses,
-            &agent.ip_address,
+            primary_ip.as_deref().unwrap_or(&agent.ip_address),
             agent.port,
             agent.connect_url.as_deref(),
         );
         agent.addresses = addresses;
+        if let Some(ip) = primary_ip {
+            agent.ip_address = ip;
+        }
 
         info!(
-            "Updated {} address(es) for agent {}",
+            "Updated {} address(es) for agent {} (primary ip: {})",
             agent.addresses.len(),
-            payload.agent_id
+            payload.agent_id,
+            agent.ip_address,
         );
 
         self.agent_registry.register(agent).await;
@@ -2303,6 +2316,25 @@ impl ConnectionHandler {
 }
 
 /// Build a `HandlerAction::Reply` with a standard protocol envelope.
+/// Extract an IP address from a WebSocket URL like `ws://192.168.1.5:8080/ws`.
+/// Returns `None` if the URL has no recognizable host portion (e.g. hostname-based).
+fn extract_ip_from_url(url: &str) -> Option<String> {
+    // Strip scheme: ws://host:port/path → host:port/path
+    let after_scheme = url.split("://").nth(1)?;
+    // Strip path: host:port/path → host:port
+    let host_port = after_scheme.split('/').next()?;
+    // Strip IPv6 brackets: [::1]:port → ::1:port → ::1
+    if host_port.starts_with('[') {
+        return host_port
+            .split(']')
+            .next()?
+            .strip_prefix('[')
+            .map(String::from);
+    }
+    // Strip port: host:port → host
+    host_port.split(':').next().map(String::from)
+}
+
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
     HandlerAction::Reply(Some(Message::Text(
         json!({
