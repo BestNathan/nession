@@ -14,6 +14,7 @@
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
+use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -55,15 +56,16 @@ async fn main() -> Result<()> {
 
     // 4. Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
+    // Resolve persistent agent identity. On first run this persists the
+    // generated or configured agent_id; on subsequent runs it loads the
+    // persisted identity so the server recognises us as the same agent.
+    let identity_path = nession_common::paths::agent_identity_path()?;
+    let agent_id = identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+
     let file_root = config
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
-    let agent_id = if config.agent_id.is_empty() {
-        system::get_hostname()
-    } else {
-        config.agent_id.clone()
-    };
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
