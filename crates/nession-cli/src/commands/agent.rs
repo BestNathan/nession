@@ -284,7 +284,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     use nession_agent::server::AgentServer;
     use nession_agent::sync::heartbeat::HeartbeatLoop;
     use nession_agent::sync::session_watcher::SessionWatcher;
-    use nession_agent::tmux::manager::TmuxManager;
+    use nession_agent::tmux::manager::SessionManager;
     use nession_common::protocol::AgentMetadata;
     use std::sync::Arc;
 
@@ -350,7 +350,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         addresses,
         None, // display_name — not used in CLI bare-metal agent mode
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         config.default_working_dir.clone(),
     );
 
@@ -376,8 +376,11 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
 
     // Start HeartbeatLoop
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
-        let heartbeat =
-            HeartbeatLoop::new(handle.clone(), TmuxManager::new(), heartbeat_interval_secs);
+        let heartbeat = HeartbeatLoop::new(
+            handle.clone(),
+            SessionManager::new(),
+            heartbeat_interval_secs,
+        );
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = heartbeat.run().await {
@@ -393,7 +396,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     let watcher_shutdown = if let Some(ref handle) = client_handle {
         let watcher = SessionWatcher::new(
             handle.clone(),
-            TmuxManager::new(),
+            SessionManager::new(),
             config.session_poll_interval_secs,
         );
         let shutdown_handle = watcher.shutdown_handle();

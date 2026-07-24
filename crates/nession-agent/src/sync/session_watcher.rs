@@ -1,7 +1,7 @@
 //! Session watcher that polls tmux for session changes and notifies the server.
 
 use crate::connection::ServerClientHandle;
-use crate::tmux::manager::{SessionInfo, TmuxManager};
+use crate::tmux::manager::{SessionInfo, SessionManager};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -32,7 +32,7 @@ impl SessionWatcherShutdownHandle {
 /// - Tracks attached client counts per session
 pub struct SessionWatcher {
     handle: ServerClientHandle,
-    tmux: TmuxManager,
+    tmux: SessionManager,
     poll_interval: Duration,
     /// Previous session state, keyed by session name.
     prev_sessions: HashMap<String, SessionInfo>,
@@ -47,7 +47,7 @@ impl SessionWatcher {
     /// * `handle` - Server client handle for sending session updates
     /// * `tmux` - Tmux manager for querying sessions
     /// * `poll_interval_secs` - Poll interval in seconds (default 5)
-    pub fn new(handle: ServerClientHandle, tmux: TmuxManager, poll_interval_secs: u64) -> Self {
+    pub fn new(handle: ServerClientHandle, tmux: SessionManager, poll_interval_secs: u64) -> Self {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         Self {
             handle,

@@ -1,7 +1,7 @@
 //! Periodic heartbeat loop that sends agent status to the central server.
 
 use crate::connection::ServerClientHandle;
-use crate::tmux::manager::TmuxManager;
+use crate::tmux::manager::SessionManager;
 use anyhow::Result;
 use nession_common::protocol::AgentStatus;
 use std::time::Duration;
@@ -31,7 +31,7 @@ impl HeartbeatShutdownHandle {
 /// - Load average (1, 5, 15 minute)
 pub struct HeartbeatLoop {
     handle: ServerClientHandle,
-    tmux: TmuxManager,
+    tmux: SessionManager,
     interval: Duration,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
@@ -44,7 +44,7 @@ impl HeartbeatLoop {
     /// * `handle` - Server client handle for sending messages
     /// * `tmux` - Tmux manager for querying session info
     /// * `interval_secs` - Interval between heartbeats in seconds (default 10)
-    pub fn new(handle: ServerClientHandle, tmux: TmuxManager, interval_secs: u64) -> Self {
+    pub fn new(handle: ServerClientHandle, tmux: SessionManager, interval_secs: u64) -> Self {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         Self {
             handle,

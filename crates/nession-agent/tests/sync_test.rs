@@ -4,7 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::AgentMetadata;
 use std::sync::Arc;
 use std::time::Duration;
@@ -72,7 +72,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -97,7 +97,7 @@ async fn test_heartbeat_loop_sends_heartbeat() {
         .expect("timeout waiting for registration");
 
     // Create heartbeat loop with 1-second interval.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let loop_handle = {
         let hl = HeartbeatLoop::new(handle.clone(), tmux, 1);
         let shutdown = hl.shutdown_handle();
@@ -136,7 +136,7 @@ async fn test_heartbeat_loop_respects_interval() {
         .expect("timeout waiting for registration");
 
     // Create heartbeat loop with 2-second interval.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let shutdown = {
         let hl = HeartbeatLoop::new(handle.clone(), tmux, 2);
         let sd = hl.shutdown_handle();
@@ -175,7 +175,7 @@ async fn test_heartbeat_loop_shutdown() {
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     // Use a long interval so we can verify shutdown stops the loop promptly.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let (shutdown, task) = {
         let hl = HeartbeatLoop::new(handle.clone(), tmux, 60);
         let sd = hl.shutdown_handle();
@@ -209,7 +209,7 @@ async fn test_session_watcher_detects_new_session() {
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let session_name = "sync_test_new_session";
 
     // Clean up any leftover session.
@@ -221,7 +221,7 @@ async fn test_session_watcher_detects_new_session() {
         .expect("failed to create tmux session");
 
     let shutdown = {
-        let sw = SessionWatcher::new(handle.clone(), TmuxManager::new(), 1);
+        let sw = SessionWatcher::new(handle.clone(), SessionManager::new(), 1);
         let sd = sw.shutdown_handle();
         tokio::spawn(sw.run());
         sd
@@ -270,7 +270,7 @@ async fn test_session_watcher_detects_removed_session() {
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let session_name = "sync_test_removed_session";
 
     // Clean up any leftover session.
@@ -282,7 +282,7 @@ async fn test_session_watcher_detects_removed_session() {
         .expect("failed to create tmux session");
 
     let shutdown = {
-        let sw = SessionWatcher::new(handle.clone(), TmuxManager::new(), 1);
+        let sw = SessionWatcher::new(handle.clone(), SessionManager::new(), 1);
         let sd = sw.shutdown_handle();
         tokio::spawn(sw.run());
         sd

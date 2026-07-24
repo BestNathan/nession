@@ -11,7 +11,7 @@ use nession_agent::server::websocket::{
     ClientDetachPayload, ClientDetachResponse, OkPayload, SessionCreatePayload,
     SessionCreateResponse, SessionKillPayload, SessionKillResponse,
 };
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use serde::Serialize;
 use std::net::SocketAddr;
 use tokio_tungstenite::connect_async;
@@ -131,7 +131,7 @@ async fn integration_client_attach_creates_pty() {
     let (addr, handle) = start_server(19084).await;
     let (mut sink, mut stream) = connect(addr).await;
 
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let session_name = "integration_attach";
     // Clean up any leftover session from previous test runs
     tmux.kill_session(session_name).await.ok();
@@ -171,7 +171,7 @@ async fn integration_terminal_io_flow() {
     let (addr, handle) = start_server(19085).await;
     let (mut sink, mut stream) = connect(addr).await;
 
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let session_name = "integration_io";
     // Clean up any leftover session from previous test runs
     tmux.kill_session(session_name).await.ok();
@@ -316,7 +316,7 @@ async fn integration_web_ui_session_create() {
     assert!(resp.payload.success);
 
     // Clean up.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     tmux.kill_session("webui_test_create").await.ok();
     handle.shutdown().await.ok();
 }
@@ -327,7 +327,7 @@ async fn integration_web_ui_session_kill() {
     let (mut sink, mut stream) = connect(addr).await;
 
     // Create a session first.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     // Clean up any leftover session from previous test runs
     tmux.kill_session("webui_test_kill").await.ok();
     tmux.create_session("webui_test_kill", 80, 24, "/tmp", &[])

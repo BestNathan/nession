@@ -3,7 +3,7 @@
 //! Provides a [`AgentServer`] that listens for P2P client connections over
 //! WebSocket (with optional TLS) and routes terminal I/O to/from per-client
 //! PTY sessions. Also exposes session management operations (list, create,
-//! kill) via the [`TmuxManager`].
+//! kill) via the [`SessionManager`].
 //!
 //! # Protocol
 //!
@@ -26,7 +26,7 @@
 
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
-use crate::tmux::manager::{SessionInfo, TmuxManager};
+use crate::tmux::manager::{SessionInfo, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -540,7 +540,7 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 /// WebSocket server that accepts P2P client connections and routes
 /// terminal I/O to/from per-client PTY sessions.
 pub struct AgentServer {
-    tmux_manager: TmuxManager,
+    tmux_manager: SessionManager,
     file_ops: Arc<FileOps>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
@@ -556,7 +556,7 @@ pub struct AgentServer {
 /// Apply env snapshots to a tmux session via `set-environment`.
 /// Returns warnings for keys that failed (non-fatal).
 async fn apply_env_snapshots(
-    tmux: &TmuxManager,
+    tmux: &SessionManager,
     session_name: &str,
     snapshots: &[EnvSnapshot],
 ) -> Vec<String> {
@@ -571,7 +571,7 @@ async fn apply_env_snapshots(
         }
     }
     let deduped: Vec<(String, String)> = seen.into_iter().collect();
-    match tmux.set_environment(session_name, &deduped).await {
+    match tmux.env().set_environment(session_name, &deduped).await {
         Ok(()) => Vec::new(),
         Err(warnings) => warnings,
     }
@@ -634,7 +634,7 @@ impl AgentServer {
         let file_ops = Arc::new(crate::fs::ops::FileOps::new(sandbox));
 
         Ok(Self {
-            tmux_manager: TmuxManager::new(),
+            tmux_manager: SessionManager::new(),
             file_ops,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
@@ -721,7 +721,7 @@ impl AgentServer {
     async fn handle_connection(
         stream: tokio::net::TcpStream,
         addr: SocketAddr,
-        tmux_manager: Arc<TmuxManager>,
+        tmux_manager: Arc<SessionManager>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
@@ -780,7 +780,7 @@ impl AgentServer {
     async fn run_message_loop(
         mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
-        tmux: Arc<TmuxManager>,
+        tmux: Arc<SessionManager>,
         sessions: Arc<Mutex<SessionMap>>,
         client_id: Arc<Mutex<Option<String>>>,
         addr: SocketAddr,
@@ -847,7 +847,7 @@ impl AgentServer {
         // Clean up any env scripts sourced by this client
         let client_id_guard = client_id.lock().await;
         if let Some(ref cid) = *client_id_guard {
-            tmux.cleanup_client_scripts(cid).await;
+            tmux.env().cleanup_client_scripts(cid).await;
             info!("Cleaned up env scripts for client {}", cid);
         }
 
@@ -859,7 +859,7 @@ impl AgentServer {
     #[allow(clippy::too_many_arguments)]
     async fn handle_request(
         text: &str,
-        tmux: Arc<TmuxManager>,
+        tmux: Arc<SessionManager>,
         sessions: Arc<Mutex<SessionMap>>,
         client_id: Arc<Mutex<Option<String>>>,
         sink: Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
@@ -1116,7 +1116,7 @@ impl AgentServer {
                             // Done synchronously (not spawned) to guarantee it arrives
                             // before any live output from the control-mode attach.
                             let scrollback_bytes =
-                                crate::tmux::control::capture_scrollback(&session_name, 2000).await;
+                                crate::tmux::util::capture_scrollback(&session_name, 2000).await;
 
                             // Send captured scrollback so xterm.js can pre-fill its buffer.
                             if let Some(bytes) = scrollback_bytes {
@@ -1813,7 +1813,7 @@ mod tests {
 
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the create below doesn't hit a duplicate-name failure.
-        TmuxManager::new()
+        SessionManager::new()
             .kill_session("server_test_create_kill")
             .await
             .ok();
@@ -1852,7 +1852,7 @@ mod tests {
 
         // Create a real tmux session first so attach has something to
         // connect to.
-        let tmux = TmuxManager::new();
+        let tmux = SessionManager::new();
         let session_name = "server_test_attach";
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the test is re-entrant (tmux rejects a duplicate session name).
@@ -1896,7 +1896,7 @@ mod tests {
         let (addr, handle) = start_test_server_on(18084).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let tmux = TmuxManager::new();
+        let tmux = SessionManager::new();
         let session_name = "server_test_io";
         tmux.kill_session(session_name).await.ok();
         tmux.create_session(session_name, 80, 24, "/tmp", &[])
@@ -2351,7 +2351,7 @@ mod tests {
         let (addr, handle) = start_test_server_on(18095).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let tmux = TmuxManager::new();
+        let tmux = SessionManager::new();
         let session_name = "server_test_invalid_b64";
         tmux.kill_session(session_name).await.ok();
         tmux.create_session(session_name, 80, 24, "/tmp", &[])
@@ -2635,7 +2635,7 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         // Pre-clean
-        TmuxManager::new()
+        SessionManager::new()
             .kill_session("web_create_kill")
             .await
             .ok();
