@@ -1,9 +1,15 @@
-import { Server, Clock, Terminal, Activity, Monitor } from 'lucide-react';
+import { Server, Clock, Terminal, Activity, Monitor, Copy, Check } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { toast } from 'sonner';
 import type { Agent } from '../types';
 import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, agentDisplayName } from '../lib/format';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
+
+/** Max heartbeat entries to track and display. */
+const MAX_HEARTBEATS = 5;
 
 interface AgentDetailPanelProps {
   agent: Agent;
@@ -11,9 +17,10 @@ interface AgentDetailPanelProps {
   onClose: () => void;
 }
 
-function computeUptime(heartbeatHistory: string[]): string | null {
-  if (heartbeatHistory.length === 0) {return null;}
-  const diffMs = Date.now() - new Date(heartbeatHistory[0]).getTime();
+function computeUptime(registeredAt?: string): string | null {
+  if (!registeredAt) {return null;}
+  const diffMs = Date.now() - new Date(registeredAt).getTime();
+  if (diffMs < 0) {return null;}
   const totalMinutes = Math.floor(diffMs / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -28,6 +35,64 @@ function getHeartbeatColor(iso: string): string {
   return 'bg-gray-500';
 }
 
+function formatAgentDetails(agent: Agent, heartbeatHistory: string[]): string {
+  const uptime = computeUptime(agent.registered_at);
+  const lines = [
+    `Agent: ${agentDisplayName(agent)}`,
+    `Status: ${agent.status}`,
+    `Agent ID: ${agent.agent_id}`,
+    '',
+    '── Connection ──',
+    `Hostname: ${agent.hostname}`,
+    `IP Address: ${agent.ip_address}`,
+    `Port: ${agent.port}`,
+    '',
+    '── Versions ──',
+    `Nession: ${agent.metadata?.nession_version ?? 'Unknown'}`,
+    `Image: ${agent.metadata?.image_tag ?? 'unknown'}`,
+    `tmux: ${agent.metadata?.tmux_version ?? 'Unknown'}`,
+    `OS: ${agent.metadata?.os_version ?? 'Unknown'}`,
+    '',
+    '── Uptime ──',
+    uptime
+      ? `${uptime} (since ${formatAbsoluteTime(heartbeatHistory[0])})`
+      : 'N/A',
+    '',
+    '── Heartbeat History ──',
+    ...(heartbeatHistory.length === 0
+      ? ['No heartbeat data yet']
+      : [...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso) =>
+          `${formatRelativeTime(iso)} — ${formatAbsoluteTime(iso)}`)),
+    '',
+    `Active Sessions: ${agent.session_count}`,
+  ];
+  return lines.join('\n');
+}
+
+/** Copy text via clipboard API with execCommand fallback. */
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback for non-HTTPS / older browsers
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      if (document.execCommand('copy')) { resolve(); }
+      else { reject(new Error('execCommand returned false')); }
+    } catch (e) {
+      reject(e);
+    } finally {
+      document.body.removeChild(ta);
+    }
+  });
+}
+
 function SectionHeader(props: { icon: React.ComponentType<{ className?: string }>; title: string }) {
   const { icon: IconComponent, title } = props;
   return (
@@ -40,15 +105,34 @@ function SectionHeader(props: { icon: React.ComponentType<{ className?: string }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between py-1">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
+    <div className="flex justify-between py-1 gap-2">
+      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
+      <span className="text-sm font-medium truncate max-w-[200px]" title={value}>
+        {value}
+      </span>
     </div>
   );
 }
 
 export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
-  const uptime = computeUptime(heartbeatHistory);
+  const uptime = computeUptime(agent.registered_at);
+  const [copied, setCopied] = useState(false);
+  // Tick every second so relative timestamps ("Xs ago") stay live.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => { setTick((n) => n + 1); }, 1000);
+    return () => { clearInterval(id); };
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    copyToClipboard(formatAgentDetails(agent, heartbeatHistory))
+      .then(() => {
+        setCopied(true);
+        toast.success('Agent details copied');
+        setTimeout(() => { setCopied(false); }, 1500);
+      })
+      .catch(() => { toast.error('Failed to copy'); });
+  }, [agent, heartbeatHistory]);
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
@@ -59,7 +143,18 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
             <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
               {agent.status}
             </Badge>
-            <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
+            <div className="flex items-center gap-1.5">
+              <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleCopy}
+                title="Copy agent details"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </Button>
+            </div>
             {agent.display_name && (
               <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
             )}
@@ -81,6 +176,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
           <div>
             <SectionHeader icon={Terminal} title="Versions" />
             <InfoRow label="Nession" value={agent.metadata?.nession_version ?? 'Unknown'} />
+            <InfoRow label="Image" value={agent.metadata?.image_tag ?? 'unknown'} />
             <InfoRow label="tmux" value={agent.metadata?.tmux_version ?? 'Unknown'} />
             <InfoRow label="OS" value={agent.metadata?.os_version ?? 'Unknown'} />
           </div>
@@ -111,7 +207,7 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
               <p className="text-sm text-muted-foreground">No heartbeat data yet</p>
             ) : (
               <div className="space-y-1">
-                {[...heartbeatHistory].reverse().slice(0, 10).map((iso, i) => (
+                {[...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso, i) => (
                   <div key={i} className="flex items-center gap-2 py-1">
                     <span className={`w-2 h-2 rounded-full ${getHeartbeatColor(iso)}`} />
                     <span className="text-sm">{formatRelativeTime(iso)}</span>

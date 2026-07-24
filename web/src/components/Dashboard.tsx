@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { ConnectionStatus } from '../types';
@@ -43,6 +43,9 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const probeCache = useAddressProbeCache(agents);
   const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); backToDashboard(); }, [backToDashboard]);
   const handleTerminalError = useCallback((err: Error) => { toast.error(`Terminal error: ${err.message}`); }, []);
+
+  // Incremented after session create/kill to trigger server info refresh.
+  const [serverRefreshKey, setServerRefreshKey] = useState(0);
 
   const onlineCount = agents.filter((a) => a.status === 'online').length;
   const offlineCount = agents.filter((a) => a.status !== 'online').length;
@@ -93,6 +96,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           clearError,
         }}
         error={error}
+        serverRefreshKey={serverRefreshKey}
       />
 
       <div className="flex-1 min-h-0 flex flex-col p-3 gap-4 md:p-4 lg:p-6 lg:gap-6 pb-[env(safe-area-inset-bottom)] w-full max-w-[1920px] mx-auto">
@@ -136,7 +140,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         onClose={() => setShowCreateModal(false)}
         agents={agents}
         preselectedAgentId={null}
-        onCreated={handleSessionCreated}
+        onCreated={() => { handleSessionCreated(); setServerRefreshKey((n) => n + 1); }}
       />
       <KillConfirmDialog
         isOpen={sessionToKill !== null}

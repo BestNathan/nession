@@ -64,6 +64,17 @@ gh pr create --title "feat: description" --body "..."
 
 **Do NOT push directly to main.** All changes go through PRs.
 
+**Exception — `.github/workflows/*` changes:** GitHub Actions workflows only take effect from the default branch (main). Workflow changes on feature branches are ignored by GitHub. When modifying `.github/workflows/*`, the workflow commit MUST be cherry-picked to a separate branch off `main`, fast-tracked as its own PR, and merged to main immediately — otherwise the change has no effect until the feature PR merges (which may be days or never).
+
+```
+# 正确流程 — workflow 变更必须独立合入 main
+git checkout -b chore/workflow-fix origin/main
+git cherry-pick <workflow-commit-hash>
+git push -u origin chore/workflow-fix
+gh pr create --title "chore: ..." --body "..."
+gh pr merge <N> --squash
+```
+
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
 ```

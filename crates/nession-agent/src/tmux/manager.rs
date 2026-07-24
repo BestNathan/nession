@@ -53,13 +53,20 @@ impl TmuxManager {
             .args([
                 "list-sessions",
                 "-F",
-                "#{session_name}\t#{session_created}\t#{session_windows}\t#{session_attached}\t#{window_width}\t#{window_height}",
+                // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
+                // in -F format strings to underscores (0x5F), so \t is unusable.
+                "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}",
             ])
             .output()
             .await?;
 
         if !output.status.success() {
             // tmux server not running, return empty list
+            tracing::warn!(
+                "tmux list-sessions exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
             return Ok(vec![]);
         }
 
@@ -67,7 +74,7 @@ impl TmuxManager {
         let sessions: Vec<SessionInfo> = stdout
             .lines()
             .filter_map(|line| {
-                let parts: Vec<&str> = line.split('\t').collect();
+                let parts: Vec<&str> = line.split('|').collect();
                 if parts.len() == 6 {
                     Some(SessionInfo {
                         name: parts
@@ -86,6 +93,7 @@ impl TmuxManager {
             })
             .collect();
 
+        tracing::info!("tmux list-sessions: {} session(s) found", sessions.len());
         Ok(sessions)
     }
 

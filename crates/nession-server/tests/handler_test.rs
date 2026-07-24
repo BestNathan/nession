@@ -3,7 +3,8 @@ use nession_server::env::EnvService;
 use nession_server::registry::{AgentRegistry, SessionRegistry};
 use nession_server::server::client_registry::ClientRegistry;
 use nession_server::server::command_broker::CommandBroker;
-use nession_server::server::{ConnectionHandler, HandlerAction};
+use nession_server::server::web_client_registry::WebClientRegistry;
+use nession_server::server::{ConnectionHandler, ConnectionHandlerConfig, HandlerAction};
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -13,15 +14,19 @@ async fn make_handler() -> ConnectionHandler {
     let session_registry = Arc::new(SessionRegistry::new(db));
     let command_broker = Arc::new(CommandBroker::new());
     let client_registry = Arc::new(ClientRegistry::new());
+    let web_client_registry = Arc::new(WebClientRegistry::new());
     let env_service = EnvService::new(std::env::temp_dir().join("nession-test-envs"));
     ConnectionHandler::new(
         agent_registry,
         session_registry,
         command_broker,
         client_registry,
+        web_client_registry,
         env_service,
-        "test_token".to_string(),
-        30,
+        ConnectionHandlerConfig {
+            server_auth_token: "test_token".to_string(),
+            heartbeat_interval_secs: 30,
+        },
     )
 }
 

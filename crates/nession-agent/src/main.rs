@@ -21,6 +21,7 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
 use nession_common::address::{finalize_addresses, legacy_to_addresses};
 use nession_common::protocol::{AgentAddress, AgentMetadata};
+use nession_common::system;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -60,7 +61,7 @@ async fn main() -> Result<()> {
         .as_deref()
         .unwrap_or(&config.default_working_dir);
     let agent_id = if config.agent_id.is_empty() {
-        get_hostname()
+        system::get_hostname()
     } else {
         config.agent_id.clone()
     };
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
     );
 
     // 5. Connect to central server
-    let hostname = get_hostname();
+    let hostname = system::get_hostname();
     // Use advertise_address (IP) if configured, otherwise auto-detect
     let ip_address = config
         .advertise_address
@@ -112,6 +113,7 @@ async fn main() -> Result<()> {
         tmux_version,
         os_version,
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
+        image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
     let tmux_for_client = Arc::new(TmuxManager::new());
@@ -289,14 +291,6 @@ async fn wait_for_shutdown() -> anyhow::Result<()> {
         info!("Received Ctrl+C");
     }
     Ok(())
-}
-
-/// Get the system hostname.
-fn get_hostname() -> String {
-    // Try HOSTNAME env var first, then fall back to "unknown"
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("HOST"))
-        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 /// Get the local IP address (best-effort).

@@ -70,6 +70,7 @@ impl AgentRegistry {
                             tmux_version: String::new(),
                             os_version: String::new(),
                             nession_version: String::new(),
+                            image_tag: String::new(),
                         });
                     let addresses = decode_addresses(&row.addresses);
                     let info = AgentInfo {
@@ -134,6 +135,15 @@ impl AgentRegistry {
             agent.status = AgentStatus::Online;
             agent.session_count = session_count;
             agent.active_sessions = active_sessions;
+        }
+    }
+
+    /// Update agent metadata in memory (version, tmux, OS).
+    /// Called on each heartbeat so the web UI stays current after agent upgrades.
+    pub async fn update_metadata(&self, agent_id: &str, metadata: AgentMetadata) {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.metadata = metadata;
         }
     }
 

@@ -154,6 +154,14 @@ pub struct AgentMetadata {
     pub tmux_version: String,
     pub os_version: String,
     pub nession_version: String,
+    /// Docker image tag (short sha) baked in at build time.
+    /// "dev" when running from `cargo run`, "unknown" when not set.
+    #[serde(default = "default_image_tag")]
+    pub image_tag: String,
+}
+
+fn default_image_tag() -> String {
+    "unknown".to_string()
 }
 
 /// Server → Agent response to `agent.register`.
@@ -201,6 +209,10 @@ pub enum AgentStatus {
 pub struct HeartbeatMetadata {
     pub uptime_seconds: u64,
     pub load_average: [f64; 3],
+    /// Agent version info — included in each heartbeat so the server
+    /// stays current after agent upgrades (previously only sent on register).
+    #[serde(default)]
+    pub agent: Option<AgentMetadata>,
 }
 
 // --- Server → Agent command payloads ---
@@ -611,6 +623,24 @@ pub struct ServerTerminalResizePayload {
     pub rows: u16,
 }
 
+// --- Server info ---
+
+/// Request payload for `client.server.info` — empty (protocol marker).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfoRequest {}
+
+/// Response payload for `client.server.info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfoResponse {
+    pub version: String,
+    #[serde(default = "default_image_tag")]
+    pub image_tag: String,
+    pub uptime_seconds: u64,
+    pub agent_count: usize,
+    pub online_agent_count: usize,
+    pub session_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,6 +723,7 @@ mod tests {
                 tmux_version: "3.4".to_string(),
                 os_version: "linux".to_string(),
                 nession_version: "0.1.0".to_string(),
+                image_tag: "test".to_string(),
             },
             protocol_version: "1.0".to_string(),
             display_name: Some("my-agent".to_string()),
@@ -809,5 +840,17 @@ mod tests {
         assert_eq!(payload.env_snapshots.len(), 1);
         assert_eq!(payload.env_snapshots[0].name, "staging.env");
         assert_eq!(payload.env_snapshots[0].vars.len(), 2);
+    }
+
+    #[test]
+    fn test_agent_metadata_image_tag_default() {
+        let json = r#"{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1.0"}"#;
+        let meta: AgentMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.image_tag, "unknown"); // serde default
+    }
+
+    #[test]
+    fn test_default_image_tag_is_unknown() {
+        assert_eq!(super::default_image_tag(), "unknown");
     }
 }

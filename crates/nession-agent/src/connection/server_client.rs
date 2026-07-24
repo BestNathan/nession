@@ -122,6 +122,8 @@ pub struct ServerClientHandle {
     outbox: mpsc::UnboundedSender<WsMessage>,
     shutdown_tx: mpsc::Sender<()>,
     agent_id: String,
+    /// Agent version info — included in each heartbeat.
+    metadata: AgentMetadata,
     /// Set by the supervisor after a reconnection so that the
     /// SessionWatcher can force a full session re-sync to the server.
     sync_needed: Arc<AtomicBool>,
@@ -166,6 +168,7 @@ impl ServerClientHandle {
             metadata: HeartbeatMetadata {
                 uptime_seconds,
                 load_average,
+                agent: Some(self.metadata.clone()),
             },
         };
         let msg = new_message(msg_types::AGENT_HEARTBEAT, payload);
@@ -281,6 +284,7 @@ impl ServerClient {
             outbox: outbox_tx,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
+            metadata: self.metadata.clone(),
             sync_needed: sync_needed.clone(),
             connected: connected.clone(),
         };
@@ -924,6 +928,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -969,6 +974,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1024,6 +1030,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1108,6 +1115,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
             format!("ws://127.0.0.1:{}", port),
@@ -1186,6 +1194,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
             format!("ws://127.0.0.1:{}", port),
@@ -1287,6 +1296,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1396,6 +1406,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1487,6 +1498,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1629,6 +1641,12 @@ mod tests {
             shutdown_tx,
             agent_id: "test".to_string(),
             sync_needed: Arc::new(AtomicBool::new(false)),
+            metadata: AgentMetadata {
+                tmux_version: String::new(),
+                os_version: String::new(),
+                nession_version: String::new(),
+                image_tag: String::new(),
+            },
             connected: Arc::new(AtomicBool::new(false)),
         };
 
@@ -1651,6 +1669,12 @@ mod tests {
             outbox: outbox_tx,
             shutdown_tx,
             agent_id: "test".to_string(),
+            metadata: AgentMetadata {
+                tmux_version: String::new(),
+                os_version: String::new(),
+                nession_version: String::new(),
+                image_tag: String::new(),
+            },
             sync_needed: Arc::new(AtomicBool::new(false)),
             connected: Arc::new(AtomicBool::new(false)),
         };
@@ -1672,6 +1696,12 @@ mod tests {
             outbox: outbox_tx,
             shutdown_tx,
             agent_id: "test".to_string(),
+            metadata: AgentMetadata {
+                tmux_version: String::new(),
+                os_version: String::new(),
+                nession_version: String::new(),
+                image_tag: String::new(),
+            },
             sync_needed: Arc::new(AtomicBool::new(false)),
             connected: Arc::new(AtomicBool::new(false)),
         };
@@ -1737,6 +1767,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1822,6 +1853,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1918,6 +1950,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(
@@ -1965,6 +1998,7 @@ mod tests {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
         };
 
         let client = ServerClient::new(

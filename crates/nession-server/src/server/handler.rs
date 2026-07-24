@@ -8,6 +8,7 @@ use crate::env::EnvService;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
+use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::display_name::validate_display_name;
 use nession_common::env_file::parse_env;
 use nession_common::protocol::{
@@ -46,10 +47,9 @@ pub struct ConnectionHandler {
     session_registry: Arc<SessionRegistry>,
     command_broker: Arc<CommandBroker>,
     client_registry: Arc<ClientRegistry>,
+    web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
-    server_auth_token: String,
-    /// Heartbeat interval (seconds) advertised to agents on registration.
-    heartbeat_interval_secs: u64,
+    config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
     /// Outgoing message sender for this client connection (set after construction).
@@ -60,24 +60,30 @@ pub struct ConnectionHandler {
     attached_client_id: Option<String>,
 }
 
+/// Immutable per-connection configuration.
+pub struct ConnectionHandlerConfig {
+    pub server_auth_token: String,
+    pub heartbeat_interval_secs: u64,
+}
+
 impl ConnectionHandler {
     pub fn new(
         agent_registry: Arc<AgentRegistry>,
         session_registry: Arc<SessionRegistry>,
         command_broker: Arc<CommandBroker>,
         client_registry: Arc<ClientRegistry>,
+        web_client_registry: Arc<WebClientRegistry>,
         env_service: Arc<EnvService>,
-        server_auth_token: String,
-        heartbeat_interval_secs: u64,
+        config: ConnectionHandlerConfig,
     ) -> Self {
         Self {
             agent_registry,
             session_registry,
             command_broker,
             client_registry,
+            web_client_registry,
             env_service,
-            server_auth_token,
-            heartbeat_interval_secs,
+            config,
             authenticated_client: false,
             registered_agent_id: None,
             client_sender: None,
@@ -154,6 +160,7 @@ impl ConnectionHandler {
             "client.env.write" => self.handle_client_env_write(msg).await,
             "client.env.delete" => self.handle_client_env_delete(msg).await,
             "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
+            "client.server.info" => self.handle_client_server_info(msg).await,
             "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
             "client.session.env.active" => self.handle_client_session_env_active(msg).await,
             "client.session.env.query" => self.handle_client_session_env_query(msg).await,
@@ -172,8 +179,8 @@ impl ConnectionHandler {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
 
         // Empty server auth_token means no-auth mode: accept any agent
-        let auth_ok =
-            self.server_auth_token.is_empty() || payload.auth_token == self.server_auth_token;
+        let auth_ok = self.config.server_auth_token.is_empty()
+            || payload.auth_token == self.config.server_auth_token;
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
@@ -245,7 +252,7 @@ impl ConnectionHandler {
                 "payload": {
                     "status": "accepted",
                     "message": "Registration successful",
-                    "heartbeat_interval_secs": self.heartbeat_interval_secs
+                    "heartbeat_interval_secs": self.config.heartbeat_interval_secs
                 }
             })
             .to_string(),
@@ -287,8 +294,26 @@ impl ConnectionHandler {
             agent_id, session_count, active_sessions
         );
 
+        // Update agent metadata if provided (keeps version/tmux/OS current
+        // after agent upgrades — previously only sent on register).
+        if let Some(agent_meta) = payload
+            .get("metadata")
+            .and_then(|v| v.get("agent"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            self.agent_registry
+                .update_metadata(agent_id, agent_meta)
+                .await;
+        }
+
         self.agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
+            .await;
+
+        // Push updated agent state to all connected web dashboard clients
+        // so session counts, status, etc. stay current without polling.
+        self.web_client_registry
+            .broadcast_agents_changed(Arc::clone(&self.agent_registry))
             .await;
 
         // Acknowledge so the agent can confirm the link is healthy in both
@@ -397,10 +422,15 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         // Empty server auth_token means no-auth mode: accept any client
-        let auth_ok = self.server_auth_token.is_empty() || auth_token == self.server_auth_token;
+        let auth_ok =
+            self.config.server_auth_token.is_empty() || auth_token == self.config.server_auth_token;
 
         if auth_ok {
             self.authenticated_client = true;
+            // Subscribe web client for real-time push (agents.changed, etc.)
+            if let Some(ref sender) = self.client_sender {
+                self.web_client_registry.subscribe(sender.clone());
+            }
             info!("Client authenticated successfully");
 
             Ok(HandlerAction::Reply(Some(Message::Text(
@@ -496,6 +526,36 @@ impl ConnectionHandler {
                 "timestamp": current_timestamp(),
                 "payload": {
                     "agents": agents_json
+                }
+            })
+            .to_string(),
+        ))))
+    }
+
+    /// Handle `client.server.info` — return server version, uptime, and stats.
+    async fn handle_client_server_info(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let agents = self.agent_registry.list().await;
+        let online = agents
+            .iter()
+            .filter(|a| a.status == AgentStatus::Online)
+            .count();
+        let sessions = self.session_registry.list().await.len();
+
+        Ok(HandlerAction::Reply(Some(Message::Text(
+            json!({
+                "msg_type": "client.server.info.response",
+                "id": msg.id,
+                "timestamp": current_timestamp(),
+                "payload": {
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "image_tag": option_env!("IMAGE_TAG").unwrap_or("dev"),
+                    "uptime_seconds": crate::uptime_seconds(),
+                    "agent_count": agents.len(),
+                    "online_agent_count": online,
+                    "session_count": sessions,
                 }
             })
             .to_string(),
@@ -2262,6 +2322,7 @@ mod tests {
         let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
         let command_broker = Arc::new(CommandBroker::new());
         let client_registry = Arc::new(ClientRegistry::new());
+        let web_client_registry = Arc::new(WebClientRegistry::new());
         let env_root = tempfile::tempdir().unwrap().keep();
         let env_service = EnvService::new(env_root);
         ConnectionHandler::new(
@@ -2269,9 +2330,12 @@ mod tests {
             session_registry,
             command_broker,
             client_registry,
+            web_client_registry,
             env_service,
-            auth_token.to_string(),
-            30,
+            ConnectionHandlerConfig {
+                server_auth_token: auth_token.to_string(),
+                heartbeat_interval_secs: 30,
+            },
         )
     }
 

@@ -117,6 +117,7 @@ async fn register_agent(
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(

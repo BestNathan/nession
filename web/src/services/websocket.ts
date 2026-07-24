@@ -21,6 +21,7 @@ import {
   SessionEnvResponse,
   SessionEnvActiveResponse,
   SessionEnvQueryResponse,
+  ServerInfo,
 } from '../types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
@@ -222,6 +223,15 @@ export class WebSocketService {
 
     const response = await this.request<AgentsListResponse>('client.agents.list', {});
     return response.agents;
+  }
+
+  /** Fetch server info (version, uptime, counts). */
+  async serverInfo(): Promise<ServerInfo> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    return this.request<ServerInfo>('client.server.info', {});
   }
 
   async listSessions(agentId?: string): Promise<Session[]> {

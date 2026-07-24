@@ -1,10 +1,11 @@
-import { Pencil } from 'lucide-react';
+import { Pencil, Monitor, Box } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { Input } from './ui/input';
 import type { Agent } from '../types';
-import { formatRelativeTime, formatUptime, getStatusVariant } from '../lib/format';
+import { formatUptime, getStatusVariant } from '../lib/format';
 import { useAgentRename } from './useAgentRename';
 
 interface AgentCardProps {
@@ -29,24 +30,14 @@ export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
       onClick={onClick}
     >
       <CardContent className="p-4 space-y-1.5">
-        {/* Status badge row */}
-        <div className="flex items-center justify-between">
+        {/* Row 1: Status badge */}
+        <div>
           <Badge variant={getStatusVariant(agent.status)} className="capitalize text-xs">
             {agent.status}
           </Badge>
-
-          {!editing && (
-            <button
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-accent"
-              onClick={startEdit}
-              title="Rename agent"
-            >
-              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          )}
         </div>
 
-        {/* Display name — main title */}
+        {/* Row 2: Display name + edit button — inline */}
         {editing ? (
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Input
@@ -62,12 +53,23 @@ export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
             />
           </div>
         ) : (
-          <h3 className="font-semibold truncate text-foreground leading-snug">
-            {displayName}
-          </h3>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="font-semibold truncate text-foreground leading-snug">
+              {displayName}
+            </h3>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={startEdit}
+              title="Rename agent"
+            >
+              <Pencil className="h-3 w-3 text-muted-foreground" />
+            </Button>
+          </div>
         )}
 
-        {/* Hostname subtitle */}
+        {/* Row 3: Hostname + reset */}
         <p className="text-xs text-muted-foreground/70 truncate font-mono">
           {agent.hostname}
           {isCustomName && (
@@ -81,26 +83,24 @@ export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
           )}
         </p>
 
-        {/* Info row */}
-        <div className="flex items-center gap-3 text-xs text-muted-foreground pt-0.5">
+        {/* Row 4: Sessions · Version · Uptime — compact info row */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground pt-0.5">
+          <Monitor className="h-3 w-3 shrink-0" />
           <span>
             {agent.session_count} session{agent.session_count !== 1 ? 's' : ''}
-            {agent.active_sessions ? ` · ${agent.active_sessions} active` : ''}
           </span>
-          <span className="text-muted-foreground/50">·</span>
-          <span>{formatRelativeTime(agent.last_heartbeat)}</span>
-        </div>
-
-        {/* Version + uptime row */}
-        <div className="flex items-center gap-3 text-xs text-muted-foreground/60">
           {agent.metadata?.nession_version && (
             <>
-              <span>v{agent.metadata.nession_version}</span>
               <span className="text-muted-foreground/30">·</span>
+              <Box className="h-3 w-3 shrink-0" />
+              <span>v{agent.metadata.nession_version}</span>
             </>
           )}
           {agent.registered_at && (
-            <span>up {formatUptime(agent.registered_at)}</span>
+            <>
+              <span className="text-muted-foreground/30">·</span>
+              <span>up {formatUptime(agent.registered_at)}</span>
+            </>
           )}
         </div>
       </CardContent>

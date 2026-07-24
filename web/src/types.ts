@@ -16,6 +16,7 @@ export interface Agent {
     tmux_version: string;
     os_version: string;
     nession_version: string;
+    image_tag?: string;
   };
   /** Candidate P2P endpoints with server probe status (issue #51). Empty for
    *  legacy servers that don't yet send them in agents.list. */
@@ -176,4 +177,14 @@ export interface SessionEnvResponse {
 export interface SessionEnvQueryResponse {
   sourced_files: EnvFileRef[];
   error?: string;
+}
+
+/** Server info returned by client.server.info. */
+export interface ServerInfo {
+  version: string;
+  image_tag?: string;
+  uptime_seconds: number;
+  agent_count: number;
+  online_agent_count: number;
+  session_count: number;
 }

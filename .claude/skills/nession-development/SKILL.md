@@ -25,6 +25,8 @@ Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm 
 | **一个功能 = 一个 worktree** | 每个 feature/bugfix/release 都从 main 创建独立的 worktree |
 | **合并后 worktree 即死** | PR 合并后，对应的 worktree 和分支不再使用 |
 
+**⚠ 例外 — `.github/workflows/*` 变更必须独立合入 main：** GitHub Actions workflow 只从默认分支读取配置，feature branch 上的 workflow 修改不会触发。修改 `.github/workflows/*` 时，workflow commit 必须 cherry-pick 到一个从 main 创建的独立分支，走单独的 PR 合入 main。详见 `nession-cicd` skill。
+
 ## 1. Worktree 开发流程
 
 ### 为什么必须用 Worktree

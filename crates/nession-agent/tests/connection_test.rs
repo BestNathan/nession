@@ -59,6 +59,7 @@ async fn integration_connection_to_mock_server() {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(
@@ -95,6 +96,7 @@ async fn integration_registration_message_format() {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(
@@ -156,6 +158,7 @@ async fn integration_heartbeat_message_format() {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(
@@ -227,6 +230,7 @@ async fn integration_session_update_message_format() {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(
@@ -292,6 +296,7 @@ async fn integration_reconnection_logic() {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
     };
 
     let client = ServerClient::new(

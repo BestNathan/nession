@@ -130,14 +130,13 @@ describe('AgentDetailPanel', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('shows uptime from heartbeat history (~3h)', () => {
+  it('shows uptime from agent registered_at (~3h)', () => {
     const threeHoursMs = 3 * 3600 * 1000;
-    const firstHeartbeat = new Date(Date.now() - threeHoursMs).toISOString();
-    const heartbeatHistory = [firstHeartbeat];
+    const registeredAt = new Date(Date.now() - threeHoursMs).toISOString();
     render(
       <AgentDetailPanel
-        agent={makeAgent()}
-        heartbeatHistory={heartbeatHistory}
+        agent={makeAgent({ registered_at: registeredAt })}
+        heartbeatHistory={[]}
         onClose={vi.fn()}
       />,
     );
