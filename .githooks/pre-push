@@ -38,6 +38,7 @@ echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB)${NC
 echo ""
 
 HAS_ERROR=0
+FAILED_CHECKS=()
 
 # ── Rust ────────────────────────────────────────────────────────────────────
 if [ $HAS_RUST -eq 1 ]; then
@@ -47,6 +48,7 @@ if [ $HAS_RUST -eq 1 ]; then
   else
     echo -e "${RED}✗ just test${NC}"
     HAS_ERROR=1
+    FAILED_CHECKS+=("test  (unit tests)")
   fi
 
   echo ""
@@ -57,6 +59,7 @@ if [ $HAS_RUST -eq 1 ]; then
   else
     echo -e "${RED}✗ just coverage${NC}"
     HAS_ERROR=1
+    FAILED_CHECKS+=("coverage (≥ 80% line coverage)")
   fi
 fi
 
@@ -70,6 +73,7 @@ if [ $HAS_WEB -eq 1 ]; then
   else
     echo -e "${RED}✗ just web-test${NC}"
     HAS_ERROR=1
+    FAILED_CHECKS+=("web-test (vitest)")
   fi
 
   echo ""
@@ -80,13 +84,28 @@ if [ $HAS_WEB -eq 1 ]; then
   else
     echo -e "${RED}✗ just web-coverage${NC}"
     HAS_ERROR=1
+    FAILED_CHECKS+=("web-coverage (≥ 80% coverage)")
   fi
 fi
 
 echo ""
 
 if [ $HAS_ERROR -eq 1 ]; then
-  echo -e "${RED}Push blocked — fix issues above${NC}"
+  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${RED}  Push blocked — ${#FAILED_CHECKS[@]} check(s) failed${NC}"
+  echo ""
+  echo -e "${YELLOW}  Failed checks:${NC}"
+  for check in "${FAILED_CHECKS[@]}"; do
+    echo -e "    - ${check}"
+  done
+  echo ""
+  echo -e "${YELLOW}  Quick fixes:${NC}"
+  echo -e "    Rust tests fail  → cargo test -p <crate> -- <test_name> --nocapture"
+  echo -e "    Coverage too low → cargo llvm-cov -p <crate> --html  (see uncovered lines)"
+  echo -e "    Web tests fail   → cd web && npx vitest run -t '<test-name>'"
+  echo -e "    Missing deps     → cd web && npm install"
+  echo -e "    Missing tools    → cargo install cargo-llvm-cov; rustup component add llvm-tools-preview"
+  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   exit 1
 fi
 

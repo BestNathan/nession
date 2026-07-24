@@ -6,7 +6,10 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use crate::config::{AdvertiseAddress, AgentConfig};
+use nession_common::address::{finalize_addresses, legacy_to_addresses};
 use nession_common::protocol::{AgentAddress, NetworkType};
+use tracing::{info, warn};
 
 /// Classify an IP into a coarse [`NetworkType`] for labelling.
 ///
@@ -122,6 +125,51 @@ fn label_for(iface_name: &str, network_type: NetworkType) -> String {
         NetworkType::Custom => "Custom",
     };
     format!("{type_label} ({iface_name})")
+}
+
+/// Assemble the agent's advertised P2P endpoints.
+///
+/// Combines:
+/// 1. Config-declared `advertise_addresses` (tunnels/ingress/custom).
+/// 2. Auto-detected non-loopback NIC addresses (unless disabled).
+/// 3. Legacy `connect_url` / `advertise_address`+port as fallback.
+///
+/// The combined list is finalised: de-duplicated by normalised URL
+/// (config wins over detected), sorted by priority, capped.
+#[must_use]
+pub fn build_advertised_addresses(config: &AgentConfig, port: u16) -> Vec<AgentAddress> {
+    let mut candidates: Vec<AgentAddress> = Vec::new();
+
+    candidates.extend(
+        config
+            .advertise_addresses
+            .iter()
+            .cloned()
+            .map(AdvertiseAddress::into_agent_address),
+    );
+
+    if config.disable_address_autodetect {
+        info!("Address auto-detection disabled by config");
+    } else {
+        candidates.extend(detect_local_addresses(port));
+    }
+
+    if let Some(url) = config.connect_url.as_deref() {
+        candidates.extend(legacy_to_addresses("", 0, Some(url)));
+    }
+    if let Some(ip) = config.advertise_address.as_deref() {
+        candidates.extend(legacy_to_addresses(ip, port, None));
+    }
+
+    let (finalised, dropped) = finalize_addresses(candidates);
+    if dropped > 0 {
+        warn!(
+            "Advertised address list exceeded the cap; dropped {} lowest-priority entr{}",
+            dropped,
+            if dropped == 1 { "y" } else { "ies" }
+        );
+    }
+    finalised
 }
 
 #[cfg(test)]

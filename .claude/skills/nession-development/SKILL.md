@@ -25,7 +25,38 @@ Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm 
 | **一个功能 = 一个 worktree** | 每个 feature/bugfix/release 都从 main 创建独立的 worktree |
 | **合并后 worktree 即死** | PR 合并后，对应的 worktree 和分支不再使用 |
 
-**⚠ 例外 — `.github/workflows/*` 变更必须独立合入 main：** GitHub Actions workflow 只从默认分支读取配置，feature branch 上的 workflow 修改不会触发。修改 `.github/workflows/*` 时，workflow commit 必须 cherry-pick 到一个从 main 创建的独立分支，走单独的 PR 合入 main。详见 `nession-cicd` skill。
+## ⛔ Iron Law: Branch Naming Must Trigger CI/CD
+
+```
+分支名必须匹配 feat/<slug> 或 fix/<slug>，否则 CI 不会触发。
+EnterWorktree 的 name 参数必须使用完整前缀。
+```
+
+**CI 触发规则：** `.github/workflows/cicd.yml` 只触发 `feat/**` 和 `fix/**` 分支。
+
+| ✅ 正确 | ❌ 错误 | 后果 |
+|---------|---------|------|
+| `feat/agent-display-name` | `worktree-feat+agent-display-name` | CI 不触发 |
+| `feat/add-login` | `feat_add_login` | CI 不触发 |
+| `fix/oom-on-attach` | `bugfix/oom` | CI 不触发 |
+
+**创建 worktree 时：**
+```bash
+# ✅ 正确 — EnterWorktree 传入完整分支名
+EnterWorktree name: "feat/<slug>"
+
+# ❌ 错误 — 使用随机名或 worktree- 前缀
+EnterWorktree name: "my-feature"
+```
+
+**如果分支名已错误：**
+```bash
+git branch -m <旧名> feat/<正确名>   # 本地重命名
+git push -u origin feat/<正确名>      # 推送正确分支
+git push origin --delete <旧名>       # 删除旧远程分支
+gh pr close <旧PR号>                  # 关闭旧 PR
+gh pr create --title "..." --body "..."  # 创建新 PR
+```
 
 ## 1. Worktree 开发流程
 
@@ -79,6 +110,8 @@ git branch -d feat/<slug>
 | 在 main 目录里切分支开发 | 用 `EnterWorktree` 或 `git worktree add` 创建隔离目录 |
 | 多个 feature 共用一个 worktree | 每个 feature 独立 worktree，互不干扰 |
 | PR 合并后还在旧分支上继续推 commit | 旧 worktree/分支已死，新建 worktree 从最新 main 开始 |
+| **分支名不是 `feat/` 或 `fix/` 前缀** | **CI 不会触发！必须用 `feat/<slug>` 或 `fix/<slug>`** |
+| **EnterWorktree 未传完整分支名** | 传入 `feat/<slug>` 而非裸名，保证 CI 能触发 |
 
 ## 2. Local Development
 
@@ -141,6 +174,58 @@ cargo install cargo-tarpaulin
 # Run coverage
 cargo tarpaulin --out Html --output-dir target/tarpaulin
 ```
+
+### Error Reporting Convention
+
+**All failures in scripts and code MUST include: (1) what happened (原因), (2) how to fix it (解决方案).** Keep it short — just enough to guide the next action.
+
+**Scripts (shell/just):**
+
+```bash
+# ❌ Bad — no clue what's wrong
+echo "✗ test failed"
+
+# ✅ Good — cause + fix
+echo "✗ node_modules/ not found in web/"
+echo "  Fix: cd web && npm install"
+```
+
+Each script's failure output must answer: *"I see this error. What do I type next?"*
+
+**Rust error messages (anyhow/context):**
+
+```rust
+// ❌ Bad — caller doesn't know how to recover
+fn load_identity(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).context("failed to read")?;
+}
+
+// ✅ Good — tells caller what to do
+fn load_identity(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path)
+        .with_context(|| format!("identity file missing; run agent once to create {path:?}"))?;
+}
+
+// ❌ Bad — bare "not found" is useless
+anyhow::bail!("not found")
+
+// ✅ Good — actionable
+anyhow::bail!("agent not registered; has the agent connected? run: nession-agent --config ...")
+```
+
+**CLI/log output:**
+
+```
+# ❌ Bad
+Error: Connection refused
+
+# ✅ Good
+Error: Connection refused (server_url: ws://localhost:19090)
+  Fix: start the server → cargo run -p nession-server
+       check the URL → verify agent-config.toml server_url field
+```
+
+**The rule:** After any failed command, the user should be able to fix it by reading the output — no need to open source code or search logs.
 
 ### Test Database
 

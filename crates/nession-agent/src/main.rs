@@ -14,13 +14,14 @@
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
-use nession_agent::netdetect::detect_local_addresses;
+use nession_agent::identity;
+use nession_agent::netdetect::build_advertised_addresses;
+use nession_agent::netwatch;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::TmuxManager;
-use nession_common::address::{finalize_addresses, legacy_to_addresses};
-use nession_common::protocol::{AgentAddress, AgentMetadata};
+use nession_common::protocol::AgentMetadata;
 use nession_common::system;
 use std::path::Path;
 use std::sync::Arc;
@@ -56,15 +57,16 @@ async fn main() -> Result<()> {
 
     // 4. Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
+    // Resolve persistent agent identity. On first run this persists the
+    // generated or configured agent_id; on subsequent runs it loads the
+    // persisted identity so the server recognises us as the same agent.
+    let identity_path = nession_common::paths::agent_identity_path()?;
+    let agent_id = identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+
     let file_root = config
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
-    let agent_id = if config.agent_id.is_empty() {
-        system::get_hostname()
-    } else {
-        config.agent_id.clone()
-    };
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -128,7 +130,7 @@ async fn main() -> Result<()> {
         let server_client = ServerClient::new(
             &config.server_url,
             &config.auth_token,
-            &config.agent_id,
+            &agent_id,
             &hostname,
             &ip_address,
             port,
@@ -204,6 +206,11 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // 7.5. Start network change detector (sends address updates on interface changes).
+    if let Some(ref handle) = client_handle {
+        netwatch::spawn_watcher(handle.clone(), config.clone(), port);
+    }
 
     // 8. Wait for shutdown signal (Ctrl+C or SIGTERM)
     info!("Agent is running. Press Ctrl+C to stop.");
@@ -313,57 +320,6 @@ fn extract_port(addr: &str) -> u16 {
         .next()
         .and_then(|p| p.parse().ok())
         .unwrap_or(0)
-}
-
-/// Assemble the agent's advertised P2P endpoints.
-///
-/// Combines, in this order of preference:
-/// 1. Config-declared `advertise_addresses` (tunnels/ingress/custom).
-/// 2. Auto-detected non-loopback NIC addresses (unless disabled).
-/// 3. The legacy `connect_url` / `advertise_address`+port as a fallback single
-///    entry, so an operator who only set the old fields still advertises them.
-///
-/// The combined list is finalised: default priorities filled in, de-duplicated
-/// by normalised URL (config entries win over detected ones since they come
-/// first), sorted by priority, and capped at [`MAX_ADDRESSES`]. A dropped-entry
-/// count is logged as a warning.
-fn build_advertised_addresses(config: &AgentConfig, port: u16) -> Vec<AgentAddress> {
-    let mut candidates: Vec<AgentAddress> = Vec::new();
-
-    // 1. Config-declared endpoints first (highest trust; win de-dup ties).
-    candidates.extend(
-        config
-            .advertise_addresses
-            .iter()
-            .cloned()
-            .map(nession_agent::config::AdvertiseAddress::into_agent_address),
-    );
-
-    // 2. Auto-detected NIC addresses.
-    if config.disable_address_autodetect {
-        info!("Address auto-detection disabled by config");
-    } else {
-        candidates.extend(detect_local_addresses(port));
-    }
-
-    // 3. Legacy fallback so pre-existing configs keep advertising something.
-    //    Only meaningful if the operator set connect_url/advertise_address.
-    if let Some(url) = config.connect_url.as_deref() {
-        candidates.extend(legacy_to_addresses("", 0, Some(url)));
-    }
-    if let Some(ip) = config.advertise_address.as_deref() {
-        candidates.extend(legacy_to_addresses(ip, port, None));
-    }
-
-    let (finalised, dropped) = finalize_addresses(candidates);
-    if dropped > 0 {
-        warn!(
-            "Advertised address list exceeded the cap; dropped {} lowest-priority entr{}",
-            dropped,
-            if dropped == 1 { "y" } else { "ies" }
-        );
-    }
-    finalised
 }
 
 /// Get the tmux version string by running `tmux -V`.
