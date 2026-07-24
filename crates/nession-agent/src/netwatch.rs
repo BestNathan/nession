@@ -180,15 +180,23 @@ mod platform {
 }
 
 // ── Linux watcher ──
+//
+// TODO(#91): Replace polling with rtnetlink event-driven watching.
+//            Use rtnetlink::new_connection() + multicast group join
+//            to receive RTNLGRP_IPV4_IFADDR / RTNLGRP_IPV6_IFADDR /
+//            RTNLGRP_LINK events. Blocked on: verifying API against
+//            netlink-proto 0.11 / netlink-packet-route 0.20 on a
+//            Linux machine — APIs changed across versions and the
+//            cfg-gated code can't be compiled on macOS.
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use netlink_packet_route::rtnl::constants::{
-        RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, RTNLGRP_LINK,
-    };
-    use netlink_proto::new_connection;
+    use std::time::Duration;
     use tokio::sync::mpsc;
     use tracing::warn;
+
+    /// Poll interval for address re-detection on Linux.
+    const POLL_INTERVAL: Duration = Duration::from_secs(30);
 
     pub(super) struct WatcherEvents {
         rx: mpsc::UnboundedReceiver<()>,
@@ -204,22 +212,18 @@ mod platform {
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            let groups = RTNLGRP_IPV4_IFADDR | RTNLGRP_IPV6_IFADDR | RTNLGRP_LINK;
-            let (mut conn, _handle, mut messages) = match new_connection() {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("Failed to open netlink socket: {e}; network watching disabled");
-                    return;
+            warn!(
+                "Linux network watching uses polling (interval: {:?}); \
+                 event-driven rtnetlink support pending — see #91",
+                POLL_INTERVAL
+            );
+            let mut ticker = tokio::time::interval(POLL_INTERVAL);
+            ticker.tick().await; // skip immediate first tick
+            loop {
+                ticker.tick().await;
+                if tx.send(()).is_err() {
+                    break;
                 }
-            };
-
-            if let Err(e) = conn.join_groups(groups) {
-                warn!("Failed to join netlink multicast groups: {e}; network watching disabled");
-                return;
-            }
-
-            while (messages.next().await).is_some() {
-                let _ = tx.send(());
             }
         });
 
