@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
         let server_client = ServerClient::new(
             &config.server_url,
             &config.auth_token,
-            &config.agent_id,
+            &agent_id,
             &hostname,
             &ip_address,
             port,

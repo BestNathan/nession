@@ -40,9 +40,7 @@ pub fn resolve_agent_id(config_agent_id: &str, identity_path: &Path) -> Result<S
                 return Ok(config_agent_id.to_string());
             }
             None => {
-                warn!(
-                    "Identity file at {identity_path:?} is empty; regenerating"
-                );
+                warn!("Identity file at {identity_path:?} is empty; regenerating");
                 persist_identity(identity_path, config_agent_id)?;
                 return Ok(config_agent_id.to_string());
             }
