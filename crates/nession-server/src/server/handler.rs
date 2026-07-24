@@ -2335,6 +2335,48 @@ fn extract_ip_from_url(url: &str) -> Option<String> {
     host_port.split(':').next().map(String::from)
 }
 
+#[cfg(test)]
+mod extract_ip_tests {
+    use super::*;
+
+    #[test]
+    fn extract_ipv4() {
+        assert_eq!(
+            extract_ip_from_url("ws://192.168.1.5:8080/ws"),
+            Some("192.168.1.5".into())
+        );
+    }
+
+    #[test]
+    fn extract_ipv6() {
+        assert_eq!(
+            extract_ip_from_url("ws://[fd00::1]:8080/ws"),
+            Some("fd00::1".into())
+        );
+    }
+
+    #[test]
+    fn extract_hostname_returns_hostname() {
+        assert_eq!(
+            extract_ip_from_url("wss://agent.example.com/ws"),
+            Some("agent.example.com".into())
+        );
+    }
+
+    #[test]
+    fn extract_no_scheme_returns_none() {
+        assert_eq!(extract_ip_from_url("not-a-url"), None);
+    }
+
+    #[test]
+    fn extract_tunnel_url() {
+        assert_eq!(
+            extract_ip_from_url("wss://tunnel.example.com/ws"),
+            Some("tunnel.example.com".into())
+        );
+    }
+}
+
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
     HandlerAction::Reply(Some(Message::Text(
         json!({

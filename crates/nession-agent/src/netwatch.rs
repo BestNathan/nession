@@ -153,8 +153,11 @@ mod platform {
             // Watch for interface and global network changes using
             // pattern matching on System Configuration keys.
             let watch_keys: CFArray<CFString> = CFArray::from_CFTypes(&[]);
+            // NOTE: SCDynamicStore uses its own pattern syntax: '*' matches
+            // any sequence, '?' matches a single character. Do NOT use regex
+            // syntax like '.*' — it will be matched literally.
             let watch_patterns = CFArray::from_CFTypes(&[
-                CFString::from("State:/Network/Interface/.*"),
+                CFString::from("State:/Network/Interface/*"),
                 CFString::from("State:/Network/Global/IPv4"),
                 CFString::from("State:/Network/Global/IPv6"),
             ]);
