@@ -14,9 +14,10 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
-    AgentAddress, AgentHeartbeatPayload, AgentMetadata, AgentRegisterPayload, AgentStatus,
-    EnvFileRef, EnvSnapshot, HeartbeatMetadata, Message, ProtocolMessage,
-    ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
+    AgentRegisterPayload, AgentStatus, EnvFileRef, EnvSnapshot, HeartbeatMetadata, Message,
+    ProtocolMessage, ServerSessionCreatePayload, ServerSessionEnvApplyPayload,
+    ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -54,6 +55,7 @@ pub mod msg_types {
     pub const AGENT_HEARTBEAT: &str = "agent.heartbeat";
     pub const AGENT_SESSION_UPDATE: &str = "agent.session.update";
     pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
+    pub const AGENT_ADDRESS_UPDATE: &str = "agent.address_update";
 }
 
 /// Payload for session update messages.
@@ -191,6 +193,20 @@ impl ServerClientHandle {
             attached_clients,
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
+        self.enqueue(&msg)
+    }
+
+    /// Queue an address-update message for delivery to the server.
+    ///
+    /// Called by the network watcher when interfaces change. The server
+    /// replaces the agent's advertised address list and re-probes
+    /// reachability.
+    pub async fn send_address_update(&self, addresses: Vec<AgentAddress>) -> Result<()> {
+        let payload = AgentAddressUpdatePayload {
+            agent_id: self.agent_id.clone(),
+            addresses,
+        };
+        let msg = new_message(msg_types::AGENT_ADDRESS_UPDATE, payload);
         self.enqueue(&msg)
     }
 
