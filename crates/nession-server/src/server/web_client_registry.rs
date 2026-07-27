@@ -122,4 +122,25 @@ impl WebClientRegistry {
             ),
         }
     }
+
+    /// Broadcast `server.commands.changed` to all connected web clients to
+    /// notify them that the quick-command list has been modified.
+    pub async fn broadcast_commands_changed(&self) {
+        let payload = serde_json::json!({
+            "msg_type": "server.commands.changed",
+            "id": "",
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            "payload": {},
+        });
+        match serde_json::to_string(&payload) {
+            Ok(json) => self.broadcast(json),
+            Err(e) => error!(
+                "WebClientRegistry: failed to serialize server.commands.changed: {}",
+                e
+            ),
+        }
+    }
 }

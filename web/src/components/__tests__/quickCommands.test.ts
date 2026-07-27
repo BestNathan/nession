@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PRESETS, loadUserCommands, saveUserCommands } from '../quickCommands';
+import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  PRESETS,
+  loadLegacyCommands,
+  clearLegacyCommands,
+  LEGACY_STORAGE_KEY,
+} from '../quickCommands';
 
 describe('quickCommands', () => {
   describe('PRESETS', () => {
@@ -31,23 +36,23 @@ describe('quickCommands', () => {
     });
   });
 
-  describe('loadUserCommands', () => {
+  describe('loadLegacyCommands', () => {
     beforeEach(() => {
       localStorage.clear();
     });
 
     it('returns empty array when nothing stored', () => {
-      expect(loadUserCommands()).toEqual([]);
+      expect(loadLegacyCommands()).toEqual([]);
     });
 
     it('returns empty array on corrupt JSON', () => {
-      localStorage.setItem('nession_quick_commands', 'not-json');
-      expect(loadUserCommands()).toEqual([]);
+      localStorage.setItem(LEGACY_STORAGE_KEY, 'not-json');
+      expect(loadLegacyCommands()).toEqual([]);
     });
 
     it('returns empty array when stored value is not an array', () => {
-      localStorage.setItem('nession_quick_commands', JSON.stringify({ foo: 'bar' }));
-      expect(loadUserCommands()).toEqual([]);
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ foo: 'bar' }));
+      expect(loadLegacyCommands()).toEqual([]);
     });
 
     it('filters entries missing required fields', () => {
@@ -57,44 +62,37 @@ describe('quickCommands', () => {
         { label: 'no-id', command: 'whoami' }, // missing id
         { id: 'c', label: 'also-ok', command: 'pwd' },
       ];
-      localStorage.setItem('nession_quick_commands', JSON.stringify(mixed));
-      const result = loadUserCommands();
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(mixed));
+      const result = loadLegacyCommands();
       expect(result).toHaveLength(2);
       expect(result[0].id).toBe('a');
       expect(result[1].id).toBe('c');
     });
+
+    it('reads well-formed legacy commands', () => {
+      const cmds = [
+        { id: 'user-1', label: 'npm start', command: 'npm start' },
+        { id: 'user-2', label: 'docker ps', command: 'docker ps', raw: true },
+      ];
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(cmds));
+      expect(loadLegacyCommands()).toEqual(cmds);
+    });
   });
 
-  describe('saveUserCommands + loadUserCommands roundtrip', () => {
+  describe('clearLegacyCommands', () => {
     beforeEach(() => {
       localStorage.clear();
     });
 
-    it('persists and restores commands', () => {
-      const cmds = [
-        { id: 'user-1', label: 'npm start', command: 'npm start' },
-        { id: 'user-2', label: 'docker ps', command: 'docker ps' },
-      ];
-      saveUserCommands(cmds);
-      const restored = loadUserCommands();
-      expect(restored).toEqual(cmds);
+    it('removes the legacy localStorage entry', () => {
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify([{ id: 'x', label: 'y', command: 'z' }]));
+      clearLegacyCommands();
+      expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+      expect(loadLegacyCommands()).toEqual([]);
     });
 
-    it('handles empty array', () => {
-      saveUserCommands([]);
-      expect(loadUserCommands()).toEqual([]);
-    });
-  });
-
-  describe('saveUserCommands error handling', () => {
-    it('does not throw when localStorage is full', () => {
-      // Simulate quota exceeded
-      const orig = localStorage.setItem;
-      localStorage.setItem = vi.fn(() => {
-        throw new Error('QuotaExceededError');
-      });
-      expect(() => saveUserCommands([{ id: 'x', label: 'y', command: 'z' }])).not.toThrow();
-      localStorage.setItem = orig;
+    it('does not throw when nothing is stored', () => {
+      expect(() => clearLegacyCommands()).not.toThrow();
     });
   });
 });

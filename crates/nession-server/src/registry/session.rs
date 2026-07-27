@@ -91,14 +91,19 @@ impl SessionRegistry {
             SessionStatus::Zombie => "zombie",
         };
 
-        // Write through to SQLite first, then update in-memory.
-        // DB write failure is logged but does not block the in-memory update.
+        // Update the in-memory registry first — it is the live serving path
+        // for `list()`/`get()`. The DB is only a restart-recovery cache, so a
+        // failed write must not delay or block visibility of the session.
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(session.session_id.clone(), session.clone());
+        }
+
+        // Write through to the DB. Failure is logged but non-fatal (the agent
+        // is the source of truth and will re-report on reconnect).
         if let Err(e) = self.db.insert_session(&session, status_str).await {
             tracing::error!("Failed to persist session {}: {:#}", session.session_id, e);
         }
-
-        let mut sessions = self.sessions.write().await;
-        sessions.insert(session.session_id.clone(), session);
     }
 
     pub async fn get(&self, session_id: &str) -> Option<SessionInfo> {

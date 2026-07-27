@@ -479,6 +479,81 @@ pub struct ClientEnvDeleteResponsePayload {
     pub error: Option<String>,
 }
 
+// --- Quick Commands (issue #95, part 3) ---
+
+/// A single quick command, matching the structure of the `quick_commands` DB
+/// table and the frontend `QuickCommand` interface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuickCommandItem {
+    pub id: String,
+    pub label: String,
+    pub command: String,
+    #[serde(default)]
+    pub raw: bool,
+    #[serde(default)]
+    pub sort_order: i32,
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+/// `client.commands.list` — fetch all server-stored quick commands.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientCommandsListPayload {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsListResponsePayload {
+    pub commands: Vec<QuickCommandItem>,
+}
+
+/// `client.commands.add` — add a new quick command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsAddPayload {
+    pub label: String,
+    pub command: String,
+    #[serde(default)]
+    pub raw: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsAddResponsePayload {
+    pub id: String,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `client.commands.remove` — delete a quick command by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsRemovePayload {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsRemoveResponsePayload {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `client.commands.update` — update a quick command's label/command/raw.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsUpdatePayload {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCommandsUpdateResponsePayload {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // --- Env application to sessions ---
 
 /// `client.session.env.apply` — apply env files to an already-running session

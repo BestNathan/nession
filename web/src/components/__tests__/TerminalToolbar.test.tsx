@@ -1,12 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { WebSocketContext } from '../../hooks/useWebSocket';
 import { TerminalToolbar, type TerminalToolbarProps } from '../TerminalToolbar';
+import type { WebSocketService } from '../../services/websocket';
 
-function renderToolbar(props: Partial<TerminalToolbarProps> = {}) {
+function createMockWs(overrides: Partial<WebSocketService> = {}): WebSocketService {
+  return {
+    listCommands: vi.fn().mockResolvedValue({ commands: [] }),
+    addCommand: vi.fn().mockResolvedValue({ success: true, id: 'mock-id' }),
+    removeCommand: vi.fn().mockResolvedValue({ success: true }),
+    updateCommand: vi.fn().mockResolvedValue({ success: true }),
+    onCommandsChanged: vi.fn().mockReturnValue(() => {}),
+    ...overrides,
+  } as unknown as WebSocketService;
+}
+
+function renderToolbar(props: Partial<TerminalToolbarProps> = {}, wsOverrides = {}) {
   const sendText = vi.fn();
-  const utils = render(<TerminalToolbar sendText={sendText} {...props} />);
-  return { sendText, ...utils };
+  const ws = createMockWs(wsOverrides);
+  const utils = render(
+    <WebSocketContext.Provider value={ws}>
+      <TerminalToolbar sendText={sendText} {...props} />
+    </WebSocketContext.Provider>,
+  );
+  return { sendText, ws, ...utils };
 }
 
 describe('TerminalToolbar', () => {
@@ -39,28 +58,34 @@ describe('TerminalToolbar', () => {
 
   it('adds a custom command', async () => {
     const user = userEvent.setup();
-    renderToolbar();
+    const { ws } = renderToolbar();
     await user.click(screen.getByRole('button', { name: /Add/ }));
     await user.type(screen.getByPlaceholderText('Label'), 'My Cmd');
     await user.type(screen.getByPlaceholderText('Command'), 'echo hello');
     await user.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('button', { name: 'My Cmd' })).toBeInTheDocument();
+    expect(ws.addCommand).toHaveBeenCalledWith('My Cmd', 'echo hello', false);
+    // After add, the list refreshes (the mock returns empty, so no button shown)
+    await waitFor(() => {
+      expect(ws.listCommands).toHaveBeenCalled();
+    });
   });
 
-  it('deletes a custom command', async () => {
+  it('deletes a custom command via server', async () => {
     const user = userEvent.setup();
-    renderToolbar();
-    // Add a command first
-    await user.click(screen.getByRole('button', { name: /Add/ }));
-    await user.type(screen.getByPlaceholderText('Label'), 'Delete Me');
-    await user.type(screen.getByPlaceholderText('Command'), 'rm -rf /');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('button', { name: 'Delete Me' })).toBeInTheDocument();
+    const listCommands = vi.fn().mockResolvedValue({ commands: [
+      { id: 'existing', label: 'Delete Me', command: 'rm -rf /', raw: false, sort_order: 0, created_at: 0 },
+    ]});
+    const removeCommand = vi.fn().mockResolvedValue({ success: true });
+    const { ws } = renderToolbar({}, { listCommands, removeCommand });
+    // The command is already loaded from server
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete Me' })).toBeInTheDocument();
+    });
     // Delete it
-    const cmdWrapper = screen.getByRole('button', { name: 'Delete Me' }).closest('div')!;
-    const deleteBtn = within(cmdWrapper).getByTitle('Delete');
+    const cmdRow = screen.getByRole('button', { name: 'Delete Me' }).closest('div')!;
+    const deleteBtn = within(cmdRow).getByTitle('Delete');
     await user.click(deleteBtn);
-    expect(screen.queryByRole('button', { name: 'Delete Me' })).not.toBeInTheDocument();
+    expect(ws.removeCommand).toHaveBeenCalledWith('existing');
   });
 
   it('sends text from textarea on Enter', async () => {
@@ -132,10 +157,76 @@ describe('TerminalToolbar', () => {
   });
 
   it('gives preset command buttons a 44px touch target on mobile', () => {
-    render(<TerminalToolbar sendText={vi.fn()} />);
+    const ws = createMockWs();
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <TerminalToolbar sendText={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
     const buttons = screen.getAllByRole('button');
     const preset = buttons.find((b) => b.className.includes('h-11 md:h-6'));
     expect(preset).toBeDefined();
   });
 
+  it('loads commands from server on mount', async () => {
+    const { ws } = renderToolbar();
+    await waitFor(() => {
+      expect(ws.listCommands).toHaveBeenCalled();
+    });
+  });
+
+  it('subscribes to server.commands.changed', () => {
+    const { ws } = renderToolbar();
+    expect(ws.onCommandsChanged).toHaveBeenCalled();
+  });
+
+  it('imports legacy localStorage commands on mount', async () => {
+    localStorage.setItem(
+      'nession_quick_commands',
+      JSON.stringify([{ id: 'legacy-1', label: 'old', command: 'old cmd', raw: true }]),
+    );
+    const { ws } = renderToolbar();
+    await waitFor(() => {
+      expect(ws.addCommand).toHaveBeenCalledWith('old', 'old cmd', true);
+    });
+    expect(localStorage.getItem('nession_quick_commands')).toBeNull();
+  });
+
+  it('fetches once under StrictMode double-mount (no duplicate list request)', async () => {
+    const ws = createMockWs();
+    render(
+      <StrictMode>
+        <WebSocketContext.Provider value={ws}>
+          <TerminalToolbar sendText={vi.fn()} />
+        </WebSocketContext.Provider>
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(ws.listCommands).toHaveBeenCalled();
+    });
+    // StrictMode mounts → unmounts → remounts in dev; the ref guard must keep
+    // the initial fetch to a single request.
+    expect(ws.listCommands).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports legacy commands once under StrictMode double-mount', async () => {
+    localStorage.setItem(
+      'nession_quick_commands',
+      JSON.stringify([{ id: 'legacy-1', label: 'old', command: 'old cmd', raw: false }]),
+    );
+    const ws = createMockWs();
+    render(
+      <StrictMode>
+        <WebSocketContext.Provider value={ws}>
+          <TerminalToolbar sendText={vi.fn()} />
+        </WebSocketContext.Provider>
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(ws.addCommand).toHaveBeenCalledWith('old', 'old cmd', false);
+    });
+    // Must migrate the legacy command exactly once, not twice.
+    expect(ws.addCommand).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('nession_quick_commands')).toBeNull();
+  });
 });

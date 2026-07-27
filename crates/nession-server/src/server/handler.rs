@@ -49,6 +49,8 @@ pub struct ConnectionHandler {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    /// Database handle for quick-command CRUD (issue #95, part 3).
+    db: Arc<crate::db::Database>,
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
@@ -66,23 +68,27 @@ pub struct ConnectionHandlerConfig {
     pub heartbeat_interval_secs: u64,
 }
 
+/// Shared dependencies for a connection handler.
+pub struct ConnectionHandlerDeps {
+    pub agent_registry: Arc<AgentRegistry>,
+    pub session_registry: Arc<SessionRegistry>,
+    pub command_broker: Arc<CommandBroker>,
+    pub client_registry: Arc<ClientRegistry>,
+    pub web_client_registry: Arc<WebClientRegistry>,
+    pub env_service: Arc<EnvService>,
+    pub db: Arc<crate::db::Database>,
+}
+
 impl ConnectionHandler {
-    pub fn new(
-        agent_registry: Arc<AgentRegistry>,
-        session_registry: Arc<SessionRegistry>,
-        command_broker: Arc<CommandBroker>,
-        client_registry: Arc<ClientRegistry>,
-        web_client_registry: Arc<WebClientRegistry>,
-        env_service: Arc<EnvService>,
-        config: ConnectionHandlerConfig,
-    ) -> Self {
+    pub fn new(deps: ConnectionHandlerDeps, config: ConnectionHandlerConfig) -> Self {
         Self {
-            agent_registry,
-            session_registry,
-            command_broker,
-            client_registry,
-            web_client_registry,
-            env_service,
+            agent_registry: deps.agent_registry,
+            session_registry: deps.session_registry,
+            command_broker: deps.command_broker,
+            client_registry: deps.client_registry,
+            web_client_registry: deps.web_client_registry,
+            env_service: deps.env_service,
+            db: deps.db,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -166,6 +172,10 @@ impl ConnectionHandler {
             "client.session.env.active" => self.handle_client_session_env_active(msg).await,
             "client.session.env.query" => self.handle_client_session_env_query(msg).await,
             "client.agent.rename" => self.handle_client_agent_rename(msg).await,
+            "client.commands.list" => self.handle_client_commands_list(msg).await,
+            "client.commands.add" => self.handle_client_commands_add(msg).await,
+            "client.commands.remove" => self.handle_client_commands_remove(msg).await,
+            "client.commands.update" => self.handle_client_commands_update(msg).await,
             _ => {
                 warn!("Unknown message type: {}", msg.msg_type);
                 Ok(HandlerAction::Reply(None))
@@ -2314,6 +2324,189 @@ impl ConnectionHandler {
             )),
         }
     }
+
+    // ── Quick Commands (issue #95, part 3) ───────────────────────────
+
+    async fn handle_client_commands_list(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.list.response",
+                json!({ "commands": [], "error": "Not authenticated" }),
+            ));
+        }
+        let commands = self.db.list_quick_commands().await.unwrap_or_default();
+        let items: Vec<serde_json::Value> = commands
+            .into_iter()
+            .map(|c| {
+                json!({
+                    "id": c.id,
+                    "label": c.label,
+                    "command": c.command,
+                    "raw": c.raw,
+                    "sort_order": c.sort_order,
+                    "created_at": c.created_at,
+                })
+            })
+            .collect();
+        Ok(reply_json(
+            &msg.id,
+            "client.commands.list.response",
+            json!({ "commands": items }),
+        ))
+    }
+
+    async fn handle_client_commands_add(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.add.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let payload = msg.payload;
+        let label = payload
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let command = payload
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let raw = payload
+            .get("raw")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        if label.is_empty() || command.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.add.response",
+                json!({ "success": false, "error": "Label and command are required" }),
+            ));
+        }
+
+        let id = format!("user-{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().timestamp();
+        let row = crate::db::QuickCommandRow {
+            id: id.clone(),
+            label,
+            command,
+            raw,
+            sort_order: 0,
+            created_at: now,
+        };
+        if let Err(e) = self.db.upsert_quick_command(&row).await {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.add.response",
+                json!({ "success": false, "error": e.to_string() }),
+            ));
+        }
+        self.web_client_registry.broadcast_commands_changed().await;
+        Ok(reply_json(
+            &msg.id,
+            "client.commands.add.response",
+            json!({ "success": true, "id": id }),
+        ))
+    }
+
+    async fn handle_client_commands_remove(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.remove.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let id = msg
+            .payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+        if id.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.remove.response",
+                json!({ "success": false, "error": "id is required" }),
+            ));
+        }
+        if let Err(e) = self.db.delete_quick_command(&id).await {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.remove.response",
+                json!({ "success": false, "error": e.to_string() }),
+            ));
+        }
+        self.web_client_registry.broadcast_commands_changed().await;
+        Ok(reply_json(
+            &msg.id,
+            "client.commands.remove.response",
+            json!({ "success": true }),
+        ))
+    }
+
+    async fn handle_client_commands_update(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.update.response",
+                json!({ "success": false, "error": "Not authenticated" }),
+            ));
+        }
+        let payload = msg.payload;
+        let id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+        if id.is_empty() {
+            return Ok(reply_json(
+                &msg.id,
+                "client.commands.update.response",
+                json!({ "success": false, "error": "id is required" }),
+            ));
+        }
+        let label = payload.get("label").and_then(|v| v.as_str());
+        let command = payload.get("command").and_then(|v| v.as_str());
+        let raw = payload.get("raw").and_then(serde_json::Value::as_bool);
+
+        match self.db.update_quick_command(&id, label, command, raw).await {
+            Ok(true) => {
+                self.web_client_registry.broadcast_commands_changed().await;
+                Ok(reply_json(
+                    &msg.id,
+                    "client.commands.update.response",
+                    json!({ "success": true }),
+                ))
+            }
+            Ok(false) => Ok(reply_json(
+                &msg.id,
+                "client.commands.update.response",
+                json!({ "success": false, "error": "Command not found" }),
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.commands.update.response",
+                json!({ "success": false, "error": e.to_string() }),
+            )),
+        }
+    }
 }
 
 /// Build a `HandlerAction::Reply` with a standard protocol envelope.
@@ -2433,15 +2626,17 @@ mod tests {
         let command_broker = Arc::new(CommandBroker::new());
         let client_registry = Arc::new(ClientRegistry::new());
         let web_client_registry = Arc::new(WebClientRegistry::new());
-        let env_root = tempfile::tempdir().unwrap().keep();
-        let env_service = EnvService::new(env_root);
+        let env_service = EnvService::new(Arc::clone(&db));
         ConnectionHandler::new(
-            agent_registry,
-            session_registry,
-            command_broker,
-            client_registry,
-            web_client_registry,
-            env_service,
+            ConnectionHandlerDeps {
+                agent_registry,
+                session_registry,
+                command_broker,
+                client_registry,
+                web_client_registry,
+                env_service,
+                db,
+            },
             ConnectionHandlerConfig {
                 server_auth_token: auth_token.to_string(),
                 heartbeat_interval_secs: 30,
@@ -4072,5 +4267,187 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(action, HandlerAction::Reply(None)));
+    }
+
+    // ---- Quick Commands (issue #95, part 3) ----
+
+    #[tokio::test]
+    async fn commands_list_requires_auth() {
+        let mut h = test_handler("tok").await;
+        let action = h
+            .handle_message(proto_msg("client.commands.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Not authenticated"));
+    }
+
+    #[tokio::test]
+    async fn commands_list_empty() {
+        let mut h = test_handler("tok").await;
+        // Auth as client first
+        let _ = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .await
+            .unwrap();
+        let action = h
+            .handle_message(proto_msg("client.commands.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["msg_type"], "client.commands.list.response");
+        assert!(reply["payload"]["commands"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commands_add_requires_auth() {
+        let mut h = test_handler("tok").await;
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.add",
+                json!({ "label": "test", "command": "echo hi" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(!reply["payload"]["success"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
+    async fn commands_add_and_list() {
+        let mut h = test_handler("tok").await;
+        // Auth as client
+        let _ = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .await
+            .unwrap();
+        // Add a command
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.add",
+                json!({ "label": "My Cmd", "command": "echo hello" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["success"].as_bool().unwrap());
+        let cmd_id = reply["payload"]["id"].as_str().unwrap().to_string();
+
+        // List should include it
+        let action = h
+            .handle_message(proto_msg("client.commands.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let cmds = reply["payload"]["commands"].as_array().unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0]["label"], "My Cmd");
+        assert_eq!(cmds[0]["command"], "echo hello");
+
+        // Remove it
+        let action = h
+            .handle_message(proto_msg("client.commands.remove", json!({ "id": cmd_id })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["success"].as_bool().unwrap());
+
+        // List should be empty again
+        let action = h
+            .handle_message(proto_msg("client.commands.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["commands"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commands_update() {
+        let mut h = test_handler("tok").await;
+        // Auth as client
+        let _ = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .await
+            .unwrap();
+        // Add a command
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.add",
+                json!({ "label": "Old", "command": "old cmd" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let cmd_id = reply["payload"]["id"].as_str().unwrap().to_string();
+
+        // Update it
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.update",
+                json!({ "id": cmd_id, "label": "New", "command": "new cmd" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["success"].as_bool().unwrap());
+
+        // List should show updated values
+        let action = h
+            .handle_message(proto_msg("client.commands.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let cmds = reply["payload"]["commands"].as_array().unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0]["label"], "New");
+        assert_eq!(cmds[0]["command"], "new cmd");
+    }
+
+    #[tokio::test]
+    async fn commands_remove_nonexistent() {
+        let mut h = test_handler("tok").await;
+        // Auth as client
+        let _ = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .await
+            .unwrap();
+        // Remove an id that doesn't exist (should still succeed — idempotent)
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.remove",
+                json!({ "id": "nonexistent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["success"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
+    async fn commands_update_nonexistent() {
+        let mut h = test_handler("tok").await;
+        // Auth as client
+        let _ = h
+            .handle_message(proto_msg("client.auth", json!({ "auth_token": "tok" })))
+            .await
+            .unwrap();
+        // Update a nonexistent command
+        let action = h
+            .handle_message(proto_msg(
+                "client.commands.update",
+                json!({ "id": "missing", "label": "Nope" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(!reply["payload"]["success"].as_bool().unwrap());
+        assert!(reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("not found"));
     }
 }

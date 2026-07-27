@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.10.1"
+version = "0.11.0"
 edition = "2021"
 
 [profile.dev]
@@ -33,7 +33,16 @@ anyhow = "1.0"
 thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
-rusqlite = { version = "0.30", features = ["bundled"] }
+sea-orm = { version = "2.0", default-features = false, features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "with-chrono",
+] }
+sea-orm-migration = { version = "2.0", default-features = false, features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+] }
 futures-util = "0.3"
 tokio-rustls = "0.25"
 rand = "0.8"
