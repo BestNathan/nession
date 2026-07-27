@@ -22,6 +22,7 @@ jobs:
           path: ~/.cargo/bin/cargo-llvm-cov
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
       - run: just check
         env:
           SCCACHE_GHA_ENABLED: "true"
