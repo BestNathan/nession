@@ -7,6 +7,7 @@ pub mod usage;
 pub use store::EnvStore;
 pub use usage::EnvUsageRegistry;
 
+use crate::db::Database;
 use std::sync::Arc;
 
 /// Bundles the server-side env store with the in-memory usage registry so a
@@ -17,11 +18,11 @@ pub struct EnvService {
 }
 
 impl EnvService {
-    /// Construct the service rooted at the given server env directory.
+    /// Construct the service backed by the given database.
     #[must_use]
-    pub fn new(root: std::path::PathBuf) -> Arc<Self> {
+    pub fn new(db: Arc<Database>) -> Arc<Self> {
         Arc::new(Self {
-            store: EnvStore::new(root),
+            store: EnvStore::new(db),
             usage: EnvUsageRegistry::new(),
         })
     }

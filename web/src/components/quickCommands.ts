@@ -1,11 +1,14 @@
-// Quick command definitions and persistence for the terminal control panel.
+// Quick command definitions for the terminal control panel.
 //
-// Presets are code-defined and never persisted. Only user-added commands are
-// stored in localStorage, so changing the preset list in a future release
-// never clobbers a user's saved commands.
+// Presets are code-defined and never persisted. User-added commands are now
+// stored on the server (issue #95, part 3) rather than browser localStorage,
+// so they are shared across browsers and survive a client reset.
+//
+// The `LEGACY_STORAGE_KEY` helpers remain only to support a one-time migration
+// of pre-existing localStorage commands into the server store.
 
 export interface QuickCommand {
-  /** Stable unique id (preset ids are fixed strings; user ids are timestamps). */
+  /** Stable unique id (preset ids are fixed strings; user ids are server-assigned). */
   id: string;
   /** Button label shown in the panel. */
   label: string;
@@ -19,7 +22,8 @@ export interface QuickCommand {
   raw?: boolean;
 }
 
-const STORAGE_KEY = 'nession_quick_commands';
+/** localStorage key used by the pre-server implementation. */
+export const LEGACY_STORAGE_KEY = 'nession_quick_commands';
 
 /** Built-in commands. Order here is the order shown above user commands. */
 export const PRESETS: QuickCommand[] = [
@@ -30,14 +34,16 @@ export const PRESETS: QuickCommand[] = [
   { id: 'preset-ctrl-c', label: 'Ctrl+C', command: '\x03', raw: true },
 ];
 
-/** Read user-added commands from localStorage; returns [] on any failure. */
-export function loadUserCommands(): QuickCommand[] {
+/**
+ * Read legacy user commands from localStorage; returns [] on any failure.
+ * Used only for the one-time migration into the server store.
+ */
+export function loadLegacyCommands(): QuickCommand[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) {return [];}
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {return [];}
-    // Keep only well-formed entries.
     return parsed.filter(
       (c): c is QuickCommand =>
         c &&
@@ -50,11 +56,11 @@ export function loadUserCommands(): QuickCommand[] {
   }
 }
 
-/** Persist user-added commands. Swallows quota/serialization errors. */
-export function saveUserCommands(cmds: QuickCommand[]): void {
+/** Clear the legacy localStorage entry after a successful migration. */
+export function clearLegacyCommands(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cmds));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    // Ignore — persistence is best-effort.
+    // Ignore — best-effort.
   }
 }

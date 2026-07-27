@@ -22,11 +22,16 @@ import {
   SessionEnvActiveResponse,
   SessionEnvQueryResponse,
   ServerInfo,
+  CommandsListResponse,
+  CommandsAddResponse,
+  CommandsRemoveResponse,
+  CommandsUpdateResponse,
 } from '../types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
 type AgentsChangeCallback = (agents: Agent[]) => void;
 type SessionsChangeCallback = (sessions: Session[]) => void;
+type CommandsChangeCallback = () => void;
 type TerminalOutputCallback = (data: string) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
@@ -57,6 +62,7 @@ export class WebSocketService {
   private connectionChangeCallbacks: ConnectionChangeCallback[] = [];
   private agentsChangeCallbacks: AgentsChangeCallback[] = [];
   private sessionsChangeCallbacks: SessionsChangeCallback[] = [];
+  private commandsChangeCallbacks: CommandsChangeCallback[] = [];
   private terminalOutputCallbacks = new Map<string, TerminalOutputCallback[]>();
   private terminalResizeCallbacks = new Map<string, TerminalResizeCallback[]>();
 
@@ -458,6 +464,50 @@ export class WebSocketService {
     return response;
   }
 
+  // ── Quick Commands (issue #95, part 3) ────────────────────────────
+
+  async listCommands(): Promise<CommandsListResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+    return this.request<CommandsListResponse>('client.commands.list', {});
+  }
+
+  async addCommand(
+    label: string,
+    command: string,
+    raw = false
+  ): Promise<CommandsAddResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+    return this.request<CommandsAddResponse>('client.commands.add', {
+      label,
+      command,
+      raw,
+    });
+  }
+
+  async removeCommand(id: string): Promise<CommandsRemoveResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+    return this.request<CommandsRemoveResponse>('client.commands.remove', { id });
+  }
+
+  async updateCommand(
+    id: string,
+    fields: { label?: string; command?: string; raw?: boolean }
+  ): Promise<CommandsUpdateResponse> {
+    if (!this.authenticated) {
+      throw new Error('Not authenticated');
+    }
+    return this.request<CommandsUpdateResponse>('client.commands.update', {
+      id,
+      ...fields,
+    });
+  }
+
   async request<T>(type: string, payload: unknown): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
@@ -511,6 +561,16 @@ export class WebSocketService {
       const index = this.sessionsChangeCallbacks.indexOf(callback);
       if (index > -1) {
         this.sessionsChangeCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onCommandsChanged(callback: CommandsChangeCallback): () => void {
+    this.commandsChangeCallbacks.push(callback);
+    return () => {
+      const index = this.commandsChangeCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.commandsChangeCallbacks.splice(index, 1);
       }
     };
   }
@@ -723,6 +783,10 @@ export class WebSocketService {
           }
           break;
 
+        case 'server.commands.changed':
+          this.notifyCommandsChange();
+          break;
+
         case 'error': {
           const errMsg = (message.payload as Record<string, unknown>)?.message as string | undefined;
           console.error('[relay] Server error:', errMsg ?? 'unknown error', message.payload);
@@ -789,6 +853,10 @@ export class WebSocketService {
 
   private notifySessionsChange(sessions: Session[]): void {
     this.sessionsChangeCallbacks.forEach((callback) => callback(sessions));
+  }
+
+  private notifyCommandsChange(): void {
+    this.commandsChangeCallbacks.forEach((callback) => callback());
   }
 
   private setConnectionStatus(status: ConnectionStatus): void {

@@ -45,9 +45,21 @@ impl WebSocketServer {
         let client_registry = Arc::new(ClientRegistry::new());
         let web_client_registry = Arc::new(WebClientRegistry::new());
 
-        let env_root = nession_common::paths::server_envs_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from(".nession/server/envs"));
-        let env_service = EnvService::new(env_root);
+        let env_service = EnvService::new(Arc::clone(&db));
+
+        // Import legacy filesystem env files into the DB on first run.
+        // The DB is authoritative from this point forward, but filesystem
+        // copies are kept for zero-downtime rollback safety.
+        if let Ok(envs_dir) = nession_common::paths::server_envs_dir() {
+            match env_service.store.import_from_dir(&envs_dir).await {
+                Ok(n) => {
+                    if n > 0 {
+                        tracing::info!("Imported {n} env file(s) from {envs_dir:?} into DB");
+                    }
+                }
+                Err(e) => tracing::warn!("Env file import from {envs_dir:?} failed: {e:#}"),
+            }
+        }
 
         Ok(Self {
             config,
@@ -189,6 +201,7 @@ impl WebSocketServer {
                 client_registry: Arc::clone(&self.client_registry),
                 web_client_registry: Arc::clone(&self.web_client_registry),
                 env_service: Arc::clone(&self.env_service),
+                db: Arc::clone(&self.db),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
             };
@@ -244,6 +257,7 @@ struct ServerContext {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    db: Arc<Database>,
     auth_token: String,
     heartbeat_interval_secs: u64,
 }
@@ -276,6 +290,7 @@ where
         client_registry,
         web_client_registry,
         env_service,
+        db,
         auth_token,
         heartbeat_interval_secs,
     } = ctx;
@@ -288,12 +303,15 @@ where
     let (sender, mut rx) = WsMessageSender::new();
 
     let mut handler = ConnectionHandler::new(
-        agent_registry,
-        session_registry,
-        command_broker.clone(),
-        client_registry.clone(),
-        web_client_registry.clone(),
-        env_service,
+        crate::server::handler::ConnectionHandlerDeps {
+            agent_registry,
+            session_registry,
+            command_broker: command_broker.clone(),
+            client_registry: client_registry.clone(),
+            web_client_registry: web_client_registry.clone(),
+            env_service,
+            db,
+        },
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,
             heartbeat_interval_secs,
