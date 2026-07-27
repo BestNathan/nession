@@ -4,7 +4,7 @@ export type StatusFilter = 'all' | 'online' | 'offline' | 'degraded';
 export type SortField = 'name' | 'activity';
 export type SortDirection = 'asc' | 'desc';
 
-/** Filter / sort state. Filtering itself lives in useDashboardHandlers
+/** Filter / sort state. Filtering itself lives in useDashboard
  *  because it needs the agents + sessions data which are fetched elsewhere. */
 export function useDashboardFilter() {
   const [searchQuery, setSearchQuery] = useState('');

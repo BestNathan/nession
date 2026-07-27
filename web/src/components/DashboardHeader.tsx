@@ -1,7 +1,7 @@
 import { X, FileCog, Server, Clock, Cpu } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ConnectionStatus, ServerInfo } from '../types';
-import type { StatusFilter } from '../hooks/useDashboardHandlers';
+import type { StatusFilter } from '../hooks/useDashboard';
 import { SearchBar } from './SearchBar';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { RefreshButton } from './ui/RefreshButton';

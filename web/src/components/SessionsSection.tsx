@@ -3,7 +3,7 @@ import type { Agent, Session } from '../types';
 import { Button } from './ui/button';
 import { RefreshButton } from './ui/RefreshButton';
 import { SessionList } from './SessionList';
-import type { SortField, SortDirection } from '../hooks/useDashboardHandlers';
+import type { SortField, SortDirection } from '../hooks/useDashboard';
 
 export function SessionsSection({
   agents, filteredSessions, loadingSessions,
