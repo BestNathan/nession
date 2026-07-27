@@ -19,12 +19,14 @@ export function useAgentData(wsService: WebSocketService) {
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heartbeatHistory = useRef<Map<string, string[]>>(new Map());
+  const wsServiceRef = useRef(wsService);
+  wsServiceRef.current = wsService;
 
   const fetchAgents = useCallback(async () => {
     setLoadingAgents(true);
     setError(null);
     try {
-      const newAgents = await wsService.listAgents();
+      const newAgents = await wsServiceRef.current.listAgents();
       setAgents(newAgents);
       trackHeartbeats(newAgents, heartbeatHistory.current);
     } catch (err) {
@@ -34,7 +36,7 @@ export function useAgentData(wsService: WebSocketService) {
     } finally {
       setLoadingAgents(false);
     }
-  }, [wsService]);
+  }, []);
 
   const getHeartbeatHistory = useCallback((agentId: string): string[] => {
     return heartbeatHistory.current.get(agentId) ?? [];
