@@ -1,5 +1,7 @@
 pub mod control;
-pub mod control_mode;
+pub mod env;
 pub mod manager;
 pub mod parser;
 pub mod pty;
+pub mod session;
+pub mod util;

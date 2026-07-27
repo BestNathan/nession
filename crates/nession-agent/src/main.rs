@@ -3,7 +3,7 @@
 //! Startup sequence:
 //! 1. Parse configuration (TOML file or defaults)
 //! 2. Initialize tracing/logging
-//! 3. Create TmuxManager
+//! 3. Create SessionManager
 //! 4. Start Agent WebSocket server (P2P client connections)
 //! 5. Connect to central server via ServerClient
 //! 6. Start HeartbeatLoop (periodic heartbeats)
@@ -20,7 +20,7 @@ use nession_agent::netwatch;
 use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::AgentMetadata;
 use nession_common::system;
 use std::path::Path;
@@ -45,11 +45,8 @@ async fn main() -> Result<()> {
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
 
-    // 3. Create TmuxManager
-    let tmux = TmuxManager::new();
-
-    // Check tmux availability
-    match tmux.check_tmux_available().await {
+    // 3. Check tmux availability
+    match nession_agent::tmux::util::check_tmux_available().await {
         Ok(true) => info!("tmux is available"),
         Ok(false) => warn!("tmux does not appear to be available"),
         Err(e) => warn!("Could not check tmux availability: {}", e),
@@ -118,7 +115,7 @@ async fn main() -> Result<()> {
         image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
-    let tmux_for_client = Arc::new(TmuxManager::new());
+    let tmux_for_client = Arc::new(SessionManager::new());
 
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
@@ -168,8 +165,11 @@ async fn main() -> Result<()> {
 
     // 6. Start HeartbeatLoop
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
-        let heartbeat =
-            HeartbeatLoop::new(handle.clone(), TmuxManager::new(), heartbeat_interval_secs);
+        let heartbeat = HeartbeatLoop::new(
+            handle.clone(),
+            SessionManager::new(),
+            heartbeat_interval_secs,
+        );
         let shutdown_handle = heartbeat.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = heartbeat.run().await {
@@ -189,7 +189,7 @@ async fn main() -> Result<()> {
     let watcher_shutdown = if let Some(ref handle) = client_handle {
         let watcher = SessionWatcher::new(
             handle.clone(),
-            TmuxManager::new(),
+            SessionManager::new(),
             config.session_poll_interval_secs,
         );
         let shutdown_handle = watcher.shutdown_handle();

@@ -5,7 +5,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{msg_types, ServerClient};
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::{AgentMetadata, AgentStatus};
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,7 +73,7 @@ async fn integration_connection_to_mock_server() {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -110,7 +110,7 @@ async fn integration_registration_message_format() {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -172,7 +172,7 @@ async fn integration_heartbeat_message_format() {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -244,7 +244,7 @@ async fn integration_session_update_message_format() {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -310,7 +310,7 @@ async fn integration_reconnection_logic() {
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 

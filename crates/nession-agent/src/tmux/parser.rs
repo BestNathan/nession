@@ -50,11 +50,7 @@ pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
     } else if line.starts_with("%layout-change ") {
         parse_layout_change(line)
     } else if line.starts_with("%window-resize ") {
-        super::control_mode::parse_window_resize(line).map(|ev| ControlMessage::WindowResize {
-            window_id: ev.window_id,
-            cols: ev.cols,
-            rows: ev.rows,
-        })
+        parse_window_resize(line)
     } else if line == "%exit" || line.starts_with("%exit ") {
         Some(ControlMessage::Exit)
     } else {
@@ -119,6 +115,19 @@ fn parse_layout_change(line: &str) -> Option<ControlMessage> {
     Some(ControlMessage::LayoutChange {
         window_id: window_id.to_string(),
         layout: layout.to_string(),
+    })
+}
+
+fn parse_window_resize(line: &str) -> Option<ControlMessage> {
+    let mut parts = line.split_whitespace();
+    let _tag = parts.next()?;
+    let window_id = parts.next()?.to_string();
+    let cols: u16 = parts.next()?.parse().ok()?;
+    let rows: u16 = parts.next()?.parse().ok()?;
+    Some(ControlMessage::WindowResize {
+        window_id,
+        cols,
+        rows,
     })
 }
 
@@ -250,6 +259,38 @@ mod tests {
             Some(ControlMessage::WindowResize { window_id, cols: 200, rows: 60 })
             if window_id == "@1"
         ));
+    }
+
+    #[test]
+    fn test_parse_window_resize_valid() {
+        let msg = parse_control_line("%window-resize @1 120 40");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::WindowResize { window_id, cols: 120, rows: 40 })
+            if window_id == "@1"
+        ));
+    }
+
+    #[test]
+    fn test_parse_window_resize_large_dimensions() {
+        let msg = parse_control_line("%window-resize @5 300 100");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::WindowResize { window_id, cols: 300, rows: 100 })
+            if window_id == "@5"
+        ));
+    }
+
+    #[test]
+    fn test_parse_window_resize_malformed() {
+        let msg = parse_control_line("%window-resize @1");
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn test_parse_window_resize_invalid_dimensions() {
+        let msg = parse_control_line("%window-resize @1 abc def");
+        assert!(msg.is_none());
     }
 
     #[test]

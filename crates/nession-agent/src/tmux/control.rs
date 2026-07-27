@@ -16,63 +16,13 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
+use super::util::run_tmux_command;
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
-
-/// Capture the last `lines` lines of scrollback for a session's active pane,
-/// including ANSI escape sequences so xterm.js can render formatting.
-///
-/// Returns the raw ANSI bytes on success, or `None` if the capture fails
-/// (e.g. session has no panes, tmux not available).
-pub async fn capture_scrollback(session: &str, lines: u16) -> Option<Vec<u8>> {
-    let lines_str = lines.to_string();
-    let output = Command::new("tmux")
-        .args([
-            "capture-pane",
-            "-t",
-            session,
-            "-p",
-            "-S",
-            &format!("-{lines_str}"),
-            "-E",
-            "-",
-            "-e",
-        ])
-        .output()
-        .await
-        .ok()?;
-    if output.status.success() && !output.stdout.is_empty() {
-        Some(output.stdout)
-    } else {
-        None
-    }
-}
-
-/// Run a tmux subcommand against a named session.
-///
-/// Spawns `tmux <args> -t <session>` and waits for completion.  Returns
-/// `Ok(())` on success, or an error with the command description and exit
-/// status on failure.
-///
-/// Prefer this over ad-hoc `Command::new("tmux")` calls — it ensures
-/// consistent error reporting (including the exit status in the message).
-async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
-    let mut cmd = Command::new("tmux");
-    cmd.args(args).arg("-t").arg(session);
-    let desc = format!("tmux {} -t {session}", args.join(" "));
-    let status = cmd
-        .status()
-        .await
-        .with_context(|| format!("failed to spawn {desc}"))?;
-    if !status.success() {
-        anyhow::bail!("{desc} exited with status: {status}");
-    }
-    Ok(())
-}
 
 /// tmux control mode session — one per attached web client.
 ///
@@ -213,6 +163,29 @@ impl Drop for ControlModeSession {
     fn drop(&mut self) {
         // Best-effort kill. Drop is sync so we can't await the wait().
         let _ = self.child.start_kill();
+    }
+}
+
+#[async_trait::async_trait]
+impl super::session::TmuxSession for ControlModeSession {
+    async fn write_input(&mut self, data: &[u8]) -> Result<()> {
+        ControlModeSession::write_input(self, data).await
+    }
+
+    async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        ControlModeSession::resize(self, cols, rows).await
+    }
+
+    fn viewport(&self) -> (u16, u16) {
+        ControlModeSession::viewport(self)
+    }
+
+    fn session_name(&self) -> &str {
+        ControlModeSession::session_name(self)
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        ControlModeSession::close(self).await
     }
 }
 

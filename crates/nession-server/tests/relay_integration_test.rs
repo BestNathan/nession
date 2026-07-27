@@ -15,7 +15,7 @@ use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::AgentMetadata;
 use nession_server::db::Database;
@@ -131,7 +131,7 @@ async fn register_agent(
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -193,14 +193,14 @@ async fn relay_attach_and_terminal_io() {
     let session_name = "relay_test_io";
 
     // Pre-clean tmux session from previous crashed run.
-    TmuxManager::new().kill_session(session_name).await.ok();
+    SessionManager::new().kill_session(session_name).await.ok();
 
     // 1. Start server and agent.
     let (server_addr, server_handle, db_path) = start_server("test-token").await;
     let (agent_addr, agent_handle) = start_agent("relay-test-agent").await;
 
     // 2. Create a tmux session.
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     tmux.create_session(session_name, 80, 24, "/tmp", &[])
         .await
         .expect("create tmux session");
@@ -217,7 +217,7 @@ async fn relay_attach_and_terminal_io() {
     // 3b. Start heartbeat loop so the server keeps the agent Online.
     let heartbeat = HeartbeatLoop::new(
         client_handle.clone(),
-        TmuxManager::new(),
+        SessionManager::new(),
         1, // 1s interval for fast test
     );
     let heartbeat_shutdown = heartbeat.shutdown_handle();
@@ -228,7 +228,7 @@ async fn relay_attach_and_terminal_io() {
     // 3c. Start session watcher so the tmux session syncs to the server.
     let watcher = SessionWatcher::new(
         client_handle.clone(),
-        TmuxManager::new(),
+        SessionManager::new(),
         1, // 1s poll for fast test
     );
     let watcher_shutdown = watcher.shutdown_handle();

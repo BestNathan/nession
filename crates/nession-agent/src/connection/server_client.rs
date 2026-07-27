@@ -31,7 +31,7 @@ use tokio_tungstenite::{
 use tracing::{debug, error, info, warn};
 
 use crate::env::EnvStore;
-use crate::tmux::manager::TmuxManager;
+use crate::tmux::manager::SessionManager;
 
 /// Type alias for the WebSocket stream.
 type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -108,7 +108,7 @@ pub struct ServerClient {
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
-    tmux: Arc<TmuxManager>,
+    tmux: Arc<SessionManager>,
     /// Store for agent-local env files under `~/.nession/agent/envs`.
     env_store: EnvStore,
     /// Track sourced env files per session (session_id -> Vec<EnvFileRef>)
@@ -255,7 +255,7 @@ impl ServerClient {
         addresses: Vec<AgentAddress>,
         display_name: Option<String>,
         metadata: AgentMetadata,
-        tmux: Arc<TmuxManager>,
+        tmux: Arc<SessionManager>,
         default_working_dir: String,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
@@ -701,6 +701,7 @@ impl ServerClient {
                 for snap in &payload.snapshots {
                     if let Err(e) = self
                         .tmux
+                        .env()
                         .source_env(client_id, &payload.name, &snap.name, &snap.vars)
                         .await
                     {
@@ -744,6 +745,7 @@ impl ServerClient {
                 let mut error: Option<String> = None;
                 if let Err(e) = self
                     .tmux
+                    .env()
                     .unsource_env(client_id, &payload.name, "all", &payload.keys)
                     .await
                 {
@@ -958,7 +960,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1004,7 +1006,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1060,7 +1062,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1144,7 +1146,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1223,7 +1225,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1326,7 +1328,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1346,7 +1348,7 @@ mod tests {
         assert_eq!(parsed["payload"]["session_name"], "test-session-create");
 
         // Clean up the created session.
-        let tmux = TmuxManager::new();
+        let tmux = SessionManager::new();
         let _ = tmux.kill_session("test-session-create").await;
 
         handle.shutdown().await.ok();
@@ -1383,7 +1385,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 // First create a session to kill.
-                let tmux = TmuxManager::new();
+                let tmux = SessionManager::new();
                 let _ = tmux
                     .create_session("test-session-kill", 80, 24, "/tmp", &[])
                     .await;
@@ -1436,7 +1438,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1528,7 +1530,7 @@ mod tests {
             vec![], // addresses
             None,   // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1797,7 +1799,7 @@ mod tests {
             vec![],
             None, // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1883,7 +1885,7 @@ mod tests {
             vec![],
             None, // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1927,7 +1929,7 @@ mod tests {
                 let _ = stream.next().await;
 
                 // First create a session to apply env to
-                let tmux = TmuxManager::new();
+                let tmux = SessionManager::new();
                 let _ = tmux
                     .create_session("test-session-env-unset", 80, 24, "/tmp", &[])
                     .await;
@@ -1980,7 +1982,7 @@ mod tests {
             vec![],
             None, // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 
@@ -1996,7 +1998,7 @@ mod tests {
         assert_eq!(parsed["payload"]["request_id"], "req-env-unset-1");
 
         // Clean up
-        let tmux = TmuxManager::new();
+        let tmux = SessionManager::new();
         let _ = tmux.kill_session("test-session-env-unset").await;
 
         handle.shutdown().await.ok();
@@ -2028,7 +2030,7 @@ mod tests {
             vec![],
             None, // display_name
             metadata,
-            Arc::new(TmuxManager::new()),
+            Arc::new(SessionManager::new()),
             "/tmp".to_string(),
         );
 

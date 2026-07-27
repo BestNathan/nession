@@ -1,8 +1,9 @@
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
+use nession_agent::tmux::util::{check_tmux_available, send_keys};
 
 #[tokio::test]
 async fn test_list_sessions_empty() {
-    let manager = TmuxManager::new();
+    let manager = SessionManager::new();
     let sessions = manager.list_sessions().await.unwrap();
     // tmux may not be running, so empty list is expected
     // Length is always >= 0 for a Vec, so just check it's valid
@@ -11,7 +12,7 @@ async fn test_list_sessions_empty() {
 
 #[tokio::test]
 async fn test_create_and_kill_session() {
-    let manager = TmuxManager::new();
+    let manager = SessionManager::new();
     let session_name = "test_session_integration";
 
     // Create session
@@ -34,7 +35,7 @@ async fn test_create_and_kill_session() {
 
 #[tokio::test]
 async fn test_send_keys() {
-    let manager = TmuxManager::new();
+    let manager = SessionManager::new();
     let session_name = "test_send_keys";
 
     // Create session
@@ -44,7 +45,7 @@ async fn test_send_keys() {
         .unwrap();
 
     // Send keys - should not error
-    manager.send_keys(session_name, "echo test").await.unwrap();
+    send_keys(session_name, "echo test").await.unwrap();
 
     // Clean up
     manager.kill_session(session_name).await.unwrap();
@@ -52,24 +53,21 @@ async fn test_send_keys() {
 
 #[tokio::test]
 async fn test_send_keys_nonexistent_session() {
-    let manager = TmuxManager::new();
-
     // Sending keys to a non-existent session should fail
-    let result = manager.send_keys("nonexistent_session_xyz", "test").await;
+    let result = send_keys("nonexistent_session_xyz", "test").await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_check_tmux_available() {
-    let manager = TmuxManager::new();
-    let available = manager.check_tmux_available().await.unwrap();
+    let available = check_tmux_available().await.unwrap();
     // tmux should be available in the test environment
     assert!(available, "tmux should be available for tests");
 }
 
 #[tokio::test]
 async fn test_kill_nonexistent_session() {
-    let manager = TmuxManager::new();
+    let manager = SessionManager::new();
 
     // Killing a non-existent session should fail
     let result = manager.kill_session("nonexistent_session_xyz").await;
@@ -78,7 +76,7 @@ async fn test_kill_nonexistent_session() {
 
 #[tokio::test]
 async fn test_create_duplicate_session() {
-    let manager = TmuxManager::new();
+    let manager = SessionManager::new();
     let session_name = "test_duplicate";
 
     // Create session

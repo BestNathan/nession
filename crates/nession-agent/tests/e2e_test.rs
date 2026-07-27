@@ -17,7 +17,7 @@ use nession_agent::server::websocket::{
 };
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
-use nession_agent::tmux::manager::TmuxManager;
+use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_common::protocol::AgentMetadata;
 use nession_server::db::Database;
@@ -120,7 +120,7 @@ async fn register_agent_with_server(
         vec![], // addresses
         None,   // display_name
         metadata,
-        Arc::new(TmuxManager::new()),
+        Arc::new(SessionManager::new()),
         "/tmp".to_string(),
     );
 
@@ -154,7 +154,7 @@ async fn test_full_agent_server_integration() {
     // Start heartbeat loop.
     let heartbeat = HeartbeatLoop::new(
         client_handle.clone(),
-        TmuxManager::new(),
+        SessionManager::new(),
         1, // 1 second for testing
     );
     let heartbeat_shutdown = heartbeat.shutdown_handle();
@@ -218,7 +218,7 @@ async fn test_client_connects_to_agent_via_p2p() {
 
 #[tokio::test]
 async fn test_terminal_io_through_full_chain() {
-    let tmux = TmuxManager::new();
+    let tmux = SessionManager::new();
     let session_name = "e2e_terminal_io";
 
     // Create a tmux session.
@@ -329,7 +329,7 @@ async fn test_terminal_io_through_full_chain() {
 
 #[tokio::test]
 async fn test_session_lifecycle() {
-    let _tmux = TmuxManager::new();
+    let _tmux = SessionManager::new();
 
     // Start agent server.
     let (agent_addr, agent_handle) = start_test_agent_server().await;
@@ -527,14 +527,14 @@ async fn test_graceful_shutdown() {
     .await;
 
     // Start heartbeat.
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), TmuxManager::new(), 10);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 10);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
     // Start session watcher.
-    let watcher = SessionWatcher::new(client_handle.clone(), TmuxManager::new(), 5);
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 5);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;
