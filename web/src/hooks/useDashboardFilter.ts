@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-export type StatusFilter = 'all' | 'online' | 'offline';
+export type StatusFilter = 'all' | 'online' | 'offline' | 'degraded';
 export type SortField = 'name' | 'activity';
 export type SortDirection = 'asc' | 'desc';
 
