@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { StrictMode } from 'react';
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { WebSocketContext } from '../../hooks/useWebSocket';
@@ -188,6 +189,44 @@ describe('TerminalToolbar', () => {
     await waitFor(() => {
       expect(ws.addCommand).toHaveBeenCalledWith('old', 'old cmd', true);
     });
+    expect(localStorage.getItem('nession_quick_commands')).toBeNull();
+  });
+
+  it('fetches once under StrictMode double-mount (no duplicate list request)', async () => {
+    const ws = createMockWs();
+    render(
+      <StrictMode>
+        <WebSocketContext.Provider value={ws}>
+          <TerminalToolbar sendText={vi.fn()} />
+        </WebSocketContext.Provider>
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(ws.listCommands).toHaveBeenCalled();
+    });
+    // StrictMode mounts → unmounts → remounts in dev; the ref guard must keep
+    // the initial fetch to a single request.
+    expect(ws.listCommands).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports legacy commands once under StrictMode double-mount', async () => {
+    localStorage.setItem(
+      'nession_quick_commands',
+      JSON.stringify([{ id: 'legacy-1', label: 'old', command: 'old cmd', raw: false }]),
+    );
+    const ws = createMockWs();
+    render(
+      <StrictMode>
+        <WebSocketContext.Provider value={ws}>
+          <TerminalToolbar sendText={vi.fn()} />
+        </WebSocketContext.Provider>
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(ws.addCommand).toHaveBeenCalledWith('old', 'old cmd', false);
+    });
+    // Must migrate the legacy command exactly once, not twice.
+    expect(ws.addCommand).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem('nession_quick_commands')).toBeNull();
   });
 });
