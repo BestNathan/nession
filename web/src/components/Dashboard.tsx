@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { ConnectionStatus } from '../types';
-import { useDashboardHandlers } from './useDashboardHandlers';
+import { useDashboardHandlers } from '../hooks/useDashboardHandlers';
 import { useAttachFlow } from './useAttachFlow';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';

@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
 import type { Session } from '../types';
-import type { SortField, SortDirection } from './useDashboardHandlers';
+import type { SortField, SortDirection } from '../hooks/useDashboardHandlers';
 
 interface SessionListProps {
   sessions: Session[];
