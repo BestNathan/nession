@@ -376,7 +376,18 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
         return;
       }
 
-      // 3. No handler — log a warning
+      // 3. Handle well-known ack / error types that no plugin registered for
+      if (message.msg_type === 'error') {
+        const errMsg = (message.payload as Record<string, unknown>)?.message as string | undefined;
+        console.error('[relay] Server error:', errMsg ?? 'unknown error', message.payload);
+        return;
+      }
+      if (message.msg_type === 'ok') {
+        // Fire-and-forget acknowledgements — no action needed.
+        return;
+      }
+
+      // 4. No handler — log a warning
       console.warn('Unhandled message type:', message.msg_type, message.payload);
     } catch (error) {
       console.error('Failed to parse WebSocket message:', error);
