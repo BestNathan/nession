@@ -101,6 +101,13 @@ tmux sessions (per-node)
 - **Relay:** Browser → Server → Agent (terminal data proxied through server)
 - **P2P:** Browser → Agent directly (lower latency, agent_address from attach response)
 
+### Frontend Conventions
+
+- **hooks/**: All custom hooks. Never place hooks in `components/`.
+- **components/**: UI components only. If a file starts with `use`, it belongs in `hooks/`.
+- **services/websocket/plugins/**: WebSocket functionality is plugin-based. New capabilities go in a plugin, not in the core.
+- **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
+
 ### Key Design Decisions
 
 - **Web UI theming:** shadcn/ui default dark theme (Zinc/neutral palette). Terminal keeps Catppuccin Mocha independent of UI theme.
