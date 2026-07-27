@@ -510,6 +510,7 @@ impl ConnectionHandler {
                         "nession_version": a.metadata.nession_version,
                         "tmux_version": a.metadata.tmux_version,
                         "os_version": a.metadata.os_version,
+                        "image_tag": a.metadata.image_tag,
                     },
                 })
             })
@@ -2991,7 +2992,7 @@ mod tests {
                 "auth_token": "",
                 "addresses": [],
                 "connect_url": null,
-                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1", "image_tag": "sha-abc123" },
             }),
         ))
         .await
@@ -3006,6 +3007,9 @@ mod tests {
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["agent_id"], "a1");
         assert_eq!(agents[0]["status"], "online");
+        // image_tag must be forwarded to clients (regression: it was dropped
+        // from the metadata JSON, so the UI showed "unknown").
+        assert_eq!(agents[0]["metadata"]["image_tag"], "sha-abc123");
     }
 
     #[tokio::test]
