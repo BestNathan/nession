@@ -7,6 +7,28 @@ type CommandsChangeCallback = () => void;
 type TerminalOutputCallback = (data: string) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
+/**
+ * Decode base64-encoded terminal data from relay mode.
+ * Relay mode wraps raw bytes in base64; P2P mode sends plain strings.
+ */
+export function decodeTerminalData(rawData: string): string {
+  if (!rawData) {
+    return rawData;
+  }
+  try {
+    const binary = atob(rawData);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return rawData;
+  }
+}
+
+function getSessionId(payload: Record<string, unknown>): string {
+  return (payload.session_name ?? payload.session_id) as string;
+}
+
 export class EventPlugin implements WebSocketPlugin {
   name = 'events';
 
@@ -59,70 +81,50 @@ export class EventPlugin implements WebSocketPlugin {
   }
 
   onAgentsChanged(callback: AgentsChangeCallback): () => void {
-    this.agentsChangeCallbacks.push(callback);
-    return () => {
-      const index = this.agentsChangeCallbacks.indexOf(callback);
-      if (index > -1) {
-        this.agentsChangeCallbacks.splice(index, 1);
-      }
-    };
+    return EventPlugin.addCallback(this.agentsChangeCallbacks, callback);
   }
 
   onSessionsChanged(callback: SessionsChangeCallback): () => void {
-    this.sessionsChangeCallbacks.push(callback);
-    return () => {
-      const index = this.sessionsChangeCallbacks.indexOf(callback);
-      if (index > -1) {
-        this.sessionsChangeCallbacks.splice(index, 1);
-      }
-    };
+    return EventPlugin.addCallback(this.sessionsChangeCallbacks, callback);
   }
 
   onCommandsChanged(callback: CommandsChangeCallback): () => void {
-    this.commandsChangeCallbacks.push(callback);
-    return () => {
-      const index = this.commandsChangeCallbacks.indexOf(callback);
-      if (index > -1) {
-        this.commandsChangeCallbacks.splice(index, 1);
-      }
-    };
+    return EventPlugin.addCallback(this.commandsChangeCallbacks, callback);
   }
 
   onTerminalOutput(sessionId: string, callback: TerminalOutputCallback): () => void {
-    if (!this.terminalOutputCallbacks.has(sessionId)) {
-      this.terminalOutputCallbacks.set(sessionId, []);
-    }
-    this.terminalOutputCallbacks.get(sessionId)!.push(callback);
+    return EventPlugin.addMapCallback(this.terminalOutputCallbacks, sessionId, callback);
+  }
 
+  onTerminalResize(sessionId: string, callback: TerminalResizeCallback): () => void {
+    return EventPlugin.addMapCallback(this.terminalResizeCallbacks, sessionId, callback);
+  }
+
+  private static addCallback<T>(list: T[], callback: T): () => void {
+    list.push(callback);
     return () => {
-      const callbacks = this.terminalOutputCallbacks.get(sessionId);
-      if (callbacks) {
-        const index = callbacks.indexOf(callback);
-        if (index > -1) {
-          callbacks.splice(index, 1);
-        }
-        if (callbacks.length === 0) {
-          this.terminalOutputCallbacks.delete(sessionId);
-        }
+      const index = list.indexOf(callback);
+      if (index > -1) {
+        list.splice(index, 1);
       }
     };
   }
 
-  onTerminalResize(sessionId: string, callback: TerminalResizeCallback): () => void {
-    if (!this.terminalResizeCallbacks.has(sessionId)) {
-      this.terminalResizeCallbacks.set(sessionId, []);
+  private static addMapCallback<T>(map: Map<string, T[]>, key: string, callback: T): () => void {
+    if (!map.has(key)) {
+      map.set(key, []);
     }
-    this.terminalResizeCallbacks.get(sessionId)!.push(callback);
+    map.get(key)!.push(callback);
 
     return () => {
-      const callbacks = this.terminalResizeCallbacks.get(sessionId);
+      const callbacks = map.get(key);
       if (callbacks) {
         const index = callbacks.indexOf(callback);
         if (index > -1) {
           callbacks.splice(index, 1);
         }
         if (callbacks.length === 0) {
-          this.terminalResizeCallbacks.delete(sessionId);
+          map.delete(key);
         }
       }
     };
@@ -141,20 +143,14 @@ export class EventPlugin implements WebSocketPlugin {
   }
 
   private handleTerminalOutput(payload: Record<string, unknown>): void {
-    const sessionId = (payload.session_name ?? payload.session_id) as string;
+    const sessionId = getSessionId(payload);
     const rawData = (payload.data ?? '') as string;
 
+    // Relay mode wraps data in base64; P2P sends plain strings.
     const isRelay = typeof payload.session_name === 'string' && typeof payload.session_id !== 'string';
     let data: string;
-    if (isRelay && rawData) {
-      try {
-        const binary = atob(rawData);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-        data = new TextDecoder().decode(bytes);
-      } catch {
-        data = rawData;
-      }
+    if (isRelay) {
+      data = decodeTerminalData(rawData);
     } else {
       data = rawData;
     }
@@ -166,9 +162,9 @@ export class EventPlugin implements WebSocketPlugin {
   }
 
   private handleTerminalResize(payload: Record<string, unknown>): void {
-    const sessionId = (payload.session_name ?? payload.session_id) as string;
-    const cols = payload.cols as number;
-    const rows = payload.rows as number;
+    const sessionId = getSessionId(payload);
+    const cols = (payload.cols as number) ?? 0;
+    const rows = (payload.rows as number) ?? 0;
 
     const callbacks = this.terminalResizeCallbacks.get(sessionId);
     if (callbacks) {
