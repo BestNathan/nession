@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Minus, Plus as PlusIcon, RotateCcw, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { useQuickCommands } from './useQuickCommands';
+import { useQuickCommands } from '../hooks/useQuickCommands';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
