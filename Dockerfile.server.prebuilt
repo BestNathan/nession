@@ -17,6 +17,7 @@ RUN mkdir -p /data /etc/nession && chown www-data:www-data /data
 COPY --from=web-dist / /usr/share/nginx/html/
 # Binary from rust build (arch-specific)
 COPY --from=server-bin /nession-server /usr/local/bin/nession-server
+RUN chmod +x /usr/local/bin/nession-server
 
 WORKDIR /etc/nession
 

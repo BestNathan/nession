@@ -17,6 +17,7 @@ RUN mkdir -p /etc/nession
 COPY --from=web-dist / /usr/share/nginx/html/
 # Binary from rust build (arch-specific)
 COPY --from=agent-bin /nession-agent /usr/local/bin/nession-agent
+RUN chmod +x /usr/local/bin/nession-agent
 
 WORKDIR /etc/nession
 
