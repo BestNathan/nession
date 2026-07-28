@@ -357,6 +357,44 @@ git push origin <branch-name>
 gh pr create --title "feat: description" --body "..."
 ```
 
+**When development is complete**, use auto-merge to merge the feature branch automatically once all CI checks pass:
+
+```bash
+# Enable auto-merge for feat/** branches — PR will merge automatically when checks pass
+gh pr merge <PR-NUMBER> --auto --squash
+
+# Check auto-merge status
+gh pr view <PR-NUMBER> --json autoMergeRequest
+
+# Cancel auto-merge if needed
+gh pr merge <PR-NUMBER> --disable-auto
+```
+
+**Auto-merge prerequisites:**
+- Branch is `feat/**` or `fix/**` (triggers CI workflow)
+- All CI checks are expected to pass (rust-check, web-check, builds)
+- PR is ready for review (no draft)
+
+**Benefits:**
+- No need to manually monitor CI status
+- PR merges immediately when checks pass
+- Reduces waiting time between approval and merge
+
+**⚠ Auto-merge will be cancelled if any check fails.** Fix the issue and push again — auto-merge will re-enable automatically.
+
+**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly without `--auto`:
+
+```bash
+# After merging feature branch to main
+git checkout main && git pull
+git checkout -b chore/bump-version
+# Bump version in Cargo.toml and web/package.json
+git add -A && git commit -m "chore: bump version to X.Y.Z"
+git push origin chore/bump-version
+gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
+gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
+```
+
 ### PR Body Template
 
 Every PR must include these three sections:
