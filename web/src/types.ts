@@ -147,4 +147,6 @@ export interface ServerInfo {
   agent_count: number;
   online_agent_count: number;
   session_count: number;
+  /** ISO 8601 timestamp when the binary was built. */
+  build_time?: string;
 }

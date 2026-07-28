@@ -164,6 +164,10 @@ fn default_image_tag() -> String {
     "unknown".to_string()
 }
 
+fn default_build_time() -> String {
+    "unknown".to_string()
+}
+
 /// Server → Agent response to `agent.register`.
 ///
 /// On acceptance the server tells the agent which heartbeat interval to use,
@@ -714,6 +718,9 @@ pub struct ServerInfoResponse {
     pub agent_count: usize,
     pub online_agent_count: usize,
     pub session_count: usize,
+    /// ISO 8601 timestamp when the binary was built (injected via BUILD_TIME env var at compile time).
+    #[serde(default = "default_build_time")]
+    pub build_time: String,
 }
 
 /// Agent → Server: update advertised addresses after network change.

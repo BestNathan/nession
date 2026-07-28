@@ -115,6 +115,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
@@ -199,6 +200,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
