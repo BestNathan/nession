@@ -75,6 +75,47 @@ gh pr create --title "chore: ..." --body "..."
 gh pr merge <N> --squash
 ```
 
+**Auto-merge for feature branches:**
+
+For `feat/**` and `fix/**` branches, use auto-merge to automatically merge the PR once all CI checks pass:
+
+```bash
+# Enable auto-merge (squash merge when checks pass)
+gh pr merge <PR-NUMBER> --auto --squash
+
+# Check status
+gh pr view <PR-NUMBER> --json autoMergeRequest,state,statusCheckRollup
+
+# Cancel auto-merge if needed
+gh pr merge <PR-NUMBER> --disable-auto
+```
+
+**When to use auto-merge:**
+- Branch is `feat/**` or `fix/**` (triggers CI workflow)
+- Development is complete (all features implemented)
+- All tests pass locally
+- PR is ready for review
+
+**Benefits:**
+- PR merges automatically when CI passes (rust-check, web-check, builds)
+- No need to manually monitor CI status or click merge
+- Reduces wait time between approval and merge
+
+**⚠ Auto-merge cancels automatically if any check fails.** Fix the issue and push — auto-merge re-enables.
+
+**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
+
+```bash
+# After merging feature branch to main
+git checkout main && git pull
+git checkout -b chore/bump-version
+# Bump version in Cargo.toml and web/package.json
+git add -A && git commit -m "chore: bump version to X.Y.Z"
+git push origin chore/bump-version
+gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
+gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
+```
+
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
 ```

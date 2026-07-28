@@ -568,6 +568,7 @@ impl ConnectionHandler {
                     "agent_count": agents.len(),
                     "online_agent_count": online,
                     "session_count": sessions,
+                    "build_time": option_env!("BUILD_TIME").unwrap_or("unknown"),
                 }
             })
             .to_string(),

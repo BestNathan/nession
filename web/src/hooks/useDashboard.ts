@@ -1,11 +1,12 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/websocket';
-import { useWebSocket } from '../hooks/useWebSocket';
-import { useAgentData } from '../hooks/useAgentData';
-import { useSessionData } from '../hooks/useSessionData';
-import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from '../hooks/useDashboardFilter';
-import { useRealtimeUpdates } from '../hooks/useRealtimeUpdates';
+import { useWebSocket } from './useWebSocket';
+import { useAgentData } from './useAgentData';
+import { useSessionData } from './useSessionData';
+import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from './useDashboardFilter';
+import { useDashboardModals } from './useDashboardModals';
+import { useRealtimeUpdates } from './useRealtimeUpdates';
 
 export type { StatusFilter, SortField, SortDirection };
 
@@ -39,7 +40,7 @@ export interface DashboardState {
   clearError: () => void;
 }
 
-// ── Pure helpers (kept here to avoid re-exports plumbing) ────────────────
+// ── Pure helpers ──────────────────────────────────────────────────────────
 
 function filterAgents(agents: Agent[], statusFilter: StatusFilter, searchQuery: string): Agent[] {
   let result = agents;
@@ -94,7 +95,7 @@ function filterSessions(
  * Composes agent/session data, filter state, modal state, and realtime
  * subscriptions into the single shape that `<Dashboard>` consumes.
  */
-export function useDashboardHandlers(_wsService?: WebSocketService): DashboardState {
+export function useDashboard(_wsService?: WebSocketService): DashboardState {
   const wsService = useWebSocket(_wsService);
 
   // Data
@@ -113,9 +114,11 @@ export function useDashboardHandlers(_wsService?: WebSocketService): DashboardSt
   } = useDashboardFilter();
 
   // Modal state
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [sessionToKill, setSessionToKill] = useState<Session | null>(null);
+  const {
+    selectedAgent, setSelectedAgent,
+    showCreateModal, setShowCreateModal,
+    sessionToKill, setSessionToKill,
+  } = useDashboardModals();
 
   // Derived filtered lists (memoised on data + filter state)
   const filteredAgents = useMemo(
@@ -134,13 +137,13 @@ export function useDashboardHandlers(_wsService?: WebSocketService): DashboardSt
   const handleSessionKilled = useCallback(() => {
     setSessionToKill(null);
     fetchSessions();
-  }, [fetchSessions]);
+  }, [fetchSessions, setSessionToKill]);
 
   const handleSessionCreated = useCallback(() => {
     setShowCreateModal(false);
     fetchSessions();
     agentData.fetchAgents();
-  }, [fetchSessions, agentData]);
+  }, [fetchSessions, agentData, setShowCreateModal]);
 
   return {
     agents: agentData.agents,

@@ -22,6 +22,7 @@ jobs:
           path: ~/.cargo/bin/cargo-llvm-cov
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
       - run: just check
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -114,6 +115,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin
@@ -198,6 +200,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: cargo build --release --bin nession-server --bin nession-agent
       - run: |
           mkdir -p /tmp/server-bin /tmp/agent-bin

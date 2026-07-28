@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { Session } from '../types';
-import type { AttachedSession } from './TerminalView';
-import type { AttachChoice } from './env/AttachDialog';
+import type { AttachedSession } from '../components/TerminalView';
+import type { AttachChoice } from '../components/env/AttachDialog';
 import { saveAttachPrefs } from '../services/attachPrefs';
 
 interface LocationLike { pathname: string; }

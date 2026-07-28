@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import type { Agent } from '../types';
 import { formatUptime, getStatusVariant } from '../lib/format';
-import { useAgentRename } from './useAgentRename';
+import { useAgentRename } from '../hooks/useAgentRename';
 
 interface AgentCardProps {
   agent: Agent;

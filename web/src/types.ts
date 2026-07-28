@@ -115,99 +115,29 @@ export interface KillSessionResponse {
   error?: string;
 }
 
-// --- Environment-variable file management ---
+// Domain-specific types have been moved to their respective component folders.
+// Re-exported here for backward compatibility.
+export type {
+  EnvSource,
+  EnvFileInfo,
+  EnvFileRef,
+  EnvListResponse,
+  EnvGetResponse,
+  EnvWriteResponse,
+  EnvDeleteResponse,
+  ActiveEnvFile,
+  SessionEnvActiveResponse,
+  SessionEnvResponse,
+  SessionEnvQueryResponse,
+} from './components/env/types';
 
-export type EnvSource = 'server' | 'agent';
-
-export interface EnvFileInfo {
-  name: string;
-  source: EnvSource;
-  agent_id?: string;
-  size: number;
-  modified: number; // unix seconds
-  var_count: number;
-}
-
-export interface EnvFileRef {
-  name: string;
-  source: EnvSource;
-  agent_id?: string;
-}
-
-export interface EnvListResponse {
-  files: EnvFileInfo[];
-  error?: string;
-}
-
-export interface EnvGetResponse {
-  success: boolean;
-  content?: string;
-  in_use_by?: string[];
-  error?: string;
-}
-
-export interface EnvWriteResponse {
-  success: boolean;
-  exists?: boolean;
-  error?: string;
-  warnings?: string[];
-}
-
-export interface EnvDeleteResponse {
-  success: boolean;
-  error?: string;
-}
-
-export interface ActiveEnvFile {
-  name: string;
-  source: EnvSource;
-  agent_id?: string;
-  phase: string; // "create" | "attach"
-}
-
-export interface SessionEnvActiveResponse {
-  active: ActiveEnvFile[];
-}
-export interface SessionEnvResponse {
-  success: boolean;
-  error?: string;
-  warnings?: string[];
-}
-
-export interface SessionEnvQueryResponse {
-  sourced_files: EnvFileRef[];
-  error?: string;
-}
-
-// Quick command (server-managed, issue #95, part 3).
-export interface QuickCommandItem {
-  id: string;
-  label: string;
-  command: string;
-  raw?: boolean;
-  sort_order?: number;
-  created_at?: number;
-}
-
-export interface CommandsListResponse {
-  commands: QuickCommandItem[];
-}
-
-export interface CommandsAddResponse {
-  success: boolean;
-  id?: string;
-  error?: string;
-}
-
-export interface CommandsRemoveResponse {
-  success: boolean;
-  error?: string;
-}
-
-export interface CommandsUpdateResponse {
-  success: boolean;
-  error?: string;
-}
+export type {
+  QuickCommandItem,
+  CommandsListResponse,
+  CommandsAddResponse,
+  CommandsRemoveResponse,
+  CommandsUpdateResponse,
+} from './components/quickCommands/types';
 
 /** Server info returned by client.server.info. */
 export interface ServerInfo {
@@ -217,4 +147,6 @@ export interface ServerInfo {
   agent_count: number;
   online_agent_count: number;
   session_count: number;
+  /** ISO 8601 timestamp when the binary was built. */
+  build_time?: string;
 }

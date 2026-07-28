@@ -2,8 +2,8 @@ import { useCallback, useState } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { ConnectionStatus } from '../types';
-import { useDashboardHandlers } from './useDashboardHandlers';
-import { useAttachFlow } from './useAttachFlow';
+import { useDashboard } from '../hooks/useDashboard';
+import { useAttachFlow } from '../hooks/useAttachFlow';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
 import { AgentSection } from './AgentSection';
@@ -33,7 +33,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     isSearchActive, sortField, sortDirection, toggleSort, selectedAgent, setSelectedAgent,
     getHeartbeatHistory, setShowCreateModal, setSessionToKill, handleSessionKilled,
     handleSessionCreated, fetchSessions, clearError, updateAgent,
-  } = useDashboardHandlers();
+  } = useDashboard();
 
   const {
     attachedSession, attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,

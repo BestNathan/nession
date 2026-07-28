@@ -3,7 +3,7 @@ import { Search } from 'lucide-react';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { useDebouncedInput } from '../hooks/useDebouncedInput';
-import type { StatusFilter } from './useDashboardHandlers';
+import type { StatusFilter } from '../hooks/useDashboard';
 
 interface SearchBarProps {
   searchQuery: string;

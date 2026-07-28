@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useAttachFlow } from '../useAttachFlow';
 import type { Session, AttachInfo } from '../../types';
-import type { AttachChoice } from '../env/AttachDialog';
+import type { AttachChoice } from '../../components/env/AttachDialog';
 
 function session(): Session {
   return {

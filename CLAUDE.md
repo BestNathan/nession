@@ -101,6 +101,13 @@ tmux sessions (per-node)
 - **Relay:** Browser → Server → Agent (terminal data proxied through server)
 - **P2P:** Browser → Agent directly (lower latency, agent_address from attach response)
 
+### Frontend Conventions
+
+- **hooks/**: All custom hooks. Never place hooks in `components/`.
+- **components/**: UI components only. If a file starts with `use`, it belongs in `hooks/`.
+- **services/websocket/plugins/**: WebSocket functionality is plugin-based. New capabilities go in a plugin, not in the core.
+- **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
+
 ### Key Design Decisions
 
 - **Web UI theming:** shadcn/ui default dark theme (Zinc/neutral palette). Terminal keeps Catppuccin Mocha independent of UI theme.
@@ -253,8 +260,20 @@ git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
 
 # 4. MERGE — after review, merge to main (CI auto-publishes images)
+#    For feat/** branches, use auto-merge to merge automatically when CI checks pass:
+gh pr merge <PR-NUMBER> --auto --squash
 
-# 5. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
+# 5. VERSION BUMP — create a separate branch from main for version bump
+git checkout main && git pull
+git checkout -b chore/bump-version
+# Edit Cargo.toml and web/package.json to bump version
+git add -A && git commit -m "chore: bump version to X.Y.Z"
+git push origin chore/bump-version
+gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
+# chore/** branches don't trigger CI, so merge directly (no --auto needed)
+gh pr merge <PR-NUMBER> --squash
+
+# 6. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
 git checkout main
 git pull
 ```
@@ -294,6 +313,11 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 3. **Collect screenshots** via Playwright MCP for any functional UI changes
 4. Push, create PR (include `Closes #<ISSUE>` in body, screenshots in PR body) → CI runs docker-publish
 5. Merge to main → auto-closes issue + CI publishes `main`-tagged images
+   - Use auto-merge when development is complete and version is bumped:
+     ```bash
+     gh pr merge <PR-NUMBER> --auto --squash
+     ```
+   - CI will automatically merge the PR once all checks pass
 6. Update image tags in k8s manifests: `k8s/kustomization.yaml`
 7. `kubectl apply -k k8s/`
 

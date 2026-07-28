@@ -1,12 +1,13 @@
 import { X, FileCog, Server, Clock, Cpu } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { ConnectionStatus, ServerInfo } from '../types';
-import type { StatusFilter } from './useDashboardHandlers';
+import type { StatusFilter } from '../hooks/useDashboard';
 import { SearchBar } from './SearchBar';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { RefreshButton } from './ui/RefreshButton';
 import { Button } from './ui/button';
 import { useWebSocket } from '../hooks/useWebSocket';
+import pkg from '../../package.json';
 
 export interface SearchProps {
   query: string;
@@ -41,8 +42,18 @@ function formatUptimeCompact(seconds: number): string {
   return `${d}d${h % 24}h`;
 }
 
-// Web UI version baked at build time (import from package.json works in Vite)
-const WEB_VERSION = '0.10.0';
+function formatBuildTime(isoString: string): string {
+  if (!isoString || isoString === 'unknown') {return '';}
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) {return '';}
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${month}-${day} ${hours}:${minutes}`;
+}
+
+const WEB_VERSION = pkg.version;
 
 function ServerInfoInline({ refreshKey }: { refreshKey: number }) {
   const ws = useWebSocket();
@@ -79,6 +90,8 @@ function ServerInfoInline({ refreshKey }: { refreshKey: number }) {
     ? info.image_tag
     : null;
 
+  const buildTime = formatBuildTime(info.build_time ?? '');
+
   return (
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
       <span className="flex items-center gap-1">
@@ -89,6 +102,14 @@ function ServerInfoInline({ refreshKey }: { refreshKey: number }) {
       <span className="flex items-center gap-1">
         web v{WEB_VERSION}{imageTag && <span className="font-mono">({imageTag})</span>}
       </span>
+      {buildTime && (
+        <>
+          <span className="text-border">·</span>
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />built {buildTime}
+          </span>
+        </>
+      )}
       <span className="text-border">·</span>
       <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatUptimeCompact(liveUptime)}</span>
       <span className="text-border">·</span>

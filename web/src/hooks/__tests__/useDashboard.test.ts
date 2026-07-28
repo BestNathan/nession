@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDashboardHandlers } from '../../components/useDashboardHandlers';
+import { useDashboard } from '../useDashboard';
 import type { Agent, Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 
@@ -58,7 +58,7 @@ function createMockWsService(): MockWsService {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('useDashboardHandlers', () => {
+describe('useDashboard', () => {
   let agentsCallback: ((agents: Agent[]) => void) | null;
   let sessionsCallback: ((sessions: Session[]) => void) | null;
   let mockWsService: MockWsService;
@@ -81,7 +81,7 @@ describe('useDashboardHandlers', () => {
 
   describe('searchQuery', () => {
     it('filters agents by hostname (case-insensitive)', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -107,7 +107,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('filters agents by agent_id', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -126,7 +126,7 @@ describe('useDashboardHandlers', () => {
 
   describe('statusFilter', () => {
     it('filters agents by online status', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -142,7 +142,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('filters agents by offline status', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -157,7 +157,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('returns all agents when statusFilter is "all"', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -178,7 +178,7 @@ describe('useDashboardHandlers', () => {
 
   describe('combined filtering', () => {
     it('applies both searchQuery and statusFilter', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -195,7 +195,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('returns empty when no agents match both filters', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -209,7 +209,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('applies statusFilter, searchQuery, and sort to filteredSessions', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -240,7 +240,7 @@ describe('useDashboardHandlers', () => {
 
   describe('sorting', () => {
     it('sorts sessions by name ascending (default)', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -255,7 +255,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('toggles sort direction on same field', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -279,7 +279,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('switches sort field and resets to asc', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -306,7 +306,7 @@ describe('useDashboardHandlers', () => {
 
   describe('heartbeat history', () => {
     it('accumulates heartbeats across agent updates', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([
@@ -327,7 +327,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('caps heartbeat history at 5 entries', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       for (let i = 1; i <= 7; i++) {
         act(() => {
@@ -345,7 +345,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('returns empty array for unknown agents', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       expect(result.current.getHeartbeatHistory('unknown')).toEqual([]);
     });
@@ -355,13 +355,13 @@ describe('useDashboardHandlers', () => {
 
   describe('selectedAgent', () => {
     it('starts as null', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       expect(result.current.selectedAgent).toBeNull();
     });
 
     it('can be set to an agent and cleared', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       const agent = makeAgent({ agent_id: 'a1' });
       act(() => { result.current.setSelectedAgent(agent); });
@@ -376,20 +376,20 @@ describe('useDashboardHandlers', () => {
 
   describe('isSearchActive', () => {
     it('is false when searchQuery is empty and statusFilter is "all"', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       expect(result.current.isSearchActive).toBe(false);
     });
 
     it('is true when searchQuery is non-empty', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => { result.current.setSearchQuery('web'); });
       expect(result.current.isSearchActive).toBe(true);
     });
 
     it('is true when statusFilter is not "all"', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => { result.current.setStatusFilter('online'); });
       expect(result.current.isSearchActive).toBe(true);
@@ -407,7 +407,7 @@ describe('useDashboardHandlers', () => {
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
       mock.listSessions = vi.fn().mockResolvedValue([]);
 
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
 
       // Wait for the initial fetch to settle
       await vi.waitFor(() => {
@@ -427,7 +427,7 @@ describe('useDashboardHandlers', () => {
       mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
 
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
 
       await vi.waitFor(() => {
         expect(result.current.loadingAgents).toBe(false);
@@ -448,7 +448,7 @@ describe('useDashboardHandlers', () => {
       mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
 
-      const { result } = renderHook(() => useDashboardHandlers(mock as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
 
       await vi.waitFor(() => {
         expect(result.current.loadingAgents).toBe(false);
@@ -465,7 +465,7 @@ describe('useDashboardHandlers', () => {
 
   describe('session search filtering', () => {
     it('filters sessions by session_name', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -481,7 +481,7 @@ describe('useDashboardHandlers', () => {
     });
 
     it('filters sessions by agent_id', () => {
-      const { result } = renderHook(() => useDashboardHandlers(mockWsService as unknown as WebSocketService));
+      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
 
       act(() => {
         agentsCallback!([

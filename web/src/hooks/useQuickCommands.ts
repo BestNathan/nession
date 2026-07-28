@@ -6,13 +6,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebSocket } from './useWebSocket';
 import type { WebSocketService } from '../services/websocket';
 import {
   loadLegacyCommands,
   clearLegacyCommands,
   type QuickCommand,
-} from './quickCommands';
+} from '../components/quickCommands';
 
 export interface UseQuickCommandsResult {
   userCommands: QuickCommand[];
