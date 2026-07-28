@@ -19,3 +19,6 @@ images:
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
   newTag: ui-0.13.1
+
+patches:
+- path: patch-imagepullsecrets.yaml
