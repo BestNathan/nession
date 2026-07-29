@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: claude-tools
+  labels:
+    app: nession
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: nession-nfs
+  resources:
+    requests:
+      storage: 10Gi

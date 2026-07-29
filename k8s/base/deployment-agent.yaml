@@ -17,6 +17,64 @@ spec:
         app: nession
         component: agent
     spec:
+      initContainers:
+        - name: install-claude-code
+          image: debian:bullseye-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+
+              # If already installed on the persistent volume, skip.
+              if [ -x /shared/bin/node ] && [ -x /shared/bin/claude ]; then
+                echo "=== Claude Code already installed, skipping ==="
+                /shared/bin/node --version
+                /shared/bin/claude --version
+                exit 0
+              fi
+
+              echo "=== Installing Node.js + Claude Code ==="
+
+              # --- APT: switch to Aliyun mirror ---
+              cat > /etc/apt/sources.list << APTEOF
+              deb http://mirrors.aliyun.com/debian bullseye main
+              deb http://mirrors.aliyun.com/debian-security bullseye-security main
+              deb http://mirrors.aliyun.com/debian bullseye-updates main
+              APTEOF
+
+              apt-get update -qq
+              apt-get install -y -qq curl ca-certificates 2>&1 | tail -2
+
+              # --- Node.js 22 via NodeSource (bullseye-compatible) ---
+              curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 | tail -1
+              apt-get install -y -qq nodejs 2>&1 | tail -1
+
+              # --- npm: Aliyun mirror ---
+              npm config set registry https://registry.npmmirror.com
+
+              # --- Install Claude Code ---
+              npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
+
+              # --- Copy to shared volume ---
+              mkdir -p /shared/bin /shared/lib
+              cp /usr/bin/node /shared/bin/
+              cp /usr/bin/claude /shared/bin/
+              cp -a /usr/lib/node_modules /shared/lib/
+
+              echo "=== Init done ==="
+              /shared/bin/node --version
+              /shared/bin/claude --version
+          volumeMounts:
+            - name: claude-tools
+              mountPath: /shared
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
       containers:
         - name: nession-agent
           image: ghcr.io/bestnathan/nession-agent:main
@@ -44,6 +102,15 @@ spec:
               value: "ws://agent.nession.nhome.local/ws"
             - name: SERVER_BACKEND
               value: "127.0.0.1:19090"
+            # Claude Code tools from init container
+            - name: PATH
+              value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/claude-tools/bin"
+            - name: NODE_PATH
+              value: "/opt/claude-tools/lib/node_modules"
+          volumeMounts:
+            - name: claude-tools
+              mountPath: /opt/claude-tools
+              subPath: nession/claude-tools
           livenessProbe:
             httpGet:
               path: /health
@@ -64,3 +131,7 @@ spec:
               cpu: "1"
               memory: 512Mi
       # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public
+      volumes:
+        - name: claude-tools
+          persistentVolumeClaim:
+            claimName: claude-tools
