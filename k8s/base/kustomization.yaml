@@ -8,6 +8,8 @@ commonLabels:
 
 resources:
   - secret.yaml
+  - pv-nfs.yaml
+  - pvc-claude-tools.yaml
   - deployment-server.yaml
   - service-server.yaml
   - ingress-server.yaml
