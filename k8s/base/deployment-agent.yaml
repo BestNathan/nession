@@ -19,7 +19,7 @@ spec:
     spec:
       initContainers:
         - name: install-claude-code
-          image: debian:bullseye-slim
+          image: registry.cn-hangzhou.aliyuncs.com/library/debian:bullseye-slim
           command:
             - sh
             - -c
