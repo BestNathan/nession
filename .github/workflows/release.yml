@@ -260,13 +260,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: server-bin-arm64
-          path: target/release/nession-server
+          path: target/aarch64-unknown-linux-gnu/release/nession-server
           retention-days: 1
 
       - uses: actions/upload-artifact@v4
         with:
           name: agent-bin-arm64
-          path: target/release/nession-agent
+          path: target/aarch64-unknown-linux-gnu/release/nession-agent
           retention-days: 1
 
   # ═══════════════════════════════════════════════════════════════════
