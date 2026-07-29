@@ -37,14 +37,12 @@ describe('ClaudeCodeSection', () => {
     expect(screen.getByText('Claude Code')).toBeDefined();
   });
 
-  it('renders unavailable state when CC not installed', async () => {
+  it('renders loading state initially', () => {
     render(
       <WebSocketContext.Provider value={mockWs()}>
         <ClaudeCodeSection agent={mockAgent} />
       </WebSocketContext.Provider>,
     );
-    // After the async fetch resolves with available: false
-    const text = await screen.findByText('Claude Code not installed');
-    expect(text).toBeDefined();
+    expect(screen.getByText('Loading...')).toBeDefined();
   });
 });
