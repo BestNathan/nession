@@ -1,4 +1,4 @@
-import { Server, Clock, Terminal, Activity, Monitor, Copy, Check } from 'lucide-react';
+import { Server, Clock, Terminal, Activity, Monitor, Copy, Check, FolderOpen } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import type { Agent } from '../types';
@@ -7,7 +7,8 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
-import { renderSlot } from '../extensions/registry';
+import { cn } from '../lib/utils';
+import { ClaudeCodeSection } from '../extensions/claude-code/components/ClaudeCodeSection';
 
 /** Max heartbeat entries to track and display. */
 const MAX_HEARTBEATS = 5;
@@ -115,8 +116,99 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
+const TABS = [
+  { id: 'overview', label: 'Overview', icon: Monitor },
+  { id: 'claude-code', label: 'Claude Code', icon: FolderOpen },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
+
+function TabBar({ active, onSelect }: { active: TabId; onSelect: (id: TabId) => void }) {
+  return (
+    <div className="flex border-b border-border bg-muted/30 -mx-4 px-4">
+      {TABS.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onSelect(tab.id)}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-[1px]',
+            active === tab.id
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <tab.icon className="w-3.5 h-3.5" />
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OverviewTab({ agent, heartbeatHistory }: { agent: Agent; heartbeatHistory: string[] }) {
   const uptime = computeUptime(agent.registered_at);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <SectionHeader icon={Monitor} title="Connection" />
+        <InfoRow label="Hostname" value={agent.hostname} />
+        <InfoRow label="IP Address" value={agent.ip_address} />
+        <InfoRow label="Port" value={String(agent.port)} />
+      </div>
+      <Separator />
+      <div>
+        <SectionHeader icon={Terminal} title="Versions" />
+        <InfoRow label="Nession" value={agent.metadata?.nession_version ?? 'Unknown'} />
+        <InfoRow label="Image" value={agent.metadata?.image_tag ?? 'unknown'} />
+        <InfoRow label="tmux" value={agent.metadata?.tmux_version ?? 'Unknown'} />
+        <InfoRow label="OS" value={agent.metadata?.os_version ?? 'Unknown'} />
+      </div>
+      <Separator />
+      <div>
+        <SectionHeader icon={Clock} title="Uptime" />
+        {uptime ? (
+          <>
+            <p className="text-lg font-medium">{uptime}</p>
+            <p className="text-sm text-muted-foreground">
+              since {formatAbsoluteTime(heartbeatHistory[0])}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">N/A</p>
+        )}
+      </div>
+      <Separator />
+      <div>
+        <SectionHeader icon={Activity} title="Heartbeat History" />
+        {heartbeatHistory.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No heartbeat data yet</p>
+        ) : (
+          <div className="space-y-1">
+            {[...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso, i) => (
+              <div key={i} className="flex items-center gap-2 py-1">
+                <span className={`w-2 h-2 rounded-full ${getHeartbeatColor(iso)}`} />
+                <span className="text-sm">{formatRelativeTime(iso)}</span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {formatAbsoluteTime(iso)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <Separator />
+      <div>
+        <SectionHeader icon={Server} title="Sessions" />
+        <p className="text-sm text-muted-foreground">
+          {agent.session_count} active sessions on this agent
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDetailPanelProps) {
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [copied, setCopied] = useState(false);
   // Tick every second so relative timestamps ("Xs ago") stay live.
   const [, setTick] = useState(0);
@@ -136,107 +228,39 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
   }, [agent, heartbeatHistory]);
 
   return (
-    <Sheet open onOpenChange={(open) => { if (!open) {onClose();} }}>
-      <SheetContent side="right" className="w-full sm:w-[400px] md:w-[480px] max-w-[100vw] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-        <div className="p-4 space-y-4">
-          {/* Header: Status badge + display name */}
-          <div>
-            <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
-              {agent.status}
-            </Badge>
-            <div className="flex items-center gap-1.5">
-              <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleCopy}
-                title="Copy agent details"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-              </Button>
-            </div>
-            {agent.display_name && (
-              <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
-            )}
+    <Sheet open onOpenChange={(open) => { if (!open) { onClose(); } }}>
+      <SheetContent side="right" className="w-full sm:w-[400px] md:w-[640px] lg:w-[720px] max-w-[100vw] flex flex-col pb-[env(safe-area-inset-bottom)]">
+        {/* Header — fixed */}
+        <div className="p-4 pb-2 flex-shrink-0">
+          <Badge variant={getStatusVariant(agent.status)} className="capitalize mb-2">
+            {agent.status}
+          </Badge>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-semibold text-lg text-foreground">{agentDisplayName(agent)}</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleCopy}
+              title="Copy agent details"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            </Button>
           </div>
+          {agent.display_name && (
+            <p className="text-sm text-muted-foreground font-mono">{agent.hostname}</p>
+          )}
+        </div>
 
-          <Separator />
+        {/* Tab bar — fixed */}
+        <div className="flex-shrink-0">
+          <TabBar active={activeTab} onSelect={setActiveTab} />
+        </div>
 
-          {/* Connection */}
-          <div>
-            <SectionHeader icon={Monitor} title="Connection" />
-            <InfoRow label="Hostname" value={agent.hostname} />
-            <InfoRow label="IP Address" value={agent.ip_address} />
-            <InfoRow label="Port" value={String(agent.port)} />
-          </div>
-
-          <Separator />
-
-          {/* Versions */}
-          <div>
-            <SectionHeader icon={Terminal} title="Versions" />
-            <InfoRow label="Nession" value={agent.metadata?.nession_version ?? 'Unknown'} />
-            <InfoRow label="Image" value={agent.metadata?.image_tag ?? 'unknown'} />
-            <InfoRow label="tmux" value={agent.metadata?.tmux_version ?? 'Unknown'} />
-            <InfoRow label="OS" value={agent.metadata?.os_version ?? 'Unknown'} />
-          </div>
-
-          <Separator />
-
-          {/* Uptime */}
-          <div>
-            <SectionHeader icon={Clock} title="Uptime" />
-            {uptime ? (
-              <>
-                <p className="text-lg font-medium">{uptime}</p>
-                <p className="text-sm text-muted-foreground">
-                  since {formatAbsoluteTime(heartbeatHistory[0])}
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">N/A</p>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Heartbeat History */}
-          <div>
-            <SectionHeader icon={Activity} title="Heartbeat History" />
-            {heartbeatHistory.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No heartbeat data yet</p>
-            ) : (
-              <div className="space-y-1">
-                {[...heartbeatHistory].reverse().slice(0, MAX_HEARTBEATS).map((iso, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1">
-                    <span className={`w-2 h-2 rounded-full ${getHeartbeatColor(iso)}`} />
-                    <span className="text-sm">{formatRelativeTime(iso)}</span>
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {formatAbsoluteTime(iso)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Sessions */}
-          <div>
-            <SectionHeader icon={Server} title="Sessions" />
-            <p className="text-sm text-muted-foreground">
-              {agent.session_count} active sessions on this agent
-            </p>
-          </div>
-
-          <Separator />
-
-          {/* Extension slots */}
-          {renderSlot('agent-detail', { agent }).map((el, i) => (
-            <div key={`ext-${i}`}>{el}</div>
-          ))}
+        {/* Tab content — scrollable */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {activeTab === 'overview' && <OverviewTab agent={agent} heartbeatHistory={heartbeatHistory} />}
+          {activeTab === 'claude-code' && <ClaudeCodeSection agent={agent} />}
         </div>
       </SheetContent>
     </Sheet>
