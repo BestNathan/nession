@@ -68,6 +68,7 @@ spec:
           volumeMounts:
             - name: claude-tools
               mountPath: /shared
+              subPath: nession/claude-tools
           resources:
             requests:
               cpu: 50m
