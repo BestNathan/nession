@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { Agent, EnvFileInfo, EnvFileRef, EnvSource } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
@@ -33,6 +33,10 @@ export function useEnvEditor({
 
   const isEdit = editing !== null;
 
+  /** Stable ref for agents — avoids resetting form state on realtime agent updates. */
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -59,13 +63,13 @@ export function useEnvEditor({
         })
         .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load file'));
     } else {
-      const firstOnline = agents.find((a) => a.status === 'online');
+      const firstOnline = agentsRef.current.find((a) => a.status === 'online');
       setName('');
       setSource('server');
       setAgentId(firstOnline ? firstOnline.agent_id : '');
       setContent('');
     }
-  }, [isOpen, editing, wsService, agents]);
+  }, [isOpen, editing, wsService]);
 
   const buildRef = (): EnvFileRef => {
     const fileName = name.trim().endsWith('.env') ? name.trim() : `${name.trim()}.env`;
