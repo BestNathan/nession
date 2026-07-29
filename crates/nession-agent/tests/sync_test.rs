@@ -74,6 +74,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     client.connect_and_run().await.expect("connect failed").0

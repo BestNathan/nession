@@ -352,6 +352,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         metadata,
         Arc::new(SessionManager::new()),
         config.default_working_dir.clone(),
+        None, // extension_registry
     );
 
     let (client_handle, heartbeat_interval_secs) = tokio::select! {
