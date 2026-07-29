@@ -13,9 +13,15 @@ HAS_WEB=0
 
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-    HAS_RUST=1
-    HAS_WEB=1
-    continue
+    # New branch — diff against the merge-base with main (or origin/main)
+    base=$(git merge-base origin/main "$local_sha" 2>/dev/null || git merge-base main "$local_sha" 2>/dev/null || echo "")
+    if [ -n "$base" ]; then
+      remote_sha="$base"
+    else
+      HAS_RUST=1
+      HAS_WEB=1
+      continue
+    fi
   fi
 
   changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)
