@@ -75,12 +75,18 @@ impl SessionManager {
             .await?;
 
         if !output.status.success() {
-            // tmux server not running, return empty list
-            tracing::warn!(
-                "tmux list-sessions exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+            // "no server running" means no tmux sessions exist — expected, not an error
+            if stderr.contains("no server running") {
+                tracing::debug!("tmux list-sessions: {} (no tmux server running)", stderr);
+            } else {
+                tracing::warn!(
+                    "tmux list-sessions exited with {}: {}",
+                    output.status,
+                    stderr
+                );
+            }
             return Ok(vec![]);
         }
 
