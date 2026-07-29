@@ -1883,6 +1883,7 @@ dependencies = [
  "futures-util",
  "if-addrs",
  "mime_guess",
+ "nession-claude-code",
  "nession-common",
  "nession-server",
  "portable-pty",

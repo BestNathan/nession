@@ -22,6 +22,7 @@ use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
+use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_common::extension::AgentExtension;
 use nession_common::protocol::AgentMetadata;
 use nession_common::system;
@@ -126,7 +127,8 @@ async fn main() -> Result<()> {
         info!("No server_url configured — running in standalone mode");
         (None, config.heartbeat_interval_secs)
     } else {
-        let extensions: Vec<Box<dyn AgentExtension>> = vec![];
+        let extensions: Vec<Box<dyn AgentExtension>> =
+            vec![Box::new(ClaudeCodeAgentExtension::new())];
         let ext_registry = if extensions.is_empty() {
             None
         } else {
