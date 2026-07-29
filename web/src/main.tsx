@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { Toaster } from 'sonner'
 import App from './App.tsx'
+import { initExtensions } from './extensions/registry'
 import './index.css'
 import { useMediaQuery } from './hooks/useMediaQuery'
 
@@ -17,8 +18,12 @@ function Root() {
   )
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <Root />
-  </React.StrictMode>,
-)
+// Initialize extensions before first render.
+// Extensions are discovered from web/src/extensions/*/
+initExtensions().then(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <Root />
+    </React.StrictMode>,
+  )
+})
