@@ -123,14 +123,42 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
 
-      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+      - uses: actions/cache@v4
+        id: cache-zig-amd64
+        with:
+          path: /usr/local/zig-0.14.0
+          key: zig-0.14.0-x86_64
+
+      - name: Install zig
+        if: steps.cache-zig-amd64.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz | sudo tar xJ -C /usr/local
+          sudo mv /usr/local/zig-linux-x86_64-0.14.0 /usr/local/zig-0.14.0
+
+      - name: Link zig
+        run: sudo ln -sf /usr/local/zig-0.14.0/zig /usr/local/bin/zig
+
+      - uses: actions/cache@v4
+        id: cache-zigbuild-amd64
+        with:
+          path: ~/.cargo/bin/cargo-zigbuild
+          key: cargo-zigbuild-0.8-x86_64
+
+      - name: Install cargo-zigbuild
+        if: steps.cache-zigbuild-amd64.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked
+
+      - name: cargo zigbuild (release)
+        run: |
+          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession
 
       - name: Package native binaries
         run: |
           V="${{ needs.version-check.outputs.rust_version }}"
           mkdir -p dist
+          BIN_DIR="target/x86_64-unknown-linux-gnu/release"
           for bin in nession-server nession-agent nession; do
-            cp "target/release/${bin}" "dist/${bin}"
+            cp "${BIN_DIR}/${bin}" "dist/${bin}"
           done
           tar -czf "nession-${V}-linux-amd64.tar.gz" -C dist .
 
@@ -153,13 +181,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: server-bin-amd64
-          path: target/release/nession-server
+          path: target/x86_64-unknown-linux-gnu/release/nession-server
           retention-days: 1
 
       - uses: actions/upload-artifact@v4
         with:
           name: agent-bin-amd64
-          path: target/release/nession-agent
+          path: target/x86_64-unknown-linux-gnu/release/nession-agent
           retention-days: 1
 
   # ═══════════════════════════════════════════════════════════════════
@@ -175,14 +203,41 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
 
-      - run: cargo build --release --bin nession-server --bin nession-agent --bin nession
+      - uses: actions/cache@v4
+        id: cache-zig-arm64
+        with:
+          path: /usr/local/zig-0.14.0
+          key: zig-0.14.0-aarch64
+
+      - name: Install zig
+        if: steps.cache-zig-arm64.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://ziglang.org/download/0.14.0/zig-linux-aarch64-0.14.0.tar.xz | sudo tar xJ -C /usr/local
+          sudo mv /usr/local/zig-linux-aarch64-0.14.0 /usr/local/zig-0.14.0
+
+      - name: Link zig
+        run: sudo ln -sf /usr/local/zig-0.14.0/zig /usr/local/bin/zig
+
+      - uses: actions/cache@v4
+        id: cache-zigbuild-arm64
+        with:
+          path: ~/.cargo/bin/cargo-zigbuild
+          key: cargo-zigbuild-0.8-aarch64
+
+      - name: Install cargo-zigbuild
+        if: steps.cache-zigbuild-arm64.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked
+
+      - name: cargo zigbuild (release)
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession
 
       - name: Package native binaries
         run: |
           V="${{ needs.version-check.outputs.rust_version }}"
           mkdir -p dist
           for bin in nession-server nession-agent nession; do
-            cp "target/release/${bin}" "dist/${bin}"
+            cp "target/aarch64-unknown-linux-gnu/release/${bin}" "dist/${bin}"
           done
           tar -czf "nession-${V}-linux-arm64.tar.gz" -C dist .
 
