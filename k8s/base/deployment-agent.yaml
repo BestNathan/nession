@@ -56,11 +56,11 @@ spec:
               # --- Install Claude Code ---
               npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
-              # --- Copy to shared volume ---
+              # --- Copy to shared volume (ignore errors from existing files) ---
               mkdir -p /shared/bin /shared/lib
-              cp /usr/bin/node /shared/bin/
-              cp /usr/bin/claude /shared/bin/
-              cp -a /usr/lib/node_modules /shared/lib/
+              cp /usr/bin/node /shared/bin/ 2>/dev/null || true
+              cp /usr/bin/claude /shared/bin/ 2>/dev/null || true
+              cp -a /usr/lib/node_modules /shared/lib/ 2>/dev/null || true
 
               echo "=== Init done ==="
               /shared/bin/node --version
