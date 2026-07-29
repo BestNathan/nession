@@ -1,14 +1,14 @@
 # ---- Build stages (shared with agent via Docker build context) ----
 
 # Stage 1: Prepare cargo-chef recipe
-FROM rust:1.88-bookworm AS planner
+FROM rust:1.96-bullseye AS planner
 WORKDIR /build
 RUN cargo install cargo-chef --locked
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached)
-FROM rust:1.88-bookworm AS cacher
+FROM rust:1.96-bullseye AS cacher
 WORKDIR /build
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
@@ -27,7 +27,7 @@ COPY web/ .
 RUN npm run build
 
 # Stage 4: Build server binary
-FROM rust:1.88-bookworm AS rust-builder
+FROM rust:1.96-bullseye AS rust-builder
 WORKDIR /build
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
@@ -40,7 +40,7 @@ COPY . .
 RUN cargo build --release --bin nession-server
 
 # Stage 5: Server runtime (no tmux needed)
-FROM debian:bookworm-slim AS runtime
+FROM debian:bullseye-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         nginx ca-certificates curl gettext-base && \

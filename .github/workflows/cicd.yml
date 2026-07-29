@@ -110,17 +110,42 @@ jobs:
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: cargo build (release)
+      - uses: actions/cache@v4
+        id: cache-zig-amd64
+        with:
+          path: /usr/local/zig-0.14.0
+          key: zig-0.14.0-x86_64
+
+      - name: Install zig
+        if: steps.cache-zig-amd64.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz | sudo tar xJ -C /usr/local
+          sudo mv /usr/local/zig-linux-x86_64-0.14.0 /usr/local/zig-0.14.0
+
+      - name: Link zig
+        run: sudo ln -sf /usr/local/zig-0.14.0/zig /usr/local/bin/zig
+
+      - uses: actions/cache@v4
+        id: cache-zigbuild-amd64
+        with:
+          path: ~/.cargo/bin/cargo-zigbuild
+          key: cargo-zigbuild-0.8-x86_64
+
+      - name: Install cargo-zigbuild
+        if: steps.cache-zigbuild-amd64.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked
+
+      - name: cargo zigbuild (release)
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
           BUILD_TIME: ${{ github.event.head_commit.timestamp }}
-        run: cargo build --release --bin nession-server --bin nession-agent
-      - run: |
+        run: |
+          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
           mkdir -p /tmp/server-bin /tmp/agent-bin
-          cp target/release/nession-server /tmp/server-bin/
-          cp target/release/nession-agent /tmp/agent-bin/
+          cp target/x86_64-unknown-linux-gnu/release/nession-server /tmp/server-bin/
+          cp target/x86_64-unknown-linux-gnu/release/nession-agent /tmp/agent-bin/
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -195,17 +220,42 @@ jobs:
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: cargo build (release)
+      - uses: actions/cache@v4
+        id: cache-zig-arm64
+        with:
+          path: /usr/local/zig-0.14.0
+          key: zig-0.14.0-aarch64
+
+      - name: Install zig
+        if: steps.cache-zig-arm64.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://ziglang.org/download/0.14.0/zig-linux-aarch64-0.14.0.tar.xz | sudo tar xJ -C /usr/local
+          sudo mv /usr/local/zig-linux-aarch64-0.14.0 /usr/local/zig-0.14.0
+
+      - name: Link zig
+        run: sudo ln -sf /usr/local/zig-0.14.0/zig /usr/local/bin/zig
+
+      - uses: actions/cache@v4
+        id: cache-zigbuild-arm64
+        with:
+          path: ~/.cargo/bin/cargo-zigbuild
+          key: cargo-zigbuild-0.8-aarch64
+
+      - name: Install cargo-zigbuild
+        if: steps.cache-zigbuild-arm64.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --locked
+
+      - name: cargo zigbuild (release)
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
           BUILD_TIME: ${{ github.event.head_commit.timestamp }}
-        run: cargo build --release --bin nession-server --bin nession-agent
-      - run: |
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
           mkdir -p /tmp/server-bin /tmp/agent-bin
-          cp target/release/nession-server /tmp/server-bin/
-          cp target/release/nession-agent /tmp/agent-bin/
+          cp target/aarch64-unknown-linux-gnu/release/nession-server /tmp/server-bin/
+          cp target/aarch64-unknown-linux-gnu/release/nession-agent /tmp/agent-bin/
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
