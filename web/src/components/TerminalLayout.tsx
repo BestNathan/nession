@@ -12,6 +12,7 @@ interface TerminalLayoutProps {
   sheetOpen: boolean;
   onSheetToggle: (open: boolean) => void;
   sessionId: string;
+  sessionName?: string;
   sendText: (text: string) => void;
   toolbarDisabled: boolean;
   fileOps?: FileOps | null;
@@ -30,6 +31,7 @@ export function TerminalLayout({
   sheetOpen,
   onSheetToggle,
   sessionId,
+  sessionName,
   sendText,
   toolbarDisabled,
   fileOps,
@@ -52,6 +54,8 @@ export function TerminalLayout({
         onSheetToggle={onSheetToggle}
         envPanel={envPanel}
         commandsPanel={commandsPanel}
+        sessionId={sessionId}
+        sessionName={sessionName}
         terminalElement={
           <div className="h-full min-h-0 flex flex-col">
             <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>

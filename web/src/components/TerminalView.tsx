@@ -136,6 +136,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
           sheetOpen={sheetOpen}
           onSheetToggle={setSheetOpen}
           sessionId={sessionId}
+          sessionName={sessionName}
           sendText={(text) => terminalHandle?.sendText(text)}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}

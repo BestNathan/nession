@@ -8,6 +8,7 @@ import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { BottomBar, type BottomTab } from './BottomBar';
+import { renderSlot } from '@/extensions/registry';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
 export interface OpenFile {
@@ -32,6 +33,8 @@ interface FileTabsProps {
   onSheetToggle: (open: boolean) => void;
   envPanel: React.ReactNode;
   commandsPanel: React.ReactNode;
+  sessionId?: string;
+  sessionName?: string;
 }
 
 const MAX_TABS = 10;
@@ -41,12 +44,13 @@ interface TabBarProps {
   activeTabId: string;
   dirtyFiles: Set<string>;
   showTerminal: boolean;
+  terminalHeaderExtensions: React.ReactNode[];
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
 }
 
-/** Horizontal tab strip: a fixed Terminal tab followed by one tab per open file. */
-function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, onSelect, onClose }: TabBarProps) {
+/** Horizontal tab strip: a fixed Terminal tab followed by extension tabs, then one tab per open file. */
+function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, terminalHeaderExtensions, onSelect, onClose }: TabBarProps) {
   return (
     <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
       <button
@@ -58,6 +62,9 @@ function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, onSelect, on
       >
         <Terminal className="h-3 w-3" /> Terminal
       </button>
+
+      {/* Extension tabs */}
+      {terminalHeaderExtensions}
 
       {openFiles.map((file) => (
         <button
@@ -184,6 +191,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
 export function FileTabs({
   fileOps, terminalElement, onTerminalReveal,
   bottomTab, onBottomTabChange, sheetOpen, onSheetToggle, envPanel, commandsPanel,
+  sessionId, sessionName,
 }: FileTabsProps) {
   const {
     openFiles, activeTabId, setActiveTabId, dirtyFiles, activeFile, showTerminal,
@@ -191,6 +199,7 @@ export function FileTabs({
   } = useFileTabs(onTerminalReveal);
 
   const isMobile = useMediaQuery('(max-width: 1023px)');
+  const terminalHeaderExtensions = renderSlot('terminal-header', { sessionId: sessionId ?? '', sessionName: sessionName ?? '' });
 
   // On mobile the browser lives in the Bottom Bar; opening a file collapses the
   // sheet so the freshly opened tab is visible.
@@ -214,6 +223,7 @@ export function FileTabs({
           activeTabId={activeTabId}
           dirtyFiles={dirtyFiles}
           showTerminal={showTerminal}
+          terminalHeaderExtensions={terminalHeaderExtensions}
           onSelect={setActiveTabId}
           onClose={handleCloseFile}
         />

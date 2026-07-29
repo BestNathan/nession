@@ -7,6 +7,7 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
+import { renderSlot } from '../extensions/registry';
 
 /** Max heartbeat entries to track and display. */
 const MAX_HEARTBEATS = 5;
@@ -229,6 +230,13 @@ export function AgentDetailPanel({ agent, heartbeatHistory, onClose }: AgentDeta
               {agent.session_count} active sessions on this agent
             </p>
           </div>
+
+          <Separator />
+
+          {/* Extension slots */}
+          {renderSlot('agent-detail', { agent }).map((el, i) => (
+            <div key={`ext-${i}`}>{el}</div>
+          ))}
         </div>
       </SheetContent>
     </Sheet>
