@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,7 @@ import type { ConfigCategory, ClaudeCodeListResponse } from '../types';
 
 export function TerminalClaudeCodeTab({ sessionId }: TerminalHeaderSlotProps) {
   const ws = useWebSocket();
-  const service = createClaudeCodeService(ws);
+  const service = useMemo(() => createClaudeCodeService(ws), [ws]);
   const [categories, setCategories] = useState<ConfigCategory[]>([]);
   const [available, setAvailable] = useState<boolean>(false);
   const [viewerOpen, setViewerOpen] = useState(false);

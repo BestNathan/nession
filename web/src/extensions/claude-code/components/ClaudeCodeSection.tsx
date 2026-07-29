@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { FileText, BookOpen, Bot, Puzzle, History, Settings, FolderOpen } from 'lucide-react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Separator } from '@/components/ui/separator';
@@ -18,7 +18,7 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 
 export function ClaudeCodeSection({ agent }: AgentDetailSlotProps) {
   const ws = useWebSocket();
-  const service = createClaudeCodeService(ws);
+  const service = useMemo(() => createClaudeCodeService(ws), [ws]);
   const [categories, setCategories] = useState<ConfigCategory[] | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
