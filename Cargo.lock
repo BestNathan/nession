@@ -1902,6 +1902,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-claude-code"
+version = "0.13.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "nession-common",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nession-cli"
 version = "0.13.3"
 dependencies = [

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/nession-claude-code",
     "crates/nession-common",
     "crates/nession-server",
     "crates/nession-agent",
