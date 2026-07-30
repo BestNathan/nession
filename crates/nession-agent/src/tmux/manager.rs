@@ -132,6 +132,9 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        // Build new-session WITHOUT `-e` — that flag requires tmux ≥ 3.0.
+        // Environment variables are applied via `set-environment` after the
+        // session exists, which works on every tmux version.
         let mut cmd = Command::new("tmux");
         cmd.args([
             "new-session",
@@ -144,35 +147,51 @@ impl SessionManager {
             &SESSION_HEIGHT.to_string(),
             "-c",
             working_dir,
-        ]);
-
-        // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
-        // tmux the flag is rejected and session creation fails loudly rather
-        // than silently dropping the environment.
-        let mut has_ps1 = false;
-        for (key, value) in env {
-            if key == "PS1" {
-                has_ps1 = true;
-            }
-            cmd.arg("-e").arg(format!("{key}={value}"));
-        }
-
-        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
-        // overwrites PS1, so a plain `-e PS1=…` is not enough.  We set
-        // NESSION_PS1 (the value) and PROMPT_COMMAND (the mechanism).
-        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
-        // applies PS1, and unsets NESSION_PS1 so later prompts have zero
-        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
-        if !has_ps1 {
-            cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
-            cmd.arg("-e")
-                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }");
-        }
+        ])
+        .stderr(std::process::Stdio::null());
 
         let status = cmd.status().await?;
 
         if !status.success() {
             anyhow::bail!("Failed to create session: {name}");
+        }
+
+        // Apply env vars via set-environment (works on tmux 1.x–3.x).
+        let mut has_ps1 = false;
+        for (key, value) in env {
+            if key == "PS1" {
+                has_ps1 = true;
+            }
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, key, value])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+
+        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
+        // overwrites PS1, so a plain `-e PS1=…` is not enough.  We set
+        // NESSON_PS1 (the value) and PROMPT_COMMAND (the mechanism).
+        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
+        // applies PS1, and unsets NESSON_PS1 so later prompts have zero
+        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
+        if !has_ps1 {
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            let _ = Command::new("tmux")
+                .args([
+                    "set-environment",
+                    "-t",
+                    name,
+                    "PROMPT_COMMAND",
+                    "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+                ])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
         }
 
         // Enable tmux mouse mode so wheel events reach tmux as SGR mouse
@@ -181,6 +200,7 @@ impl SessionManager {
         // so mouse button events stay local for text selection.
         let _ = Command::new("tmux")
             .args(["set-option", "-t", name, "mouse", "on"])
+            .stderr(std::process::Stdio::null())
             .status()
             .await;
 
@@ -190,6 +210,7 @@ impl SessionManager {
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         let status = Command::new("tmux")
             .args(["kill-session", "-t", name])
+            .stderr(std::process::Stdio::null())
             .status()
             .await?;
 

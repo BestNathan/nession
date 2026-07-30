@@ -18,7 +18,10 @@ use tokio::process::Command;
 /// consistent error reporting (including the exit status in the message).
 pub async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new("tmux");
-    cmd.args(args).arg("-t").arg(session);
+    cmd.args(args)
+        .arg("-t")
+        .arg(session)
+        .stderr(std::process::Stdio::null());
     let desc = format!("tmux {} -t {session}", args.join(" "));
     let status = cmd
         .status()
@@ -34,6 +37,7 @@ pub async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
 pub async fn send_keys(session_name: &str, keys: &str) -> Result<()> {
     let status = Command::new("tmux")
         .args(["send-keys", "-t", session_name, keys, "Enter"])
+        .stderr(std::process::Stdio::null())
         .status()
         .await?;
 
@@ -46,7 +50,11 @@ pub async fn send_keys(session_name: &str, keys: &str) -> Result<()> {
 
 /// Check whether the `tmux` binary is available on `PATH`.
 pub async fn check_tmux_available() -> Result<bool> {
-    let status = Command::new("tmux").arg("-V").status().await?;
+    let status = Command::new("tmux")
+        .arg("-V")
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await?;
     Ok(status.success())
 }
 

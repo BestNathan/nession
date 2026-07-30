@@ -700,7 +700,10 @@ impl AgentServer {
                                     if let Err(e) =
                                         Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am).await
                                     {
-                                        warn!("connection error from {}: {:#}", addr, e);
+                                        // Downgraded from warn: random non-WebSocket clients
+                                        // (health checks, scanners) hitting the P2P port are
+                                        // expected noise, not actionable alerts.
+                                        info!("connection error from {}: {:#}", addr, e);
                                     }
                                 });
                             }
