@@ -4,11 +4,20 @@
 //! `api.github.com/repos/BestNathan/nession/releases`.
 
 use crate::update::UpdateError;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Client;
 use semver::Version;
 use serde::Deserialize;
 
 const USER_AGENT: &str = "nession-cli-update-check/1.0";
+
+/// Read GITHUB_TOKEN or GH_TOKEN from the environment, if set.
+fn github_token() -> Option<String> {
+    std::env::var("GITHUB_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("GH_TOKEN").ok())
+        .filter(|t| !t.is_empty())
+}
 
 /// A single release asset from the GitHub API.
 #[derive(Debug, Deserialize)]
@@ -42,9 +51,17 @@ impl GitHubReleaseClient {
 
     /// Create a client with a custom base URL (e.g. for testing with a mock server).
     pub fn with_base_url(base_url: String) -> Result<Self, reqwest::Error> {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = github_token() {
+            if let Ok(mut auth_value) = HeaderValue::from_str(&format!("Bearer {token}")) {
+                auth_value.set_sensitive(true);
+                headers.insert(AUTHORIZATION, auth_value);
+            }
+        }
         let client = Client::builder()
             .user_agent(USER_AGENT)
             .timeout(std::time::Duration::from_secs(10))
+            .default_headers(headers)
             .build()?;
         Ok(Self { client, base_url })
     }

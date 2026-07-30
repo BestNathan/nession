@@ -19,7 +19,7 @@ pub enum UpdateError {
     #[error("Network error: {0}")]
     Network(String),
 
-    #[error("GitHub API rate limited. Try again later.")]
+    #[error("GitHub API rate limited. Set GITHUB_TOKEN env var (or wait a few minutes).")]
     RateLimited,
 
     #[allow(dead_code)]
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn update_error_display() {
         let err = UpdateError::RateLimited;
-        assert_eq!(err.to_string(), "GitHub API rate limited. Try again later.");
+        assert!(err.to_string().contains("GitHub API rate limited"));
 
         let err = UpdateError::ReleaseNotFound("0.1.0".into());
         assert!(err.to_string().contains("0.1.0"));
