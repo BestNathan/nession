@@ -22,3 +22,18 @@ images:
 
 patches:
 - path: patch-imagepullsecrets.yaml
+# Isolate production data on shared PVC via subPath.
+- target:
+    kind: Deployment
+    name: nession-server
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/0/subPath
+      value: production
+- target:
+    kind: Deployment
+    name: nession-agent
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/1/subPath
+      value: production
