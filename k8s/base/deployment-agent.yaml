@@ -56,17 +56,8 @@ spec:
               # --- Install Claude Code ---
               npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
-              # --- Initialize Claude Code default settings (skip OAuth login) ---
-              CLAUDE_DIR=/opt/claude-tools/home/.claude
-              mkdir -p "$CLAUDE_DIR"
-              cat > "$CLAUDE_DIR/settings.json" << 'SETTINGS'
-              {
-                "hasOnboarded": true
-              }
-              SETTINGS
-
               # --- Copy to shared emptyDir volume ---
-              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib /opt/claude-tools/home
+              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
               cp /usr/bin/node /opt/claude-tools/bin/
               cp /usr/bin/claude /opt/claude-tools/bin/
               cp -a /usr/lib/node_modules /opt/claude-tools/lib/
@@ -121,6 +112,9 @@ spec:
           volumeMounts:
             - name: claude-tools
               mountPath: /opt/claude-tools
+            - name: claude-home
+              mountPath: /root/.claude
+              subPath: nession/claude-home
             - name: data
               mountPath: /data
           livenessProbe:
@@ -146,6 +140,9 @@ spec:
       volumes:
         - name: claude-tools
           emptyDir: {}
+        - name: claude-home
+          persistentVolumeClaim:
+            claimName: nession-server-data
         - name: data
           persistentVolumeClaim:
             claimName: nession-server-data

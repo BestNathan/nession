@@ -36,20 +36,17 @@ if [ -n "${AGENT_CONNECT_URL}" ]; then
     echo "connect_url = \"${AGENT_CONNECT_URL}\"" >> /etc/nession/agent-config.toml
 fi
 
-# Initialize Claude Code settings (skip OAuth login for headless container).
+# Initialize Claude Code settings on first run only.
+# /root/.claude is backed by PVC — once created, survives restarts.
 CLAUDE_DIR="/root/.claude"
 if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
     mkdir -p "${CLAUDE_DIR}"
-    # If init container seeded settings on the shared volume, copy them in.
-    if [ -f "/opt/claude-tools/home/.claude/settings.json" ]; then
-        cp "/opt/claude-tools/home/.claude/settings.json" "${CLAUDE_DIR}/settings.json"
-        echo "=== Claude Code settings (from seed) ==="
-    else
-        cat > "${CLAUDE_DIR}/settings.json" << 'SETTINGS'
+    cat > "${CLAUDE_DIR}/settings.json" << 'SETTINGS'
 {"hasOnboarded": true}
 SETTINGS
-        echo "=== Claude Code settings (default, skip login) ==="
-    fi
+    echo "=== Claude Code settings initialized (first run) ==="
+else
+    echo "=== Claude Code settings already present, skipping init ==="
 fi
 
 echo "=== nession-agent ==="
