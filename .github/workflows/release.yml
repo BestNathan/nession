@@ -68,9 +68,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
       - uses: extractions/setup-just@v2
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
-      - run: cargo install cargo-llvm-cov 2>/dev/null || true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-v1
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
       - run: just check
 
   web-check:
