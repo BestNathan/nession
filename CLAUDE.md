@@ -348,5 +348,5 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **`.githooks/pre-commit`** 是唯一 hooks 入口（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这个文件。
 - **Pre-commit 全部 blocking**：`cargo fmt` → `cargo clippy` → `cargo test --no-run` → `cargo test` → coverage（仅变更 crate）→ `eslint` → `tsc --noEmit` → `vitest run` → `vitest coverage`
 - **CI 触发**：push `feat/**` / `fix/**`。`rust-check`（fmt + clippy + test）+ `web-check`（lint + tsc + test）。与 pre-commit 必须一致。
-- **⛔ `git commit --no-verify` 禁止绕过覆盖率**。不达标写测试，不降阈值，不 suppress lint。
+- **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试，覆盖率不够补测试，lint 报错修 lint——不准绕。pre-push hook 跑太久就等着，或者拆分 commit。
 - **覆盖率阈值**：`nession-common` 90%，其余 Rust crate 80%，web 80%。
