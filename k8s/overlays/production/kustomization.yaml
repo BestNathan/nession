@@ -12,28 +12,28 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-0.15.2
+  newTag: agent-0.15.3
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-0.15.2
+  newTag: server-0.15.3
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-0.15.2
+  newTag: ui-0.15.3
 
+# Isolate production data on shared PVC via subPath.
 patches:
 - path: patch-imagepullsecrets.yaml
-# Isolate production data on shared PVC via subPath.
-- target:
-    kind: Deployment
-    name: nession-server
-  patch: |-
+- patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
       value: production
-- target:
+  target:
     kind: Deployment
-    name: nession-agent
-  patch: |-
+    name: nession-server
+- patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/1/subPath
       value: production
+  target:
+    kind: Deployment
+    name: nession-agent
