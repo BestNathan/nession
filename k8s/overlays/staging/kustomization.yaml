@@ -14,29 +14,29 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-451ba7f
+  newTag: agent-aa4d1d1
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-451ba7f
+  newTag: server-aa4d1d1
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-451ba7f
+  newTag: ui-aa4d1d1
 
+# Isolate staging data on shared PVC via subPath.
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
-# Isolate staging data on shared PVC via subPath.
-- target:
-    kind: Deployment
-    name: nession-server
-  patch: |-
+- patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
       value: staging
-- target:
+  target:
     kind: Deployment
-    name: nession-agent
-  patch: |-
+    name: nession-server
+- patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/1/subPath
       value: staging
+  target:
+    kind: Deployment
+    name: nession-agent
