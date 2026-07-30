@@ -133,8 +133,6 @@ impl SessionManager {
         env: &[(String, String)],
     ) -> Result<()> {
         // Build new-session WITHOUT `-e` — that flag requires tmux ≥ 3.0.
-        // Environment variables are applied via `set-environment` after the
-        // session exists, which works on every tmux version.
         let mut cmd = Command::new("tmux");
         cmd.args([
             "new-session",
@@ -156,25 +154,69 @@ impl SessionManager {
             anyhow::bail!("Failed to create session: {name}");
         }
 
-        // Apply env vars via set-environment (works on tmux 1.x–3.x).
+        // set-environment only affects future windows/panes — the initial
+        // window's shell is already running.  Use send-keys to inject env
+        // vars into the live shell (the session is detached, so no one
+        // sees the commands), then clear-history to remove the evidence.
+        // Also call set-environment so new windows inherit the vars.
+
+        // ── send-keys: inject into the initial window ──────────────────
+        let mut init_cmd = String::new();
         let mut has_ps1 = false;
         for (key, value) in env {
             if key == "PS1" {
                 has_ps1 = true;
             }
+            init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+        }
+
+        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
+        // overwrites PS1, so a plain export is not enough.  We set
+        // NESSON_PS1 (the value) and PROMPT_COMMAND (the mechanism).
+        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
+        // applies PS1, and unsets NESSON_PS1 so later prompts have zero
+        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
+        if !has_ps1 {
+            init_cmd.push_str(&format!(
+                "export NESSON_PS1='{}';",
+                DEFAULT_PS1.replace('\'', "'\\''")
+            ));
+            init_cmd.push_str(
+                r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
+            );
+        }
+
+        if !init_cmd.is_empty() {
+            // Inject env vars into the initial window's shell via send-keys.
+            // The session was just created with -d (detached); the shell is
+            // starting in the background.  send-keys queues keystrokes into
+            // the pane's input buffer — it works even if the shell hasn't
+            // finished its rc files yet.
+            //
+            // Use a direct Command rather than the send_keys helper so that
+            // a non-zero exit is not fatal (the set-environment calls above
+            // already cover future windows; this is best-effort for the
+            // initial window).
+            let _ = Command::new("tmux")
+                .args(["send-keys", "-t", name, &init_cmd, "Enter"])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            let _ = Command::new("tmux")
+                .args(["clear-history", "-t", name])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+
+        // ── set-environment: for future windows/panes ─────────────────
+        for (key, value) in env {
             let _ = Command::new("tmux")
                 .args(["set-environment", "-t", name, key, value])
                 .stderr(std::process::Stdio::null())
                 .status()
                 .await;
         }
-
-        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
-        // overwrites PS1, so a plain `-e PS1=…` is not enough.  We set
-        // NESSON_PS1 (the value) and PROMPT_COMMAND (the mechanism).
-        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
-        // applies PS1, and unsets NESSON_PS1 so later prompts have zero
-        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
         if !has_ps1 {
             let _ = Command::new("tmux")
                 .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
