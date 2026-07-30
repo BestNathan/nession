@@ -1351,6 +1351,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_create_command() {
+        // Clean up any leftover session from a previous failed test run.
+        let tmux_cleanup = SessionManager::new();
+        let _ = tmux_cleanup.kill_session("test-session-create").await;
+
         let port = 28086;
         let (server_handle, mut msg_rx) = start_mock_server_with_session_create(port).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
