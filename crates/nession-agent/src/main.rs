@@ -76,14 +76,11 @@ async fn main() -> Result<()> {
         config.attach_mode.clone(),
     )
     .context("failed to create agent server")?;
-    let server_handle = agent_server
+    let (server_handle, listen_addr) = agent_server
         .start()
         .await
         .context("failed to start agent server")?;
-    info!(
-        "Agent WebSocket server started on {}",
-        config.listen_address
-    );
+    info!("Agent WebSocket server started on {}", listen_addr);
 
     // 5. Connect to central server
     let hostname = system::get_hostname();

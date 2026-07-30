@@ -17,12 +17,12 @@ use std::net::SocketAddr;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-/// Start a test server on a specific port and return the address + handle.
-async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHandle) {
-    let addr_str = format!("127.0.0.1:{}", port);
+/// Start a test server (OS picks a free port) and return the real bound
+/// address + handle.
+async fn start_server(_port: u16) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let server = AgentServer::new(
-        &addr_str,
+        "127.0.0.1:0",
         "test-agent",
         None,
         "/tmp".to_string(),
@@ -30,9 +30,8 @@ async fn start_server(port: u16) -> (SocketAddr, nession_agent::server::ServerHa
         AttachMode::Plain,
     )
     .expect("server creation should succeed");
-    let handle = server.start().await.expect("start should succeed");
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    (addr_str.parse().unwrap(), handle)
+    let (handle, addr) = server.start().await.expect("start should succeed");
+    (addr, handle)
 }
 
 /// Connect a WebSocket client and return the split sink / stream.

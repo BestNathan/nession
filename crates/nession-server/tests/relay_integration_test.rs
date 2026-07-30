@@ -81,17 +81,13 @@ async fn start_server(
 }
 
 /// Start the agent's internal WebSocket server (for P2P/relay connections).
+/// OS picks a free port; returns the real bound address.
 async fn start_agent(
     agent_id: &str,
 ) -> (std::net::SocketAddr, nession_agent::server::ServerHandle) {
-    use std::sync::atomic::{AtomicU16, Ordering};
-    static PORT: AtomicU16 = AtomicU16::new(41000);
-    let port = PORT.fetch_add(1, Ordering::Relaxed);
-    let addr_str = format!("127.0.0.1:{port}");
-
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let server = AgentServer::new(
-        &addr_str,
+        "127.0.0.1:0",
         agent_id,
         None, // no TLS
         "/tmp".to_string(),
@@ -100,10 +96,9 @@ async fn start_agent(
     )
     .expect("agent server creation");
 
-    let handle = server.start().await.expect("agent server start");
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (handle, addr) = server.start().await.expect("agent server start");
 
-    (addr_str.parse().unwrap(), handle)
+    (addr, handle)
 }
 
 /// Register an agent with the central server so it shows as Online.

@@ -647,12 +647,18 @@ impl AgentServer {
     }
 
     /// Start accepting connections. Returns a [`ServerHandle`] that can be
-    /// used to trigger a graceful shutdown. The server runs as a background
-    /// tokio task until shutdown is signalled or the process exits.
-    pub async fn start(mut self) -> Result<ServerHandle> {
+    /// used to trigger a graceful shutdown, together with the bound socket
+    /// address (useful when the configured address is port 0).
+    /// The server runs as a background tokio task until shutdown is signalled
+    /// or the process exits.
+    pub async fn start(mut self) -> Result<(ServerHandle, std::net::SocketAddr)> {
         let listener = TcpListener::bind(&self.listen_address)
             .await
             .with_context(|| format!("failed to bind {}", self.listen_address))?;
+
+        let local_addr = listener
+            .local_addr()
+            .context("failed to get local address after bind")?;
 
         let shutdown_rx = self
             .shutdown_rx
@@ -711,7 +717,7 @@ impl AgentServer {
             }
         });
 
-        Ok(handle)
+        Ok((handle, local_addr))
     }
 
     /// Handle a single incoming TCP connection. Performs optional TLS
@@ -1668,27 +1674,16 @@ mod tests {
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
-        let handle = server.start().await.expect("start should succeed");
-        // Give the accept loop a moment to bind.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        // The port is already bound (we got past bind()), but we don't
-        // know it from here. Tests that need the real port should use
-        // a known free port instead. For now, 0 won't work for client
-        // connections — callers must use `start_test_server_on` with a
-        // specific port.
-        //
-        // This helper is only useful for tests that just verify
-        // server construction and shutdown.
-        ("127.0.0.1:0".parse().unwrap(), handle)
+        let (handle, addr) = server.start().await.expect("start should succeed");
+        (addr, handle)
     }
 
-    /// Start a test server on a specific port. Use this for tests that
-    /// need to actually connect.
-    async fn start_test_server_on(port: u16) -> (SocketAddr, ServerHandle) {
-        let addr_str = format!("127.0.0.1:{}", port);
+    /// Start a test server (OS picks a free port). Returns the real bound
+    /// address and a shutdown handle.
+    async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let server = AgentServer::new(
-            &addr_str,
+            "127.0.0.1:0",
             "test-agent",
             None,
             "/tmp".to_string(),
@@ -1698,9 +1693,8 @@ mod tests {
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
-        let handle = server.start().await.expect("start should succeed");
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        (addr_str.parse().unwrap(), handle)
+        let (handle, addr) = server.start().await.expect("start should succeed");
+        (addr, handle)
     }
 
     /// Connect a WebSocket client to a test server.
@@ -1779,7 +1773,7 @@ mod tests {
             AttachMode::Plain,
         )
         .unwrap();
-        let handle = server.start().await.unwrap();
+        let (handle, _addr) = server.start().await.unwrap();
 
         // Shutdown should complete without error.
         handle.shutdown().await.unwrap();
