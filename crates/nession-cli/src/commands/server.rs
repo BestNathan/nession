@@ -174,6 +174,13 @@ pub async fn stop(pid_file: String) -> Result<()> {
     Ok(())
 }
 
+/// Restart the server process (stop then start).
+pub async fn restart(config_path: String, foreground: bool, pid_file: String) -> Result<()> {
+    println!("Restarting server...");
+    stop(pid_file.clone()).await?;
+    start(config_path, foreground, pid_file).await
+}
+
 /// Show server status.
 pub async fn status(pid_file: String) -> Result<()> {
     // Read PID file
