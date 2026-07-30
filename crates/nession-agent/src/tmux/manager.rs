@@ -151,6 +151,19 @@ impl SessionManager {
         ])
         .stderr(std::process::Stdio::null());
 
+        // Pass through the agent process environment (PATH, NODE_PATH, etc.)
+        // so tools installed via init container are available in tmux sessions.
+        // Skip the caller-supplied env keys — those are handled below.
+        // Collect first — std::env::vars() iterator is not Send.
+        let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        let process_env: Vec<(String, String)> = std::env::vars().collect();
+        for (key, value) in process_env.iter() {
+            if caller_keys.iter().any(|k| *k == key) {
+                continue;
+            }
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+
         let mut has_ps1 = false;
         for (key, value) in env {
             if key == "PS1" {
@@ -194,6 +207,12 @@ impl SessionManager {
 
             // Inject env vars into the live shell via send-keys.
             let mut init_cmd = String::new();
+            for (key, value) in &process_env {
+                if caller_keys.iter().any(|k| *k == key) {
+                    continue;
+                }
+                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+            }
             for (key, value) in env {
                 init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
             }
@@ -221,6 +240,16 @@ impl SessionManager {
         }
 
         // Stage 3: set-environment for future windows/panes (both paths).
+        for (key, value) in &process_env {
+            if caller_keys.iter().any(|k| *k == key) {
+                continue;
+            }
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, key, value])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
         for (key, value) in env {
             let _ = Command::new("tmux")
                 .args(["set-environment", "-t", name, key, value])
