@@ -84,16 +84,11 @@ async fn cleanup_db(db_path: &str) {
     tokio::fs::remove_file(format!("{db_path}-shm")).await.ok();
 }
 
-/// Start a real agent WebSocket server on a specific port.
+/// Start a real agent WebSocket server on an OS-assigned port.
 async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::server::ServerHandle) {
-    use std::sync::atomic::{AtomicU16, Ordering};
-    static PORT_COUNTER: AtomicU16 = AtomicU16::new(40000);
-    let port = PORT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let addr_str = format!("127.0.0.1:{}", port);
-
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let server = AgentServer::new(
-        &addr_str,
+        "127.0.0.1:0",
         "test-agent",
         None,
         "/tmp".to_string(),
@@ -101,10 +96,8 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
         AttachMode::Plain,
     )
     .expect("server creation should succeed");
-    let handle = server.start().await.expect("start should succeed");
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (handle, addr) = server.start().await.expect("start should succeed");
 
-    let addr = addr_str.parse().unwrap();
     (addr, handle)
 }
 
