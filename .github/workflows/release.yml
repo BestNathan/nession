@@ -274,9 +274,11 @@ jobs:
           retention-days: 1
 
   # ═══════════════════════════════════════════════════════════════════
-  # Docker amd64 — version tags only (reuses binaries from build-linux-amd64)
+  # Docker — 6 parallel jobs (server/agent/ui × amd64/arm64)
   # ═══════════════════════════════════════════════════════════════════
-  docker-amd64:
+
+  # ── amd64 ──────────────────────────────────────────────────────────
+  docker-server-amd64:
     needs: [version-check, build-web, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
@@ -286,33 +288,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: /tmp/web-dist
+        with: { name: web-dist, path: /tmp/web-dist }
       - uses: actions/download-artifact@v4
-        with:
-          name: server-bin-amd64
-          path: /tmp/server-bin
-      - uses: actions/download-artifact@v4
-        with:
-          name: agent-bin-amd64
-          path: /tmp/agent-bin
-
-      - name: Set image refs
-        run: |
+        with: { name: server-bin-amd64, path: /tmp/server-bin }
+      - run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
           echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
-          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
-
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push server (version)
-        uses: docker/build-push-action@v6
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
@@ -325,8 +310,26 @@ jobs:
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push agent (version)
-        uses: docker/build-push-action@v6
+  docker-agent-amd64:
+    needs: [version-check, build-web, build-linux-amd64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: /tmp/web-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: agent-bin-amd64, path: /tmp/agent-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
@@ -339,8 +342,24 @@ jobs:
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push UI (version)
-        uses: docker/build-push-action@v6
+  docker-ui-amd64:
+    needs: [version-check, build-web]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: /tmp/web-dist }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.ui.prebuilt
@@ -352,10 +371,8 @@ jobs:
           build-contexts: |
             web-dist=/tmp/web-dist
 
-  # ═══════════════════════════════════════════════════════════════════
-  # Docker arm64 — version tags only (reuses binaries from build-linux-arm64)
-  # ═══════════════════════════════════════════════════════════════════
-  docker-arm64:
+  # ── arm64 ──────────────────────────────────────────────────────────
+  docker-server-arm64:
     needs: [version-check, build-web, build-linux-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-24.04-arm
@@ -365,33 +382,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: /tmp/web-dist
+        with: { name: web-dist, path: /tmp/web-dist }
       - uses: actions/download-artifact@v4
-        with:
-          name: server-bin-arm64
-          path: /tmp/server-bin
-      - uses: actions/download-artifact@v4
-        with:
-          name: agent-bin-arm64
-          path: /tmp/agent-bin
-
-      - name: Set image refs
-        run: |
+        with: { name: server-bin-arm64, path: /tmp/server-bin }
+      - run: |
           echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
           echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
-          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
-
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push server (version)
-        uses: docker/build-push-action@v6
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.server.prebuilt
@@ -404,8 +404,26 @@ jobs:
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push agent (version)
-        uses: docker/build-push-action@v6
+  docker-agent-arm64:
+    needs: [version-check, build-web, build-linux-arm64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: /tmp/web-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: agent-bin-arm64, path: /tmp/agent-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.agent.prebuilt
@@ -418,8 +436,24 @@ jobs:
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
-      - name: Build & push UI (version)
-        uses: docker/build-push-action@v6
+  docker-ui-arm64:
+    needs: [version-check, build-web]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: /tmp/web-dist }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "WEB_VER=${{ needs.version-check.outputs.web_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.ui.prebuilt
@@ -435,7 +469,10 @@ jobs:
   # Merge multi-arch manifests (version tags only)
   # ═══════════════════════════════════════════════════════════════════
   merge:
-    needs: [version-check, docker-amd64, docker-arm64]
+    needs:
+      [version-check,
+       docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
+       docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:

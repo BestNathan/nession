@@ -23,8 +23,8 @@ coverage:
 # Fast pre-commit checks (fmt + clippy)
 quick: fmt lint
 
-# Full CI checks (fmt + lint + test + coverage)
-check: fmt lint test coverage
+# Full CI checks (fmt + lint + coverage — coverage already runs all tests)
+check: fmt lint coverage
 
 # ── Web ─────────────────────────────────────────────────────────────────────
 
