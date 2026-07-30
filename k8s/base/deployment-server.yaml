@@ -42,8 +42,8 @@ spec:
                 secretKeyRef:
                   name: nession-secret
                   key: auth-token
-            - name: SERVER_DB_PATH
-              value: "/data/server.db"
+            - name: NESSION_HOME
+              value: "/data"
           volumeMounts:
             - name: data
               mountPath: /data
@@ -69,4 +69,5 @@ spec:
       # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: nession-server-data
