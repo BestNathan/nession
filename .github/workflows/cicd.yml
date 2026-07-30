@@ -15,7 +15,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: extractions/setup-just@v2
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
       - uses: actions/cache@v4
         with:
@@ -24,9 +23,6 @@ jobs:
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: rustup component add llvm-tools-preview
       - run: just check
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
 
   web-check:
     runs-on: ubuntu-latest
@@ -108,8 +104,6 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
       - uses: actions/cache@v4
         id: cache-zig-amd64
         with:
@@ -137,8 +131,6 @@ jobs:
 
       - name: cargo zigbuild (release)
         env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
           BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: |
@@ -162,8 +154,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -176,8 +168,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -190,8 +182,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -218,8 +210,6 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
       - uses: actions/cache@v4
         id: cache-zig-arm64
         with:
@@ -247,8 +237,6 @@ jobs:
 
       - name: cargo zigbuild (release)
         env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
           BUILD_TIME: ${{ github.event.head_commit.timestamp }}
         run: |
@@ -272,8 +260,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -286,8 +274,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -300,8 +288,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build
-          cache-to: type=gha,scope=nession-build,mode=max
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
