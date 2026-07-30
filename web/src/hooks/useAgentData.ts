@@ -13,6 +13,17 @@ function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
   }
 }
 
+/** Shallow-compare two agent lists by meaningful fields.
+ *  Returns true when every agent matches on the fields the UI renders —
+ *  last_heartbeat is intentionally excluded because it changes every 10s
+ *  and would defeat deduplication. */
+function agentsEqual(a: Agent[], b: Agent[]): boolean {
+  if (a.length !== b.length) { return false; }
+  const key = (agent: Agent) =>
+    `${agent.agent_id}|${agent.status}|${agent.session_count}|${agent.active_sessions ?? 0}|${agent.display_name ?? ''}`;
+  return a.every((agent, i) => key(agent) === key(b[i]));
+}
+
 /** Agents data: state, fetch, heartbeat history tracking. */
 export function useAgentData(wsService: WebSocketService) {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -43,8 +54,13 @@ export function useAgentData(wsService: WebSocketService) {
   }, []);
 
   const applyAgentUpdate = useCallback((newAgents: Agent[]) => {
-    setAgents(newAgents);
     trackHeartbeats(newAgents, heartbeatHistory.current);
+    setAgents((prev) => {
+      if (agentsEqual(prev, newAgents)) {
+        return prev; // React bails out of re-render when reference is unchanged
+      }
+      return newAgents;
+    });
   }, []);
 
   /** Replace a single agent in the list (used after rename). */
