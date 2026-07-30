@@ -56,8 +56,17 @@ spec:
               # --- Install Claude Code ---
               npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
+              # --- Initialize Claude Code default settings (skip OAuth login) ---
+              CLAUDE_DIR=/opt/claude-tools/home/.claude
+              mkdir -p "$CLAUDE_DIR"
+              cat > "$CLAUDE_DIR/settings.json" << 'SETTINGS'
+              {
+                "hasOnboarded": true
+              }
+              SETTINGS
+
               # --- Copy to shared emptyDir volume ---
-              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
+              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib /opt/claude-tools/home
               cp /usr/bin/node /opt/claude-tools/bin/
               cp /usr/bin/claude /opt/claude-tools/bin/
               cp -a /usr/lib/node_modules /opt/claude-tools/lib/
