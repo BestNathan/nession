@@ -132,7 +132,10 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
-        // Build new-session WITHOUT `-e` — that flag requires tmux ≥ 3.0.
+        // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
+        // into the shell process so they take effect before bashrc runs — the
+        // only reliable way to set PS1 on Debian (bashrc unconditionally
+        // overwrites it).
         let mut cmd = Command::new("tmux");
         cmd.args([
             "new-session",
@@ -148,68 +151,76 @@ impl SessionManager {
         ])
         .stderr(std::process::Stdio::null());
 
-        let status = cmd.status().await?;
-
-        if !status.success() {
-            anyhow::bail!("Failed to create session: {name}");
-        }
-
-        // set-environment only affects future windows/panes — the initial
-        // window's shell is already running.  Use send-keys to inject env
-        // vars into the live shell (the session is detached, so no one
-        // sees the commands), then clear-history to remove the evidence.
-        // Also call set-environment so new windows inherit the vars.
-
-        // ── send-keys: inject into the initial window ──────────────────
-        let mut init_cmd = String::new();
         let mut has_ps1 = false;
         for (key, value) in env {
             if key == "PS1" {
                 has_ps1 = true;
             }
-            init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+            cmd.arg("-e").arg(format!("{key}={value}"));
         }
-
-        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
-        // overwrites PS1, so a plain export is not enough.  We set
-        // NESSON_PS1 (the value) and PROMPT_COMMAND (the mechanism).
-        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
-        // applies PS1, and unsets NESSON_PS1 so later prompts have zero
-        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
         if !has_ps1 {
-            init_cmd.push_str(&format!(
-                "export NESSON_PS1='{}';",
-                DEFAULT_PS1.replace('\'', "'\\''")
-            ));
-            init_cmd.push_str(
-                r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
+            cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
+            cmd.arg("-e").arg(
+                "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
             );
         }
 
-        if !init_cmd.is_empty() {
-            // Inject env vars into the initial window's shell via send-keys.
-            // The session was just created with -d (detached); the shell is
-            // starting in the background.  send-keys queues keystrokes into
-            // the pane's input buffer — it works even if the shell hasn't
-            // finished its rc files yet.
-            //
-            // Use a direct Command rather than the send_keys helper so that
-            // a non-zero exit is not fatal (the set-environment calls above
-            // already cover future windows; this is best-effort for the
-            // initial window).
-            let _ = Command::new("tmux")
-                .args(["send-keys", "-t", name, &init_cmd, "Enter"])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-            let _ = Command::new("tmux")
-                .args(["clear-history", "-t", name])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+        let status = cmd.status().await?;
+        let use_e = status.success();
+
+        if !use_e {
+            // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
+            // Retry without it, then inject via set-environment for future
+            // windows and send-keys for the already-running initial shell.
+            let mut cmd2 = Command::new("tmux");
+            cmd2.args([
+                "new-session",
+                "-d",
+                "-s",
+                name,
+                "-x",
+                &SESSION_WIDTH.to_string(),
+                "-y",
+                &SESSION_HEIGHT.to_string(),
+                "-c",
+                working_dir,
+            ])
+            .stderr(std::process::Stdio::null());
+
+            let status2 = cmd2.status().await?;
+            if !status2.success() {
+                anyhow::bail!("Failed to create session: {name}");
+            }
+
+            // Inject env vars into the live shell via send-keys.
+            let mut init_cmd = String::new();
+            for (key, value) in env {
+                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+            }
+            if !has_ps1 {
+                init_cmd.push_str(&format!(
+                    "export NESSON_PS1='{}';",
+                    DEFAULT_PS1.replace('\'', "'\\''")
+                ));
+                init_cmd.push_str(
+                    r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
+                );
+            }
+            if !init_cmd.is_empty() {
+                let _ = Command::new("tmux")
+                    .args(["send-keys", "-t", name, &init_cmd, "Enter"])
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+                let _ = Command::new("tmux")
+                    .args(["clear-history", "-t", name])
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+            }
         }
 
-        // ── set-environment: for future windows/panes ─────────────────
+        // Stage 3: set-environment for future windows/panes (both paths).
         for (key, value) in env {
             let _ = Command::new("tmux")
                 .args(["set-environment", "-t", name, key, value])
