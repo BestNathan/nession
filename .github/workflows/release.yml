@@ -68,7 +68,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
       - uses: extractions/setup-just@v2
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - run: jq --version
       - uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-llvm-cov
@@ -319,6 +319,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -331,6 +333,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -343,6 +347,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-amd64
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -392,6 +398,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -404,6 +412,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -416,6 +426,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-arm64
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -491,7 +503,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
-      - run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
 
