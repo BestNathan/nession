@@ -109,6 +109,20 @@ enum AgentAction {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    /// Restart the agent (stop then start)
+    Restart {
+        /// Path to configuration file (default: ~/.nession/agent-config.toml)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Run in foreground instead of background
+        #[arg(short, long)]
+        foreground: bool,
+
+        /// Path to PID file
+        #[arg(long)]
+        pid_file: Option<String>,
+    },
     /// Show agent status
     Status {
         /// Path to PID file
@@ -135,6 +149,20 @@ enum ServerAction {
     },
     /// Stop the server
     Stop {
+        /// Path to PID file
+        #[arg(long)]
+        pid_file: Option<String>,
+    },
+    /// Restart the server (stop then start)
+    Restart {
+        /// Path to configuration file (default: ~/.nession/server-config.toml)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Run in foreground instead of background
+        #[arg(short, long)]
+        foreground: bool,
+
         /// Path to PID file
         #[arg(long)]
         pid_file: Option<String>,
@@ -305,6 +333,32 @@ async fn main() -> Result<()> {
                 });
                 commands::agent::stop(pid_file).await?
             }
+            AgentAction::Restart {
+                config,
+                foreground,
+                pid_file,
+            } => {
+                let config = config.unwrap_or_else(|| {
+                    nession_common::paths::agent_config_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent-config.toml"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::agent_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("agent.pid"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::agent::restart(
+                    config,
+                    foreground,
+                    pid_file,
+                    cli.server_url,
+                    cli.auth_token,
+                )
+                .await?
+            }
             AgentAction::Status { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
                     nession_common::paths::agent_pid_path()
@@ -343,6 +397,25 @@ async fn main() -> Result<()> {
                         .into_owned()
                 });
                 commands::server::stop(pid_file).await?
+            }
+            ServerAction::Restart {
+                config,
+                foreground,
+                pid_file,
+            } => {
+                let config = config.unwrap_or_else(|| {
+                    nession_common::paths::server_config_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server-config.toml"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                let pid_file = pid_file.unwrap_or_else(|| {
+                    nession_common::paths::server_pid_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("server.pid"))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                commands::server::restart(config, foreground, pid_file).await?
             }
             ServerAction::Status { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {

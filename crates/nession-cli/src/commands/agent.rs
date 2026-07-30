@@ -195,6 +195,26 @@ pub async fn stop(pid_file: String) -> Result<()> {
     Ok(())
 }
 
+/// Restart the agent process (stop then start).
+pub async fn restart(
+    config_path: String,
+    foreground: bool,
+    pid_file: String,
+    server_url_override: Option<String>,
+    auth_token_override: Option<String>,
+) -> Result<()> {
+    println!("Restarting agent...");
+    stop(pid_file.clone()).await?;
+    start(
+        config_path,
+        foreground,
+        pid_file,
+        server_url_override,
+        auth_token_override,
+    )
+    .await
+}
+
 /// Show agent status.
 pub async fn status(pid_file: String) -> Result<()> {
     // Read PID file
