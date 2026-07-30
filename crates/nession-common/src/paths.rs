@@ -1,12 +1,26 @@
 use std::io;
 use std::path::PathBuf;
 
-/// Root directory for all nession runtime files: ~/.nession
+/// Environment variable that overrides the nession home directory.
+/// When set, all paths (server dir, agent dir, DB, PID, etc.)
+/// are resolved relative to this directory instead of `$HOME/.nession`.
+pub const NESSION_HOME_ENV: &str = "NESSION_HOME";
+
+/// Root directory for all nession runtime files.
+///
+/// Resolution order:
+/// 1. `$NESSION_HOME` env var — if set, use it directly
+/// 2. `$HOME/.nession` — standard XDG-style default
 pub fn nession_home() -> io::Result<PathBuf> {
+    if let Ok(home) = std::env::var(NESSION_HOME_ENV) {
+        if !home.is_empty() {
+            return Ok(PathBuf::from(home));
+        }
+    }
     dirs::home_dir().map(|h| h.join(".nession")).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not determine home directory",
+            "could not determine home directory (set NESSION_HOME or ensure HOME is set)",
         )
     })
 }
@@ -76,6 +90,15 @@ mod tests {
     fn test_nession_home() {
         let home = nession_home().unwrap();
         assert!(home.to_string_lossy().ends_with(".nession"));
+    }
+
+    #[test]
+    fn test_nession_home_env_override() {
+        let tmp = std::env::temp_dir().join("nession-test-home");
+        std::env::set_var("NESSION_HOME", tmp.to_string_lossy().as_ref());
+        let home = nession_home().unwrap();
+        assert_eq!(home, tmp);
+        std::env::remove_var("NESSION_HOME");
     }
 
     #[test]

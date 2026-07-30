@@ -25,3 +25,18 @@ images:
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
+# Isolate staging data on shared PVC via subPath.
+- target:
+    kind: Deployment
+    name: nession-server
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/0/subPath
+      value: staging
+- target:
+    kind: Deployment
+    name: nession-agent
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/1/subPath
+      value: staging

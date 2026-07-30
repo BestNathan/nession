@@ -7,11 +7,11 @@ LISTEN_PORT="${LISTEN_PORT:-10080}"
 SERVER_LISTEN="${SERVER_LISTEN:-0.0.0.0:18080}"
 SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:18080}"
 SERVER_AUTH_TOKEN="${SERVER_AUTH_TOKEN:-}"
-SERVER_DB_PATH="${SERVER_DB_PATH:-/data/server.db}"
 SERVER_HEARTBEAT_INTERVAL="${SERVER_HEARTBEAT_INTERVAL:-10}"
 SERVER_HEARTBEAT_TIMEOUT="${SERVER_HEARTBEAT_TIMEOUT:-30}"
+NESSION_HOME="${NESSION_HOME:-}"
 
-export LISTEN_PORT SERVER_BACKEND
+export LISTEN_PORT SERVER_BACKEND NESSION_HOME
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
@@ -48,11 +48,11 @@ fi
 nginx -t
 nginx -g 'daemon off;' &
 
-# Generate server config
+# Generate server config — db_path intentionally omitted: the binary resolves
+# it from NESSION_HOME (or $HOME/.nession as fallback).
 cat > /etc/nession/config.toml <<TOML
 listen_address = "${SERVER_LISTEN}"
 auth_token = "${SERVER_AUTH_TOKEN}"
-db_path = "${SERVER_DB_PATH}"
 tls_cert_path = "${TLS_CERT_PATH:-}"
 tls_key_path = "${TLS_KEY_PATH:-}"
 heartbeat_interval_secs = ${SERVER_HEARTBEAT_INTERVAL}
@@ -60,8 +60,8 @@ heartbeat_timeout_secs = ${SERVER_HEARTBEAT_TIMEOUT}
 TOML
 
 echo "=== nession-server ==="
-echo "  Listen:      $SERVER_LISTEN"
-echo "  DB:          $SERVER_DB_PATH"
-echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
+echo "  Listen:       $SERVER_LISTEN"
+echo "  Nession Home: ${NESSIN_HOME:-$HOME/.nession}"
+echo "  Nginx:        :${LISTEN_PORT} -> $SERVER_BACKEND"
 
 exec /usr/local/bin/nession-server

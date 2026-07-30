@@ -108,10 +108,14 @@ spec:
               value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/claude-tools/bin"
             - name: NODE_PATH
               value: "/opt/claude-tools/lib/node_modules"
+            - name: NESSION_HOME
+              value: "/data"
           volumeMounts:
             - name: claude-tools
               mountPath: /opt/claude-tools
               subPath: nession/claude-tools
+            - name: data
+              mountPath: /data
           livenessProbe:
             httpGet:
               path: /health
@@ -136,3 +140,6 @@ spec:
         - name: claude-tools
           persistentVolumeClaim:
             claimName: claude-tools
+        - name: data
+          persistentVolumeClaim:
+            claimName: nession-server-data
