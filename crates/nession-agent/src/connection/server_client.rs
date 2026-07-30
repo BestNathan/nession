@@ -31,6 +31,7 @@ use tokio_tungstenite::{
 use tracing::{debug, error, info, warn};
 
 use crate::env::EnvStore;
+use crate::extension::ExtensionRegistry;
 use crate::tmux::manager::SessionManager;
 
 /// Type alias for the WebSocket stream.
@@ -105,6 +106,8 @@ pub struct ServerClient {
     display_name: Option<String>,
     /// Default working directory for new tmux sessions.
     default_working_dir: String,
+    /// Extension registry for dispatching extension.* messages.
+    extension_registry: Option<Arc<ExtensionRegistry>>,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -257,6 +260,7 @@ impl ServerClient {
         metadata: AgentMetadata,
         tmux: Arc<SessionManager>,
         default_working_dir: String,
+        extension_registry: Option<Arc<ExtensionRegistry>>,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
@@ -271,6 +275,7 @@ impl ServerClient {
             addresses,
             display_name,
             default_working_dir,
+            extension_registry,
             metadata,
             tmux,
             env_store: EnvStore::new(env_root),
@@ -534,6 +539,41 @@ impl ServerClient {
         let msg: ProtocolMessage<serde_json::Value> =
             serde_json::from_str(text).context("failed to parse server message")?;
 
+        // Try extension dispatch first
+        if msg.msg_type.starts_with("extension.") {
+            if let Some(ref ext_registry) = self.extension_registry {
+                if let Some(result) = ext_registry
+                    .dispatch(&msg.msg_type, msg.payload.clone())
+                    .await
+                {
+                    let payload_value = match result {
+                        Ok(value) => value,
+                        Err(e) => {
+                            warn!("Extension handler error: {:#}", e);
+                            serde_json::json!({
+                                "error": e.to_string(),
+                                "available": false,
+                            })
+                        }
+                    };
+
+                    let response = serde_json::json!({
+                        "msg_type": "agent.session.command.response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": msg.payload.get("request_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                            "command": msg.msg_type,
+                            "result": payload_value,
+                        }
+                    });
+                    sink.send(WsMessage::Text(response.to_string())).await?;
+                    return Ok(());
+                }
+            }
+        }
         match msg.msg_type.as_str() {
             msg_types::AGENT_REGISTER_RESPONSE => {
                 // Already handled during connect; log late/duplicate responses.
@@ -962,6 +1002,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1008,6 +1049,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1064,6 +1106,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1148,6 +1191,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");
@@ -1227,6 +1271,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
@@ -1330,6 +1375,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1440,6 +1486,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1532,6 +1579,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1801,6 +1849,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1887,6 +1936,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1984,6 +2034,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -2032,6 +2083,7 @@ mod tests {
             metadata,
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
+            None,
         );
 
         let (handle, interval) = client.connect_and_run().await.expect("connect failed");

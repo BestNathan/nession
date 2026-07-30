@@ -14,6 +14,7 @@
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
+use nession_agent::extension::ExtensionRegistry;
 use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
 use nession_agent::netwatch;
@@ -21,6 +22,8 @@ use nession_agent::server::AgentServer;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
+use nession_claude_code::agent::ClaudeCodeAgentExtension;
+use nession_common::extension::AgentExtension;
 use nession_common::protocol::AgentMetadata;
 use nession_common::system;
 use std::path::Path;
@@ -124,6 +127,14 @@ async fn main() -> Result<()> {
         info!("No server_url configured — running in standalone mode");
         (None, config.heartbeat_interval_secs)
     } else {
+        let extensions: Vec<Box<dyn AgentExtension>> =
+            vec![Box::new(ClaudeCodeAgentExtension::new())];
+        let ext_registry = if extensions.is_empty() {
+            None
+        } else {
+            Some(Arc::new(ExtensionRegistry::new(extensions)))
+        };
+
         let server_client = ServerClient::new(
             &config.server_url,
             &config.auth_token,
@@ -137,6 +148,7 @@ async fn main() -> Result<()> {
             metadata,
             tmux_for_client,
             config.default_working_dir.clone(),
+            ext_registry,
         );
 
         // Attempt to connect with a timeout so the agent can still serve

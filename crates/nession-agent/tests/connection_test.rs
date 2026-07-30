@@ -75,6 +75,7 @@ async fn integration_connection_to_mock_server() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -112,6 +113,7 @@ async fn integration_registration_message_format() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -174,6 +176,7 @@ async fn integration_heartbeat_message_format() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -246,6 +249,7 @@ async fn integration_session_update_message_format() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -312,6 +316,7 @@ async fn integration_reconnection_logic() {
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     // Spawn the client connection attempt in the background.

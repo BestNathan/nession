@@ -200,6 +200,27 @@ export class WebSocketService {
     return this.requests.queryAgentEnvState(sessionId);
   }
 
+  // ── Claude Code Extension (delegated to RequestPlugin) ────────
+
+  async claudeCodeList(req: {
+    agent_id: string;
+    scope: 'global' | 'project';
+    session_id?: string;
+  }): Promise<{ available: boolean; categories: { name: string; icon: string | null; files: { path: string; size: number; content_type: string }[] }[]; error?: string }> {
+    return this.requests.claudeCodeList(req);
+  }
+
+  async claudeCodeRead(req: {
+    agent_id: string;
+    scope: 'global' | 'project';
+    session_id?: string;
+    path: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<{ content: string; content_type: string; total_size: number; offset: number; has_more: boolean; error?: string }> {
+    return this.requests.claudeCodeRead(req);
+  }
+
   // ── Quick Commands (delegated to RequestPlugin) ───────────────
 
   async listCommands(): Promise<CommandsListResponse> {

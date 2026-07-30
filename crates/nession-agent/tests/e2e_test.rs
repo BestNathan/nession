@@ -135,6 +135,7 @@ async fn register_agent_with_server(
         metadata,
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
+        None, // extension_registry
     );
 
     client

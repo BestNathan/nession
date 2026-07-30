@@ -143,6 +143,10 @@ impl ConnectionHandler {
                 msg.msg_type, msg.id
             );
         }
+        // Try extension dispatch first (extension.* messages get relayed to agent)
+        if msg.msg_type.starts_with("extension.") {
+            return self.handle_extension_message(msg).await;
+        }
         match msg.msg_type.as_str() {
             "agent.register" => self.handle_agent_register(msg).await,
             "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
@@ -1709,6 +1713,69 @@ impl ConnectionHandler {
 
         self.agent_registry.register(agent).await;
         Ok(HandlerAction::Reply(None))
+    }
+
+    /// Relay an extension message (extension.<name>.<action>) to the target agent.
+    /// Uses agent_command() which injects request_id into the payload so the agent
+    /// can correlate its response via agent.session.command.response.
+    async fn handle_extension_message(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        let agent_id = msg
+            .payload
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if agent_id.is_empty() {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": format!("{}.response", msg.msg_type),
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "missing agent_id",
+                        "available": false,
+                    }
+                })
+                .to_string(),
+            ))));
+        }
+
+        let response_msg_type = format!("{}.response", msg.msg_type);
+
+        match self
+            .agent_command(agent_id, &msg.msg_type, msg.payload.clone())
+            .await
+        {
+            Ok(response) => {
+                // agent_command returns { request_id, command, result }.
+                // Extract just the result for the client response.
+                let result = response.get("result").cloned().unwrap_or(response);
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": response_msg_type,
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": result,
+                    })
+                    .to_string(),
+                ))))
+            }
+            Err(e) => {
+                warn!("Extension command failed for agent {}: {}", agent_id, e);
+                Ok(HandlerAction::Reply(Some(Message::Text(
+                    json!({
+                        "msg_type": response_msg_type,
+                        "id": msg.id,
+                        "timestamp": current_timestamp(),
+                        "payload": { "error": "agent_disconnected", "available": false },
+                    })
+                    .to_string(),
+                ))))
+            }
+        }
     }
 
     // ========================================================================
