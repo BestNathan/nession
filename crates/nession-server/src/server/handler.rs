@@ -321,15 +321,19 @@ impl ConnectionHandler {
                 .await;
         }
 
-        self.agent_registry
+        let changed = self
+            .agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;
 
         // Push updated agent state to all connected web dashboard clients
-        // so session counts, status, etc. stay current without polling.
-        self.web_client_registry
-            .broadcast_agents_changed(Arc::clone(&self.agent_registry))
-            .await;
+        // only when a meaningful field changed (status, session counts).
+        // Timestamp-only heartbeats don't need a broadcast.
+        if changed {
+            self.web_client_registry
+                .broadcast_agents_changed(Arc::clone(&self.agent_registry))
+                .await;
+        }
 
         // Acknowledge so the agent can confirm the link is healthy in both
         // directions and reset its own miss counter.

@@ -128,13 +128,34 @@ impl AgentRegistry {
         agents.insert(info.agent_id.clone(), info);
     }
 
-    pub async fn update_heartbeat(&self, agent_id: &str, session_count: u32, active_sessions: u32) {
+    /// Update heartbeat timestamp and session counts for an agent.
+    /// Returns `true` if a **meaningful** field changed (status, session_count,
+    /// active_sessions) — i.e. the UI should re-render. Returns `false` when
+    /// only `last_heartbeat` was touched (no-op for dashboard clients).
+    pub async fn update_heartbeat(
+        &self,
+        agent_id: &str,
+        session_count: u32,
+        active_sessions: u32,
+    ) -> bool {
         let mut agents = self.agents.write().await;
         if let Some(agent) = agents.get_mut(agent_id) {
+            let status_before = agent.status.clone();
+            let sessions_before = agent.session_count;
+            let active_before = agent.active_sessions;
+
             agent.last_heartbeat = Utc::now();
             agent.status = AgentStatus::Online;
             agent.session_count = session_count;
             agent.active_sessions = active_sessions;
+
+            // Only signal a meaningful change — timestamp-only updates don't
+            // need to trigger a broadcast to every web client.
+            status_before != AgentStatus::Online
+                || sessions_before != session_count
+                || active_before != active_sessions
+        } else {
+            false
         }
     }
 
