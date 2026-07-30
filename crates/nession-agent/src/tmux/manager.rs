@@ -153,16 +153,22 @@ impl SessionManager {
 
         // Pass through the agent process environment (PATH, NODE_PATH, etc.)
         // so tools installed via init container are available in tmux sessions.
+        // Skip TERM — we force xterm-256color below regardless of what the
+        // container has (typically unset or "dumb").
         // Skip the caller-supplied env keys — those are handled below.
         // Collect first — std::env::vars() iterator is not Send.
         let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         let process_env: Vec<(String, String)> = std::env::vars().collect();
         for (key, value) in process_env.iter() {
-            if caller_keys.iter().any(|k| *k == key) {
+            if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
                 continue;
             }
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
+        // Force xterm-256color so TUI apps (Claude Code, htop, etc.) render
+        // correctly in the web terminal.  Put after the process-env loop so
+        // that a stray TERM=dumb from the container doesn't win.
+        cmd.arg("-e").arg("TERM=xterm-256color");
 
         let mut has_ps1 = false;
         for (key, value) in env {
@@ -206,9 +212,9 @@ impl SessionManager {
             }
 
             // Inject env vars into the live shell via send-keys.
-            let mut init_cmd = String::new();
+            let mut init_cmd = String::from("export TERM=xterm-256color;");
             for (key, value) in &process_env {
-                if caller_keys.iter().any(|k| *k == key) {
+                if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
                     continue;
                 }
                 init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
@@ -240,8 +246,13 @@ impl SessionManager {
         }
 
         // Stage 3: set-environment for future windows/panes (both paths).
+        let _ = Command::new("tmux")
+            .args(["set-environment", "-t", name, "TERM", "xterm-256color"])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
         for (key, value) in &process_env {
-            if caller_keys.iter().any(|k| *k == key) {
+            if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
                 continue;
             }
             let _ = Command::new("tmux")
