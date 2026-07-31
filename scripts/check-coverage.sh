@@ -74,18 +74,28 @@ done
 # Run llvm-cov with JSON output on just the target crates.
 # bash ≥5.0 exits on $(failing_cmd) with set -e (unlike bash 3.2 on macOS),
 # so we temporarily disable errexit around cargo llvm-cov.
+# stderr is saved so we can diagnose failures on CI.
+COV_STDERR=$(mktemp)
 set +e
-JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
+JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>"$COV_STDERR")
 set -e
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run${NC}"
+    if [ -s "$COV_STDERR" ]; then
+        echo -e "${YELLOW}  ── last 20 lines of stderr ──${NC}"
+        tail -20 "$COV_STDERR" | while IFS= read -r line; do
+            echo -e "  ${YELLOW}| ${line}${NC}"
+        done
+    fi
     echo -e "${YELLOW}  Fix: cargo install cargo-llvm-cov${NC}"
     echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    rm -f "$COV_STDERR"
     exit 1
 fi
+rm -f "$COV_STDERR"
 
 HAS_ERROR=0
 BELOW_THRESHOLD=()
