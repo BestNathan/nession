@@ -8,6 +8,11 @@
 
 set -euo pipefail
 
+# Debug: enable tracing on CI to diagnose silent failures
+if [ "${CI:-}" = "true" ]; then
+    set -x
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
