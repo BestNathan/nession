@@ -225,13 +225,6 @@ async fn test_client_connects_to_agent_via_p2p() {
 
 #[tokio::test]
 async fn test_terminal_io_through_full_chain() {
-    // Under LLVM instrumentation PTY I/O is too slow to complete within
-    // any reasonable deadline.
-    if std::env::var("LLVM_PROFILE_FILE").is_ok() {
-        eprintln!("skipping test_terminal_io_through_full_chain under LLVM instrumentation");
-        return;
-    }
-
     let tmux = SessionManager::new();
     let session_name = "e2e_terminal_io";
 

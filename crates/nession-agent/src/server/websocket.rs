@@ -1890,15 +1890,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_io_flow() {
-        // Under LLVM instrumentation PTY I/O is orders of magnitude slower
-        // and the PTY reader task / tmux subprocess may not produce output
-        // within any reasonable deadline.  The test is exercised on macOS
-        // (where llvm-cov works) and by `cargo test` on Linux.
-        if std::env::var("LLVM_PROFILE_FILE").is_ok() {
-            eprintln!("skipping test_terminal_io_flow under LLVM instrumentation");
-            return;
-        }
-
         let (addr, handle) = start_test_server_on(18084).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 

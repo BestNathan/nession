@@ -77,7 +77,10 @@ done
 # stderr is saved so we can diagnose failures on CI.
 COV_STDERR=$(mktemp)
 set +e
-JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>"$COV_STDERR")
+# Skip PTY/tmux timing-sensitive tests that are too slow under LLVM
+    # instrumentation.  They pass fine with plain `cargo test`.
+    SKIP_FLAGS="--skip terminal_io --skip full_chain"
+    JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json -- $SKIP_FLAGS 2>"$COV_STDERR")
 set -e
 
 if [ -z "$JSON" ]; then
