@@ -76,8 +76,9 @@ for crate in "${!THRESHOLDS[@]}"; do
     PACKAGE_FLAGS="$PACKAGE_FLAGS -p $crate"
 done
 
-# Run llvm-cov with JSON output on just the target crates
-JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
+# Run llvm-cov with JSON output on just the target crates.
+# || true guards against bash ≥5.0 where $(failing_cmd) triggers set -e exit.
+JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null) || true
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
