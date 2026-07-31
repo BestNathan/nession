@@ -51,6 +51,15 @@ else
     echo "=== Claude Code settings already present, skipping init ==="
 fi
 
+# Ensure login shells inside tmux sessions inherit the full toolchain PATH.
+# Debian's /etc/profile hardcodes PATH without /opt/claude-tools, so even
+# though tmux -e passes the correct value, bash overwrites it on startup.
+mkdir -p /etc/profile.d
+cat > /etc/profile.d/nession.sh << 'PROFILE'
+export PATH="/opt/claude-tools/bin:$PATH"
+export NODE_PATH="/opt/claude-tools/lib/node_modules${NODE_PATH:+:$NODE_PATH}"
+PROFILE
+
 echo "=== nession-agent ==="
 echo "  Agent ID:    $AGENT_ID"
 echo "  Listen:      $AGENT_LISTEN"
