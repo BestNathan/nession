@@ -1912,7 +1912,9 @@ mod tests {
             send_and_receive(&mut sink, &mut stream, &attach_req).await;
 
         // Give the PTY reader task a moment to start.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Increased from 200ms — under LLVM instrumentation the PTY setup
+        // can take noticeably longer.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // Send terminal input (base64-encoded "echo hello\n").
         use base64::Engine;
@@ -1927,11 +1929,14 @@ mod tests {
         assert_eq!(input_resp.msg_type, msg_types::OK);
 
         // Wait for the shell to echo and produce output.
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        // Increased from 1s — under LLVM instrumentation the shell startup
+        // and command execution are slower.
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
         // Read a terminal output message from the stream.
         let mut got_output = false;
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        // Increased from 5s — under LLVM instrumentation terminal I/O is slower.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
         while tokio::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_secs(2), stream.next()).await {
                 Ok(Some(Ok(WsMessage::Text(text)))) => {
