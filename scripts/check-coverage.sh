@@ -105,7 +105,8 @@ for crate in "${!THRESHOLDS[@]}"; do
     covered=$(echo "$result" | awk '{print $1}')
     count=$(echo "$result" | awk '{print $2}')
 
-    if [ "$count" -eq 0 ]; then
+    # Guard against empty values from jq parsing failures
+    if [ -z "$count" ] || [ "$count" -eq 0 ]; then
         echo -e "${YELLOW}  ${crate}: no coverage data — test binary may not have produced coverage${NC}"
         continue
     fi
