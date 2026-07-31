@@ -8,11 +8,6 @@
 
 set -euo pipefail
 
-# Debug: enable tracing on CI to diagnose silent failures
-if [ "${CI:-}" = "true" ]; then
-    set -x
-fi
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -77,8 +72,11 @@ for crate in "${!THRESHOLDS[@]}"; do
 done
 
 # Run llvm-cov with JSON output on just the target crates.
-# || true guards against bash ≥5.0 where $(failing_cmd) triggers set -e exit.
-JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null) || true
+# bash ≥5.0 exits on $(failing_cmd) with set -e (unlike bash 3.2 on macOS),
+# so we temporarily disable errexit around cargo llvm-cov.
+set +e
+JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
+set -e
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
