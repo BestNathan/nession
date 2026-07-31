@@ -85,7 +85,7 @@ if [ -z "$JSON" ]; then
     echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run${NC}"
     if [ -s "$COV_STDERR" ]; then
         echo -e "${YELLOW}  ── last 20 lines of stderr ──${NC}"
-        tail -20 "$COV_STDERR" | while IFS= read -r line; do
+        tail -60 "$COV_STDERR" | while IFS= read -r line; do
             echo -e "  ${YELLOW}| ${line}${NC}"
         done
     fi
