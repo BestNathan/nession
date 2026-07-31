@@ -12,6 +12,8 @@ AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 
 export LISTEN_PORT SERVER_BACKEND
+export LANG="${LANG:-C.UTF-8}"
+export TERM="${TERM:-xterm-256color}"
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \

@@ -107,6 +107,10 @@ spec:
               value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/claude-tools/bin"
             - name: NODE_PATH
               value: "/opt/claude-tools/lib/node_modules"
+            - name: LANG
+              value: "C.UTF-8"
+            - name: TERM
+              value: "xterm-256color"
             - name: NESSION_HOME
               value: "/data"
           volumeMounts:

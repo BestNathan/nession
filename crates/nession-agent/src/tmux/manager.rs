@@ -160,15 +160,20 @@ impl SessionManager {
         let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         let process_env: Vec<(String, String)> = std::env::vars().collect();
         for (key, value) in process_env.iter() {
-            if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
+            if key == "TERM"
+                || key == "LANG"
+                || key == "LC_ALL"
+                || caller_keys.iter().any(|k| *k == key)
+            {
                 continue;
             }
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
-        // Force xterm-256color so TUI apps (Claude Code, htop, etc.) render
-        // correctly in the web terminal.  Put after the process-env loop so
-        // that a stray TERM=dumb from the container doesn't win.
+        // Force TERM and locale so TUI apps render correctly.
+        // Containers default to C/POSIX locale (no Unicode) → box-drawing
+        // characters become underscores; TERM is typically unset or "dumb".
         cmd.arg("-e").arg("TERM=xterm-256color");
+        cmd.arg("-e").arg("LANG=C.UTF-8");
 
         let mut has_ps1 = false;
         for (key, value) in env {
@@ -212,9 +217,13 @@ impl SessionManager {
             }
 
             // Inject env vars into the live shell via send-keys.
-            let mut init_cmd = String::from("export TERM=xterm-256color;");
+            let mut init_cmd = String::from("export TERM=xterm-256color;export LANG=C.UTF-8;");
             for (key, value) in &process_env {
-                if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
+                if key == "TERM"
+                    || key == "LANG"
+                    || key == "LC_ALL"
+                    || caller_keys.iter().any(|k| *k == key)
+                {
                     continue;
                 }
                 init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
@@ -251,8 +260,17 @@ impl SessionManager {
             .stderr(std::process::Stdio::null())
             .status()
             .await;
+        let _ = Command::new("tmux")
+            .args(["set-environment", "-t", name, "LANG", "C.UTF-8"])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
         for (key, value) in &process_env {
-            if key == "TERM" || caller_keys.iter().any(|k| *k == key) {
+            if key == "TERM"
+                || key == "LANG"
+                || key == "LC_ALL"
+                || caller_keys.iter().any(|k| *k == key)
+            {
                 continue;
             }
             let _ = Command::new("tmux")
