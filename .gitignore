@@ -99,3 +99,5 @@ agent-config.toml
 build_rs_cov.profraw
 lcov.info
 tarpaulin-report.json
+default_*.profraw
+*.profraw

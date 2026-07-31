@@ -71,17 +71,34 @@ for crate in "${!THRESHOLDS[@]}"; do
     PACKAGE_FLAGS="$PACKAGE_FLAGS -p $crate"
 done
 
-# Run llvm-cov with JSON output on just the target crates
-JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json 2>/dev/null)
+# Run llvm-cov with JSON output on just the target crates.
+# bash ≥5.0 exits on $(failing_cmd) with set -e (unlike bash 3.2 on macOS),
+# so we temporarily disable errexit around cargo llvm-cov.
+# stderr is saved so we can diagnose failures on CI.
+COV_STDERR=$(mktemp)
+set +e
+# Skip PTY/tmux timing-sensitive tests that are too slow under LLVM
+    # instrumentation.  They pass fine with plain `cargo test`.
+    SKIP_FLAGS="--skip terminal_io --skip full_chain"
+    JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json -- $SKIP_FLAGS 2>"$COV_STDERR")
+set -e
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run${NC}"
+    if [ -s "$COV_STDERR" ]; then
+        echo -e "${YELLOW}  ── last 20 lines of stderr ──${NC}"
+        tail -60 "$COV_STDERR" | while IFS= read -r line; do
+            echo -e "  ${YELLOW}| ${line}${NC}"
+        done
+    fi
     echo -e "${YELLOW}  Fix: cargo install cargo-llvm-cov${NC}"
     echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    rm -f "$COV_STDERR"
     exit 1
 fi
+rm -f "$COV_STDERR"
 
 HAS_ERROR=0
 BELOW_THRESHOLD=()
@@ -105,7 +122,8 @@ for crate in "${!THRESHOLDS[@]}"; do
     covered=$(echo "$result" | awk '{print $1}')
     count=$(echo "$result" | awk '{print $2}')
 
-    if [ "$count" -eq 0 ]; then
+    # Guard against empty values from jq parsing failures
+    if [ -z "$count" ] || [ "$count" -eq 0 ]; then
         echo -e "${YELLOW}  ${crate}: no coverage data — test binary may not have produced coverage${NC}"
         continue
     fi

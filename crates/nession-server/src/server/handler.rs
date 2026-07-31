@@ -257,6 +257,24 @@ impl ConnectionHandler {
         self.agent_registry.register(agent_info).await;
         self.registered_agent_id = Some(payload.agent_id.clone());
 
+        // Clear any sessions left over from a previous agent instance.
+        // On reconnect the agent's tmux state is fresh — the SessionWatcher
+        // starts with empty prev_sessions and can only report currently-
+        // existing sessions.  Stale entries from the prior run must be
+        // removed here or they linger forever.
+        let removed = self
+            .session_registry
+            .remove_by_agent(&payload.agent_id)
+            .await;
+        if !removed.is_empty() {
+            info!(
+                "Cleared {} stale session(s) for agent {} after re-registration: {:?}",
+                removed.len(),
+                payload.agent_id,
+                removed
+            );
+        }
+
         info!("Agent {} registered successfully", payload.agent_id);
 
         Ok(HandlerAction::Reply(Some(Message::Text(
@@ -321,15 +339,19 @@ impl ConnectionHandler {
                 .await;
         }
 
-        self.agent_registry
+        let changed = self
+            .agent_registry
             .update_heartbeat(agent_id, session_count, active_sessions)
             .await;
 
         // Push updated agent state to all connected web dashboard clients
-        // so session counts, status, etc. stay current without polling.
-        self.web_client_registry
-            .broadcast_agents_changed(Arc::clone(&self.agent_registry))
-            .await;
+        // only when a meaningful field changed (status, session counts).
+        // Timestamp-only heartbeats don't need a broadcast.
+        if changed {
+            self.web_client_registry
+                .broadcast_agents_changed(Arc::clone(&self.agent_registry))
+                .await;
+        }
 
         // Acknowledge so the agent can confirm the link is healthy in both
         // directions and reset its own miss counter.

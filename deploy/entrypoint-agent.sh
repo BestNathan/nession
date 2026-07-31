@@ -12,6 +12,8 @@ AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 
 export LISTEN_PORT SERVER_BACKEND
+export LANG="${LANG:-C.UTF-8}"
+export TERM="${TERM:-xterm-256color}"
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
@@ -34,6 +36,19 @@ TOML
 # Only add connect_url if explicitly set
 if [ -n "${AGENT_CONNECT_URL}" ]; then
     echo "connect_url = \"${AGENT_CONNECT_URL}\"" >> /etc/nession/agent-config.toml
+fi
+
+# Initialize Claude Code settings on first run only.
+# /root/.claude is backed by PVC — once created, survives restarts.
+CLAUDE_DIR="/root/.claude"
+if [ ! -f "${CLAUDE_DIR}/settings.json" ]; then
+    mkdir -p "${CLAUDE_DIR}"
+    cat > "${CLAUDE_DIR}/settings.json" << 'SETTINGS'
+{"hasOnboarded": true}
+SETTINGS
+    echo "=== Claude Code settings initialized (first run) ==="
+else
+    echo "=== Claude Code settings already present, skipping init ==="
 fi
 
 echo "=== nession-agent ==="

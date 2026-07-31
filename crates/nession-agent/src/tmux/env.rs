@@ -56,6 +56,7 @@ impl EnvManager {
                     "-e",
                     &format!("{key}={value}"),
                 ])
+                .stderr(std::process::Stdio::null())
                 .status()
                 .await;
             match status {
@@ -102,6 +103,7 @@ impl EnvManager {
         // Clear tmux scrollback history to hide the source command
         let _ = Command::new("tmux")
             .args(["clear-history", "-t", session_name])
+            .stderr(std::process::Stdio::null())
             .output()
             .await;
 
@@ -132,6 +134,7 @@ impl EnvManager {
         // Clear tmux scrollback history to hide the unsource command
         let _ = Command::new("tmux")
             .args(["clear-history", "-t", session_name])
+            .stderr(std::process::Stdio::null())
             .output()
             .await;
 

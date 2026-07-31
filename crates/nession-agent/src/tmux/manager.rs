@@ -132,6 +132,10 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
+        // into the shell process so they take effect before bashrc runs — the
+        // only reliable way to set PS1 on Debian (bashrc unconditionally
+        // overwrites it).
         let mut cmd = Command::new("tmux");
         cmd.args([
             "new-session",
@@ -144,11 +148,33 @@ impl SessionManager {
             &SESSION_HEIGHT.to_string(),
             "-c",
             working_dir,
-        ]);
+        ])
+        .stderr(std::process::Stdio::null());
 
-        // Inject env vars via `-e KEY=VALUE`. Supported since tmux 3.0; on older
-        // tmux the flag is rejected and session creation fails loudly rather
-        // than silently dropping the environment.
+        // Pass through the agent process environment (PATH, NODE_PATH, etc.)
+        // so tools installed via init container are available in tmux sessions.
+        // Skip TERM — we force xterm-256color below regardless of what the
+        // container has (typically unset or "dumb").
+        // Skip the caller-supplied env keys — those are handled below.
+        // Collect first — std::env::vars() iterator is not Send.
+        let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        let process_env: Vec<(String, String)> = std::env::vars().collect();
+        for (key, value) in process_env.iter() {
+            if key == "TERM"
+                || key == "LANG"
+                || key == "LC_ALL"
+                || caller_keys.iter().any(|k| *k == key)
+            {
+                continue;
+            }
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+        // Force TERM and locale so TUI apps render correctly.
+        // Containers default to C/POSIX locale (no Unicode) → box-drawing
+        // characters become underscores; TERM is typically unset or "dumb".
+        cmd.arg("-e").arg("TERM=xterm-256color");
+        cmd.arg("-e").arg("LANG=C.UTF-8");
+
         let mut has_ps1 = false;
         for (key, value) in env {
             if key == "PS1" {
@@ -156,23 +182,127 @@ impl SessionManager {
             }
             cmd.arg("-e").arg(format!("{key}={value}"));
         }
-
-        // Default short PS1.  Debian's /etc/bash.bashrc unconditionally
-        // overwrites PS1, so a plain `-e PS1=…` is not enough.  We set
-        // NESSION_PS1 (the value) and PROMPT_COMMAND (the mechanism).
-        // PROMPT_COMMAND runs *after* bashrc, just before the first prompt,
-        // applies PS1, and unsets NESSION_PS1 so later prompts have zero
-        // overhead.  No recursive ${PROMPT_COMMAND:+…} tail.
         if !has_ps1 {
             cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
-            cmd.arg("-e")
-                .arg("PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSION_PS1; }");
+            cmd.arg("-e").arg(
+                "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+            );
         }
 
         let status = cmd.status().await?;
+        let use_e = status.success();
 
-        if !status.success() {
-            anyhow::bail!("Failed to create session: {name}");
+        if !use_e {
+            // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
+            // Retry without it, then inject via set-environment for future
+            // windows and send-keys for the already-running initial shell.
+            let mut cmd2 = Command::new("tmux");
+            cmd2.args([
+                "new-session",
+                "-d",
+                "-s",
+                name,
+                "-x",
+                &SESSION_WIDTH.to_string(),
+                "-y",
+                &SESSION_HEIGHT.to_string(),
+                "-c",
+                working_dir,
+            ])
+            .stderr(std::process::Stdio::null());
+
+            let status2 = cmd2.status().await?;
+            if !status2.success() {
+                anyhow::bail!("Failed to create session: {name}");
+            }
+
+            // Inject env vars into the live shell via send-keys.
+            let mut init_cmd = String::from("export TERM=xterm-256color;export LANG=C.UTF-8;");
+            for (key, value) in &process_env {
+                if key == "TERM"
+                    || key == "LANG"
+                    || key == "LC_ALL"
+                    || caller_keys.iter().any(|k| *k == key)
+                {
+                    continue;
+                }
+                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+            }
+            for (key, value) in env {
+                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+            }
+            if !has_ps1 {
+                init_cmd.push_str(&format!(
+                    "export NESSON_PS1='{}';",
+                    DEFAULT_PS1.replace('\'', "'\\''")
+                ));
+                init_cmd.push_str(
+                    r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
+                );
+            }
+            if !init_cmd.is_empty() {
+                let _ = Command::new("tmux")
+                    .args(["send-keys", "-t", name, &init_cmd, "Enter"])
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+                let _ = Command::new("tmux")
+                    .args(["clear-history", "-t", name])
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+            }
+        }
+
+        // Stage 3: set-environment for future windows/panes (both paths).
+        let _ = Command::new("tmux")
+            .args(["set-environment", "-t", name, "TERM", "xterm-256color"])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        let _ = Command::new("tmux")
+            .args(["set-environment", "-t", name, "LANG", "C.UTF-8"])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        for (key, value) in &process_env {
+            if key == "TERM"
+                || key == "LANG"
+                || key == "LC_ALL"
+                || caller_keys.iter().any(|k| *k == key)
+            {
+                continue;
+            }
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, key, value])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+        for (key, value) in env {
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, key, value])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        }
+        if !has_ps1 {
+            let _ = Command::new("tmux")
+                .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            let _ = Command::new("tmux")
+                .args([
+                    "set-environment",
+                    "-t",
+                    name,
+                    "PROMPT_COMMAND",
+                    "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
+                ])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
         }
 
         // Enable tmux mouse mode so wheel events reach tmux as SGR mouse
@@ -181,6 +311,7 @@ impl SessionManager {
         // so mouse button events stay local for text selection.
         let _ = Command::new("tmux")
             .args(["set-option", "-t", name, "mouse", "on"])
+            .stderr(std::process::Stdio::null())
             .status()
             .await;
 
@@ -190,6 +321,7 @@ impl SessionManager {
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         let status = Command::new("tmux")
             .args(["kill-session", "-t", name])
+            .stderr(std::process::Stdio::null())
             .status()
             .await?;
 

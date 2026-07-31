@@ -26,11 +26,11 @@ spec:
             - |
               set -e
 
-              # If already installed on the persistent volume, skip.
-              if [ -x /shared/bin/node ] && [ -x /shared/bin/claude ]; then
+              # If already installed, skip.
+              if [ -x /opt/claude-tools/bin/node ] && [ -x /opt/claude-tools/bin/claude ]; then
                 echo "=== Claude Code already installed, skipping ==="
-                /shared/bin/node --version
-                /shared/bin/claude --version
+                /opt/claude-tools/bin/node --version
+                /opt/claude-tools/bin/claude --version
                 exit 0
               fi
 
@@ -56,19 +56,18 @@ spec:
               # --- Install Claude Code ---
               npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
-              # --- Copy to shared volume (ignore errors from existing files) ---
-              mkdir -p /shared/bin /shared/lib
-              cp /usr/bin/node /shared/bin/ 2>/dev/null || true
-              cp /usr/bin/claude /shared/bin/ 2>/dev/null || true
-              cp -a /usr/lib/node_modules /shared/lib/ 2>/dev/null || true
+              # --- Copy to shared emptyDir volume ---
+              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
+              cp /usr/bin/node /opt/claude-tools/bin/
+              cp /usr/bin/claude /opt/claude-tools/bin/
+              cp -a /usr/lib/node_modules /opt/claude-tools/lib/
 
               echo "=== Init done ==="
-              /shared/bin/node --version
-              /shared/bin/claude --version
+              /opt/claude-tools/bin/node --version
+              /opt/claude-tools/bin/claude --version
           volumeMounts:
             - name: claude-tools
-              mountPath: /shared
-              subPath: nession/claude-tools
+              mountPath: /opt/claude-tools
           resources:
             requests:
               cpu: 50m
@@ -108,12 +107,18 @@ spec:
               value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/claude-tools/bin"
             - name: NODE_PATH
               value: "/opt/claude-tools/lib/node_modules"
+            - name: LANG
+              value: "C.UTF-8"
+            - name: TERM
+              value: "xterm-256color"
             - name: NESSION_HOME
               value: "/data"
           volumeMounts:
             - name: claude-tools
               mountPath: /opt/claude-tools
-              subPath: nession/claude-tools
+            - name: claude-home
+              mountPath: /root/.claude
+              subPath: nession/claude-home
             - name: data
               mountPath: /data
           livenessProbe:
@@ -138,8 +143,10 @@ spec:
       # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public
       volumes:
         - name: claude-tools
+          emptyDir: {}
+        - name: claude-home
           persistentVolumeClaim:
-            claimName: claude-tools
+            claimName: nession-server-data
         - name: data
           persistentVolumeClaim:
             claimName: nession-server-data

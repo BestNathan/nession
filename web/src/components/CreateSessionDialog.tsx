@@ -80,13 +80,20 @@ export function CreateSessionDialog({
 
   const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
 
+  // Stable ref for onlineAgents — prevents resetState from depending on the
+  // agents array, which changes on every realtime push and would cascade into
+  // useDialogReset, clearing form state while the user is typing.
+  const onlineAgentsRef = useRef(onlineAgents);
+  onlineAgentsRef.current = onlineAgents;
+
   const resetState = useCallback(() => {
-    setAgentId(preselectedAgentId ?? (onlineAgents.length > 0 ? onlineAgents[0].agent_id : ''));
+    const online = onlineAgentsRef.current;
+    setAgentId(preselectedAgentId ?? (online.length > 0 ? online[0].agent_id : ''));
     setSessionName('');
     setLoading(false);
     setError(null);
     setSelectedEnv([]);
-  }, [preselectedAgentId, onlineAgents]);
+  }, [preselectedAgentId]);
   useDialogReset(isOpen, resetState);
 
   useEffect(() => {

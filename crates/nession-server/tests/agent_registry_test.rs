@@ -73,12 +73,51 @@ async fn test_agent_heartbeat_update() {
 
     registry.register(agent).await;
 
-    // Update heartbeat
-    registry.update_heartbeat("agent_123", 5, 3).await;
+    // First update changes session_count → should return true
+    let changed = registry.update_heartbeat("agent_123", 5, 3).await;
+    assert!(changed, "session_count change should be meaningful");
 
     let updated = registry.get("agent_123").await.unwrap();
     assert_eq!(updated.session_count, 5);
     assert_eq!(updated.active_sessions, 3);
+
+    // Second update with same values → should return false (timestamp only)
+    let changed = registry.update_heartbeat("agent_123", 5, 3).await;
+    assert!(!changed, "same values should not be meaningful");
+}
+
+#[tokio::test]
+async fn test_heartbeat_status_transition_is_meaningful() {
+    let (registry, _db_guard) = test_registry(30).await;
+
+    let agent = AgentInfo {
+        agent_id: "a1".to_string(),
+        hostname: "h1".to_string(),
+        ip_address: "10.0.0.1".to_string(),
+        port: 8080,
+        display_name: None,
+        connect_url: None,
+        addresses: vec![],
+        registered_at: Utc::now(),
+        last_heartbeat: Utc::now(),
+        status: AgentStatus::Offline,
+        metadata: AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        },
+        session_count: 0,
+        active_sessions: 0,
+    };
+    registry.register(agent).await;
+
+    // Offline → Online transition should be meaningful
+    let changed = registry.update_heartbeat("a1", 0, 0).await;
+    assert!(
+        changed,
+        "status transition offline→online should be meaningful"
+    );
 }
 
 #[tokio::test]
@@ -231,8 +270,9 @@ async fn test_agent_check_offline_skips_already_offline() {
 #[tokio::test]
 async fn test_update_heartbeat_nonexistent_agent_is_noop() {
     let (registry, _db_guard) = test_registry(30).await;
-    // Should not panic
-    registry.update_heartbeat("nonexistent", 0, 0).await;
+    // Should not panic and should return false
+    let changed = registry.update_heartbeat("nonexistent", 0, 0).await;
+    assert!(!changed);
 }
 
 #[tokio::test]

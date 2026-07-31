@@ -61,7 +61,6 @@ impl PtySession {
         // and spawn it on the slave side of the PTY.
         let mut cmd = CommandBuilder::new("tmux");
         cmd.args(["attach", "-t", session_name]);
-        cmd.env("TERM", "xterm-256color");
         let child = pty
             .slave
             .spawn_command(cmd)
