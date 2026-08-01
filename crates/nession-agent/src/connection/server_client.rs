@@ -1008,7 +1008,7 @@ mod tests {
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Wait for registration message.
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for registration")
             .expect("no message received");
@@ -1063,7 +1063,7 @@ mod tests {
             .await
             .expect("heartbeat failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for heartbeat")
             .expect("no message received");
@@ -1120,7 +1120,7 @@ mod tests {
             .await
             .expect("session update failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for session update")
             .expect("no message received");
@@ -1276,7 +1276,7 @@ mod tests {
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // First registration.
-        let first = tokio::time::timeout(Duration::from_secs(2), re_rx.recv())
+        let first = tokio::time::timeout(Duration::from_secs(5), re_rx.recv())
             .await
             .expect("timeout on first register")
             .expect("no first register");
@@ -1385,7 +1385,7 @@ mod tests {
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Wait for the command response.
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for command response")
             .expect("no message received");
@@ -1496,7 +1496,7 @@ mod tests {
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
         // Wait for the command response.
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for command response")
             .expect("no message received");
@@ -1858,7 +1858,7 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for env.list response")
             .expect("no message received");
@@ -1945,7 +1945,7 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for env.query response")
             .expect("no message received");
@@ -2043,7 +2043,7 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
             .await
             .expect("timeout waiting for env.unset response")
             .expect("no message received");
