@@ -63,7 +63,19 @@ export class TerminalView {
     // background (#1e1e2e, set on `container` by the React component) fills
     // the remainder — no transform, no wrapper.
     const scrollContainer = document.createElement('div');
-    scrollContainer.style.cssText = 'width:100%; height:100%; overflow:auto;';
+    scrollContainer.style.cssText =
+      'width:100%; height:100%; overflow:auto;' +
+      // Mobile: prevent scroll chaining out of the terminal and disable
+      // pull-to-refresh when the terminal's own scroll hits a boundary.
+      // touch-action is intentionally NOT set here — xterm's internal
+      // .xterm-viewport is the actual scroll surface (scrollback buffer);
+      // setting touch-action on the outer wrapper would redirect browser
+      // touch-scroll to this container (which may not overflow) instead of
+      // to the viewport. xterm handles touch natively for selection.
+      'overscroll-behavior-y:contain;' +
+      // iOS: enable momentum ("inertia") scrolling so the terminal feels
+      // native rather than stopping dead on finger lift.
+      '-webkit-overflow-scrolling:touch;';
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position:relative;';
