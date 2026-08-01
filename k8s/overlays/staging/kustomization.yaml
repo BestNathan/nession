@@ -23,6 +23,9 @@ images:
   newTag: ui-bb85a6b
 
 # Isolate staging data on shared PVC via subPath.
+patchesStrategicMerge:
+- patch-imagepullsecrets.yaml
+
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
