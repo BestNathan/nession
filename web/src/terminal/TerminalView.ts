@@ -65,9 +65,14 @@ export class TerminalView {
     const scrollContainer = document.createElement('div');
     scrollContainer.style.cssText =
       'width:100%; height:100%; overflow:auto;' +
-      // Mobile: confine touch scrolling to this element — prevent scroll
-      // chaining to the page and disable pull-to-refresh at the boundary.
-      'touch-action:pan-y; overscroll-behavior-y:contain;' +
+      // Mobile: prevent scroll chaining out of the terminal and disable
+      // pull-to-refresh when the terminal's own scroll hits a boundary.
+      // touch-action is intentionally NOT set here — xterm's internal
+      // .xterm-viewport is the actual scroll surface (scrollback buffer);
+      // setting touch-action on the outer wrapper would redirect browser
+      // touch-scroll to this container (which may not overflow) instead of
+      // to the viewport. xterm handles touch natively for selection.
+      'overscroll-behavior-y:contain;' +
       // iOS: enable momentum ("inertia") scrolling so the terminal feels
       // native rather than stopping dead on finger lift.
       '-webkit-overflow-scrolling:touch;';
