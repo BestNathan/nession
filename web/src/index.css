@@ -133,6 +133,10 @@ html, body, #root {
   height: 100dvh;
   margin: 0;
   overflow: hidden;
+  /* Prevent pull-to-refresh and overscroll glow on mobile.
+     overflow:hidden alone is NOT sufficient on Chrome Android —
+     overscroll-behavior:none is the only reliable way to disable it. */
+  overscroll-behavior: none;
 }
 
 /* ── Mobile zoom prevention ──────────────────────────────────────────────

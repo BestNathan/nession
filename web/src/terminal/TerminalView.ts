@@ -63,7 +63,14 @@ export class TerminalView {
     // background (#1e1e2e, set on `container` by the React component) fills
     // the remainder — no transform, no wrapper.
     const scrollContainer = document.createElement('div');
-    scrollContainer.style.cssText = 'width:100%; height:100%; overflow:auto;';
+    scrollContainer.style.cssText =
+      'width:100%; height:100%; overflow:auto;' +
+      // Mobile: confine touch scrolling to this element — prevent scroll
+      // chaining to the page and disable pull-to-refresh at the boundary.
+      'touch-action:pan-y; overscroll-behavior-y:contain;' +
+      // iOS: enable momentum ("inertia") scrolling so the terminal feels
+      // native rather than stopping dead on finger lift.
+      '-webkit-overflow-scrolling:touch;';
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position:relative;';
