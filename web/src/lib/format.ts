@@ -89,3 +89,26 @@ export function formatUptime(registeredAtIso: string | undefined): string {
 export function agentDisplayName(agent: { display_name?: string; hostname: string }): string {
   return agent.display_name || agent.hostname;
 }
+
+/** Compute uptime string from registered_at ISO timestamp. */
+export function computeUptime(registeredAt?: string): string | null {
+  if (!registeredAt) {return null;}
+  const diffMs = Date.now() - new Date(registeredAt).getTime();
+  if (diffMs < 0) {return null;}
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {return `${hours}h ${minutes}m`;}
+  return `${minutes}m`;
+}
+
+/** Format a session's running duration from its last_activity timestamp. */
+export function formatSessionDuration(lastActivity: string): string {
+  const diffMs = Date.now() - new Date(lastActivity).getTime();
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {return `${hours}h ${minutes}m`;}
+  if (minutes > 0) {return `${minutes}m`;}
+  return 'just now';
+}
