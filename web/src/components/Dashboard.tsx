@@ -131,7 +131,9 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         <AgentDetailPanel
           agent={selectedAgent}
           heartbeatHistory={getHeartbeatHistory(selectedAgent.agent_id)}
+          sessions={sessions.filter((s) => s.agent_id === selectedAgent.agent_id)}
           onClose={() => setSelectedAgent(null)}
+          onRefresh={fetchSessions}
         />
       )}
 

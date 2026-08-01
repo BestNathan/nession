@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentDetailPanel } from '../AgentDetailPanel';
-import type { Agent } from '../../types';
+import type { Agent, Session } from '../../types';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -23,25 +23,41 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
+function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    session_id: 'agent-1:session-1',
+    agent_id: 'agent-1',
+    session_name: 'session-1',
+    status: 'active',
+    window_count: 1,
+    attached_clients: 0,
+    last_activity: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 describe('AgentDetailPanel', () => {
   it('renders agent hostname and status badge', () => {
     render(
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
-    const hostnames = screen.getAllByText('server-01');
-    expect(hostnames.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('online')).toBeInTheDocument();
+    // Hostname appears both in header title (h2) and system info card
+    const hostnames = screen.getAllByText('server-01');
+    expect(hostnames.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('renders connection info (IP, port)', () => {
+  it('renders connection info (IP, port) in system info card', () => {
     render(
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
@@ -54,10 +70,11 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText('0.3.0')).toBeInTheDocument();
+    expect(screen.getByText('v0.3.0')).toBeInTheDocument();
     expect(screen.getByText('3.3')).toBeInTheDocument();
     expect(screen.getByText('Linux 6.1')).toBeInTheDocument();
   });
@@ -67,11 +84,12 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent({ metadata: undefined })}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
     const unknowns = screen.getAllByText('Unknown');
-    expect(unknowns.length).toBeGreaterThanOrEqual(3);
+    expect(unknowns.length).toBeGreaterThanOrEqual(2);
   });
 
   it('shows session count', () => {
@@ -79,10 +97,14 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText(/3 active sessions/)).toBeInTheDocument();
+    // Sessions stat card shows the count
+    expect(screen.getByText('3')).toBeInTheDocument();
+    // Sessions section shows count
+    expect(screen.getByText(/0 sessions on this agent/)).toBeInTheDocument();
   });
 
   it('shows "No heartbeat data yet" for empty history', () => {
@@ -90,6 +112,7 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
@@ -106,6 +129,7 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={heartbeatHistory}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
@@ -121,6 +145,7 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent()}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={onClose}
       />,
     );
@@ -137,9 +162,84 @@ describe('AgentDetailPanel', () => {
       <AgentDetailPanel
         agent={makeAgent({ registered_at: registeredAt })}
         heartbeatHistory={[]}
+        sessions={[]}
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText(/3h 0m/)).toBeInTheDocument();
+    // Uptime appears both in header stats row and stat card
+    const uptimes = screen.getAllByText('3h 0m');
+    expect(uptimes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders sessions in recent sessions list', () => {
+    const sessions: Session[] = [
+      makeSession({ session_id: 'agent-1:s1', session_name: 'dev', status: 'active' }),
+      makeSession({ session_id: 'agent-1:s2', session_name: 'staging', status: 'detached' }),
+    ];
+    render(
+      <AgentDetailPanel
+        agent={makeAgent()}
+        heartbeatHistory={[]}
+        sessions={sessions}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('dev')).toBeInTheDocument();
+    expect(screen.getByText('staging')).toBeInTheDocument();
+    expect(screen.getByText('active')).toBeInTheDocument();
+    expect(screen.getByText('detached')).toBeInTheDocument();
+    expect(screen.getByText(/2 sessions on this agent/)).toBeInTheDocument();
+  });
+
+  it('shows empty state for no sessions', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent()}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('No active sessions')).toBeInTheDocument();
+  });
+
+  it('renders quick actions bar', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent()}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Copy All')).toBeInTheDocument();
+    expect(screen.getByText('Refresh')).toBeInTheDocument();
+    expect(screen.getByText('Ping')).toBeInTheDocument();
+  });
+
+  it('shows agent ID in truncated form', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent({ agent_id: 'a-very-long-agent-id-that-should-be-truncated-12345678' })}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+      />,
+    );
+    // The truncated ID should not be the full string
+    expect(screen.queryByText('a-very-long-agent-id-that-should-be-truncated-12345678')).not.toBeInTheDocument();
+  });
+
+  it('shows Claude Code tab', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent()}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
   });
 });
