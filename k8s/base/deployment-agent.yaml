@@ -56,6 +56,11 @@ spec:
               # --- Install Claude Code ---
               npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
+              # --- Claude Code init config ---
+              mkdir -p /opt/claude-tools/home
+              printf '{"hasCompletedOnboarding":true}
+' > /opt/claude-tools/home/.claude.json
+
               # --- Copy to shared emptyDir volume ---
               mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
               cp /usr/bin/node /opt/claude-tools/bin/
@@ -116,6 +121,9 @@ spec:
           volumeMounts:
             - name: claude-tools
               mountPath: /opt/claude-tools
+            - name: claude-tools
+              mountPath: /root/.claude.json
+              subPath: home/.claude.json
             - name: claude-home
               mountPath: /root/.claude
               subPath: nession/claude-home
