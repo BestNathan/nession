@@ -152,6 +152,22 @@ html {
   input, textarea, select {
     font-size: max(16px, 1rem);
   }
+
+  /*
+   * xterm.js positions its helper textarea at left:-9999em;width:0;height:0
+   * (see @xterm/xterm/css/xterm.css).  On mobile, the virtual keyboard only
+   * appears when the focused editable element is within the viewport and has
+   * non-zero dimensions.  Override the off-screen position so the keyboard is
+   * triggered on first tap.  We use regular (non-!important) values so that
+   * xterm's own _syncTextArea() and CompositionHelper.updateCompositionElements()
+   * inline styles continue to win during IME composition / cursor tracking.
+   */
+  .xterm .xterm-helper-textarea {
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+  }
 }
 
 @layer base {

@@ -63,19 +63,20 @@ export class TerminalView {
     // background (#1e1e2e, set on `container` by the React component) fills
     // the remainder — no transform, no wrapper.
     const scrollContainer = document.createElement('div');
+    // Mobile: prevent scroll chaining out of the terminal and disable
+    // pull-to-refresh when the terminal's own scroll hits a boundary.
+    // touch-action is intentionally NOT set here — xterm's internal
+    // .xterm-viewport is the actual scroll surface (scrollback buffer);
+    // setting touch-action on the outer wrapper would redirect browser
+    // touch-scroll to this container (which may not overflow) instead of
+    // to the viewport. xterm handles touch natively for selection.
+    // NOTE: -webkit-overflow-scrolling is intentionally omitted — it is
+    // deprecated since iOS 13 and creates a separate compositing layer
+    // that can intercept touch events, preventing the hidden textarea
+    // from receiving focus on mobile (IME/keyboard won't appear).
     scrollContainer.style.cssText =
       'width:100%; height:100%; overflow:auto;' +
-      // Mobile: prevent scroll chaining out of the terminal and disable
-      // pull-to-refresh when the terminal's own scroll hits a boundary.
-      // touch-action is intentionally NOT set here — xterm's internal
-      // .xterm-viewport is the actual scroll surface (scrollback buffer);
-      // setting touch-action on the outer wrapper would redirect browser
-      // touch-scroll to this container (which may not overflow) instead of
-      // to the viewport. xterm handles touch natively for selection.
-      'overscroll-behavior-y:contain;' +
-      // iOS: enable momentum ("inertia") scrolling so the terminal feels
-      // native rather than stopping dead on finger lift.
-      '-webkit-overflow-scrolling:touch;';
+      'overscroll-behavior-y:contain;';
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position:relative;';
@@ -132,6 +133,20 @@ export class TerminalView {
     };
 
     this.terminal.open(mountElement);
+
+    // Mobile: xterm's internal mousedown handler calls focus() on the hidden
+    // textarea, but on touch devices the synthesised mousedown can be delayed
+    // or dropped by the browser.  Explicitly focus the textarea on touchstart
+    // so the virtual keyboard appears immediately.
+    const handleTouchStart = () => {
+      if (this.isDisposed) { return; }
+      // Only steal focus if it's not already on an input/textarea, so the
+      // command toolbar and file-browser inputs keep working normally.
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { return; }
+      this.terminal.focus();
+    };
+    scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
     // Always use local text selection even when tmux SGR mouse mode is
     // active.  Without this, xterm.js sends button events to the PTY as
