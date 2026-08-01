@@ -58,8 +58,7 @@ spec:
 
               # --- Claude Code init config ---
               mkdir -p /opt/claude-tools/home
-              printf '{"hasCompletedOnboarding":true}
-' > /opt/claude-tools/home/.claude.json
+              printf '{"hasCompletedOnboarding":true}\n' > /opt/claude-tools/home/.claude.json
 
               # --- Copy to shared emptyDir volume ---
               mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
