@@ -109,7 +109,12 @@ export class TerminalView {
     this.connection = new ConnectionManager(options.connection);
 
     // Wire managers.
+    // Track the timestamp of the last onData event so the IME fallback
+    // can detect whether xterm's CompositionHelper already sent the
+    // committed text.  See the compositionend handler below.
+    let lastOnDataTime = 0;
     this.input.onData((data: string) => {
+      lastOnDataTime = Date.now();
       if (!this.isDisposed) { this.connection.send(data); }
     });
     this.input.onCtrlD(() => { this.onCtrlD?.(); });
@@ -148,65 +153,48 @@ export class TerminalView {
     };
     scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
-    // Mobile IME: xterm.js's _inputEvent guard drops insertText when
-    // ev.composed && _keyDownSeen — the normal case on mobile (soft
-    // keyboard sends keydown 229, _keyDownSeen stuck at true, IME
-    // commits via input event).  xterm's CompositionHelper may also
-    // fail to read the textarea value in time.
+    // Mobile IME: xterm.js's text-send pipeline relies on three paths:
     //
-    // We handle both the compositionend and insertText paths.  Both
-    // fire on the textarea directly (bubble phase) and compete via a
-    // time-based lock — first to send wins, the other is blocked for
-    // 200ms.  This avoids the unreliable stopImmediatePropagation
-    // approach which prevented compositionend from reaching the
-    // textarea and broke IME commit on some mobile browsers.
+    //   A. keydown → triggerDataEvent   (mobile: keyCode=229, skipped)
+    //   B. input/insertText guard       (mobile: composed && _keyDownSeen, dropped)
+    //   C. compositionend → setTimeout  (mobile: works, but can race with value)
+    //
+    // Path A never fires on mobile.  Path B drops composed input on the
+    // floor when the soft keyboard sent a keydown (keyCode 229).  Path C
+    // is the only viable path, but its setTimeout(0) may fire before the
+    // browser has written the committed text into the textarea.
+    //
+    // Our single fallback: a bubble-phase compositionend listener on the
+    // textarea that fires AFTER xterm's own listener (registration order).
+    // Both schedule setTimeout(0); xterm's fires first.  If xterm
+    // successfully sent text (onData fired), our callback skips — no
+    // duplicate.  If xterm's read came up empty (textarea not updated
+    // yet), our callback reads the now-updated value and sends.
     if ('ontouchstart' in window) {
       const textarea = mountElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
-      let compositionStartValue = '';
-      let imeLockUntil = 0;
-
-      const trySendIME = (text: string) => {
-        if (!text) { return; }
-        if (Date.now() < imeLockUntil) { return; }
-        imeLockUntil = Date.now() + 200;
-        this.connection.send(text);
-      };
-
       if (textarea) {
-        // Track value before IME starts writing.
+        let compositionStartValue = '';
+
         textarea.addEventListener('compositionstart', () => {
           compositionStartValue = textarea.value;
         });
 
-        // Path 1 (fallback for xterm's CompositionHelper):
-        // After compositionend, read the committed text from the
-        // textarea.  setTimeout(0) lets the browser update the value
-        // before we read it.
         textarea.addEventListener('compositionend', () => {
+          // xterm schedules its setTimeout first (registered earlier in
+          // terminal.open).  Wait two microtasks to ensure we read AFTER
+          // xterm's attempt — whether it succeeded or not.
           setTimeout(() => {
             if (this.isDisposed) { return; }
+            // xterm already sent the text via onData → nothing to do.
+            if (Date.now() - lastOnDataTime < 30) { return; }
+            // xterm missed it.  Read what the IME committed.
             const committed = textarea.value.slice(compositionStartValue.length);
             if (committed) {
-              trySendIME(committed);
+              this.connection.send(committed);
               compositionStartValue = textarea.value;
             }
           }, 0);
         });
-      }
-
-      // Path 2 (fallback for IMEs that skip compositionend):
-      // Capture on .xterm-helpers fires before xterm's capture
-      // listener on the child textarea.  stopImmediatePropagation
-      // prevents xterm's buggy _inputEvent guard from dropping it.
-      const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
-      if (helperContainer) {
-        helperContainer.addEventListener('input', (ev: Event) => {
-          if (this.isDisposed) { return; }
-          const ie = ev as InputEvent;
-          if (ie.inputType !== 'insertText' || !ie.data || ie.isComposing) { return; }
-          ev.stopImmediatePropagation();
-          trySendIME(ie.data);
-        }, true);
       }
     }
 
