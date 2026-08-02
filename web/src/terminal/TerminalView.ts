@@ -5,6 +5,7 @@ import { TerminalSizeManager } from './TerminalSizeManager';
 import { FontSizeManager } from './FontSizeManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
+import { MobileInput } from './MobileInput';
 import type {
   TerminalViewOptions,
   TerminalViewState,
@@ -44,6 +45,8 @@ export class TerminalView {
   private fontSize: FontSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
+  /** On touch devices: a visible textarea that replaces xterm's hidden one. */
+  private mobileInput: MobileInput | null = null;
 
   private isDisposed = false;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,12 +112,7 @@ export class TerminalView {
     this.connection = new ConnectionManager(options.connection);
 
     // Wire managers.
-    // Track the timestamp of the last onData event so the IME fallback
-    // can detect whether xterm's CompositionHelper already sent the
-    // committed text.  See the compositionend handler below.
-    let lastOnDataTime = 0;
     this.input.onData((data: string) => {
-      lastOnDataTime = Date.now();
       if (!this.isDisposed) { this.connection.send(data); }
     });
     this.input.onCtrlD(() => { this.onCtrlD?.(); });
@@ -139,63 +137,33 @@ export class TerminalView {
 
     this.terminal.open(mountElement);
 
-    // Mobile: xterm's internal mousedown handler calls focus() on the hidden
-    // textarea, but on touch devices the synthesised mousedown can be delayed
-    // or dropped by the browser.  Explicitly focus the textarea on touchstart
-    // so the virtual keyboard appears immediately.
-    const handleTouchStart = () => {
-      if (this.isDisposed) { return; }
-      // Only steal focus if it's not already on an input/textarea, so the
-      // command toolbar and file-browser inputs keep working normally.
-      const ae = document.activeElement;
-      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { return; }
-      this.terminal.focus();
-    };
-    scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
-
-    // Mobile IME: xterm.js's text-send pipeline relies on three paths:
+    // ── Mobile: replace xterm's hidden textarea with our own ──────────
+    // xterm.js is designed for physical keyboards and hides its textarea
+    // off-screen.  On touch devices we create a visible textarea that the
+    // browser and all IMEs can interact with natively — no composition
+    // event patches, no focus tricks, no per-IME edge cases.
     //
-    //   A. keydown → triggerDataEvent   (mobile: keyCode=229, skipped)
-    //   B. input/insertText guard       (mobile: composed && _keyDownSeen, dropped)
-    //   C. compositionend → setTimeout  (mobile: works, but can race with value)
-    //
-    // Path A never fires on mobile.  Path B drops composed input on the
-    // floor when the soft keyboard sent a keydown (keyCode 229).  Path C
-    // is the only viable path, but its setTimeout(0) may fire before the
-    // browser has written the committed text into the textarea.
-    //
-    // Our single fallback: a bubble-phase compositionend listener on the
-    // textarea that fires AFTER xterm's own listener (registration order).
-    // Both schedule setTimeout(0); xterm's fires first.  If xterm
-    // successfully sent text (onData fired), our callback skips — no
-    // duplicate.  If xterm's read came up empty (textarea not updated
-    // yet), our callback reads the now-updated value and sends.
+    // xterm continues to render output.  Our MobileInput handles all
+    // keyboard/IME input and sends committed text directly to the PTY.
     if ('ontouchstart' in window) {
-      const textarea = mountElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
-      if (textarea) {
-        let compositionStartValue = '';
+      this.mobileInput = new MobileInput(
+        this.terminal.element!,
+        scrollContainer,
+        {
+          onSend: (text) => {
+            if (!this.isDisposed) { this.connection.send(text); }
+          },
+        },
+      );
 
-        textarea.addEventListener('compositionstart', () => {
-          compositionStartValue = textarea.value;
-        });
-
-        textarea.addEventListener('compositionend', () => {
-          // xterm schedules its setTimeout first (registered earlier in
-          // terminal.open).  Wait two microtasks to ensure we read AFTER
-          // xterm's attempt — whether it succeeded or not.
-          setTimeout(() => {
-            if (this.isDisposed) { return; }
-            // xterm already sent the text via onData → nothing to do.
-            if (Date.now() - lastOnDataTime < 30) { return; }
-            // xterm missed it.  Read what the IME committed.
-            const committed = textarea.value.slice(compositionStartValue.length);
-            if (committed) {
-              this.connection.send(committed);
-              compositionStartValue = textarea.value;
-            }
-          }, 0);
-        });
-      }
+      // Tap the terminal area → focus our textarea.
+      const handleTouchStart = () => {
+        if (this.isDisposed) { return; }
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { return; }
+        this.mobileInput!.focus();
+      };
+      scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
     }
 
     // Always use local text selection even when tmux SGR mouse mode is
@@ -229,14 +197,19 @@ export class TerminalView {
   }
 
   sendText(text: string): void {
-    if (this.isDisposed) {
-      return;
-    }
-    // Route Ctrl+D through the same handler as the keyboard path
-    // (InputManager.ts).  The button/key-injection path should never
-    // send a raw \x04 to the PTY — it would exit the shell.
+    if (this.isDisposed) { return; }
+    // Route Ctrl+D through the same handler as the keyboard path.
     if (text === '\x04') { this.onCtrlD?.(); return; }
+    // On mobile, send via MobileInput (it's just a thin wrapper around
+    // connection.send — same as desktop path).
+    if (this.mobileInput) { this.mobileInput.sendText(text); return; }
     this.connection.send(text);
+  }
+
+  /** Focus the active input element (mobile: our textarea; desktop: xterm). */
+  focus(): void {
+    if (this.mobileInput) { this.mobileInput.focus(); }
+    else { this.terminal.focus(); }
   }
 
   /** Send client viewport resize to the agent so tmux can resize its window.
@@ -296,6 +269,7 @@ export class TerminalView {
   dispose(): void {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
+    this.mobileInput?.dispose();
     this.input.dispose();
     this.size.dispose();
     this.connection.dispose();
