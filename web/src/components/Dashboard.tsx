@@ -72,8 +72,9 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     return <EnvManager agents={agents} onBack={() => navigate('/')} />;
   }
 
-  // Not authenticated → login page
-  if (connectionStatus !== 'authenticated') {
+  // Permanently disconnected (not transient reconnect) → login page.
+  // 'connecting' during background reconnect keeps the dashboard visible.
+  if (connectionStatus === 'disconnected') {
     return <Navigate to="/login" replace />;
   }
 

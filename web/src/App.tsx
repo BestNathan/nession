@@ -11,6 +11,7 @@ import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
 import { getToken, setToken } from './lib/auth';
 import { WebSocketContext } from './hooks/useWebSocket';
+import { useVisibilityReconnect } from './hooks/useVisibilityReconnect';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
@@ -21,6 +22,11 @@ function App() {
     () => autoConnect ? 'connecting' : 'disconnected'
   );
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
+  // Track whether we've ever successfully authenticated.  Once true, the
+  // dashboard stays visible through temporary disconnections (e.g. mobile
+  // tab backgrounding) while the WebSocket reconnects in the background.
+  // Only a deliberate logout or exhausted reconnect attempts clear this.
+  const [wasEverAuthed, setWasEverAuthed] = useState(false);
   const [authToken, setAuthToken] = useState(() => {
     const urlToken = params.get('token');
     if (urlToken) {
@@ -62,6 +68,9 @@ function App() {
 
       unsubRef.current?.(); // clean up previous subscription
       unsubRef.current = service.onConnectionChange((status) => {
+        if (status === 'authenticated') {
+          setWasEverAuthed(true);
+        }
         setConnectionStatus(status);
       });
 
@@ -81,15 +90,26 @@ function App() {
     }
   }, [autoConnect, authToken, handleConnect]);
 
+  // Mobile / background-tab recovery: when the user returns to the tab,
+  // trigger an immediate reconnect if the WebSocket died while suspended.
+  useVisibilityReconnect(wasEverAuthed, wsService);
+
   const handleDisconnect = useCallback(() => {
     if (wsService) {
       destroyWebSocketService();
       setWsService(null);
+      setWasEverAuthed(false);
       setConnectionStatus('disconnected');
     }
   }, [wsService]);
 
-  const isAuthed = connectionStatus === 'authenticated' && wsService !== null;
+  // Once authenticated, keep the dashboard visible through transient
+  // disconnections (e.g. mobile tab backgrounding / network flaps).
+  // Only a deliberate disconnect or exhausted reconnect attempts clear
+  // wasEverAuthed → login page.
+  const isAuthed = wasEverAuthed
+    ? connectionStatus !== 'disconnected' && wsService !== null
+    : connectionStatus === 'authenticated' && wsService !== null;
 
   // Two distinct router shapes: login vs. authenticated dashboard.
   // The router is only recreated on auth-state transitions (login/logout),

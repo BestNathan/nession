@@ -48,6 +48,8 @@ export interface TerminalHandle {
   refit: () => void;
   sendResize: (cols: number, rows: number) => void;
   fontSizeManager: import('./FontSizeManager').FontSizeManager | null;
+  /** Re-focus the xterm textarea (e.g. after tapping toolbar buttons). */
+  focusTerminal: () => void;
 }
 
 /** Props for the Terminal React component — unchanged from current API. */

@@ -18,6 +18,7 @@ interface TerminalLayoutProps {
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
+  focusTerminal?: () => void;
 }
 
 /**
@@ -37,10 +38,11 @@ export function TerminalLayout({
   fileOps,
   onTerminalReveal,
   fontSizeManager,
+  focusTerminal,
 }: TerminalLayoutProps) {
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const commandsPanel = (
-    <TerminalToolbar sendText={sendText} disabled={toolbarDisabled} fontSizeManager={fontSizeManager} />
+    <TerminalToolbar sendText={sendText} disabled={toolbarDisabled} fontSizeManager={fontSizeManager} focusTerminal={focusTerminal} />
   );
 
   if (fileOps) {

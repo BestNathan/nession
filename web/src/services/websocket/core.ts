@@ -139,9 +139,19 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
 
         this.ws.onclose = () => {
           console.log('WebSocket closed');
-          this.setConnectionStatus('disconnected');
           this.authenticated = false;
           this.rejectAllPendingRequests(new Error('Connection closed'));
+
+          // Don't immediately broadcast 'disconnected' — if auto-reconnect
+          // is still possible we keep the UI in a connecting state so the
+          // router doesn't flip back to the login page.  Only signal
+          // 'disconnected' when all reconnect attempts are exhausted.
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            this.setConnectionStatus('disconnected');
+          } else {
+            this.setConnectionStatus('connecting');
+          }
+
           this.scheduleReconnect();
         };
       } catch (error) {
@@ -327,6 +337,8 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
+      // Signal permanent disconnection so the UI can redirect to login.
+      this.setConnectionStatus('disconnected');
       return;
     }
 

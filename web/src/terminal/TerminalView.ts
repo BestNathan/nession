@@ -5,6 +5,7 @@ import { TerminalSizeManager } from './TerminalSizeManager';
 import { FontSizeManager } from './FontSizeManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
+import { MobileInput } from './MobileInput';
 import type {
   TerminalViewOptions,
   TerminalViewState,
@@ -44,6 +45,8 @@ export class TerminalView {
   private fontSize: FontSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
+  /** On touch devices: a visible textarea that replaces xterm's hidden one. */
+  private mobileInput: MobileInput | null = null;
 
   private isDisposed = false;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
@@ -63,19 +66,20 @@ export class TerminalView {
     // background (#1e1e2e, set on `container` by the React component) fills
     // the remainder — no transform, no wrapper.
     const scrollContainer = document.createElement('div');
+    // Mobile: prevent scroll chaining out of the terminal and disable
+    // pull-to-refresh when the terminal's own scroll hits a boundary.
+    // touch-action is intentionally NOT set here — xterm's internal
+    // .xterm-viewport is the actual scroll surface (scrollback buffer);
+    // setting touch-action on the outer wrapper would redirect browser
+    // touch-scroll to this container (which may not overflow) instead of
+    // to the viewport. xterm handles touch natively for selection.
+    // NOTE: -webkit-overflow-scrolling is intentionally omitted — it is
+    // deprecated since iOS 13 and creates a separate compositing layer
+    // that can intercept touch events, preventing the hidden textarea
+    // from receiving focus on mobile (IME/keyboard won't appear).
     scrollContainer.style.cssText =
       'width:100%; height:100%; overflow:auto;' +
-      // Mobile: prevent scroll chaining out of the terminal and disable
-      // pull-to-refresh when the terminal's own scroll hits a boundary.
-      // touch-action is intentionally NOT set here — xterm's internal
-      // .xterm-viewport is the actual scroll surface (scrollback buffer);
-      // setting touch-action on the outer wrapper would redirect browser
-      // touch-scroll to this container (which may not overflow) instead of
-      // to the viewport. xterm handles touch natively for selection.
-      'overscroll-behavior-y:contain;' +
-      // iOS: enable momentum ("inertia") scrolling so the terminal feels
-      // native rather than stopping dead on finger lift.
-      '-webkit-overflow-scrolling:touch;';
+      'overscroll-behavior-y:contain;';
 
     const mountElement = document.createElement('div');
     mountElement.style.cssText = 'position:relative;';
@@ -133,6 +137,35 @@ export class TerminalView {
 
     this.terminal.open(mountElement);
 
+    // ── Mobile: replace xterm's hidden textarea with our own ──────────
+    // xterm.js is designed for physical keyboards and hides its textarea
+    // off-screen.  On touch devices we create a visible textarea that the
+    // browser and all IMEs can interact with natively — no composition
+    // event patches, no focus tricks, no per-IME edge cases.
+    //
+    // xterm continues to render output.  Our MobileInput handles all
+    // keyboard/IME input and sends committed text directly to the PTY.
+    if ('ontouchstart' in window) {
+      this.mobileInput = new MobileInput(
+        this.terminal,
+        scrollContainer,
+        {
+          onSend: (text) => {
+            if (!this.isDisposed) { this.connection.send(text); }
+          },
+        },
+      );
+
+      // Tap the terminal area → focus our textarea.
+      const handleTouchStart = () => {
+        if (this.isDisposed) { return; }
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { return; }
+        this.mobileInput!.focus();
+      };
+      scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+    }
+
     // Always use local text selection even when tmux SGR mouse mode is
     // active.  Without this, xterm.js sends button events to the PTY as
     // SGR sequences — tmux captures them for copy-mode selection, and
@@ -164,10 +197,19 @@ export class TerminalView {
   }
 
   sendText(text: string): void {
-    if (this.isDisposed) {
-      return;
-    }
+    if (this.isDisposed) { return; }
+    // Route Ctrl+D through the same handler as the keyboard path.
+    if (text === '\x04') { this.onCtrlD?.(); return; }
+    // On mobile, send via MobileInput (it's just a thin wrapper around
+    // connection.send — same as desktop path).
+    if (this.mobileInput) { this.mobileInput.sendText(text); return; }
     this.connection.send(text);
+  }
+
+  /** Focus the active input element (mobile: our textarea; desktop: xterm). */
+  focus(): void {
+    if (this.mobileInput) { this.mobileInput.focus(); }
+    else { this.terminal.focus(); }
   }
 
   /** Send client viewport resize to the agent so tmux can resize its window.
@@ -227,6 +269,7 @@ export class TerminalView {
   dispose(): void {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
+    this.mobileInput?.dispose();
     this.input.dispose();
     this.size.dispose();
     this.connection.dispose();

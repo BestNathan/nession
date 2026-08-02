@@ -3,13 +3,17 @@ import { Minus, Plus as PlusIcon, RotateCcw, SendHorizontal } from 'lucide-react
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { useQuickCommands } from '../hooks/useQuickCommands';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
+import { MobileKeyPanel } from './MobileKeyPanel';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 export interface TerminalToolbarProps {
   sendText: (text: string) => void;
   disabled?: boolean;
   fontSizeManager?: FontSizeManager | null;
+  /** Re-focus the terminal textarea after tapping toolbar buttons. */
+  focusTerminal?: () => void;
 }
 
 interface ZoomControlsProps {
@@ -74,9 +78,10 @@ function ZoomControls({ fontSizeManager, disabled }: ZoomControlsProps) {
   );
 }
 
-export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }: TerminalToolbarProps) {
+export function TerminalToolbar({ sendText, disabled = false, fontSizeManager, focusTerminal }: TerminalToolbarProps) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [inputValue, setInputValue] = useState('');
+  const isMobile = useMediaQuery('(pointer: coarse)');
 
   const sendInput = () => {
     const text = inputValue.trim();
@@ -89,6 +94,15 @@ export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }:
 
   return (
     <div className="flex flex-col min-h-0">
+      {/* Mobile virtual keys: arrows, Esc, Tab, Ctrl combos —
+          separated from quick commands for clarity. */}
+      {isMobile && (
+        <MobileKeyPanel
+          disabled={disabled}
+          onKey={(key) => sendText(key)}
+          onAfterKey={focusTerminal}
+        />
+      )}
       <QuickCommandsPanel
         userCommands={userCommands}
         disabled={disabled}
