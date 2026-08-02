@@ -35,6 +35,23 @@ export const PRESETS: QuickCommand[] = [
 ];
 
 /**
+ * Mobile-only presets: keys that don't exist or are hard to reach on
+ * virtual keyboards.  Shown only on touch devices above the regular
+ * preset row so the most-tapped buttons are closest to the input area.
+ */
+export const MOBILE_PRESETS: QuickCommand[] = [
+  { id: 'mobile-up',    label: '↑',    command: '\x1b[A', raw: true },
+  { id: 'mobile-down',  label: '↓',    command: '\x1b[B', raw: true },
+  { id: 'mobile-left',  label: '←',    command: '\x1b[D', raw: true },
+  { id: 'mobile-right', label: '→',    command: '\x1b[C', raw: true },
+  { id: 'mobile-tab',   label: 'Tab',  command: '\t',     raw: true },
+  { id: 'mobile-esc',   label: 'Esc',  command: '\x1b',   raw: true },
+  { id: 'mobile-ctrl-d',label: 'Ctrl+D', command: '\x04', raw: true },
+  { id: 'mobile-ctrl-a',label: 'Ctrl+A', command: '\x01', raw: true },
+  { id: 'mobile-ctrl-e',label: 'Ctrl+E', command: '\x05', raw: true },
+];
+
+/**
  * Read legacy user commands from localStorage; returns [] on any failure.
  * Used only for the one-time migration into the server store.
  */

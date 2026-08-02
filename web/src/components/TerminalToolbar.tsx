@@ -3,6 +3,7 @@ import { Minus, Plus as PlusIcon, RotateCcw, SendHorizontal } from 'lucide-react
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { useQuickCommands } from '../hooks/useQuickCommands';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
@@ -77,6 +78,7 @@ function ZoomControls({ fontSizeManager, disabled }: ZoomControlsProps) {
 export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }: TerminalToolbarProps) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [inputValue, setInputValue] = useState('');
+  const isMobile = useMediaQuery('(pointer: coarse)');
 
   const sendInput = () => {
     const text = inputValue.trim();
@@ -92,6 +94,7 @@ export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }:
       <QuickCommandsPanel
         userCommands={userCommands}
         disabled={disabled}
+        showMobilePresets={isMobile}
         onRunCommand={(cmd) => sendText(cmd.raw ? cmd.command : cmd.command + '\r')}
         onDeleteCommand={deleteCommand}
         onAddCommand={addCommand}
