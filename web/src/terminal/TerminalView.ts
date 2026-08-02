@@ -148,33 +148,65 @@ export class TerminalView {
     };
     scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
-    // Mobile IME fallback: xterm.js's _inputEvent handler (browser/Terminal.ts)
-    // drops insertText events when ev.composed && _keyDownSeen — the normal
-    // case on mobile (soft keyboard sends keydown 229, _keyDownSeen stuck at
-    // true, then IME commits via input event).  The compositionend path may
-    // also fail because the textarea value isn't updated synchronously.
+    // Mobile IME fallback: xterm.js's _inputEvent handler drops insertText
+    // when ev.composed && _keyDownSeen — the normal case on mobile (soft
+    // keyboard sends keydown 229, _keyDownSeen stuck at true, IME commits
+    // via input event).  The compositionend path may also fail because the
+    // textarea value isn't updated synchronously.
     //
-    // We intercept insertText events during the capture phase on the helper
-    // container (.xterm-helpers, parent of the textarea).  This fires BEFORE
-    // xterm's own capture listener on the textarea child.  When the event
-    // carries committed IME text, stopImmediatePropagation prevents xterm's
-    // buggy handler from ever seeing it, and we send the text ourselves.
+    // Our approach handles BOTH paths on touch devices:
+    //   1. compositionend → setTimeout → read textarea diff → send
+    //   2. input (insertText) → stopPropagation before xterm can drop it → send
     //
-    // This is scoped to touch devices only — on desktop, xterm's keyboard-
-    // driven path (keydown → keypress → onData) handles text correctly and
-    // the input event serves as a secondary path for emoji/special chars.
+    // Path 1 catches IMEs that properly fire compositionend but whose input
+    // events fire with isComposing=true (dodged by path 2's guard).
+    // Path 2 catches IMEs that skip compositionend and commit via input only.
+    //
+    // A short dedup window avoids double-sending when both paths fire.
     if ('ontouchstart' in window) {
+      const textarea = mountElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
       const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
-      const handleIMECommit = (ev: Event) => {
+      let compositionStartValue = '';
+      let lastSent = '';
+      let lastSentTime = 0;
+
+      const sendIME = (text: string) => {
+        if (this.isDisposed || !text) { return; }
+        // Dedup: skip if the same text was just sent (both paths fired).
+        if (text === lastSent && Date.now() - lastSentTime < 100) { return; }
+        lastSent = text;
+        lastSentTime = Date.now();
+        this.connection.send(text);
+      };
+
+      // Path 1: compositionend reads the textarea diff.
+      if (textarea) {
+        textarea.addEventListener('compositionstart', () => {
+          compositionStartValue = textarea.value;
+        });
+        textarea.addEventListener('compositionend', () => {
+          // Let the browser update the textarea before reading.
+          setTimeout(() => {
+            if (this.isDisposed) { return; }
+            const committed = textarea.value.slice(compositionStartValue.length);
+            if (committed) {
+              sendIME(committed);
+              compositionStartValue = textarea.value;
+            }
+          }, 0);
+        });
+      }
+
+      // Path 2: intercept insertText before xterm's capture listener drops it.
+      const handleInput = (ev: Event) => {
         if (this.isDisposed) { return; }
         const ie = ev as InputEvent;
         if (ie.inputType !== 'insertText' || !ie.data || ie.isComposing) { return; }
-        // IME committed text: stop xterm's handler from dropping it.
         ev.stopImmediatePropagation();
-        this.connection.send(ie.data);
+        sendIME(ie.data);
       };
       if (helperContainer) {
-        helperContainer.addEventListener('input', handleIMECommit, true);
+        helperContainer.addEventListener('input', handleInput, true);
       }
     }
 
