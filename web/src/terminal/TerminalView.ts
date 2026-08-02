@@ -148,6 +148,36 @@ export class TerminalView {
     };
     scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
+    // Mobile IME fallback: xterm.js's _inputEvent handler (browser/Terminal.ts)
+    // drops insertText events when ev.composed && _keyDownSeen — the normal
+    // case on mobile (soft keyboard sends keydown 229, _keyDownSeen stuck at
+    // true, then IME commits via input event).  The compositionend path may
+    // also fail because the textarea value isn't updated synchronously.
+    //
+    // We intercept insertText events during the capture phase on the helper
+    // container (.xterm-helpers, parent of the textarea).  This fires BEFORE
+    // xterm's own capture listener on the textarea child.  When the event
+    // carries committed IME text, stopImmediatePropagation prevents xterm's
+    // buggy handler from ever seeing it, and we send the text ourselves.
+    //
+    // This is scoped to touch devices only — on desktop, xterm's keyboard-
+    // driven path (keydown → keypress → onData) handles text correctly and
+    // the input event serves as a secondary path for emoji/special chars.
+    if ('ontouchstart' in window) {
+      const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
+      const handleIMECommit = (ev: Event) => {
+        if (this.isDisposed) { return; }
+        const ie = ev as InputEvent;
+        if (ie.inputType !== 'insertText' || !ie.data || ie.isComposing) { return; }
+        // IME committed text: stop xterm's handler from dropping it.
+        ev.stopImmediatePropagation();
+        this.connection.send(ie.data);
+      };
+      if (helperContainer) {
+        helperContainer.addEventListener('input', handleIMECommit, true);
+      }
+    }
+
     // Always use local text selection even when tmux SGR mouse mode is
     // active.  Without this, xterm.js sends button events to the PTY as
     // SGR sequences — tmux captures them for copy-mode selection, and
