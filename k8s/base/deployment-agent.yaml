@@ -17,68 +17,6 @@ spec:
         app: nession
         component: agent
     spec:
-      initContainers:
-        - name: install-claude-code
-          image: ghcr.io/bestnathan/nession-agent:main
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-
-              # If already installed, skip.
-              if [ -x /opt/claude-tools/bin/node ] && [ -x /opt/claude-tools/bin/claude ]; then
-                echo "=== Claude Code already installed, skipping ==="
-                /opt/claude-tools/bin/node --version
-                /opt/claude-tools/bin/claude --version
-                exit 0
-              fi
-
-              echo "=== Installing Node.js + Claude Code ==="
-
-              # --- APT: switch to Aliyun mirror ---
-              cat > /etc/apt/sources.list << APTEOF
-              deb http://mirrors.aliyun.com/debian bullseye main
-              deb http://mirrors.aliyun.com/debian-security bullseye-security main
-              deb http://mirrors.aliyun.com/debian bullseye-updates main
-              APTEOF
-
-              apt-get update -qq
-              apt-get install -y -qq curl ca-certificates 2>&1 | tail -2
-
-              # --- Node.js 22 via NodeSource (bullseye-compatible) ---
-              curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 | tail -1
-              apt-get install -y -qq nodejs 2>&1 | tail -1
-
-              # --- npm: Aliyun mirror ---
-              npm config set registry https://registry.npmmirror.com
-
-              # --- Install Claude Code ---
-              npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
-
-              # --- Claude Code init config ---
-              mkdir -p /opt/claude-tools/home
-              printf '{"hasCompletedOnboarding":true}\n' > /opt/claude-tools/home/.claude.json
-
-              # --- Copy to shared emptyDir volume ---
-              mkdir -p /opt/claude-tools/bin /opt/claude-tools/lib
-              cp /usr/bin/node /opt/claude-tools/bin/
-              cp /usr/bin/claude /opt/claude-tools/bin/
-              cp -a /usr/lib/node_modules /opt/claude-tools/lib/
-
-              echo "=== Init done ==="
-              /opt/claude-tools/bin/node --version
-              /opt/claude-tools/bin/claude --version
-          volumeMounts:
-            - name: claude-tools
-              mountPath: /opt/claude-tools
-          resources:
-            requests:
-              cpu: 50m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
       containers:
         - name: nession-agent
           image: ghcr.io/bestnathan/nession-agent:main
@@ -106,11 +44,6 @@ spec:
               value: "ws://agent.nession.nhome.local/ws"
             - name: SERVER_BACKEND
               value: "127.0.0.1:19090"
-            # Claude Code tools from init container
-            - name: PATH
-              value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/claude-tools/bin"
-            - name: NODE_PATH
-              value: "/opt/claude-tools/lib/node_modules"
             - name: LANG
               value: "C.UTF-8"
             - name: TERM
@@ -118,11 +51,6 @@ spec:
             - name: NESSION_HOME
               value: "/data"
           volumeMounts:
-            - name: claude-tools
-              mountPath: /opt/claude-tools
-            - name: claude-tools
-              mountPath: /root/.claude.json
-              subPath: home/.claude.json
             - name: claude-home
               mountPath: /root/.claude
               subPath: nession/claude-home
@@ -149,8 +77,6 @@ spec:
               memory: 512Mi
       # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public
       volumes:
-        - name: claude-tools
-          emptyDir: {}
         - name: claude-home
           persistentVolumeClaim:
             claimName: nession-server-data

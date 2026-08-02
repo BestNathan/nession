@@ -46,6 +46,24 @@ RUN apt-get update && \
         nginx ca-certificates curl gettext-base tmux && \
     rm -rf /var/lib/apt/lists/*
 
+# Node.js 22 + Claude Code (baked in instead of k8s init container).
+# Replaces the old initContainer-based install which re-downloaded
+# on every pod recreation because emptyDir doesn't survive across
+# deployments.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm config set registry https://registry.npmmirror.com && \
+    npm install -g @anthropic-ai/claude-code && \
+    apt-get purge -y curl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Claude Code one-time init config (skips onboarding on first run)
+RUN mkdir -p /root/.claude && \
+    printf '{"hasCompletedOnboarding":true}\n' > /root/.claude.json
+
 COPY --from=rust-builder /build/target/release/nession-agent /usr/local/bin/nession-agent
 COPY --from=web-builder /build/dist /usr/share/nginx/html
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
