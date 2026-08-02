@@ -5,6 +5,7 @@ import { Textarea } from './ui/textarea';
 import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
+import { MobileKeyPanel } from './MobileKeyPanel';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 export interface TerminalToolbarProps {
@@ -91,10 +92,17 @@ export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }:
 
   return (
     <div className="flex flex-col min-h-0">
+      {/* Mobile virtual keys: arrows, Esc, Tab, Ctrl combos —
+          separated from quick commands for clarity. */}
+      {isMobile && (
+        <MobileKeyPanel
+          disabled={disabled}
+          onKey={(key) => sendText(key)}
+        />
+      )}
       <QuickCommandsPanel
         userCommands={userCommands}
         disabled={disabled}
-        showMobilePresets={isMobile}
         onRunCommand={(cmd) => sendText(cmd.raw ? cmd.command : cmd.command + '\r')}
         onDeleteCommand={deleteCommand}
         onAddCommand={addCommand}

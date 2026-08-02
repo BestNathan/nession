@@ -5,13 +5,11 @@ import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { PRESETS, MOBILE_PRESETS, type QuickCommand } from './quickCommands';
+import { PRESETS, type QuickCommand } from './quickCommands';
 
 export interface QuickCommandsPanelProps {
   userCommands: QuickCommand[];
   disabled: boolean;
-  /** When true, renders mobile-specific presets (arrows, Esc, Tab, …). */
-  showMobilePresets?: boolean;
   onRunCommand: (cmd: QuickCommand) => void;
   onDeleteCommand: (id: string) => Promise<void>;
   onAddCommand: (label: string, command: string) => Promise<void>;
@@ -20,7 +18,6 @@ export interface QuickCommandsPanelProps {
 export function QuickCommandsPanel({
   userCommands,
   disabled,
-  showMobilePresets = false,
   onRunCommand,
   onDeleteCommand,
   onAddCommand,
@@ -43,12 +40,6 @@ export function QuickCommandsPanel({
 
   return (
     <div className="flex flex-wrap gap-1 content-start overflow-y-auto min-h-0 p-2 pb-0">
-      {/* Mobile nav keys (arrows, Esc, Tab) — closest to input */}
-      {showMobilePresets && MOBILE_PRESETS.map((cmd) => (
-        <Button key={cmd.id} variant="outline" size="sm"
-          className="h-11 md:h-6 text-xs md:text-[11px] px-2" disabled={disabled}
-          onClick={() => onRunCommand(cmd)}>{cmd.label}</Button>
-      ))}
       {PRESETS.map((cmd) => (
         <Button key={cmd.id} variant="outline" size="sm"
           className="h-11 md:h-6 text-xs md:text-[11px] px-2" disabled={disabled}
