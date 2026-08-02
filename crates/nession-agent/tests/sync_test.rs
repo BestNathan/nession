@@ -7,11 +7,20 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::AgentMetadata;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
+
+/// Generate a unique session name for tests.
+fn unique_session_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-{prefix}-{nanos}")
+}
 
 /// Start a mock WebSocket server that collects incoming messages.
 /// Returns a receiver that yields each text message the client sends.
@@ -211,13 +220,13 @@ async fn test_session_watcher_detects_new_session() {
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = SessionManager::new();
-    let session_name = "sync_test_new_session";
+    let session_name = unique_session_name("watcher-new");
 
     // Clean up any leftover session.
-    let _ = tmux.kill_session(session_name).await;
+    let _ = tmux.kill_session(&session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .expect("failed to create tmux session");
 
@@ -248,13 +257,13 @@ async fn test_session_watcher_detects_new_session() {
     .await;
 
     // Clean up.
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
     shutdown.shutdown().await.ok();
     handle.shutdown().await.ok();
     server_handle.abort();
 
     let update = found.expect("did not receive session update for new session");
-    assert_eq!(update["payload"]["session_name"], session_name);
+    assert_eq!(update["payload"]["session_name"], session_name.as_str());
     // No clients attached, so status should be "detached".
     assert_eq!(update["payload"]["status"], "detached");
     assert_eq!(update["payload"]["window_count"], 1);
@@ -272,13 +281,13 @@ async fn test_session_watcher_detects_removed_session() {
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = SessionManager::new();
-    let session_name = "sync_test_removed_session";
+    let session_name = unique_session_name("watcher-removed");
 
     // Clean up any leftover session.
-    let _ = tmux.kill_session(session_name).await;
+    let _ = tmux.kill_session(&session_name).await;
 
     // Create the session before starting the watcher.
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .expect("failed to create tmux session");
 
@@ -310,7 +319,7 @@ async fn test_session_watcher_detects_removed_session() {
     assert!(saw_create, "did not see initial session creation update");
 
     // Now kill the session; the watcher should detect removal.
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
 
     // Wait for "gone" update.
     let found = tokio::time::timeout(Duration::from_secs(10), async {
@@ -337,6 +346,7 @@ async fn test_session_watcher_detects_removed_session() {
     server_handle.abort();
 
     let update = found.expect("did not receive session removal update");
+    assert_eq!(update["payload"]["session_name"], session_name.as_str());
     assert_eq!(update["payload"]["status"], "gone");
     assert_eq!(update["payload"]["window_count"], 0);
     assert_eq!(update["payload"]["attached_clients"], 0);

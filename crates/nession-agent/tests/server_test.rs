@@ -14,8 +14,19 @@ use nession_agent::server::websocket::{
 use nession_agent::tmux::manager::SessionManager;
 use serde::Serialize;
 use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+/// Generate a unique session name for tests — avoids collisions with real
+/// user sessions and between parallel test runs.
+fn unique_session_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-{prefix}-{nanos}")
+}
 
 /// Start a test server (OS picks a free port) and return the real bound
 /// address + handle.
@@ -101,7 +112,7 @@ async fn integration_session_create_and_kill() {
     let (addr, handle) = start_server(19083).await;
     let (mut sink, mut stream) = connect(addr).await;
 
-    let session_name = "integration_create_kill";
+    let session_name = unique_session_name("create-kill");
     let create = SessionCreatePayload {
         name: session_name.to_string(),
         width: 80,
@@ -131,10 +142,10 @@ async fn integration_client_attach_creates_pty() {
     let (mut sink, mut stream) = connect(addr).await;
 
     let tmux = SessionManager::new();
-    let session_name = "integration_attach";
+    let session_name = unique_session_name("attach");
     // Clean up any leftover session from previous test runs
-    tmux.kill_session(session_name).await.ok();
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.kill_session(&session_name).await.ok();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -161,7 +172,7 @@ async fn integration_client_attach_creates_pty() {
     assert_eq!(resp.msg_type, msg_types::OK);
     assert_eq!(resp.payload.session_name, session_name);
 
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
 }
 
@@ -171,10 +182,10 @@ async fn integration_terminal_io_flow() {
     let (mut sink, mut stream) = connect(addr).await;
 
     let tmux = SessionManager::new();
-    let session_name = "integration_io";
+    let session_name = unique_session_name("io");
     // Clean up any leftover session from previous test runs
-    tmux.kill_session(session_name).await.ok();
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.kill_session(&session_name).await.ok();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -237,7 +248,7 @@ async fn integration_terminal_io_flow() {
     let _: nession_agent::server::websocket::Message<serde_json::Value> =
         round_trip(&mut sink, &mut stream, &req).await;
 
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
 
     assert!(got_hello, "expected terminal output containing 'hello'");
@@ -304,7 +315,7 @@ async fn integration_web_ui_session_create() {
 
     let payload = WebSessionCreatePayload {
         agent_id: "local-agent".to_string(),
-        name: "webui_test_create".to_string(),
+        name: unique_session_name("web-create"),
         width: 80,
         height: 24,
     };
@@ -313,10 +324,18 @@ async fn integration_web_ui_session_create() {
         round_trip(&mut sink, &mut stream, &req).await;
     assert_eq!(resp.msg_type, msg_types::OK);
     assert!(resp.payload.success);
+    // Extract the session name from the response for cleanup.
+    let created_name = resp
+        .payload
+        .session_id
+        .as_deref()
+        .and_then(|sid| sid.split(':').nth(1))
+        .unwrap_or("");
+    assert!(!created_name.is_empty());
 
     // Clean up.
     let tmux = SessionManager::new();
-    tmux.kill_session("webui_test_create").await.ok();
+    tmux.kill_session(created_name).await.ok();
     handle.shutdown().await.ok();
 }
 
@@ -327,14 +346,13 @@ async fn integration_web_ui_session_kill() {
 
     // Create a session first.
     let tmux = SessionManager::new();
-    // Clean up any leftover session from previous test runs
-    tmux.kill_session("webui_test_kill").await.ok();
-    tmux.create_session("webui_test_kill", 80, 24, "/tmp", &[])
+    let session_name = unique_session_name("web-kill");
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
     let payload = WebSessionKillPayload {
-        session_id: "local-agent:webui_test_kill".to_string(),
+        session_id: format!("local-agent:{session_name}"),
     };
     let req = new_message(msg_types::CLIENT_SESSION_KILL, payload);
     let resp: nession_agent::server::websocket::Message<WebSessionKillResponse> =

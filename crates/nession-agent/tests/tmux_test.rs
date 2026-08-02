@@ -1,6 +1,17 @@
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::util::{check_tmux_available, send_keys};
 
+/// Generate a unique session name for tests so they never collide with
+/// real user sessions — even across parallel test runs.
+fn unique_session_name(prefix: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-{prefix}-{nanos}")
+}
+
 #[tokio::test]
 async fn test_list_sessions_empty() {
     let manager = SessionManager::new();
@@ -13,11 +24,11 @@ async fn test_list_sessions_empty() {
 #[tokio::test]
 async fn test_create_and_kill_session() {
     let manager = SessionManager::new();
-    let session_name = "test_session_integration";
+    let session_name = unique_session_name("create-kill");
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp", &[])
+        .create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -26,7 +37,7 @@ async fn test_create_and_kill_session() {
     assert!(sessions.iter().any(|s| s.name == session_name));
 
     // Kill session
-    manager.kill_session(session_name).await.unwrap();
+    manager.kill_session(&session_name).await.unwrap();
 
     // Verify it's gone
     let sessions = manager.list_sessions().await.unwrap();
@@ -36,25 +47,26 @@ async fn test_create_and_kill_session() {
 #[tokio::test]
 async fn test_send_keys() {
     let manager = SessionManager::new();
-    let session_name = "test_send_keys";
+    let session_name = unique_session_name("send-keys");
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp", &[])
+        .create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
     // Send keys - should not error
-    send_keys(session_name, "echo test").await.unwrap();
+    send_keys(&session_name, "echo test").await.unwrap();
 
     // Clean up
-    manager.kill_session(session_name).await.unwrap();
+    manager.kill_session(&session_name).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_send_keys_nonexistent_session() {
     // Sending keys to a non-existent session should fail
-    let result = send_keys("nonexistent_session_xyz", "test").await;
+    let ghost = unique_session_name("ghost");
+    let result = send_keys(&ghost, "test").await;
     assert!(result.is_err());
 }
 
@@ -68,29 +80,30 @@ async fn test_check_tmux_available() {
 #[tokio::test]
 async fn test_kill_nonexistent_session() {
     let manager = SessionManager::new();
+    let ghost = unique_session_name("ghost");
 
     // Killing a non-existent session should fail
-    let result = manager.kill_session("nonexistent_session_xyz").await;
+    let result = manager.kill_session(&ghost).await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_create_duplicate_session() {
     let manager = SessionManager::new();
-    let session_name = "test_duplicate";
+    let session_name = unique_session_name("duplicate");
 
     // Create session
     manager
-        .create_session(session_name, 80, 24, "/tmp", &[])
+        .create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
     // Creating the same session again should fail
     let result = manager
-        .create_session(session_name, 80, 24, "/tmp", &[])
+        .create_session(&session_name, 80, 24, "/tmp", &[])
         .await;
     assert!(result.is_err());
 
     // Clean up
-    manager.kill_session(session_name).await.unwrap();
+    manager.kill_session(&session_name).await.unwrap();
 }

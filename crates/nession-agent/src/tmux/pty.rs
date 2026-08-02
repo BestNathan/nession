@@ -52,9 +52,11 @@ impl PtySession {
             })
             .context("failed to open PTY")?;
 
-        // Hide the tmux status bar — the web UI has its own chrome.
+        // Hide the tmux status bar for this session only — the web UI has
+        // its own chrome.  Using `-t` instead of `-g` avoids a global
+        // side-effect that would affect every session on the machine.
         let _ = std::process::Command::new("tmux")
-            .args(["set-option", "-g", "status", "off"])
+            .args(["set-option", "-t", session_name, "status", "off"])
             .status();
 
         // Build the command using portable-pty's CommandBuilder

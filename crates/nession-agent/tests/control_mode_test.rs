@@ -5,10 +5,20 @@
 
 use anyhow::{anyhow, Result};
 use nession_agent::tmux::control::ControlModeSession;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
+
+/// Generate a unique session name for tests — avoids collisions with real
+/// user sessions.
+fn unique_session_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-ctrl-{prefix}-{nanos}")
+}
 
 /// Kill a tmux session; ignores errors (session may not exist).
 async fn cleanup_session(name: &str) {
@@ -51,13 +61,13 @@ async fn drain_bytes(rx: &mut mpsc::Receiver<Vec<u8>>, total_ms: u64) -> Vec<u8>
 
 #[tokio::test]
 async fn test_attach_and_receive_output() -> Result<()> {
-    let session_name = "nession-ctrl-attach-test";
-    cleanup_session(session_name).await;
-    create_session(session_name).await?;
+    let session_name = unique_session_name("attach");
+    cleanup_session(&session_name).await;
+    create_session(&session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
     let (mut session, mut rx, _resize_rx) =
-        ControlModeSession::attach(session_name, 80, 24).await?;
+        ControlModeSession::attach(&session_name, 80, 24).await?;
 
     // Drain any startup output (initial screen redraw from refresh-client).
     let _ = drain_bytes(&mut rx, 500).await;
@@ -75,18 +85,18 @@ async fn test_attach_and_receive_output() -> Result<()> {
     );
 
     let _ = session.close().await;
-    cleanup_session(session_name).await;
+    cleanup_session(&session_name).await;
     Ok(())
 }
 
 #[tokio::test]
 async fn test_resize_updates_viewport() -> Result<()> {
-    let session_name = "nession-ctrl-resize-test";
-    cleanup_session(session_name).await;
-    create_session(session_name).await?;
+    let session_name = unique_session_name("resize");
+    cleanup_session(&session_name).await;
+    create_session(&session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(&session_name, 80, 24).await?;
 
     assert_eq!(session.viewport(), (80, 24));
 
@@ -97,19 +107,19 @@ async fn test_resize_updates_viewport() -> Result<()> {
     assert_eq!(session.viewport(), (100, 30));
 
     let _ = session.close().await;
-    cleanup_session(session_name).await;
+    cleanup_session(&session_name).await;
     Ok(())
 }
 
 #[tokio::test]
 async fn test_multiple_clients_independent_viewport() -> Result<()> {
-    let session_name = "nession-ctrl-multi-test";
-    cleanup_session(session_name).await;
-    create_session(session_name).await?;
+    let session_name = unique_session_name("multi");
+    cleanup_session(&session_name).await;
+    create_session(&session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut client1, _rx1, _rz1) = ControlModeSession::attach(session_name, 80, 24).await?;
-    let (mut client2, _rx2, _rz2) = ControlModeSession::attach(session_name, 120, 40).await?;
+    let (mut client1, _rx1, _rz1) = ControlModeSession::attach(&session_name, 80, 24).await?;
+    let (mut client2, _rx2, _rz2) = ControlModeSession::attach(&session_name, 120, 40).await?;
 
     assert_eq!(client1.viewport(), (80, 24));
     assert_eq!(client2.viewport(), (120, 40));
@@ -122,22 +132,22 @@ async fn test_multiple_clients_independent_viewport() -> Result<()> {
 
     let _ = client1.close().await;
     let _ = client2.close().await;
-    cleanup_session(session_name).await;
+    cleanup_session(&session_name).await;
     Ok(())
 }
 
 #[tokio::test]
 async fn test_close_is_idempotent() -> Result<()> {
-    let session_name = "nession-ctrl-close-test";
-    cleanup_session(session_name).await;
-    create_session(session_name).await?;
+    let session_name = unique_session_name("close");
+    cleanup_session(&session_name).await;
+    create_session(&session_name).await?;
     sleep(Duration::from_millis(300)).await;
 
-    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(session_name, 80, 24).await?;
+    let (mut session, _rx, _resize_rx) = ControlModeSession::attach(&session_name, 80, 24).await?;
 
     session.close().await?;
     session.close().await?;
 
-    cleanup_session(session_name).await;
+    cleanup_session(&session_name).await;
     Ok(())
 }

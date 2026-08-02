@@ -31,6 +31,17 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 // Test Helpers
 // ---------------------------------------------------------------------------
 
+/// Generate a unique session name for tests so they never collide with
+/// real user sessions.
+fn unique_session_name(prefix: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-{prefix}-{nanos}")
+}
+
 /// Start a real nession-server on a random port and return its address.
 async fn start_test_server(
     auth_token: &str,
@@ -226,10 +237,10 @@ async fn test_client_connects_to_agent_via_p2p() {
 #[tokio::test]
 async fn test_terminal_io_through_full_chain() {
     let tmux = SessionManager::new();
-    let session_name = "e2e_terminal_io";
+    let session_name = unique_session_name("e2e-io");
 
     // Create a tmux session.
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
 
@@ -324,7 +335,7 @@ async fn test_terminal_io_through_full_chain() {
     sink.send(WsMessage::Text(json)).await.unwrap();
 
     // Clean up.
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
     agent_handle.shutdown().await.ok();
 
     assert!(got_output, "expected terminal output containing 'test123'");
@@ -347,7 +358,7 @@ async fn test_session_lifecycle() {
     let (mut sink, mut stream) = ws.split();
 
     // Create a session.
-    let session_name = "e2e_lifecycle";
+    let session_name = unique_session_name("e2e-lifecycle");
     let create = SessionCreatePayload {
         name: session_name.to_string(),
         width: 80,
@@ -384,7 +395,7 @@ async fn test_session_lifecycle() {
         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(parsed["msg_type"], agent_msg_types::OK);
         let sessions = parsed["payload"]["sessions"].as_array().unwrap();
-        assert!(sessions.iter().any(|s| s["name"] == session_name));
+        assert!(sessions.iter().any(|s| s["name"] == session_name.as_str()));
     }
 
     // Kill the session.
