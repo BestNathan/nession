@@ -147,7 +147,7 @@ export class TerminalView {
     // keyboard/IME input and sends committed text directly to the PTY.
     if ('ontouchstart' in window) {
       this.mobileInput = new MobileInput(
-        this.terminal.element!,
+        this.terminal,
         scrollContainer,
         {
           onSend: (text) => {

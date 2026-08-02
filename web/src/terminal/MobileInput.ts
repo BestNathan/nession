@@ -1,25 +1,18 @@
 /**
  * MobileInput — a visible textarea that replaces xterm's hidden one on
- * touch devices.  xterm.js is designed for physical keyboards and hides
- * its textarea off-screen (left:-9999em; opacity:0).  On mobile this
- * prevents the virtual keyboard and IME from working reliably because
- * browsers need a visible, in-viewport editable element.
+ * touch devices.  The textarea is positioned at xterm's cursor position
+ * (like xterm's _syncTextArea does on desktop), giving the browser and
+ * IME a valid, in-viewport editable element to anchor to.
  *
- * MobileInput creates its own textarea positioned at the bottom of the
- * terminal viewport.  All keyboard, IME composition, and paste events
- * flow through it naturally — the browser handles IME composition just
- * like any other textarea.  Committed text is sent directly to the PTY
- * via the onSend callback (ConnectionManager.send), bypassing xterm's
- * input pipeline entirely.
- *
- * xterm continues to render output (terminal.write) and handle mouse/
- * touch selection — it just doesn't participate in keyboard input.
+ * All keyboard, IME composition, and paste events flow through this
+ * textarea natively.  Committed text goes directly to the PTY via
+ * onSend (ConnectionManager.send).  xterm handles rendering only.
  */
 
+import type { Terminal } from '@xterm/xterm';
+
 export interface MobileInputCallbacks {
-  /** Send committed text directly to the PTY. */
   onSend: (text: string) => void;
-  /** Called when the textarea receives or loses focus. */
   onFocusChange?: (focused: boolean) => void;
 }
 
@@ -27,47 +20,54 @@ export class MobileInput {
   readonly element: HTMLTextAreaElement;
   private disposed = false;
   private callbacks: MobileInputCallbacks;
+  private terminal: Terminal;
   private isComposing = false;
 
-  /**
-   * @param terminalElement  The `.xterm` div (returned by terminal.open).
-   * @param parent           Container to append our textarea into.
-   */
   constructor(
-    terminalElement: HTMLElement,
+    terminal: Terminal,
     parent: HTMLElement,
     callbacks: MobileInputCallbacks,
   ) {
     this.callbacks = callbacks;
+    this.terminal = terminal;
 
     // ── find xterm's hidden textarea ──
-    const xta = terminalElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    const termEl = terminal.element!;
+    const xta = termEl.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
 
     // ── create our textarea ──
     const ta = document.createElement('textarea');
     ta.setAttribute('autocorrect', 'off');
     ta.setAttribute('autocapitalize', 'off');
     ta.setAttribute('spellcheck', 'false');
-    // Prevent iOS auto-zoom on focus.
-    ta.style.fontSize = '16px';
-    // Positioned at the bottom of the terminal viewport.
+    ta.setAttribute('autocomplete', 'off');
     ta.style.cssText =
-      'position:absolute; bottom:0; left:0; right:0;' +
+      'position:absolute;' +
       'z-index:10;' +
-      // Semi-transparent — visible enough for the browser to anchor IME
-      // but not visually distracting.
-      'background:rgba(30,30,46,0.95);' +
-      'color:#cdd6f4;' +
-      'border:none; border-top:1px solid rgba(255,255,255,0.08);' +
-      'padding:6px 8px;' +
+      // Nearly invisible — just enough to be a valid IME anchor.
+      'opacity:0.01;' +
+      'background:transparent;' +
+      'color:transparent;' +
+      'caret-color:transparent;' +
+      'border:none;' +
+      'padding:0; margin:0;' +
       'font-family:monospace;' +
-      'line-height:1.3;' +
-      'resize:none; overflow:hidden;' +
-      'outline:none;';
-    ta.rows = 1;
-    ta.placeholder = 'Tap to type…';
+      'font-size:16px;' +    // prevent iOS auto-zoom
+      'line-height:1;' +
+      'resize:none;' +
+      'overflow:hidden;' +
+      'outline:none;' +
+      // Start as a 1×1 px dot; syncPosition() sizes it to cursor cell.
+      'width:1px; height:1px;' +
+      'left:0; top:0;';
 
-    // ── input: committed text (IME and non-IME) ──
+    // ── position syncing ──
+    // Update textarea position when the cursor moves.
+    const onCursorMove = this.terminal.onCursorMove(() => this.syncPosition());
+    // Also sync after terminal output (cursor may have moved).
+    const onRender = this.terminal.onRender(() => this.syncPosition());
+
+    // ── input: committed text ──
     ta.addEventListener('input', (ev: Event) => {
       if (this.disposed) { return; }
       const ie = ev as InputEvent;
@@ -77,82 +77,43 @@ export class MobileInput {
       }
     });
 
-    // ── keydown: special keys that don't produce insertText ──
+    // ── keydown: special keys ──
     ta.addEventListener('keydown', (ev: KeyboardEvent) => {
       if (this.disposed) { return; }
-      // During IME composition, let the browser handle everything.
       if (this.isComposing || ev.isComposing || ev.keyCode === 229) { return; }
 
       switch (ev.key) {
-        case 'Enter':
-          ev.preventDefault();
-          this.callbacks.onSend('\r');
-          ta.value = '';
-          break;
-        case 'Backspace':
-          ev.preventDefault();
-          this.callbacks.onSend('\x7f');
-          break;
-        case 'Escape':
-          ev.preventDefault();
-          this.callbacks.onSend('\x1b');
-          break;
-        case 'Tab':
-          ev.preventDefault();
-          this.callbacks.onSend('\t');
-          break;
-        case 'ArrowUp':
-          ev.preventDefault();
-          this.callbacks.onSend('\x1b[A');
-          break;
-        case 'ArrowDown':
-          ev.preventDefault();
-          this.callbacks.onSend('\x1b[B');
-          break;
-        case 'ArrowLeft':
-          ev.preventDefault();
-          this.callbacks.onSend('\x1b[D');
-          break;
-        case 'ArrowRight':
-          ev.preventDefault();
-          this.callbacks.onSend('\x1b[C');
-          break;
-        default:
-          // Regular character keys are handled by the input event above.
-          // Do nothing here — the character will come through as insertText.
-          break;
+        case 'Enter':       ev.preventDefault(); this.callbacks.onSend('\r');     ta.value = ''; break;
+        case 'Backspace':   ev.preventDefault(); this.callbacks.onSend('\x7f');                 break;
+        case 'Escape':      ev.preventDefault(); this.callbacks.onSend('\x1b');                 break;
+        case 'Tab':         ev.preventDefault(); this.callbacks.onSend('\t');                   break;
+        case 'ArrowUp':     ev.preventDefault(); this.callbacks.onSend('\x1b[A');               break;
+        case 'ArrowDown':   ev.preventDefault(); this.callbacks.onSend('\x1b[B');               break;
+        case 'ArrowLeft':   ev.preventDefault(); this.callbacks.onSend('\x1b[D');               break;
+        case 'ArrowRight':  ev.preventDefault(); this.callbacks.onSend('\x1b[C');               break;
       }
     });
 
-    // ── track composition state ──
+    // ── composition tracking ──
     ta.addEventListener('compositionstart', () => { this.isComposing = true; });
     ta.addEventListener('compositionend', () => {
       this.isComposing = false;
-      // After composition, the committed text arrives via the input
-      // event (insertText, isComposing=false), which we handle above.
-      // Clear any leftover composing text from the textarea.
-      setTimeout(() => { ta.value = ''; }, 0);
+      setTimeout(() => { if (!this.disposed) { ta.value = ''; } }, 0);
     });
 
     // ── paste ──
     ta.addEventListener('paste', (ev: ClipboardEvent) => {
       if (this.disposed) { return; }
       const text = ev.clipboardData?.getData('text/plain');
-      if (text) {
-        ev.preventDefault();
-        this.callbacks.onSend(text);
-      }
+      if (text) { ev.preventDefault(); this.callbacks.onSend(text); }
     });
 
     // ── focus / blur ──
     ta.addEventListener('focus', () => this.callbacks.onFocusChange?.(true));
     ta.addEventListener('blur', () => this.callbacks.onFocusChange?.(false));
 
-    // ── redirect focus from xterm's hidden textarea to ours ──
+    // ── redirect focus from xterm's textarea ──
     if (xta) {
-      // xterm's mousedown handler calls this.textarea.focus().
-      // On mobile, the soft keyboard needs a visible textarea — if
-      // focus lands on xterm's hidden one, steal it back.
       xta.addEventListener('focus', () => {
         if (this.disposed || document.activeElement === ta) { return; }
         setTimeout(() => ta.focus(), 0);
@@ -161,15 +122,51 @@ export class MobileInput {
 
     parent.appendChild(ta);
     this.element = ta;
+
+    // Clean up xterm subscriptions on dispose.
+    const origDispose = this.dispose.bind(this);
+    this.dispose = () => {
+      onCursorMove.dispose();
+      onRender.dispose();
+      origDispose();
+    };
   }
 
-  /** Programmatically focus our textarea (call on terminal tap). */
+  /** Position the textarea at xterm's cursor location. */
+  syncPosition(): void {
+    if (this.disposed) { return; }
+    try {
+      const buffer = this.terminal.buffer.active;
+      const cursorX = Math.min(buffer.cursorX, this.terminal.cols - 1);
+      const cursorY = buffer.cursorY; // relative to viewport
+
+      const cell = this.getCellDimensions();
+      if (cell.width < 1 || cell.height < 1) { return; }
+
+      this.element.style.left = `${cursorX * cell.width}px`;
+      this.element.style.top = `${cursorY * cell.height}px`;
+      this.element.style.width = `${Math.max(cell.width, 1)}px`;
+      this.element.style.height = `${Math.max(cell.height, 1)}px`;
+    } catch {
+      // Terminal may not be fully initialised yet.
+    }
+  }
+
+  /** Read cell pixel dimensions from xterm's render service internals. */
+  private getCellDimensions(): { width: number; height: number } {
+    const internals = this.terminal as unknown as {
+      _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } };
+    };
+    const cell = internals._core?._renderService?.dimensions?.css?.cell;
+    return { width: cell?.width ?? 8, height: cell?.height ?? 16 };
+  }
+
   focus(): void {
     if (this.disposed) { return; }
+    this.syncPosition();
     this.element.focus();
   }
 
-  /** Send text programmatically (e.g. from quick-command buttons). */
   sendText(text: string): void {
     this.callbacks.onSend(text);
   }
