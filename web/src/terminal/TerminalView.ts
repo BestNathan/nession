@@ -148,65 +148,47 @@ export class TerminalView {
     };
     scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
-    // Mobile IME fallback: xterm.js's _inputEvent handler drops insertText
-    // when ev.composed && _keyDownSeen — the normal case on mobile (soft
-    // keyboard sends keydown 229, _keyDownSeen stuck at true, IME commits
-    // via input event).  The compositionend path may also fail because the
-    // textarea value isn't updated synchronously.
+    // Mobile IME: xterm.js's CompositionHelper fires on the textarea
+    // and reads the textarea value via setTimeout(0).  On mobile this
+    // is unreliable — the value may not be updated yet, the _inputEvent
+    // guard drops insertText when composed && _keyDownSeen, and the
+    // keydown/keyup lifecycle doesn't match the soft keyboard.
     //
-    // Our approach handles BOTH paths on touch devices:
-    //   1. compositionend → setTimeout → read textarea diff → send
-    //   2. input (insertText) → stopPropagation before xterm can drop it → send
+    // We take over compositionend entirely on touch devices: a capture
+    // listener on .xterm-helpers (parent of the textarea) fires BEFORE
+    // xterm's bubble listener on the textarea.  stopImmediatePropagation
+    // prevents xterm from ever seeing the event; we read the textarea
+    // diff after a microtask and send the committed text ourselves.
     //
-    // Path 1 catches IMEs that properly fire compositionend but whose input
-    // events fire with isComposing=true (dodged by path 2's guard).
-    // Path 2 catches IMEs that skip compositionend and commit via input only.
-    //
-    // A short dedup window avoids double-sending when both paths fire.
+    // compositionstart is NOT blocked — xterm's handler tracks the
+    // composing state and positions the composition view normally.
     if ('ontouchstart' in window) {
       const textarea = mountElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
       const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
       let compositionStartValue = '';
-      let lastSent = '';
-      let lastSentTime = 0;
 
-      const sendIME = (text: string) => {
-        if (this.isDisposed || !text) { return; }
-        // Dedup: skip if the same text was just sent (both paths fired).
-        if (text === lastSent && Date.now() - lastSentTime < 100) { return; }
-        lastSent = text;
-        lastSentTime = Date.now();
-        this.connection.send(text);
-      };
-
-      // Path 1: compositionend reads the textarea diff.
-      if (textarea) {
-        textarea.addEventListener('compositionstart', () => {
+      if (textarea && helperContainer) {
+        // Capture compositionstart on the parent so we snapshot the
+        // textarea value before the IME writes into it.
+        helperContainer.addEventListener('compositionstart', () => {
           compositionStartValue = textarea.value;
-        });
-        textarea.addEventListener('compositionend', () => {
-          // Let the browser update the textarea before reading.
+        }, true);
+
+        // Capture compositionend on the parent: fires before xterm's
+        // bubble listener on the textarea.  stopImmediatePropagation
+        // prevents xterm from running its (unreliable) handler.
+        helperContainer.addEventListener('compositionend', (ev) => {
+          ev.stopImmediatePropagation();
+          // Let the browser update the textarea value first.
           setTimeout(() => {
             if (this.isDisposed) { return; }
             const committed = textarea.value.slice(compositionStartValue.length);
             if (committed) {
-              sendIME(committed);
+              this.connection.send(committed);
               compositionStartValue = textarea.value;
             }
           }, 0);
-        });
-      }
-
-      // Path 2: intercept insertText before xterm's capture listener drops it.
-      const handleInput = (ev: Event) => {
-        if (this.isDisposed) { return; }
-        const ie = ev as InputEvent;
-        if (ie.inputType !== 'insertText' || !ie.data || ie.isComposing) { return; }
-        ev.stopImmediatePropagation();
-        sendIME(ie.data);
-      };
-      if (helperContainer) {
-        helperContainer.addEventListener('input', handleInput, true);
+        }, true);
       }
     }
 
