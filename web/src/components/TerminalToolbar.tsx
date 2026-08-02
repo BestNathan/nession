@@ -12,6 +12,8 @@ export interface TerminalToolbarProps {
   sendText: (text: string) => void;
   disabled?: boolean;
   fontSizeManager?: FontSizeManager | null;
+  /** Re-focus the terminal textarea after tapping toolbar buttons. */
+  focusTerminal?: () => void;
 }
 
 interface ZoomControlsProps {
@@ -76,7 +78,7 @@ function ZoomControls({ fontSizeManager, disabled }: ZoomControlsProps) {
   );
 }
 
-export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }: TerminalToolbarProps) {
+export function TerminalToolbar({ sendText, disabled = false, fontSizeManager, focusTerminal }: TerminalToolbarProps) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [inputValue, setInputValue] = useState('');
   const isMobile = useMediaQuery('(pointer: coarse)');
@@ -98,6 +100,7 @@ export function TerminalToolbar({ sendText, disabled = false, fontSizeManager }:
         <MobileKeyPanel
           disabled={disabled}
           onKey={(key) => sendText(key)}
+          onAfterKey={focusTerminal}
         />
       )}
       <QuickCommandsPanel

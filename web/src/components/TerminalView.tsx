@@ -142,6 +142,7 @@ export function TerminalView({ session, onBack, onDisconnect, onError }: Termina
           fileOps={fileOps}
           onTerminalReveal={() => terminalHandle?.refit()}
           fontSizeManager={terminalHandle?.fontSizeManager ?? null}
+          focusTerminal={() => terminalHandle?.focusTerminal()}
         />
       </div>
     </div>

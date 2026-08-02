@@ -191,6 +191,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           viewRef.current?.sendResize(cols, rows);
         },
         fontSizeManager: viewRef.current?.fontSizeManager ?? null,
+        focusTerminal: () => viewRef.current?.terminal.focus(),
       };
     },
     [isBlocked, viewGeneration],

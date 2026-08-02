@@ -226,6 +226,10 @@ export class TerminalView {
     if (this.isDisposed) {
       return;
     }
+    // Route Ctrl+D through the same handler as the keyboard path
+    // (InputManager.ts).  The button/key-injection path should never
+    // send a raw \x04 to the PTY — it would exit the shell.
+    if (text === '\x04') { this.onCtrlD?.(); return; }
     this.connection.send(text);
   }
 
