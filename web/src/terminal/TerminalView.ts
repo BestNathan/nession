@@ -148,46 +148,64 @@ export class TerminalView {
     };
     scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
 
-    // Mobile IME: xterm.js's CompositionHelper fires on the textarea
-    // and reads the textarea value via setTimeout(0).  On mobile this
-    // is unreliable — the value may not be updated yet, the _inputEvent
-    // guard drops insertText when composed && _keyDownSeen, and the
-    // keydown/keyup lifecycle doesn't match the soft keyboard.
+    // Mobile IME: xterm.js's _inputEvent guard drops insertText when
+    // ev.composed && _keyDownSeen — the normal case on mobile (soft
+    // keyboard sends keydown 229, _keyDownSeen stuck at true, IME
+    // commits via input event).  xterm's CompositionHelper may also
+    // fail to read the textarea value in time.
     //
-    // We take over compositionend entirely on touch devices: a capture
-    // listener on .xterm-helpers (parent of the textarea) fires BEFORE
-    // xterm's bubble listener on the textarea.  stopImmediatePropagation
-    // prevents xterm from ever seeing the event; we read the textarea
-    // diff after a microtask and send the committed text ourselves.
-    //
-    // compositionstart is NOT blocked — xterm's handler tracks the
-    // composing state and positions the composition view normally.
+    // We handle both the compositionend and insertText paths.  Both
+    // fire on the textarea directly (bubble phase) and compete via a
+    // time-based lock — first to send wins, the other is blocked for
+    // 200ms.  This avoids the unreliable stopImmediatePropagation
+    // approach which prevented compositionend from reaching the
+    // textarea and broke IME commit on some mobile browsers.
     if ('ontouchstart' in window) {
       const textarea = mountElement.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
-      const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
       let compositionStartValue = '';
+      let imeLockUntil = 0;
 
-      if (textarea && helperContainer) {
-        // Capture compositionstart on the parent so we snapshot the
-        // textarea value before the IME writes into it.
-        helperContainer.addEventListener('compositionstart', () => {
+      const trySendIME = (text: string) => {
+        if (!text) { return; }
+        if (Date.now() < imeLockUntil) { return; }
+        imeLockUntil = Date.now() + 200;
+        this.connection.send(text);
+      };
+
+      if (textarea) {
+        // Track value before IME starts writing.
+        textarea.addEventListener('compositionstart', () => {
           compositionStartValue = textarea.value;
-        }, true);
+        });
 
-        // Capture compositionend on the parent: fires before xterm's
-        // bubble listener on the textarea.  stopImmediatePropagation
-        // prevents xterm from running its (unreliable) handler.
-        helperContainer.addEventListener('compositionend', (ev) => {
-          ev.stopImmediatePropagation();
-          // Let the browser update the textarea value first.
+        // Path 1 (fallback for xterm's CompositionHelper):
+        // After compositionend, read the committed text from the
+        // textarea.  setTimeout(0) lets the browser update the value
+        // before we read it.
+        textarea.addEventListener('compositionend', () => {
           setTimeout(() => {
             if (this.isDisposed) { return; }
             const committed = textarea.value.slice(compositionStartValue.length);
             if (committed) {
-              this.connection.send(committed);
+              trySendIME(committed);
               compositionStartValue = textarea.value;
             }
           }, 0);
+        });
+      }
+
+      // Path 2 (fallback for IMEs that skip compositionend):
+      // Capture on .xterm-helpers fires before xterm's capture
+      // listener on the child textarea.  stopImmediatePropagation
+      // prevents xterm's buggy _inputEvent guard from dropping it.
+      const helperContainer = mountElement.querySelector('.xterm-helpers') as HTMLElement | null;
+      if (helperContainer) {
+        helperContainer.addEventListener('input', (ev: Event) => {
+          if (this.isDisposed) { return; }
+          const ie = ev as InputEvent;
+          if (ie.inputType !== 'insertText' || !ie.data || ie.isComposing) { return; }
+          ev.stopImmediatePropagation();
+          trySendIME(ie.data);
         }, true);
       }
     }
