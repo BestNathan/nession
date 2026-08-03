@@ -152,7 +152,16 @@ impl PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        // Kill the tmux subprocess when the session struct is dropped.
+        // Detach the tmux client gracefully using a blocking command (Drop is
+        // sync so we cannot wait on the async child).  SIGKILL on a tmux
+        // attach client is less risky than control-mode, but be safe.
+        let _ = std::process::Command::new("tmux")
+            .args(["detach-client", "-t", &self.session_name])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // Best-effort reap — the child has likely exited after detach.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -179,8 +188,14 @@ impl super::session::TmuxSession for PtySession {
     }
 
     async fn close(&mut self) -> Result<()> {
-        // Terminate the tmux subprocess. Idempotent — Drop also kills, and
-        // kill/wait on an already-dead child is a no-op.
+        // Detach the tmux client gracefully before killing the subprocess.
+        let _ = std::process::Command::new("tmux")
+            .args(["detach-client", "-t", &self.session_name])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // Best-effort reap — child should have exited after detach.
         let _ = self.child.kill();
         let _ = self.child.wait();
         Ok(())

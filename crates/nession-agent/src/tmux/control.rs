@@ -149,11 +149,19 @@ impl ControlModeSession {
         &self.session_name
     }
 
-    /// Close the tmux subprocess. Idempotent.
+    /// Close the tmux subprocess gracefully. Idempotent.
+    ///
+    /// Sends `detach-client` to the control-mode stdin so tmux cleanly
+    /// disconnects the client.  SIGKILL is NEVER used because it can crash
+    /// the tmux server on macOS (observed with Homebrew tmux 3.6b).
     pub async fn close(&mut self) -> Result<()> {
-        // start_kill instead of kill().await to avoid waiting if the child
-        // is already gone.
-        let _ = self.child.start_kill();
+        // Send graceful detach — the tmux subprocess will exit cleanly.
+        let _ = self.stdin.write_all(b"detach-client\n").await;
+        let _ = self.stdin.flush().await;
+        // Wait briefly for the subprocess to process the detach and exit.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Best-effort wait — child has likely already exited after detach.
+        // Use wait() instead of start_kill() to avoid SIGKILL.
         let _ = self.child.wait().await;
         Ok(())
     }
@@ -161,8 +169,20 @@ impl ControlModeSession {
 
 impl Drop for ControlModeSession {
     fn drop(&mut self) {
-        // Best-effort kill. Drop is sync so we can't await the wait().
-        let _ = self.child.start_kill();
+        // Detach the control-mode client gracefully using a blocking tmux
+        // command (Drop is sync so we cannot use async here).
+        //
+        // SIGKILL (start_kill / kill -9) on a control-mode client crashes
+        // the tmux server on macOS (Homebrew tmux 3.6b: "server exited
+        // unexpectedly").  We must always detach cleanly.
+        let _ = std::process::Command::new("tmux")
+            .args(["detach-client", "-t", &self.session_name])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // Let the child process exit on its own — drop order will close
+        // stdin (EOF → child exits), then child (reaped by tokio/lanchd).
     }
 }
 
