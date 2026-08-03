@@ -111,11 +111,10 @@ export class TerminalView {
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
 
-    // MouseIntentResolver: click → SGR → PTY, drag → local selection.
+    // MouseIntentResolver: controls shouldForceSelection gate.
+    // Single click/drag (mouse active) → xterm generates SGR → tmux.
+    // Double/triple click, Shift, mouse inactive → local selection.
     this.mouseIntent = new MouseIntentResolver(this.terminal);
-    this.mouseIntent.onSend = (data: string) => {
-      if (!this.isDisposed) { this.connection.send(data); }
-    };
 
     // Wire managers.
     this.input.onData((data: string) => {
