@@ -1656,8 +1656,18 @@ mod tests {
     use crate::fs::ops::FileData;
     use base64::Engine;
     use futures_util::SinkExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    /// Generate a unique session name for tests.
+    fn unique_session_name(prefix: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("nession-test-{prefix}-{nanos}")
+    }
 
     /// Start a test server on an ephemeral port and return a handle for
     /// shutdown. Note: the bound address uses port 0, so this helper is
@@ -1808,16 +1818,15 @@ mod tests {
         let (addr, handle) = start_test_server_on(18082).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
+        let session_name = unique_session_name("srv-create-kill");
+
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the create below doesn't hit a duplicate-name failure.
-        SessionManager::new()
-            .kill_session("server_test_create_kill")
-            .await
-            .ok();
+        SessionManager::new().kill_session(&session_name).await.ok();
 
         // Create a session.
         let create_payload = SessionCreatePayload {
-            name: "server_test_create_kill".to_string(),
+            name: session_name.clone(),
             width: 80,
             height: 24,
         };
@@ -1826,18 +1835,18 @@ mod tests {
             send_and_receive(&mut sink, &mut stream, &create_req).await;
 
         assert_eq!(create_resp.msg_type, msg_types::OK);
-        assert_eq!(create_resp.payload.name, "server_test_create_kill");
+        assert_eq!(create_resp.payload.name, session_name);
 
         // Kill the session.
         let kill_payload = SessionKillPayload {
-            name: "server_test_create_kill".to_string(),
+            name: session_name.clone(),
         };
         let kill_req = new_message(msg_types::SESSION_KILL, kill_payload);
         let kill_resp: Message<SessionKillResponse> =
             send_and_receive(&mut sink, &mut stream, &kill_req).await;
 
         assert_eq!(kill_resp.msg_type, msg_types::OK);
-        assert_eq!(kill_resp.payload.name, "server_test_create_kill");
+        assert_eq!(kill_resp.payload.name, session_name);
 
         handle.shutdown().await.ok();
     }
@@ -1850,11 +1859,11 @@ mod tests {
         // Create a real tmux session first so attach has something to
         // connect to.
         let tmux = SessionManager::new();
-        let session_name = "server_test_attach";
+        let session_name = unique_session_name("srv-attach");
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the test is re-entrant (tmux rejects a duplicate session name).
-        tmux.kill_session(session_name).await.ok();
-        tmux.create_session(session_name, 80, 24, "/tmp", &[])
+        tmux.kill_session(&session_name).await.ok();
+        tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 
@@ -1884,7 +1893,7 @@ mod tests {
         assert_eq!(detach_resp.payload.session_name, session_name);
 
         // Cleanup the tmux session.
-        tmux.kill_session(session_name).await.ok();
+        tmux.kill_session(&session_name).await.ok();
         handle.shutdown().await.ok();
     }
 
@@ -1894,9 +1903,9 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = "server_test_io";
-        tmux.kill_session(session_name).await.ok();
-        tmux.create_session(session_name, 80, 24, "/tmp", &[])
+        let session_name = unique_session_name("srv-io");
+        tmux.kill_session(&session_name).await.ok();
+        tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 
@@ -1965,7 +1974,7 @@ mod tests {
         let detach_req = new_message(msg_types::CLIENT_DETACH, detach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &detach_req).await;
 
-        tmux.kill_session(session_name).await.ok();
+        tmux.kill_session(&session_name).await.ok();
         handle.shutdown().await.ok();
 
         assert!(
@@ -2354,9 +2363,9 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = "server_test_invalid_b64";
-        tmux.kill_session(session_name).await.ok();
-        tmux.create_session(session_name, 80, 24, "/tmp", &[])
+        let session_name = unique_session_name("srv-invalid-b64");
+        tmux.kill_session(&session_name).await.ok();
+        tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
 
@@ -2388,7 +2397,7 @@ mod tests {
         let detach_req = new_message(msg_types::CLIENT_DETACH, detach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &detach_req).await;
 
-        tmux.kill_session(session_name).await.ok();
+        tmux.kill_session(&session_name).await.ok();
         handle.shutdown().await.ok();
     }
 
@@ -2636,15 +2645,15 @@ mod tests {
         let (addr, handle) = start_test_server_on(18101).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
+        let session_name = unique_session_name("web-create-kill");
+        let expected_session_id = format!("test-agent:{session_name}");
+
         // Pre-clean
-        SessionManager::new()
-            .kill_session("web_create_kill")
-            .await
-            .ok();
+        SessionManager::new().kill_session(&session_name).await.ok();
 
         let create_payload = WebSessionCreatePayload {
             agent_id: "test-agent".to_string(),
-            name: "web_create_kill".to_string(),
+            name: session_name.clone(),
             width: 100,
             height: 30,
         };
@@ -2656,12 +2665,12 @@ mod tests {
         assert!(create_resp.payload.success);
         assert_eq!(
             create_resp.payload.session_id,
-            Some("test-agent:web_create_kill".to_string())
+            Some(expected_session_id.clone())
         );
 
         // Kill via web UI
         let kill_payload = WebSessionKillPayload {
-            session_id: "test-agent:web_create_kill".to_string(),
+            session_id: expected_session_id,
         };
         let kill_req = new_message(msg_types::CLIENT_SESSION_KILL, kill_payload);
         let kill_resp: Message<WebSessionKillResponse> =

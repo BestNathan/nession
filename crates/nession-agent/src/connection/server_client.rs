@@ -1297,6 +1297,7 @@ mod tests {
     /// Mock server that sends a session create command after registration.
     async fn start_mock_server_with_session_create(
         port: u16,
+        session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
@@ -1330,7 +1331,7 @@ mod tests {
                     "timestamp": 1234567891,
                     "payload": {
                         "request_id": "req-123",
-                        "name": "test-session-create",
+                        "name": session_name,
                         "width": 100,
                         "height": 30
                     }
@@ -1349,14 +1350,22 @@ mod tests {
         (handle, msg_rx)
     }
 
+    fn unique_session_name(prefix: &str) -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("nession-test-{prefix}-{nanos}")
+    }
+
     #[tokio::test]
     async fn test_server_session_create_command() {
-        // Clean up any leftover session from a previous failed test run.
-        let tmux_cleanup = SessionManager::new();
-        let _ = tmux_cleanup.kill_session("test-session-create").await;
+        let session_name = unique_session_name("server-create");
 
         let port = 28086;
-        let (server_handle, mut msg_rx) = start_mock_server_with_session_create(port).await;
+        let (server_handle, mut msg_rx) =
+            start_mock_server_with_session_create(port, session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1395,11 +1404,11 @@ mod tests {
         assert_eq!(parsed["payload"]["request_id"], "req-123");
         assert_eq!(parsed["payload"]["command"], "session.create");
         assert_eq!(parsed["payload"]["success"], true);
-        assert_eq!(parsed["payload"]["session_name"], "test-session-create");
+        assert_eq!(parsed["payload"]["session_name"], session_name.as_str());
 
         // Clean up the created session.
         let tmux = SessionManager::new();
-        let _ = tmux.kill_session("test-session-create").await;
+        let _ = tmux.kill_session(&session_name).await;
 
         handle.shutdown().await.ok();
         server_handle.abort();
@@ -1408,6 +1417,7 @@ mod tests {
     /// Mock server that sends a session kill command after registration.
     async fn start_mock_server_with_session_kill(
         port: u16,
+        session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
@@ -1437,7 +1447,7 @@ mod tests {
                 // First create a session to kill.
                 let tmux = SessionManager::new();
                 let _ = tmux
-                    .create_session("test-session-kill", 80, 24, "/tmp", &[])
+                    .create_session(&session_name, 80, 24, "/tmp", &[])
                     .await;
 
                 // Send session kill command.
@@ -1447,7 +1457,7 @@ mod tests {
                     "timestamp": 1234567892,
                     "payload": {
                         "request_id": "req-456",
-                        "name": "test-session-kill"
+                        "name": session_name,
                     }
                 });
                 let _ = sink.send(WsMessage::Text(kill_cmd.to_string())).await;
@@ -1466,8 +1476,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_kill_command() {
+        let session_name = unique_session_name("server-kill");
         let port = 28087;
-        let (server_handle, mut msg_rx) = start_mock_server_with_session_kill(port).await;
+        let (server_handle, mut msg_rx) =
+            start_mock_server_with_session_kill(port, session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1962,6 +1974,7 @@ mod tests {
     /// Mock server that sends server.session.env.unset command.
     async fn start_mock_server_env_unset(
         port: u16,
+        session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
         let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
@@ -1985,7 +1998,7 @@ mod tests {
                 // First create a session to apply env to
                 let tmux = SessionManager::new();
                 let _ = tmux
-                    .create_session("test-session-env-unset", 80, 24, "/tmp", &[])
+                    .create_session(&session_name, 80, 24, "/tmp", &[])
                     .await;
 
                 let cmd = serde_json::json!({
@@ -1994,7 +2007,7 @@ mod tests {
                     "timestamp": 1234567891,
                     "payload": {
                         "request_id": "req-env-unset-1",
-                        "name": "test-session-env-unset",
+                        "name": session_name,
                         "keys": ["FOO", "BAR"],
                         "client_id": "test-client"
                     }
@@ -2014,8 +2027,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_env_unset_command() {
+        let session_name = unique_session_name("env-unset");
         let port = 28091;
-        let (server_handle, mut msg_rx) = start_mock_server_env_unset(port).await;
+        let (server_handle, mut msg_rx) =
+            start_mock_server_env_unset(port, session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -2054,7 +2069,7 @@ mod tests {
 
         // Clean up
         let tmux = SessionManager::new();
-        let _ = tmux.kill_session("test-session-env-unset").await;
+        let _ = tmux.kill_session(&session_name).await;
 
         handle.shutdown().await.ok();
         server_handle.abort();

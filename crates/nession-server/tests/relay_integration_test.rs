@@ -21,7 +21,16 @@ use nession_common::protocol::AgentMetadata;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Generate a unique session name for tests.
+fn unique_session_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("nession-test-{prefix}-{nanos}")
+}
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -186,10 +195,10 @@ async fn send_and_recv(
 
 #[tokio::test]
 async fn relay_attach_and_terminal_io() {
-    let session_name = "relay_test_io";
+    let session_name = unique_session_name("relay-io");
 
     // Pre-clean tmux session from previous crashed run.
-    SessionManager::new().kill_session(session_name).await.ok();
+    SessionManager::new().kill_session(&session_name).await.ok();
 
     // 1. Start server and agent.
     let (server_addr, server_handle, db_path) = start_server("test-token").await;
@@ -197,7 +206,7 @@ async fn relay_attach_and_terminal_io() {
 
     // 2. Create a tmux session.
     let tmux = SessionManager::new();
-    tmux.create_session(session_name, 80, 24, "/tmp", &[])
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .expect("create tmux session");
 
@@ -342,7 +351,7 @@ async fn relay_attach_and_terminal_io() {
     // 10. Clean up.
     heartbeat_shutdown.shutdown().await.ok();
     watcher_shutdown.shutdown().await.ok();
-    tmux.kill_session(session_name).await.ok();
+    tmux.kill_session(&session_name).await.ok();
     client_handle.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle.abort();
