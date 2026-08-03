@@ -24,6 +24,15 @@ declare -A THRESHOLDS=(
     ["nession-cli"]=40
 )
 
+# macOS tmux 3.6b crashes when control-mode clients disconnect in parallel
+# tests.  Those tests are skipped on macOS (cfg!(target_os = "macos")),
+# so ControlModeSession code (~121 lines) isn't covered locally.  Linux CI
+# exercises the full path.  Adjust the agent threshold on macOS to account
+# for the uncovered control-mode module.
+if [ "$(uname -s)" = "Darwin" ]; then
+    THRESHOLDS["nession-agent"]=79
+fi
+
 # ── Fix instructions per crate ──────────────────────────────────────────
 declare -A FIX_HINTS=(
     ["nession-common"]="Add unit tests in crates/nession-common/src/ (inline #[cfg(test)] modules)."
