@@ -305,10 +305,10 @@ impl SessionManager {
                 .await;
         }
 
-        // Enable tmux mouse mode so wheel events reach tmux as SGR mouse
-        // sequences for copy-mode scroll.  The web client monkey-patches
-        // xterm.js's SelectionManager.shouldForceSelection → always true,
-        // so mouse button events stay local for text selection.
+        // Enable tmux mouse mode so mouse events reach tmux as SGR sequences
+        // (copy-mode scroll, pane selection, and forwarding to TUI apps).
+        // The web client lets xterm.js use its default behaviour — mouse
+        // clicks pass through to the PTY; hold Shift for local selection.
         let _ = Command::new("tmux")
             .args(["set-option", "-t", name, "mouse", "on"])
             .stderr(std::process::Stdio::null())

@@ -4,6 +4,7 @@ export { Renderer } from './Renderer';
 export { ThemeManager } from './ThemeManager';
 export { InputManager } from './InputManager';
 export { ConnectionManager } from './ConnectionManager';
+export { MouseIntentResolver } from './MouseIntentResolver';
 export { TerminalSizeManager } from './TerminalSizeManager';
 export { FontSizeManager } from './FontSizeManager';
 export { PROFILES, detectProfile } from './DeviceProfile';
