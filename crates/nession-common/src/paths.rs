@@ -60,6 +60,16 @@ pub fn agent_envs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("envs"))
 }
 
+/// Server logs directory: ~/.nession/server/logs
+pub fn server_logs_dir() -> io::Result<PathBuf> {
+    server_dir().map(|d| d.join("logs"))
+}
+
+/// Agent logs directory: ~/.nession/agent/logs
+pub fn agent_logs_dir() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("logs"))
+}
+
 /// Agent identity file path: ~/.nession/agent/identity
 pub fn agent_identity_path() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("identity"))
@@ -75,10 +85,13 @@ pub fn server_config_path() -> io::Result<PathBuf> {
     nession_home().map(|h| h.join("server-config.toml"))
 }
 
-/// Create server and agent component directories if they don't exist.
+/// Create server and agent component directories (including logs) if they
+/// don't exist.
 pub fn ensure_component_dirs() -> io::Result<()> {
     std::fs::create_dir_all(server_dir()?)?;
+    std::fs::create_dir_all(server_logs_dir()?)?;
     std::fs::create_dir_all(agent_dir()?)?;
+    std::fs::create_dir_all(agent_logs_dir()?)?;
     Ok(())
 }
 

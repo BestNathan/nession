@@ -286,13 +286,12 @@ fn load_agent_config(
 
 /// Run the agent in foreground mode (blocks until shutdown).
 async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
-    // Initialize tracing for foreground mode
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Initialize logging (stdout + file).
+    let _log_guard = nession_common::logging::init_logging(
+        &config.logging,
+        &nession_common::paths::agent_logs_dir()?,
+        "nession-agent",
+    )?;
 
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
     info!("Agent ID: {}", config.agent_id);

@@ -234,28 +234,19 @@ fn load_server_config(path: &str) -> Result<ServerConfig> {
         info!("No config file found at '{}', using defaults", path);
         Ok(ServerConfig {
             listen_address: "127.0.0.1:8080".to_string(),
-            tls_cert_path: String::new(),
-            tls_key_path: String::new(),
-            auth_token: String::new(),
-            heartbeat_interval_secs: 10,
-            heartbeat_timeout_secs: 30,
-            db_path: nession_common::paths::server_db_path()
-                .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
-                .to_string_lossy()
-                .into_owned(),
+            ..Default::default()
         })
     }
 }
 
 /// Run the server in foreground mode (blocks until shutdown).
 async fn run_server_foreground(config: ServerConfig) -> Result<()> {
-    // Initialize tracing for foreground mode
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Initialize logging (stdout + file).
+    let _log_guard = nession_common::logging::init_logging(
+        &config.logging,
+        &nession_common::paths::server_logs_dir()?,
+        "nession-server",
+    )?;
 
     info!("nession-server {} starting", env!("CARGO_PKG_VERSION"));
     info!("Listen address: {}", config.listen_address);

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::logging::LoggingConfig;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub listen_address: String,
@@ -15,6 +17,10 @@ pub struct ServerConfig {
     pub heartbeat_timeout_secs: u64,
     #[serde(default = "default_db_path")]
     pub db_path: String,
+    /// Logging configuration (optional). When omitted, defaults to
+    /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 impl Default for ServerConfig {
@@ -27,6 +33,7 @@ impl Default for ServerConfig {
             heartbeat_interval_secs: default_heartbeat_interval(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
+            logging: LoggingConfig::default(),
         }
     }
 }
@@ -81,6 +88,7 @@ mod tests {
             heartbeat_interval_secs: 20,
             heartbeat_timeout_secs: 60,
             db_path: "/tmp/test.db".to_string(),
+            ..Default::default()
         };
         assert_eq!(config.listen_address, "127.0.0.1:9090");
         assert_eq!(config.heartbeat_interval_secs, 20);

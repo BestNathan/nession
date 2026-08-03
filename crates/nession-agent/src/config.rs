@@ -1,5 +1,6 @@
 //! Agent configuration.
 
+use nession_common::logging::LoggingConfig;
 use nession_common::protocol::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
 
@@ -142,6 +143,11 @@ pub struct AgentConfig {
     /// File operations are restricted to paths within this directory.
     #[serde(default)]
     pub file_root: Option<String>,
+
+    /// Logging configuration (optional). When omitted, defaults to
+    /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 impl Default for AgentConfig {
@@ -163,6 +169,7 @@ impl Default for AgentConfig {
             disable_address_autodetect: false,
             default_working_dir: default_working_dir(),
             file_root: None,
+            logging: LoggingConfig::default(),
         }
     }
 }
