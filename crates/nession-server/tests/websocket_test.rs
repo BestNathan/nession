@@ -42,6 +42,7 @@ async fn test_server_accepts_connection() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_accept.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -66,6 +67,7 @@ async fn test_agent_registration() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_register.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -124,6 +126,7 @@ async fn test_invalid_auth_token() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_auth.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -175,6 +178,7 @@ async fn test_heartbeat_without_registration() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_heartbeat.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -228,6 +232,7 @@ async fn test_client_agents_list_unauthenticated() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_alist.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -269,6 +274,7 @@ async fn test_close_frame_triggers_disconnect() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_close.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -302,6 +308,7 @@ async fn test_agent_registration_with_connect_url() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_connect_url.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;
@@ -351,6 +358,7 @@ async fn test_server_local_addr() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_local_addr.db"),
+        ..Default::default()
     };
 
     let db = Database::new(&config.db_path).await.unwrap();
@@ -375,6 +383,7 @@ async fn test_client_sessions_list_authenticated() {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: test_db_path("test_ws_sessions_list.db"),
+        ..Default::default()
     };
 
     let (addr, _handle) = start_test_server(config).await;

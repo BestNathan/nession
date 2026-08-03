@@ -18,6 +18,7 @@ async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         db_path: String::new(),
+        ..Default::default()
     };
 
     let db = Database::new(":memory:").await.unwrap();

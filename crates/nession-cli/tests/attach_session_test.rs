@@ -18,6 +18,7 @@ fn create_test_config(port: u16) -> ServerConfig {
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: format!("/tmp/nession_test_{}.db", port),
+        ..Default::default()
     }
 }
 

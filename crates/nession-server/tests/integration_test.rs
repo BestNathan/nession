@@ -49,6 +49,7 @@ impl TestServer {
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
             db_path: db_path.clone(),
+            ..Default::default()
         };
 
         let db = Database::new(&db_path).await.unwrap();

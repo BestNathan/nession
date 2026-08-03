@@ -1,7 +1,6 @@
 use anyhow::Context;
 use std::path::Path;
 use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use nession_common::config::ServerConfig;
 use nession_server::db::Database;
@@ -9,19 +8,17 @@ use nession_server::server::WebSocketServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing/logging
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "nession_server=info,tower_http=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // Load configuration first (needed for logging setup).
+    let config = load_config()?;
+
+    // Initialize logging (stdout + file).
+    let _log_guard = nession_common::logging::init_logging(
+        &config.logging,
+        &nession_common::paths::server_logs_dir()?,
+        "nession-server",
+    )?;
 
     info!("Starting nession-server");
-
-    // Load configuration
-    let config = load_config()?;
     info!(
         "Configuration loaded: listen_address={}, db_path={}",
         config.listen_address, config.db_path
@@ -61,15 +58,7 @@ fn load_config() -> anyhow::Result<ServerConfig> {
         info!("No config.toml found, using default configuration");
         Ok(ServerConfig {
             listen_address: "127.0.0.1:8080".to_string(),
-            tls_cert_path: String::new(),
-            tls_key_path: String::new(),
-            auth_token: String::new(),
-            heartbeat_interval_secs: 10,
-            heartbeat_timeout_secs: 30,
-            db_path: nession_common::paths::server_db_path()
-                .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
-                .to_string_lossy()
-                .into_owned(),
+            ..Default::default()
         })
     }
 }
