@@ -91,25 +91,47 @@ impl SessionWatcher {
 
     /// Poll tmux for the current session list and send updates for any changes.
     async fn poll_and_sync(&mut self) -> Result<()> {
-        // Skip polling while disconnected — updates would accumulate in the
-        // outbox channel and become stale. The full re-sync on reconnect
-        // (via take_sync_needed below) will catch up.
-        if !self.handle.is_connected() {
-            debug!("Skipping session poll — not connected to server");
+        // If the supervisor reconnected, the server-side session registry was
+        // wiped.  Instead of the previous "gone-all + rebuild" approach (which
+        // could leave the registry empty when a second disconnection happened
+        // mid-sync), we send a full idempotent snapshot:
+        //   1. Re-report every session that currently exists (server does an
+        //      upsert, so duplicate updates are harmless).
+        //   2. Mark any previously-known sessions that no longer exist as gone.
+        // This guarantees eventual consistency even across rapid reconnect cycles.
+        if self.handle.take_sync_needed() {
+            debug!("Full session re-sync triggered after reconnection");
+
+            let current_sessions = self.tmux.list_sessions().await.unwrap_or_default();
+
+            // Re-report all *current* sessions first (idempotent upsert).
+            for session in &current_sessions {
+                self.send_update(session).await?;
+            }
+
+            // Mark sessions that disappeared while we were disconnected.
+            for name in self.prev_sessions.keys() {
+                if !current_sessions.iter().any(|s| s.name == *name) {
+                    debug!("Reporting stale session as gone: {}", name);
+                    let _ = self.handle.send_session_update(name, "gone", 0, 0).await;
+                }
+            }
+
+            // Rebuild the local cache from the current tmux state.
+            self.prev_sessions.clear();
+            for session in &current_sessions {
+                self.prev_sessions
+                    .insert(session.name.clone(), session.clone());
+            }
             return Ok(());
         }
 
-        // If the supervisor reconnected, the server-side session registry was
-        // wiped. Before resetting our state, report any sessions we knew about
-        // as gone so the server cleans up stale entries from the previous
-        // connection (e.g. after a pod restart where tmux was recreated).
-        if self.handle.take_sync_needed() {
-            debug!("Full session re-sync triggered after reconnection");
-            for name in self.prev_sessions.keys() {
-                debug!("Reporting stale session as gone: {}", name);
-                let _ = self.handle.send_session_update(name, "gone", 0, 0).await;
-            }
-            self.prev_sessions.clear();
+        // Normal incremental poll: skip when not connected so we don't
+        // accumulate stale messages in the outbox.  The full re-sync above
+        // runs on the first poll after reconnection.
+        if !self.handle.is_connected() {
+            debug!("Skipping session poll — not connected to server");
+            return Ok(());
         }
 
         let current_sessions = self.tmux.list_sessions().await.unwrap_or_default();
