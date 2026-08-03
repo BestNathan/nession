@@ -4,24 +4,28 @@ import type { Agent, Session } from '../../../types';
 type AgentsChangeCallback = (agents: Agent[]) => void;
 type SessionsChangeCallback = (sessions: Session[]) => void;
 type CommandsChangeCallback = () => void;
-type TerminalOutputCallback = (data: string) => void;
+type TerminalOutputCallback = (data: Uint8Array) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
 /**
- * Decode base64-encoded terminal data from relay mode.
- * Relay mode wraps raw bytes in base64; P2P mode sends plain strings.
+ * Decode base64-encoded terminal data to raw bytes.
+ *
+ * Returns Uint8Array so that non-UTF-8 octets are preserved.  xterm.js
+ * accepts Uint8Array in `write()` and interprets the bytes directly as a
+ * terminal byte stream (ANSI escapes + text + arbitrary binary).
  */
-export function decodeTerminalData(rawData: string): string {
+export function decodeTerminalData(rawData: string): Uint8Array {
   if (!rawData) {
-    return rawData;
+    return new Uint8Array(0);
   }
   try {
     const binary = atob(rawData);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-    return new TextDecoder().decode(bytes);
+    return bytes;
   } catch {
-    return rawData;
+    // Invalid base64 — fall back to encoding the raw string as UTF-8 bytes.
+    return new TextEncoder().encode(rawData);
   }
 }
 
@@ -146,13 +150,14 @@ export class EventPlugin implements WebSocketPlugin {
     const sessionId = getSessionId(payload);
     const rawData = (payload.data ?? '') as string;
 
-    // Relay mode wraps data in base64; P2P sends plain strings.
+    // Relay mode wraps bytes in base64; P2P sends Uint8Array-compatible data.
     const isRelay = typeof payload.session_name === 'string' && typeof payload.session_id !== 'string';
-    let data: string;
+    let data: Uint8Array;
     if (isRelay) {
       data = decodeTerminalData(rawData);
     } else {
-      data = rawData;
+      // P2P: rawData is already a byte string — convert to Uint8Array.
+      data = new TextEncoder().encode(rawData);
     }
 
     const callbacks = this.terminalOutputCallbacks.get(sessionId);

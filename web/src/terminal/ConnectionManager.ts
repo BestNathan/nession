@@ -13,11 +13,21 @@ function encodeB64(s: string): string {
   return btoa(binary);
 }
 
-function decodeB64(b64: string): string {
+/**
+ * Decode a base64 string to raw bytes.
+ *
+ * IMPORTANT: returns Uint8Array, NOT a decoded string.  Terminal output is
+ * a stream of raw bytes (ANSI escapes + UTF-8 text + arbitrary octets).
+ * Passing bytes through TextDecoder would replace invalid-UTF-8 octets
+ * with U+FFFD replacement characters, corrupting the byte stream before
+ * xterm.js can interpret it.  xterm.js's `write()` accepts Uint8Array
+ * natively, so we pass the raw bytes directly.
+ */
+function decodeB64(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-  return new TextDecoder().decode(bytes);
+  return bytes;
 }
 
 const RELAY_MAX_ATTEMPTS = 10;
@@ -44,7 +54,7 @@ export class ConnectionManager {
   private disposed = false;
 
   onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
-  onOutput: ((data: string) => void) | null = null;
+  onOutput: ((data: Uint8Array) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
   onResize: ((cols: number, rows: number) => void) | null = null;
@@ -170,7 +180,7 @@ export class ConnectionManager {
       if (this.disposed) { return; }
 
       if (msg.msg_type === '__binary__') {
-        this.onOutput?.(new TextDecoder().decode(msg.payload as ArrayBuffer));
+        this.onOutput?.(new Uint8Array(msg.payload as ArrayBuffer));
         return;
       }
 
@@ -218,7 +228,7 @@ export class ConnectionManager {
 
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
-    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionName, (data: string) => {
+    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionName, (data: Uint8Array) => {
       if (!this.disposed) {
         this.onOutput?.(data);
       }

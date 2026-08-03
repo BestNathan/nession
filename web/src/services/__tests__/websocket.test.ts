@@ -269,7 +269,9 @@ describe('WebSocketService', () => {
       last().onmessage!(new MessageEvent('message', {
         data: JSON.stringify({ msg_type: 'terminal.output', id: '', timestamp: Date.now(), payload: { session_id: 'sess-A', data: 'hi' } }),
       }));
-      expect(cbA).toHaveBeenCalledWith('hi');
+      expect(cbA).toHaveBeenCalledTimes(1);
+      expect(ArrayBuffer.isView(cbA.mock.calls[0][0])).toBe(true);
+      expect([...cbA.mock.calls[0][0] as ArrayLike<number>]).toEqual([104, 105]);
       expect(cbB).not.toHaveBeenCalled();
     });
   });

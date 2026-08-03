@@ -122,7 +122,7 @@ export class TerminalView {
     });
     this.input.onCtrlD(() => { this.onCtrlD?.(); });
 
-    this.connection.onOutput = (data: string) => {
+    this.connection.onOutput = (data: Uint8Array) => {
       if (!this.isDisposed) { this.terminal.write(data); }
     };
     this.connection.onStateChange = (state: ConnectionState, attempt: number) => {
