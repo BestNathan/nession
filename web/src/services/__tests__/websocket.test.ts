@@ -269,7 +269,10 @@ describe('WebSocketService', () => {
       last().onmessage!(new MessageEvent('message', {
         data: JSON.stringify({ msg_type: 'terminal.output', id: '', timestamp: Date.now(), payload: { session_id: 'sess-A', data: 'hi' } }),
       }));
-      expect(cbA).toHaveBeenCalledWith('hi');
+      expect(cbA).toHaveBeenCalledTimes(1);
+      const arg = cbA.mock.calls[0][0] as Uint8Array;
+      expect(ArrayBuffer.isView(arg)).toBe(true);
+      expect([...arg]).toEqual([104, 105]);
       expect(cbB).not.toHaveBeenCalled();
     });
   });

@@ -40,7 +40,7 @@ type ConnectionChangeCallback = (status: ConnectionStatus) => void;
 type AgentsChangeCallback = (agents: Agent[]) => void;
 type SessionsChangeCallback = (sessions: Session[]) => void;
 type CommandsChangeCallback = () => void;
-type TerminalOutputCallback = (data: string) => void;
+type TerminalOutputCallback = (data: Uint8Array) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
 export class WebSocketService {

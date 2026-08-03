@@ -5,6 +5,7 @@ import { TerminalSizeManager } from './TerminalSizeManager';
 import { FontSizeManager } from './FontSizeManager';
 import { InputManager } from './InputManager';
 import { ConnectionManager } from './ConnectionManager';
+import { MouseIntentResolver } from './MouseIntentResolver';
 import { MobileInput } from './MobileInput';
 import type {
   TerminalViewOptions,
@@ -32,9 +33,6 @@ interface XtermInternals {
         };
       };
     };
-    _selectionService?: {
-      shouldForceSelection: (e: MouseEvent) => boolean;
-    };
   };
 }
 
@@ -45,6 +43,8 @@ export class TerminalView {
   private fontSize: FontSizeManager;
   private input: InputManager;
   private connection: ConnectionManager;
+  /** Resolves click vs drag intent so TUI apps receive mouse events. */
+  private mouseIntent: MouseIntentResolver;
   /** On touch devices: a visible textarea that replaces xterm's hidden one. */
   private mobileInput: MobileInput | null = null;
 
@@ -111,13 +111,18 @@ export class TerminalView {
     this.input = new InputManager(this.terminal);
     this.connection = new ConnectionManager(options.connection);
 
+    // MouseIntentResolver: controls shouldForceSelection gate.
+    // Single click/drag (mouse active) → xterm generates SGR → tmux.
+    // Double/triple click, Shift, mouse inactive → local selection.
+    this.mouseIntent = new MouseIntentResolver(this.terminal);
+
     // Wire managers.
     this.input.onData((data: string) => {
       if (!this.isDisposed) { this.connection.send(data); }
     });
     this.input.onCtrlD(() => { this.onCtrlD?.(); });
 
-    this.connection.onOutput = (data: string) => {
+    this.connection.onOutput = (data: Uint8Array) => {
       if (!this.isDisposed) { this.terminal.write(data); }
     };
     this.connection.onStateChange = (state: ConnectionState, attempt: number) => {
@@ -166,13 +171,9 @@ export class TerminalView {
       scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
     }
 
-    // Always use local text selection even when tmux SGR mouse mode is
-    // active.  Without this, xterm.js sends button events to the PTY as
-    // SGR sequences — tmux captures them for copy-mode selection, and
-    // the user can't select text without holding Shift.  Wheel events
-    // are unaffected and still reach tmux for copy-mode scroll.
-    const sel = (this.terminal as unknown as XtermInternals)._core?._selectionService;
-    if (sel) { sel.shouldForceSelection = () => true; }
+    // MouseIntentResolver (see above) distinguishes click from drag.
+    // No manual shouldForceSelection patch needed — the resolver
+    // handles both paths.
 
     // Prime mount pixel size from xterm's default cols/rows (typically 80×24)
     // so the DOM has explicit dimensions before the first tmux resize arrives.
@@ -270,6 +271,7 @@ export class TerminalView {
     this.isDisposed = true;
     if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.mobileInput?.dispose();
+    this.mouseIntent.dispose();
     this.input.dispose();
     this.size.dispose();
     this.connection.dispose();

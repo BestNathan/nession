@@ -43,32 +43,26 @@ function createMockCore(): { core: WebSocketServiceCore; fireMessage: (type: str
 }
 
 describe('decodeTerminalData', () => {
-  it('decodes base64 to plain text', () => {
-    expect(decodeTerminalData(btoa('hello world'))).toBe('hello world');
+  it('decodes base64 to raw bytes', () => {
+    const result = decodeTerminalData(btoa('hello world'));
+    expect([...result]).toEqual([104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100]);
   });
 
-  it('returns empty string for empty input', () => {
-    expect(decodeTerminalData('')).toBe('');
+  it('returns empty Uint8Array for empty input', () => {
+    expect(decodeTerminalData('')).toHaveLength(0);
   });
 
-  it('returns raw data when base64 decoding fails', () => {
-    // atob is lenient with most input — trigger the catch path by using
-    // a string that throws when atob tries to decode it.
-    // Atob will throw if input has invalid chars in strict mode, but jsdom is lenient.
-    // Simpler: just verify that a non-base64 input that is valid ASCII passes through
-    // (it IS decoded, just the result is not useful).
-    const garbage = '\x00\x01\x02';
-    // decodeTerminalData will atob() then decode bytes — roundtrip is identity
-    const result = decodeTerminalData(garbage);
-    // The function should either decode or return original; either way it shouldn't throw
-    expect(typeof result).toBe('string');
+  it('falls back to UTF-8 encode when base64 decoding fails', () => {
+    const result = decodeTerminalData('\x00\x01\x02');
+    expect(ArrayBuffer.isView(result)).toBe(true);
+    expect(result).toHaveLength(3);
   });
 
-  it('roundtrips UTF-8 bytes correctly', () => {
-    // btoa of a simple ASCII string
+  it('roundtrips bytes correctly', () => {
     const input = 'ls -la /tmp';
     const encoded = btoa(input);
-    expect(decodeTerminalData(encoded)).toBe(input);
+    const result = decodeTerminalData(encoded);
+    expect([...result]).toEqual([...new TextEncoder().encode(input)]);
   });
 });
 
@@ -177,19 +171,25 @@ describe('EventPlugin', () => {
       expect(cb).toHaveBeenCalled();
     });
 
-    it('terminal.output in P2P mode (has session_id) dispatches plain data', () => {
+    it('terminal.output in P2P mode (has session_id) dispatches as Uint8Array', () => {
       const cb = vi.fn();
       plugin.onTerminalOutput('s1', cb);
       fireMessage('terminal.output', { session_id: 's1', data: 'hello' });
-      expect(cb).toHaveBeenCalledWith('hello');
+      expect(cb).toHaveBeenCalledTimes(1);
+      const arg = cb.mock.calls[0][0] as Uint8Array;
+      expect(ArrayBuffer.isView(arg)).toBe(true);
+      expect([...arg]).toEqual([104, 101, 108, 108, 111]);
     });
 
-    it('terminal.output in relay mode (has session_name, base64 data) decodes', () => {
+    it('terminal.output in relay mode (has session_name, base64 data) decodes to Uint8Array', () => {
       const cb = vi.fn();
       plugin.onTerminalOutput('my-session', cb);
       const encoded = btoa('decoded-text');
       fireMessage('terminal.output', { session_name: 'my-session', data: encoded });
-      expect(cb).toHaveBeenCalledWith('decoded-text');
+      expect(cb).toHaveBeenCalledTimes(1);
+      const arg = cb.mock.calls[0][0] as Uint8Array;
+      expect(ArrayBuffer.isView(arg)).toBe(true);
+      expect([...arg]).toEqual([...new TextEncoder().encode('decoded-text')]);
     });
 
     it('terminal.resize dispatches cols/rows to callbacks', () => {
@@ -233,7 +233,9 @@ describe('EventPlugin', () => {
       fireMessage('terminal.output', { session_id: 's1', data: 'x' });
       fireMessage('terminal.output', { session_id: 's2', data: 'y' });
       expect(cb1).not.toHaveBeenCalled();
-      expect(cb2).toHaveBeenCalledWith('y');
+      expect(cb2).toHaveBeenCalledTimes(1);
+      const arg2 = cb2.mock.calls[0][0] as Uint8Array;
+      expect([...arg2]).toEqual([121]);
     });
   });
 });
