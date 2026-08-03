@@ -176,8 +176,9 @@ describe('EventPlugin', () => {
       plugin.onTerminalOutput('s1', cb);
       fireMessage('terminal.output', { session_id: 's1', data: 'hello' });
       expect(cb).toHaveBeenCalledTimes(1);
-      expect(ArrayBuffer.isView(cb.mock.calls[0][0])).toBe(true);
-      expect([...cb.mock.calls[0][0] as ArrayLike<number>]).toEqual([104, 101, 108, 108, 111]);
+      const arg = cb.mock.calls[0][0] as Uint8Array;
+      expect(ArrayBuffer.isView(arg)).toBe(true);
+      expect([...arg]).toEqual([104, 101, 108, 108, 111]);
     });
 
     it('terminal.output in relay mode (has session_name, base64 data) decodes to Uint8Array', () => {
@@ -186,8 +187,9 @@ describe('EventPlugin', () => {
       const encoded = btoa('decoded-text');
       fireMessage('terminal.output', { session_name: 'my-session', data: encoded });
       expect(cb).toHaveBeenCalledTimes(1);
-      expect(ArrayBuffer.isView(cb.mock.calls[0][0])).toBe(true);
-      expect([...cb.mock.calls[0][0] as ArrayLike<number>]).toEqual([...new TextEncoder().encode('decoded-text')]);
+      const arg = cb.mock.calls[0][0] as Uint8Array;
+      expect(ArrayBuffer.isView(arg)).toBe(true);
+      expect([...arg]).toEqual([...new TextEncoder().encode('decoded-text')]);
     });
 
     it('terminal.resize dispatches cols/rows to callbacks', () => {
@@ -232,7 +234,8 @@ describe('EventPlugin', () => {
       fireMessage('terminal.output', { session_id: 's2', data: 'y' });
       expect(cb1).not.toHaveBeenCalled();
       expect(cb2).toHaveBeenCalledTimes(1);
-      expect([...cb2.mock.calls[0][0] as ArrayLike<number>]).toEqual([121]);
+      const arg2 = cb2.mock.calls[0][0] as Uint8Array;
+      expect([...arg2]).toEqual([121]);
     });
   });
 });
