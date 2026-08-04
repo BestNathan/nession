@@ -1,5 +1,5 @@
 import { toast } from 'sonner';
-import type { EnvFileInfo } from '../../types';
+import type { EnvFileInfo, EnvFileRef, EnvSource } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { sourceLabel, toRef } from './envRef';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -33,15 +33,17 @@ export function useEnvManager(_wsService?: WebSocketService) {
   );
 
   const uploadOp = useAsyncOperation(
-    async (file: File) => {
+    async (opts: { file: File; source: EnvSource; agentId?: string }) => {
+      const { file, source, agentId } = opts;
       const content = await file.text();
       const name = file.name.endsWith('.env') ? file.name : `${file.name}.env`;
-      let resp = await wsService.writeEnvFile({ name, source: 'server' }, content, false);
+      const ref: EnvFileRef = { name, source, agent_id: agentId };
+      let resp = await wsService.writeEnvFile(ref, content, false);
       if (!resp.success && resp.exists) {
         if (!window.confirm('File already exists. Overwrite?')) {
           return { success: false as const };
         }
-        resp = await wsService.writeEnvFile({ name, source: 'server' }, content, true);
+        resp = await wsService.writeEnvFile(ref, content, true);
       }
       if (resp.success) {
         toast.success(`Uploaded ${name}`);

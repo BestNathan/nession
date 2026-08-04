@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { ArrowLeft, Copy, Plus, RefreshCw, Upload, Trash2, Pencil, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -7,6 +7,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { Skeleton } from '../ui/skeleton';
 import type { Agent, EnvFileInfo } from '../../types';
 import { EnvEditorDialog } from './EnvEditorDialog';
+import { EnvUploadDialog } from './EnvUploadDialog';
 import { sourceLabel } from './envRef';
 import { useEnvManager } from './useEnvManager';
 
@@ -70,7 +71,7 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
   const [editing, setEditing] = useState<EnvFileInfo | null>(null);
   const [cloneFrom, setCloneFrom] = useState<EnvFileInfo | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const openCreate = () => {
     setEditing(null);
@@ -88,16 +89,6 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
     setEditorOpen(true);
   };
 
-  const onUploadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      void uploadFile(file);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="border-b px-6 py-3 flex items-center gap-4 flex-shrink-0">
@@ -106,14 +97,7 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
         </Button>
         <h1 className="text-lg font-bold">Env Files</h1>
         <div className="flex-1" />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".env,text/plain"
-          className="hidden"
-          onChange={onUploadChange}
-        />
-        <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+        <Button size="sm" variant="outline" onClick={() => setUploadOpen(true)}>
           <Upload className="w-3.5 h-3.5 mr-1" /> Upload
         </Button>
         <Button size="sm" onClick={openCreate}>
@@ -164,6 +148,14 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
         cloneFrom={cloneFrom}
         agents={agents}
         onSaved={refresh}
+      />
+      <EnvUploadDialog
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        agents={agents}
+        onUpload={async (file, source, agentId) => {
+          await uploadFile({ file, source, agentId });
+        }}
       />
     </div>
   );
