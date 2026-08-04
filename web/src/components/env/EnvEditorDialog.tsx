@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, forwardRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   Dialog,
@@ -116,27 +116,13 @@ export function EnvEditorDialog({
               </Select>
             </div>
           )}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="env-content">Content</Label>
-              <MaskToggleButton
-                hideSecrets={editor.hideSecrets}
-                onToggle={() => editor.setHideSecrets(!editor.hideSecrets)}
-              />
-            </div>
-            <div className="relative">
-              <Textarea
-                id="env-content"
-                value={editor.content}
-                onChange={(e) => editor.setContent(e.target.value)}
-                placeholder={PLACEHOLDER}
-                disabled={editor.loading}
-                className="font-mono text-xs h-64"
-                spellCheck={false}
-              />
-              {editor.hideSecrets && <MaskedContentOverlay content={editor.content} />}
-            </div>
-          </div>
+          <EnvContentEditor
+            content={editor.content}
+            onContentChange={editor.setContent}
+            hideSecrets={editor.hideSecrets}
+            onToggleSecrets={() => editor.setHideSecrets(!editor.hideSecrets)}
+            loading={editor.loading}
+          />
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={editor.loading}>
@@ -149,6 +135,53 @@ export function EnvEditorDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface EnvContentEditorProps {
+  content: string;
+  onContentChange: (value: string) => void;
+  hideSecrets: boolean;
+  onToggleSecrets: () => void;
+  loading: boolean;
+}
+
+/** Textarea + secret-masking overlay with scroll sync. */
+function EnvContentEditor({
+  content,
+  onContentChange,
+  hideSecrets,
+  onToggleSecrets,
+  loading,
+}: EnvContentEditorProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor="env-content">Content</Label>
+        <MaskToggleButton hideSecrets={hideSecrets} onToggle={onToggleSecrets} />
+      </div>
+      <div className="relative">
+        <Textarea
+          id="env-content"
+          ref={textareaRef}
+          value={content}
+          onChange={(e) => onContentChange(e.target.value)}
+          onScroll={() => {
+            if (overlayRef.current && textareaRef.current) {
+              overlayRef.current.scrollTop = textareaRef.current.scrollTop;
+            }
+          }}
+          placeholder={PLACEHOLDER}
+          disabled={loading}
+          className="font-mono text-xs h-64"
+          spellCheck={false}
+        />
+        {hideSecrets && <MaskedContentOverlay ref={overlayRef} content={content} />}
+      </div>
+    </div>
   );
 }
 
@@ -182,13 +215,15 @@ function MaskToggleButton({
  * textarea content is never modified. Sits above the textarea with
  * `pointer-events-none` so clicks pass through to the editor below.
  */
-function MaskedContentOverlay({ content }: { content: string }) {
-  return (
-    <div
-      className="absolute inset-0 font-mono text-xs p-3 pointer-events-none whitespace-pre-wrap break-all overflow-hidden bg-background"
-      style={{ padding: '0.75rem', lineHeight: '1.5' }}
-      aria-hidden="true"
-    >
+const MaskedContentOverlay = forwardRef<HTMLDivElement, { content: string }>(
+  function MaskedContentOverlay({ content }, ref) {
+    return (
+      <div
+        ref={ref}
+        className="absolute inset-0 font-mono text-xs p-3 pointer-events-none whitespace-pre-wrap break-all overflow-auto bg-background"
+        style={{ padding: '0.75rem', lineHeight: '1.5' }}
+        aria-hidden="true"
+      >
       {content.split('\n').map((line, i) => {
         const eqIdx = line.indexOf('=');
         if (eqIdx === -1) {
@@ -207,6 +242,7 @@ function MaskedContentOverlay({ content }: { content: string }) {
         }
         return <span key={i}>{line}{'\n'}</span>;
       })}
-    </div>
-  );
-}
+      </div>
+    );
+  },
+);
