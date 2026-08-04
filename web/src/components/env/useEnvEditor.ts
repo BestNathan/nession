@@ -30,6 +30,7 @@ export function useEnvEditor({
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hideSecrets, setHideSecrets] = useState(false);
 
   const isEdit = editing !== null;
 
@@ -47,6 +48,7 @@ export function useEnvEditor({
       setName(editing.name);
       setSource(editing.source);
       setAgentId(editing.agent_id ?? '');
+      setHideSecrets(true);
       wsService
         .getEnvFile({ name: editing.name, source: editing.source, agent_id: editing.agent_id })
         .then((resp) => {
@@ -68,6 +70,7 @@ export function useEnvEditor({
       setSource('server');
       setAgentId(firstOnline ? firstOnline.agent_id : '');
       setContent('');
+      setHideSecrets(false);
     }
   }, [isOpen, editing, wsService]);
 
@@ -121,5 +124,6 @@ export function useEnvEditor({
     agentId, setAgentId,
     content, setContent,
     loading, error, isEdit, submit,
+    hideSecrets, setHideSecrets,
   };
 }

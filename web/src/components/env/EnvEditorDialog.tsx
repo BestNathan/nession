@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -116,16 +117,25 @@ export function EnvEditorDialog({
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="env-content">Content</Label>
-            <Textarea
-              id="env-content"
-              value={editor.content}
-              onChange={(e) => editor.setContent(e.target.value)}
-              placeholder={PLACEHOLDER}
-              disabled={editor.loading}
-              className="font-mono text-xs h-64"
-              spellCheck={false}
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="env-content">Content</Label>
+              <MaskToggleButton
+                hideSecrets={editor.hideSecrets}
+                onToggle={() => editor.setHideSecrets(!editor.hideSecrets)}
+              />
+            </div>
+            <div className="relative">
+              <Textarea
+                id="env-content"
+                value={editor.content}
+                onChange={(e) => editor.setContent(e.target.value)}
+                placeholder={PLACEHOLDER}
+                disabled={editor.loading}
+                className="font-mono text-xs h-64"
+                spellCheck={false}
+              />
+              {editor.hideSecrets && <MaskedContentOverlay content={editor.content} />}
+            </div>
           </div>
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
           <DialogFooter>
@@ -139,5 +149,64 @@ export function EnvEditorDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Toggle button for the "hide secrets" masking mode. */
+function MaskToggleButton({
+  hideSecrets,
+  onToggle,
+}: {
+  hideSecrets: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      onClick={onToggle}
+    >
+      {hideSecrets ? (
+        <><EyeOff className="w-3.5 h-3.5 mr-1" /> Show Secrets</>
+      ) : (
+        <><Eye className="w-3.5 h-3.5 mr-1" /> Hide Secrets</>
+      )}
+    </Button>
+  );
+}
+
+/**
+ * Visual overlay that masks secret values. Display-only: the underlying
+ * textarea content is never modified. Sits above the textarea with
+ * `pointer-events-none` so clicks pass through to the editor below.
+ */
+function MaskedContentOverlay({ content }: { content: string }) {
+  return (
+    <div
+      className="absolute inset-0 font-mono text-xs p-3 pointer-events-none whitespace-pre-wrap break-all overflow-hidden bg-background"
+      style={{ padding: '0.75rem', lineHeight: '1.5' }}
+      aria-hidden="true"
+    >
+      {content.split('\n').map((line, i) => {
+        const eqIdx = line.indexOf('=');
+        if (eqIdx === -1) {
+          return <span key={i}>{line}{'\n'}</span>;
+        }
+        const key = line.slice(0, eqIdx).trim();
+        const isSecret = /(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL)/i.test(key);
+        if (isSecret) {
+          return (
+            <span key={i}>
+              {line.slice(0, eqIdx + 1)}
+              <span className="text-muted-foreground">********</span>
+              {'\n'}
+            </span>
+          );
+        }
+        return <span key={i}>{line}{'\n'}</span>;
+      })}
+    </div>
   );
 }
