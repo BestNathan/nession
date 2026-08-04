@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { toast } from 'sonner';
-import { Play, X, FileText, RefreshCw, Check, CheckSquare, Square } from 'lucide-react';
+import { Play, X, FileText, RefreshCw, Check, CheckSquare, Square, Pencil } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import type { EnvFileInfo } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { refKey, toRef, sourceLabel } from './envRef';
+import { EnvEditorDialog } from './EnvEditorDialog';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface EnvPanelProps {
@@ -156,6 +157,37 @@ function useEnvSelection({
   return { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction };
 }
 
+// ── Inline edit dialog (extracted to keep EnvPanel under the 120-line limit) ──
+
+function useEnvEditDialog(
+  refresh: () => void,
+  sourced: Set<string>,
+  action: (f: EnvFileInfo, a: 'source' | 'unsource') => void,
+) {
+  const [editingFile, setEditingFile] = useState<EnvFileInfo | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const open = useCallback((file: EnvFileInfo) => {
+    setEditingFile(file);
+    setEditorOpen(true);
+  }, []);
+
+  const close = useCallback(() => {
+    setEditorOpen(false);
+    setEditingFile(null);
+  }, []);
+
+  const onSaved = () => {
+    refresh();
+    // If the edited file was sourced, re-source it so the session sees the new content.
+    if (editingFile && sourced.has(refKey(editingFile))) {
+      action(editingFile, 'source');
+    }
+  };
+
+  return { editingFile, editorOpen, open, close, onSaved };
+}
+
 // ── Row (extracted to keep EnvPanel under the 120-line limit) ──────────
 
 function EnvFileRow({
@@ -168,6 +200,8 @@ function EnvFileRow({
   selectMode,
   isSelected,
   onToggleSelect,
+  showEdit,
+  onEdit,
 }: {
   file: EnvFileInfo;
   isSourced: boolean;
@@ -178,6 +212,8 @@ function EnvFileRow({
   selectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  showEdit?: boolean;
+  onEdit?: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors">
@@ -196,6 +232,15 @@ function EnvFileRow({
         {sourceLabel(file)}
       </Badge>
       <span className="text-[10px] text-muted-foreground w-8 text-right">{file.var_count}v</span>
+      {showEdit && (
+        <Button
+          size="sm" variant="ghost"
+          className="h-6 w-6 px-0"
+          onClick={onEdit}
+        >
+          <Pencil className="w-3 h-3" />
+        </Button>
+      )}
       {isSourced ? (
         isCreateTime ? (
           <span className="h-6 w-6 flex items-center justify-center text-emerald-500" title="Applied at session creation">
@@ -314,8 +359,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
   }, [refresh, sessionId, wsService]);
 
   const action = useEnvActions(undefined, sessionId, setSourced, setBusy);
-  const source = useCallback((f: EnvFileInfo) => action(f, 'source'), [action]);
-  const unsource = useCallback((f: EnvFileInfo) => action(f, 'unsource'), [action]);
+  const edit = useEnvEditDialog(refresh, sourced, action);
 
   const { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction } = useEnvSelection({
     wsService,
@@ -354,11 +398,13 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
                 isSourced={sourced.has(refKey(file))}
                 isCreateTime={createTimeKeys.has(refKey(file))}
                 isBusy={busy.has(refKey(file))}
-                onSource={source}
-                onUnsource={unsource}
+                onSource={(f) => action(f, 'source')}
+                onUnsource={(f) => action(f, 'unsource')}
                 selectMode={selectMode}
                 isSelected={selected.has(refKey(file))}
                 onToggleSelect={() => toggleFileSelect(file)}
+                showEdit={!selectMode}
+                onEdit={() => edit.open(file)}
               />
             ))}
           </div>
@@ -378,6 +424,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
           </div>
         )}
       </ScrollArea>
+      <EnvEditorDialog isOpen={edit.editorOpen} onClose={edit.close} editing={edit.editingFile} agents={[]} onSaved={edit.onSaved} />
     </div>
   );
 }
