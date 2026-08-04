@@ -101,7 +101,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
   const [sheetOpen, setSheetOpen] = useState(false);
-
   const {
     sessions,
     loading: sessionsLoading,
@@ -124,7 +123,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     initialSelectedAddress: selectedAddress ?? null,
   });
   const isP2P = effectiveMode === 'p2p';
-
   // End relay synchronously before navigating away, so that the
   // server's relay loop exits and subsequent messages (e.g. sessions.list)
   // are processed by the server handler rather than forwarded to the agent.
@@ -134,20 +132,12 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-
   const handleSwitchSession = useCallback((s: Session, choice: AttachChoice) => {
     if (effectiveMode === 'relay' && wsService?.isConnected()) {
       try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
     }
     onSwitchSession(s, choice);
   }, [effectiveMode, wsService, sessionId, onSwitchSession]);
-
-  // Stable across re-renders. The hook returns a fresh object literal each
-  // render, but its transport methods are useCallback-stable for the
-  // connection's lifetime and fileOps uses only those — not the mutating
-  // connectionState field. Keying the memo on those stable refs recreates
-  // fileOps only when the connection is rebuilt, so FileBrowser's
-  // load-on-mount effect doesn't re-fire on every state transition.
   const sendMessage = p2pConnection?.sendMessage;
   const onMessage = p2pConnection?.onMessage;
   const waitForConnection = p2pConnection?.waitForConnection;
@@ -158,6 +148,11 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         : null,
     [sendMessage, onMessage, waitForConnection],
   );
+
+  const handleGetTerminalPwd = useCallback(async () => {
+    if (!fileOps) {throw new Error('File ops not available');}
+    return (await fileOps.getCwd(sessionId)).path;
+  }, [fileOps, sessionId]);
 
   const terminalElement = (
     <Terminal
@@ -220,6 +215,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
             onTerminalReveal={() => terminalHandle?.refit()}
             fontSizeManager={terminalHandle?.fontSizeManager ?? null}
             focusTerminal={() => terminalHandle?.focusTerminal()}
+            onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
           />
         </div>
       </div>

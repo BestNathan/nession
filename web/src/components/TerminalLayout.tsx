@@ -19,6 +19,8 @@ interface TerminalLayoutProps {
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
   focusTerminal?: () => void;
+  /** Called to get the terminal's current working directory. */
+  onGetTerminalPwd?: () => Promise<string>;
 }
 
 /**
@@ -39,6 +41,7 @@ export function TerminalLayout({
   onTerminalReveal,
   fontSizeManager,
   focusTerminal,
+  onGetTerminalPwd,
 }: TerminalLayoutProps) {
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const commandsPanel = (
@@ -58,6 +61,7 @@ export function TerminalLayout({
         commandsPanel={commandsPanel}
         sessionId={sessionId}
         sessionName={sessionName}
+        onGetTerminalPwd={onGetTerminalPwd}
         terminalElement={
           <div className="h-full min-h-0 flex flex-col">
             <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
