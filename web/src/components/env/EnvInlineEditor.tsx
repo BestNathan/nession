@@ -119,9 +119,9 @@ function EditorFormBody({
   return (
     <div className="p-4 space-y-4">
       {/* Name + source + agent */}
-      <div className={cn('grid gap-3', state.isEdit ? 'grid-cols-1' : 'grid-cols-2')}>
+      <div className="flex gap-3 items-end">
         {!state.isEdit && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 flex-[2] min-w-0">
             <Label className="text-xs">File Name</Label>
             <Input
               value={state.name}
@@ -131,7 +131,7 @@ function EditorFormBody({
             />
           </div>
         )}
-        <div className="space-y-1.5">
+        <div className={cn('space-y-1.5 min-w-0', state.isEdit ? 'flex-1' : 'flex-[1]')}>
           <Label className="text-xs">Location</Label>
           <Select value={state.source} onValueChange={(v) => v && set('source', v as EnvSource)} disabled={state.loading}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -142,7 +142,7 @@ function EditorFormBody({
           </Select>
         </div>
         {state.source === 'agent' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 flex-[1] min-w-0">
             <Label className="text-xs">Agent</Label>
             <Select value={state.agentId} onValueChange={(v) => { if (v) { set('agentId', v); } }} disabled={state.loading}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select agent" /></SelectTrigger>
