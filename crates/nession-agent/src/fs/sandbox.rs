@@ -29,33 +29,41 @@ impl PathSandbox {
     /// Returns an error with code `permission_denied` if the resolved
     /// path lies outside the root.
     pub fn resolve(&self, path: &str) -> Result<PathBuf> {
-        // If the path is absolute and exists on the filesystem, use it directly.
-        // This handles paths outside the sandbox root (terminal can access
-        // arbitrary paths, so the file browser follows suit).
+        // If the path is absolute, canonicalize it directly — don't join with
+        // the sandbox root.  For non-existent absolute paths the ancestor walk
+        // below handles the resolution without incorrectly nesting the path
+        // under the sandbox root.
         if path.starts_with('/') {
             if let Ok(canonical) = std::fs::canonicalize(path) {
                 return Ok(canonical);
             }
+            return Self::resolve_absolute(path);
         }
 
-        // Relative or non-existent path: normalize and join with sandbox root.
-        let relative = path.trim_start_matches('/');
+        // Relative path: normalize and join with sandbox root.
         let relative = if let Some(root_name) = self.root.file_name() {
-            Path::new(relative)
+            Path::new(path)
                 .strip_prefix(root_name)
                 .map(|p| p.as_os_str().to_string_lossy().into_owned())
-                .unwrap_or_else(|_| relative.to_string())
+                .unwrap_or_else(|_| path.to_string())
         } else {
-            relative.to_string()
+            path.to_string()
         };
         let combined = self.root.join(&relative);
 
         // Canonicalize. For non-existent paths (create_dir, write_file),
         // walk up the ancestor chain and append the suffix.
-        match std::fs::canonicalize(&combined) {
+        Self::resolve_existing_or_ancestor(&combined)
+    }
+
+    /// Walk up from `base` until an existing ancestor is found, then join
+    /// the remaining suffix back on. Returns the canonical ancestor joined
+    /// with the missing tail.
+    fn resolve_existing_or_ancestor(base: &Path) -> Result<PathBuf> {
+        match std::fs::canonicalize(base) {
             Ok(p) => Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let mut ancestor = combined.as_path();
+                let mut ancestor = base;
                 let mut suffix: Option<PathBuf> = None;
                 loop {
                     match std::fs::canonicalize(ancestor) {
@@ -74,14 +82,23 @@ impl PathSandbox {
                             ancestor = ancestor.parent().context("path has no parent")?;
                         }
                         Err(inner) => {
-                            return Err(anyhow::Error::from(inner))
-                                .with_context(|| format!("failed to resolve path: {path}"))
+                            return Err(anyhow::Error::from(inner)).with_context(|| {
+                                format!("failed to resolve path: {}", base.display())
+                            })
                         }
                     }
                 }
             }
-            Err(e) => Err(anyhow::Error::from(e)).context("failed to resolve path"),
+            Err(e) => Err(anyhow::Error::from(e))
+                .with_context(|| format!("failed to resolve path: {}", base.display())),
         }
+    }
+
+    /// Resolve a non-existent absolute path by walking up from the given
+    /// path to find the nearest existing ancestor, then joining the suffix.
+    fn resolve_absolute(path: &str) -> Result<PathBuf> {
+        let p = Path::new(path);
+        Self::resolve_existing_or_ancestor(p)
     }
 
     /// Return the sandbox root path.
@@ -169,16 +186,12 @@ mod tests {
     #[test]
     fn test_resolve_absolute_path_strips_leading_slash() {
         let (dir, sandbox) = setup_sandbox();
-        // Use a path that does NOT exist on the real filesystem, so the
-        // sandbox-root-relative fallback is exercised (rather than the
-        // absolute-path shortcut). `/nonexistent-dir-xyz/file` → `<root>/nonexistent-dir-xyz/file`.
+        // A non-existent absolute path resolves as an absolute path (no
+        // longer joined with the sandbox root).  Walk up from the full
+        // absolute path, find `/` as the existing ancestor, then join
+        // the suffix back.
         let result = sandbox.resolve("/nonexistent-dir-xyz/file").unwrap();
-        let expected = dir
-            .path()
-            .canonicalize()
-            .unwrap()
-            .join("nonexistent-dir-xyz/file");
-        assert_eq!(result, expected);
+        assert_eq!(result, Path::new("/nonexistent-dir-xyz/file"));
     }
 
     #[test]
@@ -216,11 +229,15 @@ mod tests {
         let file = dir.path().join("slash_test.txt");
         fs::write(&file, b"slash").unwrap();
 
+        // An absolute path that doesn't exist at the filesystem root is
+        // resolved as an absolute path (not joined with the sandbox root).
+        // `/slash_test.txt` doesn't exist → resolve walks up to `/` and
+        // joins `slash_test.txt` → `/slash_test.txt`.
         let resolved = sandbox.resolve("/slash_test.txt").unwrap();
-        assert_eq!(resolved, file.canonicalize().unwrap());
+        assert_eq!(resolved, Path::new("/slash_test.txt"));
     }
 
-    /// Regression test: when a client sends an absolute path whose first
+    /// Regression test: when a client sends a relative path whose first
     /// component matches the sandbox root's own directory name, the root
     /// must NOT be doubled. E.g., sandbox at `/root` + path `root/.bashrc`
     /// must resolve to `/root/.bashrc`, not `/root/root/.bashrc`.
@@ -244,18 +261,20 @@ mod tests {
         let resolved = sandbox.resolve(&dup_relative).unwrap();
         assert_eq!(resolved, target.canonicalize().unwrap());
 
-        // 2. Absolute path that starts with the root name.
+        // 2. Absolute path that starts with the root name — treated as
+        //    an absolute filesystem path under the new resolve semantics.
         let dup_absolute = format!("/{}/.bashrc", root_dir_name);
         let resolved = sandbox.resolve(&dup_absolute).unwrap();
-        assert_eq!(resolved, target.canonicalize().unwrap());
+        assert_eq!(resolved, Path::new(&dup_absolute));
 
         // 3. Regular relative path (no duplication) still works.
         let resolved = sandbox.resolve(".bashrc").unwrap();
         assert_eq!(resolved, target.canonicalize().unwrap());
 
-        // 4. Absolute path without root-name duplication still works.
+        // 4. Absolute path without root-name duplication — treated as
+        //    an absolute filesystem path.
         let resolved = sandbox.resolve("/.bashrc").unwrap();
-        assert_eq!(resolved, target.canonicalize().unwrap());
+        assert_eq!(resolved, Path::new("/.bashrc"));
     }
 
     #[test]
