@@ -72,7 +72,7 @@ function FileListItem({
 
 // ── Left panel: file list panel ─────────────────────────────────────────
 
-function FileListPanel({ files, loading, search, onSearchChange, selected, isNew, cloneTarget, onSelect, onDelete, onNew }: {
+function FileListPanel({ files, loading, search, onSearchChange, selected, isNew, cloneTarget, onSelect, onDelete, onNew, className }: {
   files: ReturnType<typeof useEnvManager>['files'];
   loading: boolean;
   search: string;
@@ -83,6 +83,7 @@ function FileListPanel({ files, loading, search, onSearchChange, selected, isNew
   onSelect: (f: EnvFileInfo) => void;
   onDelete: (f: EnvFileInfo) => void;
   onNew: () => void;
+  className?: string;
 }) {
   const filtered = useMemo(() => {
     if (!search.trim()) { return files; }
@@ -93,7 +94,7 @@ function FileListPanel({ files, loading, search, onSearchChange, selected, isNew
   }, [files, search]);
 
   return (
-    <div className="w-64 border-r flex flex-col flex-shrink-0">
+    <div className={cn('flex flex-col flex-shrink-0', className)}>
       <div className="p-2 border-b">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -184,27 +185,39 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
     }
   }, [deleteFile, selected]);
 
+  const hasDetail = selected !== null || isNew || cloneTarget !== null;
+  const backToList = useCallback(() => {
+    setSelected(null);
+    setIsNew(false);
+    setCloneTarget(null);
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-background">
-      {/* Top bar */}
-      <header className="border-b px-4 py-2.5 flex items-center gap-3 flex-shrink-0">
+      {/* Top bar — simplified on mobile when detail is active */}
+      <header className="border-b px-3 sm:px-4 py-2 sm:py-2.5 flex items-center gap-2 sm:gap-3 flex-shrink-0">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="w-4 h-4 mr-1" /> Back
+          <ArrowLeft className="w-4 h-4 mr-1" /> <span className="max-sm:hidden">Back</span>
         </Button>
-        <h1 className="text-base font-bold">Env Files</h1>
-        <span className="text-xs text-muted-foreground">({files.length})</span>
+        <h1 className="text-sm sm:text-base font-bold truncate">Env Files</h1>
+        <span className="text-xs text-muted-foreground max-sm:hidden">({files.length})</span>
         <div className="flex-1" />
         <Button size="sm" variant="outline" onClick={() => setUploadOpen(true)}>
-          <Upload className="w-3.5 h-3.5 mr-1" /> Upload
+          <Upload className="w-3.5 h-3.5 sm:mr-1" /> <span className="max-sm:hidden">Upload</span>
         </Button>
         <Button size="sm" onClick={() => void refresh()} disabled={loading}>
           <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
         </Button>
       </header>
 
-      {/* Split panel */}
+      {/* Split panel — responsive: stacked on mobile, side-by-side on desktop */}
       <div className="flex-1 flex min-h-0">
+        {/* File list: hidden on mobile when detail is shown */}
         <FileListPanel
+          className={cn(
+            'w-full border-r md:w-64',
+            hasDetail ? 'max-md:hidden' : 'max-md:flex',
+          )}
           files={files} loading={loading} search={search}
           onSearchChange={setSearch} selected={selected}
           isNew={isNew} cloneTarget={cloneTarget}
@@ -212,8 +225,16 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
           onNew={startNew}
         />
 
-        {/* Right: inline editor */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* Editor: visible on mobile only when detail active */}
+        <div className={cn('flex-1 flex flex-col min-w-0', !hasDetail && 'max-md:hidden')}>
+          {/* Mobile back-to-list bar */}
+          {hasDetail && (
+            <div className="md:hidden px-3 py-1.5 border-b flex items-center flex-shrink-0">
+              <Button variant="ghost" size="sm" onClick={backToList}>
+                <ArrowLeft className="w-4 h-4 mr-1" /> Files
+              </Button>
+            </div>
+          )}
           <EnvInlineEditor
             file={(!isNew && !cloneTarget) ? selected : null}
             cloneFrom={cloneTarget}
