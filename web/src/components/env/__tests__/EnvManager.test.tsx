@@ -89,10 +89,10 @@ describe('EnvManager', () => {
       </WebSocketContext.Provider>,
     );
     await waitFor(() => expect(screen.getByText('gone.env')).toBeInTheDocument());
-    // The delete button is the second action button in the row (Trash icon).
-    const buttons = screen.getAllByRole('button');
-    const trash = buttons[buttons.length - 1];
-    await user.click(trash);
+    // Click file to select it and show the editor footer
+    await user.click(screen.getByText('gone.env'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Delete/ })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Delete/ }));
     await waitFor(() => expect(deleteEnvFile).toHaveBeenCalled());
     confirmSpy.mockRestore();
   });
@@ -112,7 +112,10 @@ describe('EnvManager', () => {
       </WebSocketContext.Provider>,
     );
     await waitFor(() => expect(screen.getByText('staging.env')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /clone/i }));
+    // Click file to select → right panel shows → click Clone in footer
+    await user.click(screen.getByText('staging.env'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Clone/ })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Clone/ }));
     await waitFor(() => {
       expect(screen.getByDisplayValue('staging-copy.env')).toBeInTheDocument();
     });
@@ -123,7 +126,7 @@ describe('EnvManager', () => {
     });
   });
 
-  it('opens the create dialog on New', async () => {
+  it('opens the create editor on New', async () => {
     const user = userEvent.setup();
     render(
       <WebSocketContext.Provider value={makeWs()}>
@@ -131,7 +134,9 @@ describe('EnvManager', () => {
       </WebSocketContext.Provider>,
     );
     await waitFor(() => expect(screen.getByText(/No env files yet/)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /New/ }));
+    // There are two "New File" buttons: empty state center + left panel footer
+    const newButtons = screen.getAllByRole('button', { name: /New File/ });
+    await user.click(newButtons[0] ?? newButtons[newButtons.length - 1]);
     await waitFor(() => expect(screen.getByText('New Env File')).toBeInTheDocument());
   });
 });
