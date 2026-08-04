@@ -28,6 +28,7 @@ export function useEnvEditor({
   const [source, setSource] = useState<EnvSource>('server');
   const [agentId, setAgentId] = useState('');
   const [content, setContent] = useState('');
+  const [originalContent, setOriginalContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hideSecrets, setHideSecrets] = useState(false);
@@ -54,6 +55,7 @@ export function useEnvEditor({
         .then((resp) => {
           if (resp.success) {
             setContent(resp.content ?? '');
+            setOriginalContent(resp.content ?? '');
             if (resp.in_use_by && resp.in_use_by.length > 0) {
               setError(
                 `This file is in use by session(s): ${resp.in_use_by.join(', ')}. Stop the session or detach before editing.`,
@@ -70,6 +72,7 @@ export function useEnvEditor({
       setSource('server');
       setAgentId(firstOnline ? firstOnline.agent_id : '');
       setContent('');
+      setOriginalContent('');
       setHideSecrets(false);
     }
   }, [isOpen, editing, wsService]);
@@ -123,6 +126,7 @@ export function useEnvEditor({
     source, setSource,
     agentId, setAgentId,
     content, setContent,
+    originalContent,
     loading, error, isEdit, submit,
     hideSecrets, setHideSecrets,
   };

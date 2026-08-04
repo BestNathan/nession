@@ -21,6 +21,7 @@ import {
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
 import { parseEnv } from '@/lib/envParser';
 import { useEnvEditor } from './useEnvEditor';
+import { EnvDiff } from './EnvDiff';
 
 interface EnvEditorDialogProps {
   isOpen: boolean;
@@ -125,6 +126,16 @@ export function EnvEditorDialog({
             loading={editor.loading}
           />
           <ParsePreview content={editor.content} />
+          {editor.isEdit && editing && (
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
+                Preview Changes
+              </summary>
+              <div className="mt-1.5">
+                <EnvDiff original={editor.originalContent} modified={editor.content} />
+              </div>
+            </details>
+          )}
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={editor.loading}>
