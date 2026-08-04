@@ -87,6 +87,36 @@ describe('EnvEditorDialog', () => {
     });
   });
 
+  it('prefills a new editor from cloneFrom', async () => {
+    const getEnvFile = vi
+      .fn()
+      .mockResolvedValue({ success: true, content: 'A=1\nB=2', in_use_by: [] });
+    const ws = makeWs({ getEnvFile });
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <EnvEditorDialog
+          isOpen
+          onClose={vi.fn()}
+          editing={null}
+          cloneFrom={editingFile}
+          agents={[agent()]}
+          onSaved={vi.fn()}
+        />
+      </WebSocketContext.Provider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('staging-copy.env')).toBeInTheDocument();
+    });
+    expect(getEnvFile).toHaveBeenCalledWith({
+      name: 'staging.env',
+      source: 'server',
+      agent_id: undefined,
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: /content/i })).toHaveValue('A=1\nB=2');
+    });
+  });
+
   it('appends .env suffix when missing', async () => {
     const writeEnvFile = vi.fn().mockResolvedValue({ success: true });
     const user = userEvent.setup();

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Plus, RefreshCw, Upload, Trash2, Pencil, FileText } from 'lucide-react';
+import { ArrowLeft, Copy, Plus, RefreshCw, Upload, Trash2, Pencil, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -19,10 +19,12 @@ function EnvFileRow({
   file,
   onEdit,
   onDelete,
+  onClone,
 }: {
   file: EnvFileInfo;
   onEdit: (f: EnvFileInfo) => void;
   onDelete: (f: EnvFileInfo) => void;
+  onClone: (f: EnvFileInfo) => void;
 }) {
   return (
     <div className="flex items-center gap-3 py-3 px-4 hover:bg-accent/40 transition-colors">
@@ -45,6 +47,14 @@ function EnvFileRow({
         <Button
           size="sm"
           variant="outline"
+          aria-label={`Clone ${file.name}`}
+          onClick={() => onClone(file)}
+        >
+          <Copy className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => onDelete(file)}
           className="text-destructive border-destructive hover:bg-destructive/10"
         >
@@ -58,15 +68,23 @@ function EnvFileRow({
 export function EnvManager({ agents, onBack }: EnvManagerProps) {
   const { files, loading, refresh, deleteFile, uploadFile } = useEnvManager();
   const [editing, setEditing] = useState<EnvFileInfo | null>(null);
+  const [cloneFrom, setCloneFrom] = useState<EnvFileInfo | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openCreate = () => {
     setEditing(null);
+    setCloneFrom(null);
     setEditorOpen(true);
   };
   const openEdit = (file: EnvFileInfo) => {
     setEditing(file);
+    setCloneFrom(null);
+    setEditorOpen(true);
+  };
+  const openClone = (file: EnvFileInfo) => {
+    setCloneFrom(file);
+    setEditing(null);
     setEditorOpen(true);
   };
 
@@ -127,6 +145,7 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
                   file={file}
                   onEdit={openEdit}
                   onDelete={deleteFile}
+                  onClone={openClone}
                 />
               ))}
             </div>
@@ -136,8 +155,13 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
 
       <EnvEditorDialog
         isOpen={editorOpen}
-        onClose={() => setEditorOpen(false)}
+        onClose={() => {
+          setEditorOpen(false);
+          setEditing(null);
+          setCloneFrom(null);
+        }}
         editing={editing}
+        cloneFrom={cloneFrom}
         agents={agents}
         onSaved={refresh}
       />

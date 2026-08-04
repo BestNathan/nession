@@ -97,6 +97,32 @@ describe('EnvManager', () => {
     confirmSpy.mockRestore();
   });
 
+  it('opens the clone editor prefilled from the original file', async () => {
+    const getEnvFile = vi
+      .fn()
+      .mockResolvedValue({ success: true, content: 'FOO=bar', in_use_by: [] });
+    const ws = makeWs({
+      listEnvFiles: vi.fn().mockResolvedValue({ files: [file('staging.env')] }),
+      getEnvFile,
+    });
+    const user = userEvent.setup();
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <EnvManager agents={[agent()]} onBack={vi.fn()} />
+      </WebSocketContext.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText('staging.env')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /clone/i }));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('staging-copy.env')).toBeInTheDocument();
+    });
+    expect(getEnvFile).toHaveBeenCalledWith({
+      name: 'staging.env',
+      source: 'server',
+      agent_id: undefined,
+    });
+  });
+
   it('opens the create dialog on New', async () => {
     const user = userEvent.setup();
     render(

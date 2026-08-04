@@ -28,6 +28,8 @@ interface EnvEditorDialogProps {
   onClose: () => void;
   /** When set, edit that file; when null, create a new one. */
   editing: EnvFileInfo | null;
+  /** When set, open a new editor pre-filled from that file's content. */
+  cloneFrom?: EnvFileInfo | null;
   agents: Agent[];
   onSaved: () => void;
 }
@@ -39,10 +41,11 @@ export function EnvEditorDialog({
   isOpen,
   onClose,
   editing,
+  cloneFrom,
   agents,
   onSaved,
 }: EnvEditorDialogProps) {
-  const editor = useEnvEditor({ isOpen, editing, agents, onSaved, onClose });
+  const editor = useEnvEditor({ isOpen, editing, cloneFrom, agents, onSaved, onClose });
   const nameRef = useRef<HTMLInputElement>(null);
   const onlineAgents = agents.filter((a) => a.status === 'online');
 

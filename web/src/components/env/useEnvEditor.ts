@@ -9,9 +9,31 @@ export interface EnvEditorOptions {
   wsService?: WebSocketService;
   isOpen: boolean;
   editing: EnvFileInfo | null;
+  /** When set, opens a new editor pre-filled from this file's content. */
+  cloneFrom?: EnvFileInfo | null;
   agents: Agent[];
   onSaved: () => void;
   onClose: () => void;
+}
+
+/** Seed a clone editor with a file's content; on failure the editor opens empty. */
+async function loadCloneContent(
+  wsService: WebSocketService,
+  file: EnvFileInfo,
+  onContent: (content: string) => void,
+): Promise<void> {
+  try {
+    const resp = await wsService.getEnvFile({
+      name: file.name,
+      source: file.source,
+      agent_id: file.agent_id,
+    });
+    if (resp.success) {
+      onContent(resp.content ?? '');
+    }
+  } catch {
+    // Not loaded — the clone still opens with the prefilled name/source.
+  }
 }
 
 /** Form state + load/save behaviour for the env editor dialog. */
@@ -19,6 +41,7 @@ export function useEnvEditor({
   wsService: _wsService,
   isOpen,
   editing,
+  cloneFrom,
   agents,
   onSaved,
   onClose,
@@ -45,6 +68,14 @@ export function useEnvEditor({
     }
     setError(null);
     setLoading(false);
+    if (cloneFrom) {
+      setName(`${cloneFrom.name.replace(/\.env$/, '')}-copy.env`);
+      setSource(cloneFrom.source);
+      setAgentId(cloneFrom.agent_id ?? '');
+      setOriginalContent('');
+      void loadCloneContent(wsService, cloneFrom, setContent);
+      return;
+    }
     if (editing) {
       setName(editing.name);
       setSource(editing.source);
@@ -75,7 +106,7 @@ export function useEnvEditor({
       setOriginalContent('');
       setHideSecrets(false);
     }
-  }, [isOpen, editing, wsService]);
+  }, [isOpen, editing, cloneFrom, wsService]);
 
   const buildRef = (): EnvFileRef => {
     const fileName = name.trim().endsWith('.env') ? name.trim() : `${name.trim()}.env`;
