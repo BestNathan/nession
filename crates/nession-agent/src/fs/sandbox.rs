@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_resolve_absolute_path_strips_leading_slash() {
-        let (dir, sandbox) = setup_sandbox();
+        let (_dir, sandbox) = setup_sandbox();
         // A non-existent absolute path resolves as an absolute path (no
         // longer joined with the sandbox root).  Walk up from the full
         // absolute path, find `/` as the existing ancestor, then join
