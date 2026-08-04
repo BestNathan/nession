@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ArrowLeft, Menu } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency, Session } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
 import type { BottomTab } from './BottomBar';
@@ -11,13 +11,11 @@ import { AddressSelector } from './AddressSelector';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useTerminalSessions } from '../hooks/useTerminalSessions';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
-import { SessionPanel } from './SessionPanel';
+import { SessionDropdown } from './SessionDropdown';
 import type { AttachChoice } from './env/AttachDialog';
 import { TerminalLayout } from './TerminalLayout';
 
 interface TerminalHeaderProps {
-  panelOpen: boolean;
-  onTogglePanel: () => void;
   onBack: () => void;
   sessionName: string;
   effectiveMode: 'p2p' | 'relay';
@@ -27,28 +25,37 @@ interface TerminalHeaderProps {
   activeUrl: string | null;
   manualOverride: string | null;
   setManualOverride: (url: string | null) => void;
+  // NEW — session list data for the dropdown
+  sessions: Session[];
+  sessionsLoading: boolean;
+  sessionsError: string | null;
+  onRetrySessions: () => void;
+  currentSessionId: string;
+  onSwitchSession: (session: Session, choice: AttachChoice) => void;
+  probeCache: ReturnType<typeof useAddressProbeCache>;
 }
 
 function TerminalHeader({
-  panelOpen, onTogglePanel, onBack, sessionName, effectiveMode,
+  onBack, sessionName, effectiveMode,
   attachInfo, forcedRelay, latencies, activeUrl, manualOverride, setManualOverride,
+  sessions, sessionsLoading, sessionsError, onRetrySessions,
+  currentSessionId, onSwitchSession, probeCache,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
-      <Button
-        variant={panelOpen ? 'secondary' : 'ghost'}
-        size="sm"
-        onClick={onTogglePanel}
-        title="Toggle session list"
-      >
-        <Menu className="w-4 h-4 mr-1" /> Sessions
-      </Button>
       <Button variant="ghost" size="sm" onClick={onBack}>
         <ArrowLeft className="w-4 h-4 mr-1" /> Back
       </Button>
-      <span className="text-sm text-muted-foreground">
-        Session: <strong className="text-foreground">{sessionName}</strong>
-      </span>
+      <SessionDropdown
+        sessions={sessions}
+        loading={sessionsLoading}
+        error={sessionsError}
+        onRetry={onRetrySessions}
+        currentSessionId={currentSessionId}
+        currentSessionName={sessionName}
+        onSwitchSession={onSwitchSession}
+        probeCache={probeCache}
+      />
       <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
         {effectiveMode.toUpperCase()}
         {forcedRelay && attachInfo.mode === 'p2p' ? ' (fallback)' : ''}
@@ -97,7 +104,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   const terminalRef = useCallback((handle: TerminalHandle | null) => {
     setTerminalHandle(handle);
   }, []);
-  const [panelOpen, setPanelOpen] = useState(false);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -174,8 +180,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   return (
     <div className="h-[100dvh] flex flex-col bg-background">
       <TerminalHeader
-        panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen((p) => !p)}
         onBack={handleBack}
         sessionName={sessionName}
         effectiveMode={effectiveMode}
@@ -185,39 +189,32 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         activeUrl={activeUrl ?? null}
         manualOverride={manualOverride}
         setManualOverride={setManualOverride}
+        sessions={sessions}
+        sessionsLoading={sessionsLoading}
+        sessionsError={sessionsError}
+        onRetrySessions={refetchSessions}
+        currentSessionId={sessionId}
+        onSwitchSession={handleSwitchSession}
+        probeCache={probeCache}
       />
 
-      <div className="flex-1 min-h-0 flex">
-        {panelOpen && (
-          <SessionPanel
-            sessions={sessions}
-            loading={sessionsLoading}
-            error={sessionsError}
-            onRetry={refetchSessions}
-            currentSessionId={sessionId}
-            onSwitchSession={handleSwitchSession}
-            probeCache={probeCache}
-            defaultOpen
-          />
-        )}
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-          <TerminalLayout
-            terminalElement={terminalElement}
-            bottomTab={bottomTab}
-            onBottomTabChange={setBottomTab}
-            sheetOpen={sheetOpen}
-            onSheetToggle={setSheetOpen}
-            sessionId={sessionId}
-            sessionName={sessionName}
-            sendText={(text) => terminalHandle?.sendText(text)}
-            toolbarDisabled={toolbarDisabled}
-            fileOps={fileOps}
-            onTerminalReveal={() => terminalHandle?.refit()}
-            fontSizeManager={terminalHandle?.fontSizeManager ?? null}
-            focusTerminal={() => terminalHandle?.focusTerminal()}
-            onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
-          />
-        </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        <TerminalLayout
+          terminalElement={terminalElement}
+          bottomTab={bottomTab}
+          onBottomTabChange={setBottomTab}
+          sheetOpen={sheetOpen}
+          onSheetToggle={setSheetOpen}
+          sessionId={sessionId}
+          sessionName={sessionName}
+          sendText={(text) => terminalHandle?.sendText(text)}
+          toolbarDisabled={toolbarDisabled}
+          fileOps={fileOps}
+          onTerminalReveal={() => terminalHandle?.refit()}
+          fontSizeManager={terminalHandle?.fontSizeManager ?? null}
+          focusTerminal={() => terminalHandle?.focusTerminal()}
+          onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
+        />
       </div>
     </div>
   );
