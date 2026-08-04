@@ -141,6 +141,7 @@ pub mod msg_types {
     pub const FILE_DELETE: &str = "file.delete";
     pub const FILE_CREATE_DIR: &str = "file.create_dir";
     pub const FILE_RENAME: &str = "file.rename";
+    pub const FILE_CWD: &str = "file.cwd";
 
     // Keepalive (P2P client → agent)
     pub const KEEPALIVE_PING: &str = "keepalive.ping";
@@ -397,6 +398,17 @@ pub struct FileCreateDirPayload {
 pub struct FileRenamePayload {
     pub from: String,
     pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCwdPayload {
+    /// Web UI session_id in "agent_id:session_name" format.
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCwdResponse {
+    pub path: String,
 }
 
 // --- Protocol helpers ---
@@ -1594,6 +1606,22 @@ impl AgentServer {
                             .unwrap_or_default()
                     }
                     Err(e) => err("rename_failed", &e.to_string()),
+                }
+            }
+
+            msg_types::FILE_CWD => {
+                let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return err("parse_error", &e.to_string()),
+                };
+                let session_name = extract_session_name(&payload.session_id);
+                match tmux.get_session_cwd(&session_name).await {
+                    Ok(path) => {
+                        let resp = FileCwdResponse { path };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => err("cwd_failed", &e.to_string()),
                 }
             }
 
