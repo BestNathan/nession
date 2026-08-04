@@ -274,7 +274,7 @@ describe('WebSocketService (facade)', () => {
     it('writeEnvFile', async () => {
       const ref = { name: 'f', source: 'server' as const };
       await service.writeEnvFile(ref, 'X=1', true);
-      expect(requestsInstance.writeEnvFile).toHaveBeenCalledWith(ref, 'X=1', true);
+      expect(requestsInstance.writeEnvFile).toHaveBeenCalledWith(ref, 'X=1', true, false);
     });
 
     it('deleteEnvFile', async () => {

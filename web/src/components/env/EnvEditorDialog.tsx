@@ -139,18 +139,61 @@ export function EnvEditorDialog({
               </div>
             </details>
           )}
+          {editor.inUseBy.length > 0 && <InUseWarning sessions={editor.inUseBy} />}
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={editor.loading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={editor.loading}>
-              {editor.loading ? 'Saving…' : 'Save'}
-            </Button>
-          </DialogFooter>
+          <EnvEditorFooter
+            loading={editor.loading}
+            inUse={editor.inUseBy.length > 0}
+            onCancel={onClose}
+            onForceSave={() => editor.doForceWrite()}
+          />
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Warning shown when the file is in use by running sessions. */
+function InUseWarning({ sessions }: { sessions: string[] }) {
+  return (
+    <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+      <p className="text-sm text-destructive font-medium">
+        This file is in use by {sessions.length} session(s)
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Forcing will re-source the updated file in: {sessions.join(', ')}
+      </p>
+    </div>
+  );
+}
+
+/** Dialog footer: Cancel + Save, or Force Override when the file is in use. */
+function EnvEditorFooter({
+  loading,
+  inUse,
+  onCancel,
+  onForceSave,
+}: {
+  loading: boolean;
+  inUse: boolean;
+  onCancel: () => void;
+  onForceSave: () => void;
+}) {
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+        Cancel
+      </Button>
+      {inUse ? (
+        <Button type="button" variant="destructive" onClick={onForceSave} disabled={loading}>
+          {loading ? 'Saving…' : 'Force Override'}
+        </Button>
+      ) : (
+        <Button type="submit" disabled={loading}>
+          {loading ? 'Saving…' : 'Save'}
+        </Button>
+      )}
+    </DialogFooter>
   );
 }
 

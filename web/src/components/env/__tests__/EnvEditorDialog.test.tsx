@@ -60,17 +60,21 @@ describe('EnvEditorDialog', () => {
         { name: 'prod.env', source: 'server', agent_id: undefined },
         '',
         false,
+        false,
       );
       expect(onSaved).toHaveBeenCalled();
     });
   });
 
-  it('loads content and shows in-use lock message when editing', async () => {
+  it('loads content and shows in-use warning with Force Override when editing', async () => {
+    const writeEnvFile = vi.fn().mockResolvedValue({ success: true });
     const ws = makeWs({
       getEnvFile: vi
         .fn()
         .mockResolvedValue({ success: true, content: 'A=1', in_use_by: ['agent-1:dev'] }),
+      writeEnvFile,
     });
+    const user = userEvent.setup();
     render(
       <WebSocketContext.Provider value={ws}>
         <EnvEditorDialog
@@ -83,7 +87,18 @@ describe('EnvEditorDialog', () => {
       </WebSocketContext.Provider>,
     );
     await waitFor(() => {
-      expect(screen.getByText(/in use by session\(s\): agent-1:dev/)).toBeInTheDocument();
+      expect(screen.getByText(/This file is in use by 1 session\(s\)/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/agent-1:dev/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Force Override' }));
+    await waitFor(() => {
+      expect(writeEnvFile).toHaveBeenCalledWith(
+        { name: 'staging.env', source: 'server', agent_id: undefined },
+        'A=1',
+        true,
+        true,
+      );
     });
   });
 
@@ -137,6 +152,7 @@ describe('EnvEditorDialog', () => {
     await waitFor(() => {
       expect(writeEnvFile).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'noext.env' }),
+        expect.anything(),
         expect.anything(),
         expect.anything(),
       );

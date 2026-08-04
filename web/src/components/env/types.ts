@@ -32,6 +32,9 @@ export interface EnvWriteResponse {
   exists?: boolean;
   error?: string;
   warnings?: string[];
+  in_use_by?: string[];
+  re_sourced?: string[];
+  re_source_errors?: string[];
 }
 
 export interface EnvDeleteResponse {

@@ -170,8 +170,9 @@ export class WebSocketService {
     ref: EnvFileRef,
     content: string,
     overwrite: boolean,
+    force = false,
   ): Promise<EnvWriteResponse> {
-    return this.requests.writeEnvFile(ref, content, overwrite);
+    return this.requests.writeEnvFile(ref, content, overwrite, force);
   }
 
   async deleteEnvFile(ref: EnvFileRef): Promise<EnvDeleteResponse> {

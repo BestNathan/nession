@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import type { Agent, EnvFileInfo, EnvFileRef, EnvSource } from '../../types';
+import type { Agent, EnvFileInfo, EnvFileRef, EnvSource, EnvWriteResponse } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
@@ -14,6 +14,21 @@ export interface EnvEditorOptions {
   agents: Agent[];
   onSaved: () => void;
   onClose: () => void;
+}
+
+/** Surface save-result toasts (re-source, warnings, plain success) from a write response. */
+function notifySaveResult(resp: EnvWriteResponse, isEdit: boolean): void {
+  if (resp.re_sourced && resp.re_sourced.length > 0) {
+    toast.success(`Re-sourced in ${resp.re_sourced.length} session(s)`);
+  }
+  if (resp.re_source_errors && resp.re_source_errors.length > 0) {
+    resp.re_source_errors.forEach((e: string) => toast.error(`Re-source failed: ${e}`));
+  }
+  if (resp.warnings && resp.warnings.length > 0) {
+    toast.warning(`Saved with warnings: ${resp.warnings.join('; ')}`);
+  } else if (!resp.re_sourced || resp.re_sourced.length === 0) {
+    toast.success(isEdit ? 'Env file updated' : 'Env file created');
+  }
 }
 
 /** Seed a clone editor with a file's content; on failure the editor opens empty. */
@@ -55,6 +70,7 @@ export function useEnvEditor({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hideSecrets, setHideSecrets] = useState(false);
+  const [inUseBy, setInUseBy] = useState<string[]>([]);
 
   const isEdit = editing !== null;
 
@@ -73,6 +89,7 @@ export function useEnvEditor({
       setSource(cloneFrom.source);
       setAgentId(cloneFrom.agent_id ?? '');
       setOriginalContent('');
+      setInUseBy([]);
       void loadCloneContent(wsService, cloneFrom, setContent);
       return;
     }
@@ -87,11 +104,7 @@ export function useEnvEditor({
           if (resp.success) {
             setContent(resp.content ?? '');
             setOriginalContent(resp.content ?? '');
-            if (resp.in_use_by && resp.in_use_by.length > 0) {
-              setError(
-                `This file is in use by session(s): ${resp.in_use_by.join(', ')}. Stop the session or detach before editing.`,
-              );
-            }
+            setInUseBy(resp.in_use_by ?? []);
           } else {
             setError(resp.error ?? 'Failed to load file');
           }
@@ -105,6 +118,7 @@ export function useEnvEditor({
       setContent('');
       setOriginalContent('');
       setHideSecrets(false);
+      setInUseBy([]);
     }
   }, [isOpen, editing, cloneFrom, wsService]);
 
@@ -113,22 +127,18 @@ export function useEnvEditor({
     return { name: fileName, source, agent_id: source === 'agent' ? agentId : undefined };
   };
 
-  const doWrite = async (overwrite: boolean): Promise<void> => {
+  const doWrite = async (overwrite: boolean, force = false): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await wsService.writeEnvFile(buildRef(), content, overwrite);
+      const resp = await wsService.writeEnvFile(buildRef(), content, overwrite, force);
       if (resp.success) {
-        if (resp.warnings && resp.warnings.length > 0) {
-          toast.warning(`Saved with warnings: ${resp.warnings.join('; ')}`);
-        } else {
-          toast.success(isEdit ? 'Env file updated' : 'Env file created');
-        }
+        notifySaveResult(resp, isEdit);
         onSaved();
         onClose();
       } else if (resp.exists) {
         if (window.confirm('File already exists. Overwrite?')) {
-          await doWrite(true);
+          await doWrite(true, force);
         }
       } else {
         setError(resp.error ?? 'Failed to save file');
@@ -149,7 +159,7 @@ export function useEnvEditor({
       setError('Select an agent for agent-local files');
       return;
     }
-    void doWrite(isEdit);
+    void doWrite(isEdit, false);
   };
 
   return {
@@ -160,5 +170,7 @@ export function useEnvEditor({
     originalContent,
     loading, error, isEdit, submit,
     hideSecrets, setHideSecrets,
+    inUseBy,
+    doForceWrite: () => doWrite(true, true),
   };
 }
