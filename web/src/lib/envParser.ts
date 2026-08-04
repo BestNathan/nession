@@ -75,7 +75,15 @@ export function parseEnv(content: string): ParsedEnv {
   const index = new Map<string, number>();
   const warnings: string[] = [];
 
-  const lines = content.split(/\r?\n/);
+  // Strip a leading UTF-8 BOM (U+FEFF) so Windows-saved .env files parse
+  // correctly. The Rust parser (nession-common/env_file) currently does NOT
+  // strip BOM — if a file starts with BOM, the first line's key will include
+  // it and fail validation. We intentionally accept BOM here so the preview
+  // (Task 3) doesn't flag a valid-looking file; the Rust side should gain
+  // matching BOM handling in a follow-up.
+  const sanitized = content.startsWith('﻿') ? content.slice(1) : content;
+
+  const lines = sanitized.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();

@@ -80,4 +80,16 @@ describe('parseEnv', () => {
     const result = parseEnv('FOO=bar\r\nBAZ=qux\r\n');
     expect(result.vars).toEqual([['FOO', 'bar'], ['BAZ', 'qux']]);
   });
+
+  it('falls through to unquoted on unterminated quote', () => {
+    const result = parseEnv('FOO="unclosed\n');
+    expect(result.vars).toHaveLength(1);
+    expect(result.vars[0]).toEqual(['FOO', '"unclosed']);
+  });
+
+  it('strips leading UTF-8 BOM', () => {
+    const result = parseEnv('﻿FOO=bar\nBAZ=qux\n');
+    expect(result.vars).toEqual([['FOO', 'bar'], ['BAZ', 'qux']]);
+    expect(result.warnings).toHaveLength(0);
+  });
 });
