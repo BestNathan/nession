@@ -110,6 +110,28 @@ impl PathSandbox {
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    /// Convert an absolute path to a path relative to the sandbox root.
+    ///
+    /// Returns an empty string if `abs_path` equals the sandbox root.
+    /// Returns an error if `abs_path` is outside the sandbox.
+    pub fn relative_path(&self, abs_path: &str) -> Result<String> {
+        let canonical = std::fs::canonicalize(abs_path)
+            .with_context(|| format!("failed to canonicalize path: {abs_path}"))?;
+        if !canonical.starts_with(&self.root) {
+            anyhow::bail!(
+                "permission_denied: path {abs_path} is outside sandbox root {}",
+                self.root.display()
+            );
+        }
+        let rel = canonical
+            .strip_prefix(&self.root)
+            .unwrap_or_else(|_| Path::new(""))
+            .to_string_lossy()
+            .to_string();
+        // Normalize: strip leading "/" so "" = root.
+        Ok(rel.trim_start_matches('/').to_string())
+    }
 }
 
 /// Early-detection heuristic: resolve `.` and `..` components without

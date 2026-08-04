@@ -1616,11 +1616,14 @@ impl AgentServer {
                 };
                 let session_name = extract_session_name(&payload.session_id);
                 match tmux.get_session_cwd(&session_name).await {
-                    Ok(path) => {
-                        let resp = FileCwdResponse { path };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
+                    Ok(abs_path) => match file_ops.relative_path(&abs_path) {
+                        Ok(rel_path) => {
+                            let resp = FileCwdResponse { path: rel_path };
+                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                                .unwrap_or_default()
+                        }
+                        Err(e) => err("cwd_failed", &e.to_string()),
+                    },
                     Err(e) => err("cwd_failed", &e.to_string()),
                 }
             }
