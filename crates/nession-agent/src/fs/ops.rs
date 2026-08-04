@@ -66,12 +66,15 @@ impl FileOps {
                 let entry_path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
 
-                // Strip sandbox root so paths are relative — downstream
-                // operations resolve against the same root via the sandbox.
+                // Compute path usable by sandbox.resolve() on the next call.
+                // Prefer a path relative to the sandbox root; when the entry
+                // lives outside the root (absolute path, e.g. after navigating
+                // via a CWD outside the sandbox), return the absolute path so
+                // resolve() can canonicalize it directly.
                 let relative_path = entry_path
                     .strip_prefix(&root)
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| name.clone());
+                    .unwrap_or_else(|_| entry_path.to_string_lossy().to_string());
 
                 result.push(FileEntry {
                     name,

@@ -39,6 +39,9 @@ export class ConnectionManager {
   private p2pConnection?: ConnectionOptions['p2pConnection'];
   private serverConnection?: ConnectionOptions['serverConnection'];
 
+  /** Most recent client→agent resize, used on reconnect so tmux isn't
+   *  re-created at the default 80×24. */
+  private lastResize: { cols: number; rows: number } | null = null;
   private reconnectAttempt = 0;
   private relayLost = false;
   /** True once the initial relay has been established.
@@ -95,6 +98,7 @@ export class ConnectionManager {
   /** Send a terminal resize to the agent (client → tmux direction). */
   sendResize(cols: number, rows: number): void {
     if (this.disposed) { return; }
+    this.lastResize = { cols, rows };
     try {
       if (this.mode === 'p2p' && this.p2pConnection?.connectionState === 'connected') {
         this.p2pConnection.sendMessage({
@@ -113,6 +117,10 @@ export class ConnectionManager {
 
   async attach(width?: number, height?: number): Promise<void> {
     if (this.disposed) { return; }
+    // Fall back to last known client viewport so tmux isn't re-created at the
+    // default 80×24 on reconnect (P2P) or relay re-establishment.
+    const w = width ?? this.lastResize?.cols;
+    const h = height ?? this.lastResize?.rows;
     if (this.mode === 'p2p' && this.p2pConnection) {
       try {
         await this.p2pConnection.waitForConnection();
@@ -127,7 +135,7 @@ export class ConnectionManager {
         timestamp: Math.floor(Date.now() / 1000),
         payload: {
           session_name: this.sessionName,
-          ...(width !== undefined && height !== undefined ? { width, height } : {}),
+          ...(w !== undefined && h !== undefined ? { width: w, height: h } : {}),
         },
       });
     } else if (this.mode === 'relay' && this.serverConnection) {
@@ -140,14 +148,15 @@ export class ConnectionManager {
         this.serverConnection.beginRelay(
           this.sessionId,
           this.relayUrl ?? undefined,
-          width,
-          height,
+          w,
+          h,
         );
         return;
       }
-      // Reconnection: re-send beginRelay.
+      // Reconnection: re-send beginRelay with last known viewport so the
+      // server opens the agent relay at the correct size.
       try {
-        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined);
+        this.serverConnection.beginRelay(this.sessionId, this.relayUrl ?? undefined, w, h);
       } catch (err) {
         this.onError?.(err instanceof Error ? err : new Error(String(err)));
       }
