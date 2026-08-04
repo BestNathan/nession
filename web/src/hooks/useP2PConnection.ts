@@ -180,6 +180,14 @@ export function useP2PConnection(
   ) {
     setConnectionState('connecting');
   }
+  // When agentUrl goes from a value to null (session switch while plan
+  // re-resolves, or forced relay fallback), reset to 'disconnected' so
+  // that waitForConnection() doesn't falsely resolve while there is no
+  // WebSocket. Without this the stale 'connected' from the previous agent
+  // makes callers think the transport is ready when it isn't.
+  if (!agentUrl && prevAgentUrlRef.current && connectionState !== 'disconnected') {
+    setConnectionState('disconnected');
+  }
   prevAgentUrlRef.current = agentUrl;
 
   // Mirror connectionState into a ref so waitForConnection can read live state
