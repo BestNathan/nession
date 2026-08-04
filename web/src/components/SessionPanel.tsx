@@ -20,6 +20,7 @@ interface SessionPanelProps {
   currentSessionId: string;
   onSwitchSession: (session: Session, choice: AttachChoice) => void;
   probeCache: ReturnType<typeof useAddressProbeCache>;
+  defaultOpen?: boolean;
 }
 
 interface SessionRowProps {
@@ -162,6 +163,7 @@ export function SessionPanel({
   currentSessionId,
   onSwitchSession,
   probeCache,
+  defaultOpen = false,
 }: SessionPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [attachTarget, setAttachTarget] = useState<Session | null>(null);
@@ -190,7 +192,7 @@ export function SessionPanel({
   }, []);
 
   return (
-    <SidePanel defaultOpen={false}>
+    <SidePanel defaultOpen={defaultOpen}>
       <div className="flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2.5 border-b">
