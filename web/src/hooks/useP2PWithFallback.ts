@@ -49,6 +49,17 @@ export function useP2PWithFallback(
   const [manualOverride, setManualOverride] = useState<string | null>(
     initialSelectedAddress,
   );
+
+  // Reset manualOverride when the session changes so a manually-selected
+  // address from session-1 on agent-1 doesn't carry over to session-2 on
+  // agent-2. The ref keeps current initialSelectedAddress reachable without
+  // listing it as an effect dependency (which would fire on every render).
+  const initialSelectedRef = useRef(initialSelectedAddress);
+  initialSelectedRef.current = initialSelectedAddress;
+  useEffect(() => {
+    setManualOverride(initialSelectedRef.current);
+  }, [attachInfo.session_id]);
+
   // When a manual override is active it wins; otherwise use the dialog's
   // browser-tested order.
   const plan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
@@ -56,10 +67,13 @@ export function useP2PWithFallback(
   const [forcedRelay, setForcedRelay] = useState(false);
 
   // A new attach (or re-planned addresses) resets rotation + relay fallback.
+  // Key on the URL list as a stable string so the effect only fires when the
+  // candidate set actually changes, not on every identity-stable re-render.
+  const planUrlsKey = plan.urls.join(',');
   useEffect(() => {
     setAddressIndex(0);
     setForcedRelay(false);
-  }, [plan]);
+  }, [planUrlsKey]);
 
   const isP2P = attachInfo.mode === 'p2p' && !forcedRelay;
   const activeUrl = isP2P && plan.ready ? (plan.urls[addressIndex] ?? null) : null;
