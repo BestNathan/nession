@@ -1,4 +1,4 @@
-import { useRef, useEffect, forwardRef } from 'react';
+import { useRef, useEffect, forwardRef, useState, useMemo } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '../ui/select';
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
+import { parseEnv } from '@/lib/envParser';
 import { useEnvEditor } from './useEnvEditor';
 
 interface EnvEditorDialogProps {
@@ -123,6 +124,7 @@ export function EnvEditorDialog({
             onToggleSecrets={() => editor.setHideSecrets(!editor.hideSecrets)}
             loading={editor.loading}
           />
+          <ParsePreview content={editor.content} />
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={editor.loading}>
@@ -135,6 +137,78 @@ export function EnvEditorDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Debounced live parse preview shown below the content editor. */
+function ParsePreview({ content }: { content: string }) {
+  const [debounced, setDebounced] = useState(content);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    timerRef.current = setTimeout(() => setDebounced(content), 300);
+    return () => clearTimeout(timerRef.current);
+  }, [content]);
+
+  const parsed = useMemo(() => {
+    if (!debounced.trim()) {
+      return null;
+    }
+    return parseEnv(debounced);
+  }, [debounced]);
+
+  if (!parsed) {
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">Parsed Variables</Label>
+        <p className="text-xs text-muted-foreground">(empty)</p>
+      </div>
+    );
+  }
+
+  const hasWarnings = parsed.warnings.length > 0;
+
+  return (
+    <details className="space-y-1" open={hasWarnings}>
+      <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
+        Parsed Variables ({parsed.vars.length})
+        {hasWarnings && (
+          <span className="ml-2 text-amber-500">
+            {parsed.warnings.length} warning{parsed.warnings.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </summary>
+      <div className="mt-1.5 rounded-md border max-h-40 overflow-y-auto">
+        {parsed.warnings.map((w, i) => (
+          <p key={`w-${i}`} className="text-[11px] text-amber-600 dark:text-amber-400 px-2 py-0.5 font-mono">
+            ⚠️ {w}
+          </p>
+        ))}
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="text-left px-2 py-1 font-medium text-muted-foreground">Variable</th>
+              <th className="text-left px-2 py-1 font-medium text-muted-foreground">Value</th>
+              <th className="text-right px-2 py-1 font-medium text-muted-foreground w-12">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {parsed.vars.map(([key, value]) => {
+              const truncated = value.length > 40 ? value.slice(0, 40) + '…' : value;
+              return (
+                <tr key={key}>
+                  <td className="px-2 py-0.5 font-mono">{key}</td>
+                  <td className="px-2 py-0.5 font-mono text-muted-foreground">
+                    {truncated || <span className="italic text-muted-foreground">(empty)</span>}
+                  </td>
+                  <td className="px-2 py-0.5 text-right">{'✅'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 
