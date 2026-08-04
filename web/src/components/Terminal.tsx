@@ -168,6 +168,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       view.dispose();
       viewRef.current = null;
       setViewGeneration((g) => g + 1);
+      // Clear DOM elements left by TerminalView constructor (scrollContainer + mountElement).
+      // TerminalView.dispose() tears down managers/xterm but doesn't remove its DOM nodes;
+      // without this, session switch leaves orphaned scroll containers that stack visually.
+      container.innerHTML = '';
     };
   }, [sessionId, sessionName, mode, p2pConnection, serverConnection, relayUrl, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
 
