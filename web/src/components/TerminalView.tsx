@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import type { AttachInfo, AddressLatency, Session } from '../types';
+import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
 import type { BottomTab } from './BottomBar';
 import { Badge } from './ui/badge';
@@ -83,6 +83,8 @@ export interface AttachedSession {
   /** Manual relay endpoint URL from the attach dialog (null = auto). */
   relayUrl?: string | null;
   renderer?: 'webgl' | 'canvas';
+  /** Env files chosen in the attach dialog to source once the terminal is live. */
+  envRefs?: EnvFileRef[];
 }
 
 interface TerminalViewProps {
@@ -154,6 +156,35 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         : null,
     [sendMessage, onMessage, waitForConnection],
   );
+
+  // Source env files selected in the attach dialog once the session transport
+  // is live. applySessionEnv routes through the server to the agent's tmux, so
+  // relay mode can fire immediately; P2P waits for the socket to come up.
+  // Guarded per sessionId so StrictMode's double-mount or re-renders can't
+  // re-apply, while switching to a different session sources fresh.
+  const envSourcedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const refs = session.envRefs;
+    if (!refs || refs.length === 0 || envSourcedRef.current === sessionId) {
+      return;
+    }
+    const apply = () => {
+      if (envSourcedRef.current === sessionId) {
+        return;
+      }
+      envSourcedRef.current = sessionId;
+      for (const ref of refs) {
+        void wsService.applySessionEnv(sessionId, [ref]).catch(() => {});
+      }
+    };
+    if (effectiveMode === 'relay') {
+      apply();
+      return;
+    }
+    if (p2pConnection) {
+      void p2pConnection.waitForConnection().then(apply).catch(() => {});
+    }
+  }, [session.envRefs, sessionId, effectiveMode, p2pConnection, wsService]);
 
   const handleGetTerminalPwd = useCallback(async () => {
     if (!fileOps) {throw new Error('File ops not available');}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AttachDialog } from '../AttachDialog';
-import type { Session, AttachInfo } from '../../../types';
+import type { Session, AttachInfo, EnvFileInfo } from '../../../types';
 import type { WebSocketService } from '../../../services/websocket';
 import { WebSocketContext } from '../../../hooks/useWebSocket';
 import type { AddressProbeCache } from '../../../hooks/useAddressProbeCache';
@@ -30,9 +30,10 @@ function attachInfo(addresses: AttachInfo['addresses'] = []): AttachInfo {
   };
 }
 
-function mockWs(info: AttachInfo): WebSocketService {
+function mockWs(info: AttachInfo, envFiles: EnvFileInfo[] = []): WebSocketService {
   return {
     requestAttach: vi.fn(async () => info),
+    listEnvFiles: vi.fn(async () => ({ files: envFiles })),
   } as unknown as WebSocketService;
 }
 
@@ -224,5 +225,34 @@ describe('AttachDialog', () => {
     expect(screen.getByText('Renderer')).toBeInTheDocument();
     expect(screen.getByText('WebGL')).toBeInTheDocument();
     expect(screen.getByText('Canvas')).toBeInTheDocument();
+  });
+
+  it('selects env files and passes them as envRefs on confirm', async () => {
+    const onConfirm = vi.fn();
+    const ws = mockWs(attachInfo(), [
+      { name: 'prod.env', source: 'server', size: 10, modified: 0, var_count: 3 },
+    ]);
+    const user = userEvent.setup();
+    render(
+      <WebSocketContext.Provider value={ws}>
+        <AttachDialog
+          isOpen
+          onClose={vi.fn()}
+          session={session()}
+          onConfirm={onConfirm}
+          probeCache={mockProbeCache()}
+        />
+      </WebSocketContext.Provider>,
+    );
+    // The env section starts collapsed; expand it to reveal the file list.
+    await user.click(screen.getByText('Environment Files'));
+    await user.click(await screen.findByText('prod.env'));
+    const attachBtn = screen.getByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    await user.click(attachBtn);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ envRefs: [{ name: 'prod.env', source: 'server' }] }),
+    );
   });
 });

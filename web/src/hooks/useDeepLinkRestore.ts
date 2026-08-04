@@ -51,6 +51,7 @@ export function useDeepLinkRestore(opts: {
         selectedUrl: null,
         relayUrl: null,
         renderer: 'webgl',
+        envRefs: [],
       });
       // Mark only after a successful (synchronous) confirm. (#71 #5)
       confirmedRef.current = pendingSessionId;
