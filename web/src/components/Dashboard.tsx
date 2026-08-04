@@ -63,8 +63,8 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   // ── Route-based view rendering ───────────────────────────────────────────
 
   if (terminalMatch && attachedSession) {
-    return (<RenderTerminal attachedSession={attachedSession}
-      handleBackToDashboard={backToDashboard} handleTerminalDisconnect={handleTerminalDisconnect}
+    return (<RenderTerminal attachedSession={attachedSession} handleBackToDashboard={backToDashboard}
+      handleSwitchSession={confirmAttach} handleTerminalDisconnect={handleTerminalDisconnect}
       handleTerminalError={handleTerminalError} />);
   }
 

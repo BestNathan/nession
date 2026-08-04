@@ -39,6 +39,11 @@ impl FileOps {
         Self { sandbox }
     }
 
+    /// Convert an absolute path to a sandbox-relative path for use with list_dir etc.
+    pub fn relative_path(&self, abs_path: &str) -> Result<String> {
+        self.sandbox.relative_path(abs_path)
+    }
+
     /// List entries in a directory. Sorted: directories first, then files,
     /// both alphabetically by name.
     pub async fn list_dir(&self, path: &str) -> Result<Vec<FileEntry>> {

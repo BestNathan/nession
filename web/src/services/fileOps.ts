@@ -124,6 +124,9 @@ export function createFileOps(p2p: FileTransport) {
     renameFile: (from: string, to: string): Promise<{ from: string; to: string; success: boolean }> =>
       sendRequest(p2p, 'file.rename', { from, to }),
 
+    getCwd: (sessionId: string): Promise<{ path: string }> =>
+      sendRequest(p2p, 'file.cwd', { session_id: sessionId }),
+
     uploadFile: (path: string, file: File): Promise<{ path: string; written: number }> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();

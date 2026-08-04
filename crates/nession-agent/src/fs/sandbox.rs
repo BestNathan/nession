@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// Restricts file operations to a root directory.
 ///
@@ -29,11 +29,16 @@ impl PathSandbox {
     /// Returns an error with code `permission_denied` if the resolved
     /// path lies outside the root.
     pub fn resolve(&self, path: &str) -> Result<PathBuf> {
-        // Normalize: strip leading '/' to make it relative to root.
-        // Defensive: also strip the sandbox root's own directory name if
-        // the path already starts with it. Without this, clients that send
-        // paths like "/root/.bashrc" (absolute paths on a root="/root"
-        // sandbox) end up doubled to "/root/root/.bashrc" after joining.
+        // If the path is absolute and exists on the filesystem, use it directly.
+        // This handles paths outside the sandbox root (terminal can access
+        // arbitrary paths, so the file browser follows suit).
+        if path.starts_with('/') {
+            if let Ok(canonical) = std::fs::canonicalize(path) {
+                return Ok(canonical);
+            }
+        }
+
+        // Relative or non-existent path: normalize and join with sandbox root.
         let relative = path.trim_start_matches('/');
         let relative = if let Some(root_name) = self.root.file_name() {
             Path::new(relative)
@@ -45,36 +50,16 @@ impl PathSandbox {
         };
         let combined = self.root.join(&relative);
 
-        // Early-detection heuristic for `..` traversal attempts.
-        // This catches obvious escapes before touching the filesystem,
-        // but the real security guarantee is the canonicalize +
-        // starts_with check below.
-        let normalized = normalize_path(&combined);
-        if !normalized.starts_with(&self.root) {
-            anyhow::bail!("permission_denied: path outside sandbox root");
-        }
-
-        // Canonicalize unconditionally — avoids a TOCTOU race between
-        // an explicit exists() check and the actual canonicalization.
-        let resolved = match std::fs::canonicalize(&combined) {
-            Ok(p) => p,
+        // Canonicalize. For non-existent paths (create_dir, write_file),
+        // walk up the ancestor chain and append the suffix.
+        match std::fs::canonicalize(&combined) {
+            Ok(p) => Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Walk up the ancestor chain to find the first existing
-                // directory, then append the non-existent suffix.
-                // This handles paths like "a/b/c" where none of the
-                // components exist yet (common for create_dir, write_file).
-                //
-                // NOTE: Use `Option<PathBuf>` for suffix to avoid
-                // `join(empty_path)` on macOS, which spuriously adds a
-                // trailing slash (e.g. `"a".join("")` → `"a/"`).
                 let mut ancestor = combined.as_path();
                 let mut suffix: Option<PathBuf> = None;
                 loop {
                     match std::fs::canonicalize(ancestor) {
                         Ok(canonical) => {
-                            if !canonical.starts_with(&self.root) {
-                                anyhow::bail!("permission_denied: path outside sandbox root");
-                            }
                             return Ok(match suffix {
                                 Some(s) => canonical.join(&s),
                                 None => canonical,
@@ -95,46 +80,30 @@ impl PathSandbox {
                     }
                 }
             }
-            Err(e) => return Err(anyhow::Error::from(e)).context("failed to resolve path"),
-        };
-
-        // Verify the resolved path is within the root.
-        if !resolved.starts_with(&self.root) {
-            anyhow::bail!("permission_denied: path outside sandbox root");
+            Err(e) => Err(anyhow::Error::from(e)).context("failed to resolve path"),
         }
-
-        Ok(resolved)
     }
 
     /// Return the sandbox root path.
     pub fn root(&self) -> &Path {
         &self.root
     }
-}
 
-/// Early-detection heuristic: resolve `.` and `..` components without
-/// touching the filesystem.
-///
-/// This provides a **logical** (not canonical) normalization useful for
-/// detecting obvious directory traversal attempts before filesystem
-/// operations are attempted.  It is NOT a security boundary — the real
-/// guarantee comes from `canonicalize` + `starts_with` after resolution.
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                components.pop();
-            }
-            Component::CurDir => {}
-            c => components.push(c.as_os_str()),
+    /// Convert an absolute path to a path usable by [`resolve`].
+    ///
+    /// If the path is inside the sandbox root, returns a relative path
+    /// (empty string for the root itself). Otherwise returns the absolute
+    /// path as-is so `resolve()` can canonicalize it directly.
+    pub fn relative_path(&self, abs_path: &str) -> Result<String> {
+        let canonical = std::fs::canonicalize(abs_path)
+            .with_context(|| format!("failed to canonicalize path: {abs_path}"))?;
+        if let Ok(rel) = canonical.strip_prefix(&self.root) {
+            let s = rel.to_string_lossy().to_string();
+            return Ok(s.trim_start_matches('/').to_string());
         }
+        // Path is outside sandbox — return as absolute path.
+        Ok(canonical.to_string_lossy().to_string())
     }
-    let mut result = PathBuf::new();
-    for c in components {
-        result.push(c);
-    }
-    result
 }
 
 #[cfg(test)]
@@ -182,36 +151,51 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_rejects_dot_dot_escape() {
+    fn test_resolve_allows_dot_dot_outside_sandbox() {
         let (_dir, sandbox) = setup_sandbox();
+        // Sandbox boundary is intentionally not enforced — terminal can
+        // access arbitrary paths, so the file browser follows.
         let result = sandbox.resolve("../etc/passwd");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("permission_denied") || err.contains("outside sandbox"));
+        // May succeed or fail depending on whether /etc/passwd exists.
+        // The key is it no longer rejects with permission_denied.
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("permission_denied"),
+                "should not reject with permission_denied: {e}"
+            );
+        }
     }
 
     #[test]
     fn test_resolve_absolute_path_strips_leading_slash() {
         let (dir, sandbox) = setup_sandbox();
-        // Leading `/` is stripped, so `/etc/passwd` → `etc/passwd`
-        // relative to sandbox root. This is an in-sandbox non-existent path,
-        // so it resolves successfully to `<root>/etc/passwd`.
-        let result = sandbox.resolve("/etc/passwd").unwrap();
-        let expected = dir.path().canonicalize().unwrap().join("etc/passwd");
+        // Use a path that does NOT exist on the real filesystem, so the
+        // sandbox-root-relative fallback is exercised (rather than the
+        // absolute-path shortcut). `/nonexistent-dir-xyz/file` → `<root>/nonexistent-dir-xyz/file`.
+        let result = sandbox.resolve("/nonexistent-dir-xyz/file").unwrap();
+        let expected = dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("nonexistent-dir-xyz/file");
         assert_eq!(result, expected);
     }
 
     #[test]
-    fn test_resolve_rejects_symlink_escape() {
+    fn test_resolve_allows_symlink_outside_sandbox() {
         let (dir, sandbox) = setup_sandbox();
-        // Create a symlink pointing outside the sandbox.
         let link_path = dir.path().join("escape_link");
         symlink("/etc/passwd", &link_path).unwrap();
 
+        // Boundary intentionally not enforced — symlinks to outside paths are allowed.
         let result = sandbox.resolve("escape_link");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("permission_denied") || err.contains("outside sandbox"));
+        // Should succeed if /etc/passwd exists, fail for other reasons (e.g. permissions).
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("permission_denied"),
+                "should not reject with permission_denied: {e}"
+            );
+        }
     }
 
     #[test]

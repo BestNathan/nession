@@ -117,6 +117,33 @@ impl SessionManager {
         Ok(sessions)
     }
 
+    /// Query the current working directory of a tmux session's active pane.
+    pub async fn get_session_cwd(&self, session_name: &str) -> Result<String> {
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                session_name,
+                "-F",
+                "#{pane_current_path}",
+            ])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!(
+                "tmux display-message failed for session {}: {}",
+                session_name,
+                stderr.trim()
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.trim().to_string())
+    }
+
     /// Create a new detached tmux session at a fixed [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
     ///
     /// The `_width` and `_height` parameters are ignored — sessions always use the
@@ -391,6 +418,37 @@ mod window_size_lock_tests {
         );
 
         // Cleanup — swallow errors, best-effort.
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", &name])
+            .status()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn get_session_cwd_returns_path() {
+        if Command::new("tmux").arg("-V").status().await.is_err() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+
+        let mgr = SessionManager::new();
+        let name = unique_name("cwd-test");
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
+        mgr.create_session(&name, 200, 60, &cwd, &[])
+            .await
+            .expect("create");
+
+        let result = mgr.get_session_cwd(&name).await.expect("get_session_cwd");
+        // Canonicalize both paths: macOS /var is a symlink to /private/var,
+        // and tmux may resolve symlinks differently from std::env::temp_dir().
+        let expected = std::fs::canonicalize(&cwd).unwrap_or_else(|_| PathBuf::from(&cwd));
+        let actual = std::fs::canonicalize(&result).unwrap_or_else(|_| PathBuf::from(&result));
+        assert_eq!(
+            actual, expected,
+            "CWD should match the session's working directory"
+        );
+
         let _ = Command::new("tmux")
             .args(["kill-session", "-t", &name])
             .status()

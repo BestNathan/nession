@@ -20,11 +20,6 @@ export interface OpenFile {
 interface FileTabsProps {
   fileOps: FileOps;
   terminalElement: React.ReactNode;
-  /**
-   * Called when the terminal tab becomes visible again after a file tab was
-   * shown. Lets the parent refit the terminal, which cannot measure itself
-   * while hidden (display:none).
-   */
   onTerminalReveal?: () => void;
   /** Bottom-bar wiring (state lifted in TerminalView; shared with the non-fileOps path). */
   bottomTab: BottomTab;
@@ -35,6 +30,8 @@ interface FileTabsProps {
   commandsPanel: React.ReactNode;
   sessionId?: string;
   sessionName?: string;
+  /** Called to get the terminal's current working directory. */
+  onGetTerminalPwd?: () => Promise<string>;
 }
 
 const MAX_TABS = 10;
@@ -191,7 +188,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
 export function FileTabs({
   fileOps, terminalElement, onTerminalReveal,
   bottomTab, onBottomTabChange, sheetOpen, onSheetToggle, envPanel, commandsPanel,
-  sessionId, sessionName,
+  sessionId, sessionName, onGetTerminalPwd,
 }: FileTabsProps) {
   const {
     openFiles, activeTabId, setActiveTabId, dirtyFiles, activeFile, showTerminal,
@@ -212,7 +209,7 @@ export function FileTabs({
     <div className="flex-1 min-h-0 flex flex-row">
       {!isMobile && (
         <SidePanel>
-          <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
+          <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
         </SidePanel>
       )}
 
@@ -252,7 +249,7 @@ export function FileTabs({
           envPanel={envPanel}
           commandsPanel={commandsPanel}
           filesPanel={
-            <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} />
+            <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
           }
         />
       </div>

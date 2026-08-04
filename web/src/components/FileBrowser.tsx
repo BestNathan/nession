@@ -10,6 +10,7 @@ import {
   Home,
   Pencil,
   Trash2,
+  FolderSync,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
@@ -48,6 +49,8 @@ export interface FileBrowserProps {
   onFileDeleted?: (path: string) => void;
   /** Called when a file/directory is renamed (so parent can update tabs) */
   onFileRenamed?: (oldPath: string, newPath: string) => void;
+  /** If provided, shows a button that queries the terminal's CWD and navigates there. */
+  onGetTerminalPwd?: () => Promise<string>;
 }
 
 const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
@@ -55,7 +58,7 @@ const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
 
-export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDeleted, onFileRenamed }: FileBrowserProps) {
+export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDeleted, onFileRenamed, onGetTerminalPwd }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -86,9 +89,14 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   useEffect(() => {
     loadDir(currentPath);
   }, [currentPath, loadDir]);
-
   const handleRefresh = () => loadDir(currentPath);
-
+  const [cwdLoading, setCwdLoading] = useState(false);
+  const handleNavigateToCwd = async () => {
+    if (!onGetTerminalPwd) { return; }
+    setCwdLoading(true);
+    try { setCurrentPath(await onGetTerminalPwd()); } catch { toast.error('Failed to get terminal directory'); }
+    finally { setCwdLoading(false); }
+  };
   const handleEntryClick = (entry: FileEntry) => {
     if (entry.is_dir) {
       setCurrentPath(entry.path);
@@ -240,6 +248,11 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fileInputRef.current?.click()} title="Upload file">
           <Upload className="h-3.5 w-3.5" />
         </Button>
+        {onGetTerminalPwd && (
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
+            <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />
+          </Button>
+        )}
         <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
       </div>
 
@@ -284,15 +297,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
       {/* Column headers */}
       <div className="flex items-center px-2 py-0.5 text-[10px] text-muted-foreground border-b select-none">
-        <button className="flex-1 text-left hover:text-foreground transition-colors" onClick={() => handleSort('name')}>
-          Name{sortKey === 'name' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-        </button>
-        <button className="w-16 text-right hover:text-foreground transition-colors" onClick={() => handleSort('size')}>
-          Size{sortKey === 'size' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-        </button>
-        <button className="w-16 text-right hover:text-foreground transition-colors" onClick={() => handleSort('modified')}>
-          Mod{sortKey === 'modified' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-        </button>
+        {(['name', 'size', 'modified'] as const).map((key) => (
+          <button key={key} className={key === 'name' ? 'flex-1 text-left' : 'w-16 text-right'} onClick={() => handleSort(key)}>
+            {key === 'name' ? 'Name' : key === 'size' ? 'Size' : 'Mod'}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+          </button>))}
       </div>
 
       {/* File list */}

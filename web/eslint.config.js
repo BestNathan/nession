@@ -94,9 +94,9 @@ export default tseslint.config(
     },
   },
 
-  // ── FileBrowser recursive tree ───────────────────────────────────────
+  // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/components/FileBrowser.tsx'],
+    files: ['src/components/FileBrowser.tsx', 'src/components/TerminalView.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },
