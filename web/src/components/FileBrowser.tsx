@@ -298,7 +298,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       {/* Column headers */}
       <div className="flex items-center px-2 py-0.5 text-[10px] text-muted-foreground border-b select-none">
         {(['name', 'size', 'modified'] as const).map((key) => (
-          <button key={key} className={key === 'name' ? 'flex-1 text-left' : 'w-16 text-right'} onClick={() => handleSort(key)}>
+          <button key={key} className={key === 'name' ? 'flex-1 text-left min-w-0' : 'w-[72px] text-right flex-shrink-0'} onClick={() => handleSort(key)}>
             {key === 'name' ? 'Name' : key === 'size' ? 'Size' : 'Mod'}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
           </button>))}
       </div>
@@ -349,9 +349,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   ) : (
                     <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
                   )}
-                  <span className="flex-1 truncate">{entry.name}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatRelativeTimeSeconds(entry.modified)}</span>
+                  <span className="flex-1 truncate min-w-0">{entry.name}</span>
+                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{entry.is_dir ? '' : formatSize(entry.size)}</span>
+                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>

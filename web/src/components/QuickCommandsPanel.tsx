@@ -31,15 +31,15 @@ interface CommandRowProps {
 }
 
 function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: CommandRowProps) {
-  // On touch devices: buttons always visible, row is tappable, generous touch targets.
+  // On touch devices: buttons always visible, row is tappable.
   // On desktop: hover-reveal pattern with compact buttons.
   const btnClass = isTouch
-    ? 'h-11 w-11 p-0 flex-shrink-0'
+    ? 'h-8 w-8 p-0 flex-shrink-0'
     : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100';
 
   return (
     <div
-      className="flex items-center gap-1.5 py-1 px-1 rounded hover:bg-accent/50 group min-h-[44px]"
+      className="flex items-center gap-1.5 py-0.5 px-1 rounded hover:bg-accent/50 group min-h-[40px]"
       onClick={isTouch ? () => onRun(cmd) : undefined}
       role={isTouch ? 'button' : undefined}
       tabIndex={isTouch ? 0 : undefined}

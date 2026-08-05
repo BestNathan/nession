@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BottomSheet, type BottomTab } from './BottomSheet';
 import { FloatingKeyBar } from './FloatingKeyBar';
 import { InputPanel } from './InputPanel';
@@ -37,18 +37,14 @@ export function MobileTerminalLayout({
   const keyBar = useFloatingKeyBar();
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
-  const prevCollapsedRef = useRef(false);
 
-  // Keyboard: auto-collapse sheet and hide key bar
+  // Keyboard: hide floating key bar (don't need virtual keys while typing).
+  // Do NOT auto-collapse — it causes a layout-shift→refocus loop that makes
+  // the keyboard bounce erratically on iOS/Android.
   useEffect(() => {
     if (isKeyboardOpen) {
-      prevCollapsedRef.current = sheetCollapsed;
-      setSheetCollapsed(true);
       keyBar.forceHide();
-    } else {
-      setSheetCollapsed(prevCollapsedRef.current);
     }
-    // Only react to isKeyboardOpen changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isKeyboardOpen]);
 
