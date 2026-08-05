@@ -12,6 +12,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 interface QuickCommandsPanelProps {
   sendText: (text: string) => void;
@@ -24,13 +25,26 @@ interface CommandRowProps {
   cmd: QuickCommand;
   isPreset: boolean;
   disabled: boolean;
+  isTouch: boolean;
   onRun: (cmd: QuickCommand) => void;
   onDelete: (id: string) => void;
 }
 
-function CommandRow({ cmd, isPreset, disabled, onRun, onDelete }: CommandRowProps) {
+function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: CommandRowProps) {
+  // On touch devices: buttons always visible, row is tappable, generous touch targets.
+  // On desktop: hover-reveal pattern with compact buttons.
+  const btnClass = isTouch
+    ? 'h-11 w-11 p-0 flex-shrink-0'
+    : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100';
+
   return (
-    <div className="flex items-center gap-1.5 py-1 px-1 rounded hover:bg-accent/50 group">
+    <div
+      className="flex items-center gap-1.5 py-1 px-1 rounded hover:bg-accent/50 group min-h-[44px]"
+      onClick={isTouch ? () => onRun(cmd) : undefined}
+      role={isTouch ? 'button' : undefined}
+      tabIndex={isTouch ? 0 : undefined}
+      onKeyDown={isTouch ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRun(cmd); } } : undefined}
+    >
       <span className="text-xs flex-1 min-w-0 truncate">{cmd.label}</span>
       {cmd.raw && (
         <span className="text-[10px] text-muted-foreground flex-shrink-0">
@@ -40,9 +54,9 @@ function CommandRow({ cmd, isPreset, disabled, onRun, onDelete }: CommandRowProp
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100"
+        className={btnClass}
         disabled={disabled}
-        onClick={() => onRun(cmd)}
+        onClick={(e) => { e.stopPropagation(); onRun(cmd); }}
         aria-label="Run"
         title="Run"
       >
@@ -52,9 +66,9 @@ function CommandRow({ cmd, isPreset, disabled, onRun, onDelete }: CommandRowProp
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive"
+          className={isTouch ? 'h-11 w-11 p-0 flex-shrink-0' : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive'}
           disabled={disabled}
-          onClick={() => onDelete(cmd.id)}
+          onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
           aria-label="Delete"
           title="Delete"
         >
@@ -169,6 +183,7 @@ function AddCommandForm({ disabled, onSave, onCancel }: AddCommandFormProps) {
 export function QuickCommandsPanel({ sendText, disabled }: QuickCommandsPanelProps) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [showAddForm, setShowAddForm] = useState(false);
+  const isTouch = useMediaQuery('(pointer: coarse)');
 
   const handleRun = (cmd: QuickCommand) => {
     sendText(cmd.raw ? cmd.command : cmd.command + '\r');
@@ -188,6 +203,7 @@ export function QuickCommandsPanel({ sendText, disabled }: QuickCommandsPanelPro
             cmd={cmd}
             isPreset={PRESETS.some((p) => p.id === cmd.id)}
             disabled={disabled}
+            isTouch={isTouch}
             onRun={handleRun}
             onDelete={(id) => {
               void deleteCommand(id);

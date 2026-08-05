@@ -9,6 +9,11 @@ vi.mock('../../hooks/useQuickCommands', () => ({
   useQuickCommands: vi.fn(),
 }));
 
+// Mock useMediaQuery — default to desktop (no touch)
+vi.mock('../../hooks/useMediaQuery', () => ({
+  useMediaQuery: vi.fn().mockReturnValue(false),
+}));
+
 const mockAddCommand = vi.fn().mockResolvedValue(undefined);
 const mockDeleteCommand = vi.fn().mockResolvedValue(undefined);
 

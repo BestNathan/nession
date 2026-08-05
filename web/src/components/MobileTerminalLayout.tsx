@@ -75,11 +75,15 @@ export function MobileTerminalLayout({
       <div className="flex-1 min-h-0 relative">
         {terminalElement}
 
-        {/* KeyBar trigger strip — 8px invisible touch target */}
+        {/* KeyBar trigger strip — semi-transparent hint bar that reveals the floating key bar on tap */}
         <div
-          className="absolute bottom-0 left-0 right-0 h-2 z-10"
+          className="absolute bottom-0 left-0 right-0 h-3 z-10 bg-foreground/5"
           onTouchStart={() => keyBar.show()}
-        />
+        >
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[9px] text-muted-foreground/40 pointer-events-none">
+            ▲ tap for keyboard keys
+          </div>
+        </div>
 
         {/* Floating key bar overlay */}
         <FloatingKeyBar

@@ -235,21 +235,21 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={loading} title="Refresh">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh} disabled={loading} title="Refresh">
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
           <FilePlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
           <FolderPlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fileInputRef.current?.click()} title="Upload file">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => fileInputRef.current?.click()} title="Upload file">
           <Upload className="h-3.5 w-3.5" />
         </Button>
         {onGetTerminalPwd && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
             <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />
           </Button>
         )}
