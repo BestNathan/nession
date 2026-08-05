@@ -16,7 +16,7 @@ import {
 
 export interface UseQuickCommandsResult {
   userCommands: QuickCommand[];
-  addCommand: (label: string, command: string) => Promise<void>;
+  addCommand: (label: string, command: string, raw?: boolean) => Promise<void>;
   deleteCommand: (id: string) => Promise<void>;
 }
 
@@ -89,9 +89,9 @@ export function useQuickCommands(): UseQuickCommandsResult {
   }, [wsService, refreshCommands]);
 
   const addCommand = useCallback(
-    async (label: string, command: string) => {
+    async (label: string, command: string, raw = false) => {
       try {
-        await wsService.addCommand(label, command, false);
+        await wsService.addCommand(label, command, raw);
         await refreshCommands();
       } catch {
         toast.error('Failed to add command');
