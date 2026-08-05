@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Minus, Plus as PlusIcon, RotateCcw, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { MobileKeyPanel } from './MobileKeyPanel';
@@ -79,7 +78,6 @@ function ZoomControls({ fontSizeManager, disabled }: ZoomControlsProps) {
 }
 
 export function TerminalToolbar({ sendText, disabled = false, fontSizeManager, focusTerminal }: TerminalToolbarProps) {
-  const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [inputValue, setInputValue] = useState('');
   const isMobile = useMediaQuery('(pointer: coarse)');
 
@@ -103,13 +101,7 @@ export function TerminalToolbar({ sendText, disabled = false, fontSizeManager, f
           onAfterKey={focusTerminal}
         />
       )}
-      <QuickCommandsPanel
-        userCommands={userCommands}
-        disabled={disabled}
-        onRunCommand={(cmd) => sendText(cmd.raw ? cmd.command : cmd.command + '\r')}
-        onDeleteCommand={deleteCommand}
-        onAddCommand={addCommand}
-      />
+      <QuickCommandsPanel sendText={sendText} disabled={disabled} />
 
       {/* Input row — pinned to bottom; multi-line, fixed ~3 rows */}
       <div className="flex gap-1.5 flex-shrink-0 p-2 pt-1 border-t items-end">

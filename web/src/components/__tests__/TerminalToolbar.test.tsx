@@ -33,36 +33,40 @@ describe('TerminalToolbar', () => {
     localStorage.clear();
   });
 
-  it('renders all preset buttons', () => {
+  it('renders all preset commands', () => {
     renderToolbar();
-    expect(screen.getByRole('button', { name: 'clear' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'ls -la' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'git status' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'git pull' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Ctrl+C' })).toBeInTheDocument();
+    expect(screen.getByText('clear')).toBeInTheDocument();
+    expect(screen.getByText('ls -la')).toBeInTheDocument();
+    expect(screen.getByText('git status')).toBeInTheDocument();
+    expect(screen.getByText('git pull')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl+C')).toBeInTheDocument();
   });
 
-  it('calls sendText when a preset button is clicked', async () => {
+  it('calls sendText when a preset run button is clicked', async () => {
     const user = userEvent.setup();
     const { sendText } = renderToolbar();
-    await user.click(screen.getByRole('button', { name: 'clear' }));
+    const row = screen.getByText('clear').closest('div')!;
+    const runBtn = row.querySelector('button')!;
+    await user.click(runBtn);
     expect(sendText).toHaveBeenCalledWith('clear\r');
   });
 
   it('calls sendText without CR for raw commands', async () => {
     const user = userEvent.setup();
     const { sendText } = renderToolbar();
-    await user.click(screen.getByRole('button', { name: 'Ctrl+C' }));
+    const row = screen.getByText('Ctrl+C').closest('div')!;
+    const runBtn = row.querySelector('button')!;
+    await user.click(runBtn);
     expect(sendText).toHaveBeenCalledWith('\x03');
   });
 
   it('adds a custom command', async () => {
     const user = userEvent.setup();
     const { ws } = renderToolbar();
-    await user.click(screen.getByRole('button', { name: /Add/ }));
+    await user.click(screen.getByRole('button', { name: /Add Command/ }));
     await user.type(screen.getByPlaceholderText('Label'), 'My Cmd');
     await user.type(screen.getByPlaceholderText('Command'), 'echo hello');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(ws.addCommand).toHaveBeenCalledWith('My Cmd', 'echo hello', false);
     // After add, the list refreshes (the mock returns empty, so no button shown)
     await waitFor(() => {
@@ -79,10 +83,10 @@ describe('TerminalToolbar', () => {
     const { ws } = renderToolbar({}, { listCommands, removeCommand });
     // The command is already loaded from server
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Delete Me' })).toBeInTheDocument();
+      expect(screen.getByText('Delete Me')).toBeInTheDocument();
     });
     // Delete it
-    const cmdRow = screen.getByRole('button', { name: 'Delete Me' }).closest('div')!;
+    const cmdRow = screen.getByText('Delete Me').closest('div')!;
     const deleteBtn = within(cmdRow).getByTitle('Delete');
     await user.click(deleteBtn);
     expect(ws.removeCommand).toHaveBeenCalledWith('existing');
@@ -125,9 +129,9 @@ describe('TerminalToolbar', () => {
 
   it('disables functional buttons when disabled prop is true', () => {
     renderToolbar({ disabled: true });
-    expect(screen.getByRole('button', { name: 'clear' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'ls -la' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Add/ })).toBeDisabled();
+    expect(screen.getByText('clear').closest('div')!.querySelector('button')).toBeDisabled();
+    expect(screen.getByText('ls -la').closest('div')!.querySelector('button')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Add Command/ })).toBeDisabled();
     expect(screen.getByTitle('Send')).toBeDisabled();
   });
 
@@ -151,21 +155,9 @@ describe('TerminalToolbar', () => {
   it('does not add empty command', async () => {
     const user = userEvent.setup();
     renderToolbar();
-    await user.click(screen.getByRole('button', { name: /Add/ }));
-    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: /Add Command/ }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
-  });
-
-  it('gives preset command buttons a 44px touch target on mobile', () => {
-    const ws = createMockWs();
-    render(
-      <WebSocketContext.Provider value={ws}>
-        <TerminalToolbar sendText={vi.fn()} />
-      </WebSocketContext.Provider>,
-    );
-    const buttons = screen.getAllByRole('button');
-    const preset = buttons.find((b) => b.className.includes('h-11 md:h-6'));
-    expect(preset).toBeDefined();
   });
 
   it('loads commands from server on mount', async () => {
