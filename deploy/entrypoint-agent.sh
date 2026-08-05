@@ -51,6 +51,17 @@ else
     echo "=== Claude Code settings already present, skipping init ==="
 fi
 
+# Ensure tmux.conf exists (may be lost if /root is on a PVC that overwrites the Docker layer).
+if [ ! -f /root/.tmux.conf ]; then
+    cat > /root/.tmux.conf << 'TMUX'
+set -g mouse on
+set -g history-limit 50000
+setw -g mode-keys vi
+set -g focus-events on
+TMUX
+    echo "=== tmux.conf created (first run) ==="
+fi
+
 # Ensure login shells inside tmux sessions inherit the full toolchain PATH.
 # Debian's /etc/profile hardcodes PATH without /opt/claude-tools, so even
 # though tmux -e passes the correct value, bash overwrites it on startup.

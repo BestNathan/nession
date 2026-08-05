@@ -47,10 +47,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install tmux from static builds (https://github.com/tmux/tmux-builds)
-# Uses multi-arch binaries: v3.7b, linux-amd64 / linux-arm64
+# Uses multi-arch binaries: v3.6b, linux-amd64 / linux-arm64.
+# Pinned to 3.6b (same version as Homebrew on macOS) — SGR mouse works correctly.
 ARG TARGETARCH
 RUN TMUX_ARCH=$(case "${TARGETARCH}" in amd64) echo "x86_64" ;; arm64) echo "arm64" ;; *) echo "x86_64" ;; esac) && \
-    TMUX_VERSION="3.7b" && \
+    TMUX_VERSION="3.6b" && \
     curl -fsSL "https://github.com/tmux/tmux-builds/releases/download/v${TMUX_VERSION}/tmux-${TMUX_VERSION}-linux-${TMUX_ARCH}.tar.gz" \
         -o /tmp/tmux.tar.gz && \
     tar -xzf /tmp/tmux.tar.gz -C /usr/local/bin/ && \
@@ -75,6 +76,9 @@ RUN apt-get update && \
 # Claude Code one-time init config (skips onboarding on first run)
 RUN mkdir -p /root/.claude && \
     printf '{"hasCompletedOnboarding":true}\n' > /root/.claude.json
+
+# tmux configuration (mouse, scrollback, vi-mode keys, focus events)
+RUN printf 'set -g mouse on\nset -g history-limit 50000\nsetw -g mode-keys vi\nset -g focus-events on\n' > /root/.tmux.conf
 
 COPY --from=rust-builder /build/target/release/nession-agent /usr/local/bin/nession-agent
 COPY --from=web-builder /build/dist /usr/share/nginx/html
