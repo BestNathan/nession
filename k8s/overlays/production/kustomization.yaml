@@ -12,13 +12,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-0.20.3
+  newTag: agent-0.21.0
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-0.20.3
+  newTag: server-0.21.0
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-0.20.3
+  newTag: ui-0.21.0
 
 # Isolate production data on shared PVC via subPath.
 patches:
