@@ -2,9 +2,39 @@
 FROM debian:bullseye-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base tmux && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
+
+# Install tmux from static builds (https://github.com/tmux/tmux-builds)
+# Uses multi-arch binaries: v3.7b, linux-amd64 / linux-arm64
+ARG TARGETARCH
+RUN TMUX_ARCH=$(case "${TARGETARCH}" in amd64) echo "x86_64" ;; arm64) echo "arm64" ;; *) echo "x86_64" ;; esac) && \
+    TMUX_VERSION="3.7b" && \
+    curl -fsSL "https://github.com/tmux/tmux-builds/releases/download/v${TMUX_VERSION}/tmux-${TMUX_VERSION}-linux-${TMUX_ARCH}.tar.gz" \
+        -o /tmp/tmux.tar.gz && \
+    tar -xzf /tmp/tmux.tar.gz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/tmux && \
+    rm /tmp/tmux.tar.gz && \
+    tmux -V
+
+# Node.js 22 + Claude Code (baked in instead of k8s init container).
+# Replaces the old initContainer-based install which re-downloaded
+# on every pod recreation because emptyDir doesn't survive across
+# deployments.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm config set registry https://registry.npmmirror.com && \
+    npm install -g @anthropic-ai/claude-code && \
+    apt-get purge -y curl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Claude Code one-time init config (skips onboarding on first run)
+RUN mkdir -p /root/.claude && \
+    printf '{"hasCompletedOnboarding":true}\n' > /root/.claude.json
 
 # Stable files first — rarely change, always cache-hit
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
