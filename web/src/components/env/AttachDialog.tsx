@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Wifi, WifiOff } from 'lucide-react';
+import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -10,10 +10,11 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
-import type { AttachInfo, AttachMode, AddressLatency, Session } from '../../types';
+import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '../../types';
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {
@@ -30,6 +31,8 @@ export interface AttachChoice {
   relayUrl?: string | null;
   /** Renderer the user picked (webgl/canvas). */
   renderer: 'webgl' | 'canvas';
+  /** Env files to source in the session after attach. */
+  envRefs: EnvFileRef[];
 }
 
 interface AttachDialogProps {
@@ -63,6 +66,8 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
   const [selectedUrl, setSelectedUrl] = useState<string>(AUTO_URL);
   const [error, setError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
+  const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
+  const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
 
   const agentId = session?.agent_id ?? session?.session_id.split(':')[0] ?? null;
   const webglSupported = detectWebGLSupport();
@@ -78,7 +83,12 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     setAttachInfo(null);
     setSelectedUrl(AUTO_URL);
     setError(null);
-  }, [isOpen, webglSupported]);
+    // Load available env files and clear the previous selection on each open.
+    wsService.listEnvFiles()
+      .then((resp) => setEnvFiles(resp.files))
+      .catch(() => {});
+    setSelectedEnv([]);
+  }, [isOpen, webglSupported, wsService]);
 
   // Manual relay URL override — only relevant in relay mode.
   const relayUrl = useMemo(
@@ -133,8 +143,8 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     }
     const manual = selectedUrl === AUTO_URL ? null : selectedUrl;
     const relayUrl = mode === 'relay' ? manual : null;
-    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer });
-  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm]);
+    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer, envRefs: selectedEnv });
+  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm, selectedEnv]);
 
   const candidates = attachInfo?.addresses ?? [];
 
@@ -149,6 +159,9 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
             <Label>Connection Mode</Label>
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
+
+          {/* Env files to source after attach (collapsible, remembers open state). */}
+          <EnvPickerSection files={envFiles} selected={selectedEnv} onChange={setSelectedEnv} />
 
           {/* Candidate address list.
               P2P mode: browser-measured latency.
@@ -373,5 +386,51 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
         )}>{statusLabel}</span>
       ) : null}
     </button>
+  );
+}
+
+/**
+ * Collapsible env-file picker for the attach dialog. Tracks its own expanded
+ * state (persisted to localStorage) so the dialog stays out of the way until
+ * the user opts in. Selected files are sourced in the session after attach.
+ */
+function EnvPickerSection({
+  files,
+  selected,
+  onChange,
+}: {
+  files: EnvFileInfo[];
+  selected: EnvFileRef[];
+  onChange: (selected: EnvFileRef[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(() => localStorage.getItem('attach-env-expanded') === 'true');
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    localStorage.setItem('attach-env-expanded', String(next));
+  };
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+      >
+        {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+        Environment Files
+        {selected.length > 0 && (
+          <span className="text-[10px] text-muted-foreground ml-1">
+            ({selected.length} selected)
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <EnvFileMultiSelect
+          files={files}
+          selected={selected}
+          onChange={onChange}
+        />
+      )}
+    </div>
   );
 }

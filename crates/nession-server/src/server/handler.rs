@@ -1971,6 +1971,11 @@ impl ConnectionHandler {
             .get("overwrite")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
+        let force = msg
+            .payload
+            .get("force")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
 
         if name.is_empty() {
             return Ok(reply_json(
@@ -1981,8 +1986,9 @@ impl ConnectionHandler {
         }
 
         // In-use lock: an overwrite of a file bound to a running session is
-        // refused with a clear message listing the sessions.
-        if overwrite {
+        // refused with a clear message listing the sessions, unless `force` is
+        // set (caller accepts the risk and re-sources the file afterwards).
+        if overwrite && !force {
             let in_use = self
                 .env_service
                 .usage
@@ -1996,7 +2002,8 @@ impl ConnectionHandler {
                         "error": format!(
                             "This file is in use by session(s): {}. Stop the session or detach before editing.",
                             in_use.join(", ")
-                        )
+                        ),
+                        "in_use_by": in_use,
                     }),
                 ));
             }
@@ -2029,11 +2036,63 @@ impl ConnectionHandler {
         };
 
         match outcome {
-            Ok(true) => Ok(reply_json(
-                &msg.id,
-                "client.env.write.response",
-                json!({ "success": true, "warnings": warnings }),
-            )),
+            Ok(true) => {
+                let mut re_sourced: Vec<String> = Vec::new();
+                let mut re_source_errors: Vec<String> = Vec::new();
+
+                if force {
+                    let sessions =
+                        self.env_service
+                            .usage
+                            .sessions_using(&name, source, agent_id.as_deref());
+                    for sid in &sessions {
+                        // Get the agent_id from the session (first part before ':')
+                        let agent_id = sid.split(':').next().unwrap_or("");
+                        match self
+                            .agent_command(
+                                agent_id,
+                                "agent.env.resource",
+                                json!({
+                                    "session_id": sid,
+                                    "env_refs": [{"name": &name, "source": source, "agent_id": agent_id}],
+                                    "re_source": true,
+                                }),
+                            )
+                            .await
+                        {
+                            Ok(resp) => {
+                                if resp.get("success").and_then(serde_json::Value::as_bool)
+                                    == Some(true)
+                                {
+                                    re_sourced.push(sid.clone());
+                                } else {
+                                    re_source_errors.push(format!(
+                                        "{}: {}",
+                                        sid,
+                                        resp.get("error")
+                                            .and_then(serde_json::Value::as_str)
+                                            .unwrap_or("unknown error")
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                re_source_errors.push(format!("{sid}: {e}"));
+                            }
+                        }
+                    }
+                }
+
+                Ok(reply_json(
+                    &msg.id,
+                    "client.env.write.response",
+                    json!({
+                        "success": true,
+                        "warnings": warnings,
+                        "re_sourced": re_sourced,
+                        "re_source_errors": re_source_errors,
+                    }),
+                ))
+            }
             Ok(false) => Ok(reply_json(
                 &msg.id,
                 "client.env.write.response",
@@ -2060,6 +2119,11 @@ impl ConnectionHandler {
             ));
         }
         let (name, source, agent_id) = parse_env_ref(&msg.payload);
+        let force = msg
+            .payload
+            .get("force")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         if name.is_empty() {
             return Ok(reply_json(
                 &msg.id,
@@ -2068,22 +2132,26 @@ impl ConnectionHandler {
             ));
         }
 
-        let in_use = self
-            .env_service
-            .usage
-            .sessions_using(&name, source, agent_id.as_deref());
-        if !in_use.is_empty() {
-            return Ok(reply_json(
-                &msg.id,
-                "client.env.delete.response",
-                json!({
-                    "success": false,
-                    "error": format!(
-                        "This file is in use by session(s): {}. Stop the session or detach before deleting.",
-                        in_use.join(", ")
-                    )
-                }),
-            ));
+        // In-use lock: refuse to delete a file bound to a running session
+        // unless `force` is set (the file is gone, so no re-source is needed).
+        if !force {
+            let in_use = self
+                .env_service
+                .usage
+                .sessions_using(&name, source, agent_id.as_deref());
+            if !in_use.is_empty() {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.env.delete.response",
+                    json!({
+                        "success": false,
+                        "error": format!(
+                            "This file is in use by session(s): {}. Stop the session or detach before deleting.",
+                            in_use.join(", ")
+                        )
+                    }),
+                ));
+            }
         }
 
         let outcome = match source {
@@ -4112,6 +4180,75 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("in use"));
+        assert_eq!(reply["payload"]["in_use_by"], json!(["a1:s1"]));
+    }
+
+    #[tokio::test]
+    async fn env_write_force_skips_lock_and_re_sources() {
+        use crate::server::command_broker::WsMessageSender;
+
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+
+        // Write a file first so the store has it.
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({ "name": "forced.env", "content": "X=1", "overwrite": false }),
+        ))
+        .await
+        .unwrap();
+
+        // Register an agent control channel so `agent_command` can be answered.
+        let (sender, mut rx) = WsMessageSender::new();
+        h.command_broker.register_agent("a1", sender).await;
+
+        // Record usage for a session bound to this file.
+        h.env_service.usage.record_create(
+            "a1:s1",
+            &[EnvFileRef {
+                name: "forced.env".to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            }],
+            None,
+        );
+
+        // Run the force write concurrently with a mock agent that answers the
+        // re-source (`agent.env.resource`) command.
+        let broker = Arc::clone(&h.command_broker);
+        let send_fut = h.handle_message(proto_msg(
+            "client.env.write",
+            json!({
+                "name": "forced.env",
+                "content": "X=2",
+                "overwrite": true,
+                "force": true,
+                "source": "server",
+            }),
+        ));
+        let resolve_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("agent should receive a command")
+                .to_text()
+                .unwrap()
+                .to_string();
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let request_id = parsed["payload"]["request_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            broker
+                .resolve_command("a1", &request_id, json!({ "success": true }))
+                .await;
+        };
+        let (action, _) = tokio::join!(send_fut, resolve_fut);
+        let reply = parse_reply(action.unwrap());
+
+        assert_eq!(reply["payload"]["success"], true);
+        assert_eq!(reply["payload"]["re_sourced"], json!(["a1:s1"]));
+        assert_eq!(reply["payload"]["re_source_errors"], json!([]));
     }
 
     #[tokio::test]
@@ -4149,6 +4286,39 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("in use"));
+    }
+
+    #[tokio::test]
+    async fn env_delete_force_skips_lock() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        // Write a file first
+        h.handle_message(proto_msg(
+            "client.env.write",
+            json!({ "name": "used.env", "content": "X=1", "overwrite": false }),
+        ))
+        .await
+        .unwrap();
+        // Record usage
+        h.env_service.usage.record_create(
+            "a1:s1",
+            &[nession_common::protocol::EnvFileRef {
+                name: "used.env".to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            }],
+            None,
+        );
+        // Delete with force — should succeed despite being in use
+        let action = h
+            .handle_message(proto_msg(
+                "client.env.delete",
+                json!({ "name": "used.env", "source": "server", "force": true }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert_eq!(reply["payload"]["success"], true);
     }
 
     // ---- agent.env.get without agent_id ----

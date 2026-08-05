@@ -224,13 +224,13 @@ describe('RequestPlugin', () => {
   });
 
   describe('writeEnvFile', () => {
-    it('sends ref + content + overwrite', async () => {
+    it('sends ref + content + overwrite + force', async () => {
       const ref = { name: 'a.env', source: 'agent' as const };
       (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
-      await plugin.writeEnvFile(ref, 'KEY=val', true);
+      await plugin.writeEnvFile(ref, 'KEY=val', true, true);
       expect(core.request).toHaveBeenCalledWith('client.env.write', {
         name: 'a.env', source: 'agent', agent_id: undefined,
-        content: 'KEY=val', overwrite: true,
+        content: 'KEY=val', overwrite: true, force: true,
       });
     });
   });

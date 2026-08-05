@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { ConnectionStatus } from '../types';
@@ -19,6 +19,35 @@ export { AgentSection };
 
 interface DashboardProps {
   connectionStatus: ConnectionStatus;
+}
+
+/** Route guard: returns the correct view or null to continue to main dashboard. */
+function resolveRouteView(opts: {
+  terminalMatch: ReturnType<typeof useMatch>; envMatch: ReturnType<typeof useMatch>;
+  connectionStatus: ConnectionStatus;
+  attachedSession: ReturnType<typeof useAttachFlow>['attachedSession'];
+  backToDashboard: () => void; confirmAttach: ReturnType<typeof useAttachFlow>['confirmAttach'];
+  handleTerminalDisconnect: () => void; handleTerminalError: (err: Error) => void;
+  agents: ReturnType<typeof useDashboard>['agents']; navigate: ReturnType<typeof useNavigate>;
+}): ReactNode {
+  const { terminalMatch, envMatch, connectionStatus, attachedSession, backToDashboard,
+    confirmAttach, handleTerminalDisconnect, handleTerminalError, agents, navigate } = opts;
+  if (terminalMatch && attachedSession) {
+    return (<RenderTerminal key={attachedSession.sessionId} attachedSession={attachedSession}
+      handleBackToDashboard={backToDashboard} handleSwitchSession={confirmAttach}
+      handleTerminalDisconnect={handleTerminalDisconnect}
+      handleTerminalError={handleTerminalError} />);
+  }
+
+  if (envMatch) {
+    return <EnvManager agents={agents} onBack={() => navigate('/')} />;
+  }
+
+  if (connectionStatus === 'disconnected') {
+    return <Navigate to="/login" replace />;
+  }
+
+  return null;
 }
 
 export function Dashboard({ connectionStatus }: DashboardProps) {
@@ -60,23 +89,12 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     navigate,
   });
 
-  // ── Route-based view rendering ───────────────────────────────────────────
-
-  if (terminalMatch && attachedSession) {
-    return (<RenderTerminal attachedSession={attachedSession} handleBackToDashboard={backToDashboard}
-      handleSwitchSession={confirmAttach} handleTerminalDisconnect={handleTerminalDisconnect}
-      handleTerminalError={handleTerminalError} />);
-  }
-
-  if (envMatch) {
-    return <EnvManager agents={agents} onBack={() => navigate('/')} />;
-  }
-
-  // Permanently disconnected (not transient reconnect) → login page.
-  // 'connecting' during background reconnect keeps the dashboard visible.
-  if (connectionStatus === 'disconnected') {
-    return <Navigate to="/login" replace />;
-  }
+  const routeView = resolveRouteView({
+    terminalMatch, envMatch, connectionStatus, attachedSession,
+    backToDashboard, confirmAttach, handleTerminalDisconnect,
+    handleTerminalError, agents, navigate,
+  });
+  if (routeView !== null) { return routeView; }
 
   return (
     <div className="h-[100dvh] flex flex-col bg-background">

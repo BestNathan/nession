@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { toast } from 'sonner';
-import { Play, X, FileText, RefreshCw, Check } from 'lucide-react';
+import { Play, X, FileText, RefreshCw, Check, CheckSquare, Square, Pencil } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import type { EnvFileInfo } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import { refKey, toRef, sourceLabel } from './envRef';
+import { EnvEditorDialog } from './EnvEditorDialog';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface EnvPanelProps {
@@ -64,6 +65,129 @@ function useEnvActions(
   );
 }
 
+// ── Selection + batch actions (extracted to keep EnvPanel under the 120-line limit) ──
+
+function useEnvSelection({
+  wsService,
+  sessionId,
+  files,
+  setBusy,
+  refresh,
+}: {
+  wsService: WebSocketService;
+  sessionId: string;
+  files: EnvFileInfo[];
+  setBusy: Dispatch<SetStateAction<Set<string>>>;
+  refresh: () => void;
+}) {
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const toggleSelectMode = () => {
+    setSelectMode((prev) => !prev);
+    setSelected(new Set());
+  };
+
+  const toggleFileSelect = (file: EnvFileInfo) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const key = refKey(file);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const batchAction = useCallback(
+    async (action: 'source' | 'unsource') => {
+      const selFiles = files.filter((f) => selected.has(refKey(f)));
+      if (selFiles.length === 0) {
+        return;
+      }
+
+      setBusy((prev) => {
+        const next = new Set(prev);
+        for (const f of selFiles) {
+          next.add(refKey(f));
+        }
+        return next;
+      });
+
+      const results = await Promise.allSettled(
+        selFiles.map((f) => {
+          const ref = toRef(f);
+          return action === 'source'
+            ? wsService.applySessionEnv(sessionId, [ref])
+            : wsService.unsetSessionEnv(sessionId, [ref]);
+        }),
+      );
+
+      let ok = 0;
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value.success) {
+          ok++;
+        } else if (r.status === 'rejected') {
+          toast.error(`Failed to ${action} ${selFiles[i].name}`);
+        }
+      });
+
+      const verb = action === 'source' ? 'Sourced' : 'Unsourced';
+      if (ok > 0) {
+        toast.success(`${verb} ${ok}/${selFiles.length} files`);
+      }
+
+      setBusy((prev) => {
+        const next = new Set(prev);
+        for (const f of selFiles) {
+          next.delete(refKey(f));
+        }
+        return next;
+      });
+
+      setSelectMode(false);
+      setSelected(new Set());
+      refresh();
+    },
+    [wsService, sessionId, files, selected, setBusy, refresh],
+  );
+
+  return { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction };
+}
+
+// ── Inline edit dialog (extracted to keep EnvPanel under the 120-line limit) ──
+
+function useEnvEditDialog(
+  refresh: () => void,
+  sourced: Set<string>,
+  action: (f: EnvFileInfo, a: 'source' | 'unsource') => void,
+) {
+  const [editingFile, setEditingFile] = useState<EnvFileInfo | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const open = useCallback((file: EnvFileInfo) => {
+    setEditingFile(file);
+    setEditorOpen(true);
+  }, []);
+
+  const close = useCallback(() => {
+    setEditorOpen(false);
+    setEditingFile(null);
+  }, []);
+
+  const onSaved = () => {
+    refresh();
+    // If the edited file was sourced, re-source it so the session sees the new content.
+    if (editingFile && sourced.has(refKey(editingFile))) {
+      action(editingFile, 'source');
+    }
+  };
+
+  return { editingFile, editorOpen, open, close, onSaved };
+}
+
 // ── Row (extracted to keep EnvPanel under the 120-line limit) ──────────
 
 function EnvFileRow({
@@ -73,6 +197,11 @@ function EnvFileRow({
   isBusy,
   onSource,
   onUnsource,
+  selectMode,
+  isSelected,
+  onToggleSelect,
+  showEdit,
+  onEdit,
 }: {
   file: EnvFileInfo;
   isSourced: boolean;
@@ -80,15 +209,38 @@ function EnvFileRow({
   isBusy: boolean;
   onSource: (f: EnvFileInfo) => void;
   onUnsource: (f: EnvFileInfo) => void;
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
+  showEdit?: boolean;
+  onEdit?: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors">
+      {selectMode && (
+        <button type="button" onClick={onToggleSelect} className="flex-shrink-0" aria-label={`Select ${file.name}`}>
+          {isSelected ? (
+            <CheckSquare className="w-4 h-4 text-primary" />
+          ) : (
+            <Square className="w-4 h-4 text-muted-foreground" />
+          )}
+        </button>
+      )}
       <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
       <span className="flex-1 text-xs truncate">{file.name}</span>
       <Badge variant="outline" className="text-[10px] px-1 py-0">
         {sourceLabel(file)}
       </Badge>
       <span className="text-[10px] text-muted-foreground w-8 text-right">{file.var_count}v</span>
+      {showEdit && (
+        <Button
+          size="sm" variant="ghost"
+          className="h-6 w-6 px-0"
+          onClick={onEdit}
+        >
+          <Pencil className="w-3 h-3" />
+        </Button>
+      )}
       {isSourced ? (
         isCreateTime ? (
           <span className="h-6 w-6 flex items-center justify-center text-emerald-500" title="Applied at session creation">
@@ -112,6 +264,31 @@ function EnvFileRow({
           <Play className="w-3 h-3 mr-0.5" /> Source
         </Button>
       )}
+    </div>
+  );
+}
+
+// ── Batch action bar (extracted to keep EnvPanel under the 120-line limit) ──
+
+function BatchActionBar({
+  count,
+  onSource,
+  onUnsource,
+}: {
+  count: number;
+  onSource: () => void;
+  onUnsource: () => void;
+}) {
+  return (
+    <div className="border-t px-3 py-1.5 flex items-center gap-2">
+      <span className="text-[10px] text-muted-foreground">{count} selected</span>
+      <div className="flex-1" />
+      <Button size="sm" className="h-6 px-2 text-[10px]" onClick={onSource}>
+        <Play className="w-3 h-3 mr-0.5" /> Source
+      </Button>
+      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={onUnsource}>
+        <X className="w-3 h-3 mr-0.5" /> Unsource
+      </Button>
     </div>
   );
 }
@@ -182,8 +359,15 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
   }, [refresh, sessionId, wsService]);
 
   const action = useEnvActions(undefined, sessionId, setSourced, setBusy);
-  const source = useCallback((f: EnvFileInfo) => action(f, 'source'), [action]);
-  const unsource = useCallback((f: EnvFileInfo) => action(f, 'unsource'), [action]);
+  const edit = useEnvEditDialog(refresh, sourced, action);
+
+  const { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction } = useEnvSelection({
+    wsService,
+    sessionId,
+    files,
+    setBusy,
+    refresh,
+  });
 
   const sourcedFiles = files.filter((f) => sourced.has(refKey(f)));
 
@@ -191,9 +375,14 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1.5 border-b">
         <span className="text-xs font-medium text-muted-foreground">Env Files</span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={refresh} disabled={loading}>
-          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={toggleSelectMode}>
+            {selectMode ? 'Cancel' : 'Select'}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={refresh} disabled={loading}>
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {files.length === 0 ? (
@@ -209,11 +398,23 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
                 isSourced={sourced.has(refKey(file))}
                 isCreateTime={createTimeKeys.has(refKey(file))}
                 isBusy={busy.has(refKey(file))}
-                onSource={source}
-                onUnsource={unsource}
+                onSource={(f) => action(f, 'source')}
+                onUnsource={(f) => action(f, 'unsource')}
+                selectMode={selectMode}
+                isSelected={selected.has(refKey(file))}
+                onToggleSelect={() => toggleFileSelect(file)}
+                showEdit={!selectMode}
+                onEdit={() => edit.open(file)}
               />
             ))}
           </div>
+        )}
+        {selectMode && selected.size > 0 && (
+          <BatchActionBar
+            count={selected.size}
+            onSource={() => batchAction('source')}
+            onUnsource={() => batchAction('unsource')}
+          />
         )}
         {sourcedFiles.length > 0 && (
           <div className="border-t px-3 py-1">
@@ -223,6 +424,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
           </div>
         )}
       </ScrollArea>
+      <EnvEditorDialog isOpen={edit.editorOpen} onClose={edit.close} editing={edit.editingFile} agents={[]} onSaved={edit.onSaved} />
     </div>
   );
 }

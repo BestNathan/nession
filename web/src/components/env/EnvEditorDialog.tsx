@@ -1,4 +1,5 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, forwardRef, useState, useMemo } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -18,13 +19,17 @@ import {
   SelectValue,
 } from '../ui/select';
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
+import { parseEnv } from '@/lib/envParser';
 import { useEnvEditor } from './useEnvEditor';
+import { EnvDiff } from './EnvDiff';
 
 interface EnvEditorDialogProps {
   isOpen: boolean;
   onClose: () => void;
   /** When set, edit that file; when null, create a new one. */
   editing: EnvFileInfo | null;
+  /** When set, open a new editor pre-filled from that file's content. */
+  cloneFrom?: EnvFileInfo | null;
   agents: Agent[];
   onSaved: () => void;
 }
@@ -36,10 +41,11 @@ export function EnvEditorDialog({
   isOpen,
   onClose,
   editing,
+  cloneFrom,
   agents,
   onSaved,
 }: EnvEditorDialogProps) {
-  const editor = useEnvEditor({ isOpen, editing, agents, onSaved, onClose });
+  const editor = useEnvEditor({ isOpen, editing, cloneFrom, agents, onSaved, onClose });
   const nameRef = useRef<HTMLInputElement>(null);
   const onlineAgents = agents.filter((a) => a.status === 'online');
 
@@ -115,29 +121,259 @@ export function EnvEditorDialog({
               </Select>
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="env-content">Content</Label>
-            <Textarea
-              id="env-content"
-              value={editor.content}
-              onChange={(e) => editor.setContent(e.target.value)}
-              placeholder={PLACEHOLDER}
-              disabled={editor.loading}
-              className="font-mono text-xs h-64"
-              spellCheck={false}
-            />
-          </div>
+          <EnvContentEditor
+            content={editor.content}
+            onContentChange={editor.setContent}
+            hideSecrets={editor.hideSecrets}
+            onToggleSecrets={() => editor.setHideSecrets(!editor.hideSecrets)}
+            loading={editor.loading}
+          />
+          <ParsePreview content={editor.content} />
+          {editor.isEdit && editing && (
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
+                Preview Changes
+              </summary>
+              <div className="mt-1.5">
+                <EnvDiff original={editor.originalContent} modified={editor.content} />
+              </div>
+            </details>
+          )}
+          {editor.inUseBy.length > 0 && <InUseWarning sessions={editor.inUseBy} />}
           {editor.error && <p className="text-sm text-destructive">{editor.error}</p>}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={editor.loading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={editor.loading}>
-              {editor.loading ? 'Saving…' : 'Save'}
-            </Button>
-          </DialogFooter>
+          <EnvEditorFooter
+            loading={editor.loading}
+            inUse={editor.inUseBy.length > 0}
+            onCancel={onClose}
+            onForceSave={() => editor.doForceWrite()}
+          />
         </form>
       </DialogContent>
     </Dialog>
   );
 }
+
+/** Warning shown when the file is in use by running sessions. */
+function InUseWarning({ sessions }: { sessions: string[] }) {
+  return (
+    <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+      <p className="text-sm text-destructive font-medium">
+        This file is in use by {sessions.length} session(s)
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Forcing will re-source the updated file in: {sessions.join(', ')}
+      </p>
+    </div>
+  );
+}
+
+/** Dialog footer: Cancel + Save, or Force Override when the file is in use. */
+function EnvEditorFooter({
+  loading,
+  inUse,
+  onCancel,
+  onForceSave,
+}: {
+  loading: boolean;
+  inUse: boolean;
+  onCancel: () => void;
+  onForceSave: () => void;
+}) {
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+        Cancel
+      </Button>
+      {inUse ? (
+        <Button type="button" variant="destructive" onClick={onForceSave} disabled={loading}>
+          {loading ? 'Saving…' : 'Force Override'}
+        </Button>
+      ) : (
+        <Button type="submit" disabled={loading}>
+          {loading ? 'Saving…' : 'Save'}
+        </Button>
+      )}
+    </DialogFooter>
+  );
+}
+
+/** Debounced live parse preview shown below the content editor. */
+function ParsePreview({ content }: { content: string }) {
+  const [debounced, setDebounced] = useState(content);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    timerRef.current = setTimeout(() => setDebounced(content), 300);
+    return () => clearTimeout(timerRef.current);
+  }, [content]);
+
+  const parsed = useMemo(() => {
+    if (!debounced.trim()) {
+      return null;
+    }
+    return parseEnv(debounced);
+  }, [debounced]);
+
+  if (!parsed) {
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">Parsed Variables</Label>
+        <p className="text-xs text-muted-foreground">(empty)</p>
+      </div>
+    );
+  }
+
+  const hasWarnings = parsed.warnings.length > 0;
+
+  return (
+    <details className="space-y-1" open={hasWarnings}>
+      <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
+        Parsed Variables ({parsed.vars.length})
+        {hasWarnings && (
+          <span className="ml-2 text-amber-500">
+            {parsed.warnings.length} warning{parsed.warnings.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </summary>
+      <div className="mt-1.5 rounded-md border max-h-40 overflow-y-auto">
+        {parsed.warnings.map((w, i) => (
+          <p key={`w-${i}`} className="text-[11px] text-amber-600 dark:text-amber-400 px-2 py-0.5 font-mono">
+            ⚠️ {w}
+          </p>
+        ))}
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="text-left px-2 py-1 font-medium text-muted-foreground">Variable</th>
+              <th className="text-left px-2 py-1 font-medium text-muted-foreground">Value</th>
+              <th className="text-right px-2 py-1 font-medium text-muted-foreground w-12">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {parsed.vars.map(([key, value]) => {
+              const truncated = value.length > 40 ? value.slice(0, 40) + '…' : value;
+              return (
+                <tr key={key}>
+                  <td className="px-2 py-0.5 font-mono">{key}</td>
+                  <td className="px-2 py-0.5 font-mono text-muted-foreground">
+                    {truncated || <span className="italic text-muted-foreground">(empty)</span>}
+                  </td>
+                  <td className="px-2 py-0.5 text-right">{'✅'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+interface EnvContentEditorProps {
+  content: string;
+  onContentChange: (value: string) => void;
+  hideSecrets: boolean;
+  onToggleSecrets: () => void;
+  loading: boolean;
+}
+
+/** Textarea + secret-masking overlay with scroll sync. */
+function EnvContentEditor({
+  content,
+  onContentChange,
+  hideSecrets,
+  onToggleSecrets,
+  loading,
+}: EnvContentEditorProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor="env-content">Content</Label>
+        <MaskToggleButton hideSecrets={hideSecrets} onToggle={onToggleSecrets} />
+      </div>
+      <div className="relative">
+        <Textarea
+          id="env-content"
+          ref={textareaRef}
+          value={content}
+          onChange={(e) => onContentChange(e.target.value)}
+          onScroll={() => {
+            if (overlayRef.current && textareaRef.current) {
+              overlayRef.current.scrollTop = textareaRef.current.scrollTop;
+            }
+          }}
+          placeholder={PLACEHOLDER}
+          disabled={loading}
+          className="font-mono text-xs h-64"
+          spellCheck={false}
+        />
+        {hideSecrets && <MaskedContentOverlay ref={overlayRef} content={content} />}
+      </div>
+    </div>
+  );
+}
+
+/** Toggle button for the "hide secrets" masking mode. */
+function MaskToggleButton({
+  hideSecrets,
+  onToggle,
+}: {
+  hideSecrets: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      onClick={onToggle}
+    >
+      {hideSecrets ? (
+        <><EyeOff className="w-3.5 h-3.5 mr-1" /> Show Secrets</>
+      ) : (
+        <><Eye className="w-3.5 h-3.5 mr-1" /> Hide Secrets</>
+      )}
+    </Button>
+  );
+}
+
+/**
+ * Visual overlay that masks secret values. Display-only: the underlying
+ * textarea content is never modified. Sits above the textarea with
+ * `pointer-events-none` so clicks pass through to the editor below.
+ */
+const MaskedContentOverlay = forwardRef<HTMLDivElement, { content: string }>(
+  function MaskedContentOverlay({ content }, ref) {
+    return (
+      <div
+        ref={ref}
+        className="absolute inset-0 font-mono text-xs p-3 pointer-events-none whitespace-pre-wrap break-all overflow-auto bg-background"
+        style={{ padding: '0.75rem', lineHeight: '1.5' }}
+        aria-hidden="true"
+      >
+      {content.split('\n').map((line, i) => {
+        const eqIdx = line.indexOf('=');
+        if (eqIdx === -1) {
+          return <span key={i}>{line}{'\n'}</span>;
+        }
+        const key = line.slice(0, eqIdx).trim();
+        const isSecret = /(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL)/i.test(key);
+        if (isSecret) {
+          return (
+            <span key={i}>
+              {line.slice(0, eqIdx + 1)}
+              <span className="text-muted-foreground">********</span>
+              {'\n'}
+            </span>
+          );
+        }
+        return <span key={i}>{line}{'\n'}</span>;
+      })}
+      </div>
+    );
+  },
+);

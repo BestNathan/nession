@@ -149,6 +149,7 @@ export class RequestPlugin implements WebSocketPlugin {
     ref: EnvFileRef,
     content: string,
     overwrite: boolean,
+    force = false,
   ): Promise<EnvWriteResponse> {
     this.requireAuth();
     return this.core.request<EnvWriteResponse>('client.env.write', {
@@ -157,6 +158,7 @@ export class RequestPlugin implements WebSocketPlugin {
       agent_id: ref.agent_id,
       content,
       overwrite,
+      force,
     });
   }
 

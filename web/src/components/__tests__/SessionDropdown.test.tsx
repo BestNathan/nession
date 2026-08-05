@@ -30,6 +30,7 @@ function makeWsService() {
     killSession: vi.fn().mockResolvedValue({ success: true }),
     listSessions: vi.fn().mockResolvedValue([]),
     requestAttach: vi.fn().mockResolvedValue({}),
+    listEnvFiles: vi.fn().mockResolvedValue({ files: [] }),
     isConnected: vi.fn().mockReturnValue(true),
   } as unknown as WebSocketService;
 }

@@ -48,6 +48,7 @@ export function useAttachFlow(
       selectedAddress: choice.selectedUrl ?? undefined,
       relayUrl: choice.relayUrl,
       renderer: choice.renderer,
+      envRefs: choice.envRefs,
     });
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
   }, [navigate]);
