@@ -39,7 +39,7 @@ function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: Comma
 
   return (
     <div
-      className="flex items-center gap-1.5 py-0.5 px-1 rounded hover:bg-accent/50 group min-h-[40px]"
+      className="flex items-center gap-1 px-1 rounded hover:bg-accent/50 group"
       onClick={isTouch ? () => onRun(cmd) : undefined}
       role={isTouch ? 'button' : undefined}
       tabIndex={isTouch ? 0 : undefined}
@@ -195,7 +195,7 @@ export function QuickCommandsPanel({ sendText, disabled }: QuickCommandsPanelPro
   };
 
   return (
-    <div className="flex flex-col min-h-0 p-2 gap-1">
+    <div className="flex flex-col min-h-0 p-1.5 gap-0.5">
       <div className="flex-1 min-h-0 overflow-y-auto">
         {[...PRESETS, ...userCommands].map((cmd) => (
           <CommandRow

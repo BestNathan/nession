@@ -115,7 +115,7 @@ function HistorySection({ entries, inputValue, onSelect }: HistorySectionProps) 
           key={entry.id}
           type="button"
           onClick={() => onSelect(entry.command)}
-          className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent/50 flex items-center justify-between gap-2 min-h-[44px]"
+          className="w-full text-left text-xs px-2 py-1 rounded hover:bg-accent/50 flex items-center justify-between gap-2"
         >
           <span className="truncate font-mono">{entry.command}</span>
           <span className="text-[10px] text-muted-foreground flex-shrink-0">
