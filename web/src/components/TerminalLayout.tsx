@@ -1,16 +1,16 @@
+import { useState } from 'react';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { FileTabs } from './FileTabs';
 import { EnvPanel } from './env/EnvPanel';
-import { TerminalToolbar } from './TerminalToolbar';
+import { InputPanel } from './InputPanel';
+import { QuickCommandsPanel } from './QuickCommandsPanel';
+import { MobileTerminalLayout } from './MobileTerminalLayout';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import type { FileOps } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 interface TerminalLayoutProps {
   terminalElement: React.ReactNode;
-  bottomTab: BottomTab;
-  onBottomTabChange: (tab: BottomTab) => void;
-  sheetOpen: boolean;
-  onSheetToggle: (open: boolean) => void;
   sessionId: string;
   sessionName?: string;
   sendText: (text: string) => void;
@@ -24,15 +24,13 @@ interface TerminalLayoutProps {
 }
 
 /**
- * Shared layout for terminal view with optional file operations.
- * Eliminates duplication between fileOps and no-fileOps branches.
+ * Shared layout for terminal view. Mobile (≤1023px) delegates to
+ * MobileTerminalLayout with FloatingKeyBar + BottomSheet. Desktop uses
+ * the existing FileTabs + BottomBar pattern with shared InputPanel and
+ * QuickCommandsPanel.
  */
 export function TerminalLayout({
   terminalElement,
-  bottomTab,
-  onBottomTabChange,
-  sheetOpen,
-  onSheetToggle,
   sessionId,
   sessionName,
   sendText,
@@ -43,9 +41,37 @@ export function TerminalLayout({
   focusTerminal,
   onGetTerminalPwd,
 }: TerminalLayoutProps) {
+  const isMobile = useMediaQuery('(max-width: 1023px)');
+  // Desktop-only state — must be called unconditionally (rules-of-hooks)
+  const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Mobile path — completely separate layout with FloatingKeyBar + BottomSheet
+  if (isMobile) {
+    return (
+      <MobileTerminalLayout
+        terminalElement={terminalElement}
+        sessionId={sessionId}
+        sessionName={sessionName}
+        sendText={sendText}
+        toolbarDisabled={toolbarDisabled}
+        fileOps={fileOps}
+        onTerminalReveal={onTerminalReveal}
+        fontSizeManager={fontSizeManager}
+        focusTerminal={focusTerminal}
+        onGetTerminalPwd={onGetTerminalPwd}
+      />
+    );
+  }
+
+  // ── Desktop path (≥1024px) ──────────────────────────────────────────
+
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const commandsPanel = (
-    <TerminalToolbar sendText={sendText} disabled={toolbarDisabled} fontSizeManager={fontSizeManager} focusTerminal={focusTerminal} />
+    <div className="flex flex-col min-h-0">
+      <InputPanel sendText={sendText} disabled={toolbarDisabled} />
+      <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />
+    </div>
   );
 
   if (fileOps) {
@@ -54,9 +80,9 @@ export function TerminalLayout({
         fileOps={fileOps}
         onTerminalReveal={onTerminalReveal}
         bottomTab={bottomTab}
-        onBottomTabChange={onBottomTabChange}
+        onBottomTabChange={setBottomTab}
         sheetOpen={sheetOpen}
-        onSheetToggle={onSheetToggle}
+        onSheetToggle={setSheetOpen}
         envPanel={envPanel}
         commandsPanel={commandsPanel}
         sessionId={sessionId}
@@ -76,10 +102,10 @@ export function TerminalLayout({
       <div className="flex-1 min-h-0 flex flex-col">{terminalElement}</div>
       <BottomBar
         activeTab={bottomTab}
-        onTabChange={onBottomTabChange}
+        onTabChange={setBottomTab}
         showFilesTab={false}
         sheetOpen={sheetOpen}
-        onSheetToggle={onSheetToggle}
+        onSheetToggle={setSheetOpen}
         envPanel={envPanel}
         commandsPanel={commandsPanel}
       />
