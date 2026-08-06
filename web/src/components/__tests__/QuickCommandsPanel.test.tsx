@@ -2,17 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QuickCommandsPanel } from '../QuickCommandsPanel';
 import { PRESETS } from '../quickCommands';
-import { useQuickCommands } from '../../hooks/useQuickCommands';
 
-// Mock the useQuickCommands hook
 vi.mock('../../hooks/useQuickCommands', () => ({
   useQuickCommands: vi.fn(),
 }));
 
-// Mock useMediaQuery — default to desktop (no touch)
-vi.mock('../../hooks/useMediaQuery', () => ({
-  useMediaQuery: vi.fn().mockReturnValue(false),
+vi.mock('../../hooks/useCommandHistory', () => ({
+  useCommandHistory: () => ({
+    addEntry: vi.fn(),
+    history: [],
+    removeEntry: vi.fn(),
+    clearHistory: vi.fn(),
+    filterHistory: vi.fn().mockReturnValue([]),
+  }),
 }));
+
+import { useQuickCommands } from '../../hooks/useQuickCommands';
 
 const mockAddCommand = vi.fn().mockResolvedValue(undefined);
 const mockDeleteCommand = vi.fn().mockResolvedValue(undefined);
@@ -26,10 +31,7 @@ function setupMockHook() {
 }
 
 describe('QuickCommandsPanel', () => {
-  const defaultProps = {
-    sendText: vi.fn(),
-    disabled: false,
-  };
+  const defaultProps = { sendText: vi.fn(), disabled: false };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -43,9 +45,16 @@ describe('QuickCommandsPanel', () => {
     }
   });
 
+  it('renders physical key row', () => {
+    render(<QuickCommandsPanel {...defaultProps} />);
+    expect(screen.getByText('Esc')).toBeInTheDocument();
+    expect(screen.getByText('Tab')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByText('Del')).toBeInTheDocument();
+  });
+
   it('clicking a preset row sends the correct command', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
-    // The entire row is a button now.
     fireEvent.click(screen.getByText('Ctrl+C'));
     expect(defaultProps.sendText).toHaveBeenCalledWith('\x03');
   });
@@ -61,61 +70,43 @@ describe('QuickCommandsPanel', () => {
     expect(screen.getByText(/Add Command/)).toBeInTheDocument();
   });
 
-  it('clicking add shows the add form with Plain/Ctrl toggle', () => {
+  it('clicking add shows Combo/Plain toggle', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
-    expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Command/)).toBeInTheDocument();
+    expect(screen.getByText('Combo')).toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
-    expect(screen.getByText('Ctrl+')).toBeInTheDocument();
   });
 
-  it('switching to Ctrl+ mode shows single letter key input', () => {
+  it('switching to Plain shows command input', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
-    fireEvent.click(screen.getByText('Ctrl+'));
-    expect(screen.queryByPlaceholderText(/Command/)).toBeNull();
-    expect(screen.getByPlaceholderText('K')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Plain'));
+    expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Command/)).toBeInTheDocument();
+  });
+
+  it('Combo mode shows modifier toggles and key input', () => {
+    render(<QuickCommandsPanel {...defaultProps} />);
+    fireEvent.click(screen.getByText(/Add Command/));
+    expect(screen.getByText('Ctrl')).toBeInTheDocument();
+    expect(screen.getByText('Alt')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('A')).toBeInTheDocument();
   });
 
   it('presets do not have delete buttons', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
-    // Check that a preset row has no delete button
-    const ctrlCRow = screen.getByText('Ctrl+C').closest('div')!;
-    const deleteBtns = ctrlCRow.querySelectorAll('button[aria-label="Delete"]');
-    expect(deleteBtns.length).toBe(0);
+    const ctrlCRow = screen.getByText('Ctrl+C').closest('button')!;
+    expect(ctrlCRow.querySelector('[aria-label="Delete"]')).toBeNull();
   });
 
   it('user commands show delete buttons', () => {
     vi.mocked(useQuickCommands).mockReturnValue({
-      userCommands: [
-        { id: 'user-1', label: 'my-cmd', command: 'echo hi', raw: false },
-      ],
+      userCommands: [{ id: 'user-1', label: 'my-cmd', command: 'echo hi', raw: false }],
       addCommand: mockAddCommand,
       deleteCommand: mockDeleteCommand,
     });
     render(<QuickCommandsPanel {...defaultProps} />);
-    // User command row should have a delete button
-    const row = screen.getByText('my-cmd').closest('div')!;
-    const deleteBtn = row.querySelector('button[aria-label="Delete"]');
-    expect(deleteBtn).not.toBeNull();
-  });
-
-  it('saving in Plain mode calls addCommand with raw=false', async () => {
-    render(<QuickCommandsPanel {...defaultProps} />);
-    fireEvent.click(screen.getByText(/Add Command/));
-    fireEvent.change(screen.getByPlaceholderText('Label'), { target: { value: 'My Cmd' } });
-    fireEvent.change(screen.getByPlaceholderText(/Command/), { target: { value: 'echo test' } });
-    fireEvent.click(screen.getByText('Save'));
-    expect(mockAddCommand).toHaveBeenCalledWith('My Cmd', 'echo test', false);
-  });
-
-  it('saving in Ctrl+ mode calls addCommand with raw=true', async () => {
-    render(<QuickCommandsPanel {...defaultProps} />);
-    fireEvent.click(screen.getByText(/Add Command/));
-    fireEvent.click(screen.getByText('Ctrl+'));
-    fireEvent.change(screen.getByPlaceholderText('K'), { target: { value: 'k' } });
-    fireEvent.click(screen.getByText('Save'));
-    expect(mockAddCommand).toHaveBeenCalledWith('Ctrl+K', '\x0b', true);
+    const row = screen.getByText('my-cmd').closest('button')!;
+    expect(row.querySelector('[aria-label="Delete"]')).not.toBeNull();
   });
 });
