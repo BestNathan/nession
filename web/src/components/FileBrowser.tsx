@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Skeleton } from './ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -235,26 +236,17 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh} disabled={loading} title="Refresh">
-          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
-          <FilePlus className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
-          <FolderPlus className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => fileInputRef.current?.click()} title="Upload file">
-          <Upload className="h-3.5 w-3.5" />
-        </Button>
-        {onGetTerminalPwd && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
-            <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />
-          </Button>
-        )}
-        <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
-      </div>
+      <FileToolbar
+        loading={loading}
+        cwdLoading={cwdLoading}
+        onRefresh={handleRefresh}
+        onNewFile={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }}
+        onNewFolder={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }}
+        onUploadClick={() => fileInputRef.current?.click()}
+        showCwdButton={Boolean(onGetTerminalPwd)}
+        onNavigateToCwd={handleNavigateToCwd}
+      />
+      <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
 
       {/* New file/folder input */}
       {(newEntryForm.showNewFile || newEntryForm.showNewFolder) && (
@@ -429,5 +421,94 @@ function FileBrowserDialogs({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+interface FileToolbarProps {
+  loading: boolean;
+  cwdLoading: boolean;
+  onRefresh: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
+  onUploadClick: () => void;
+  showCwdButton: boolean;
+  onNavigateToCwd: () => void;
+}
+
+function FileToolbar({
+  loading,
+  cwdLoading,
+  onRefresh,
+  onNewFile,
+  onNewFolder,
+  onUploadClick,
+  showCwdButton,
+  onNavigateToCwd,
+}: FileToolbarProps) {
+  return (
+    <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onRefresh} disabled={loading} aria-label="Refresh" />
+          }
+        >
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Refresh</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewFile} aria-label="New file" />
+          }
+        >
+          <FilePlus className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>New file</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewFolder} aria-label="New folder" />
+          }
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>New folder</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onUploadClick} aria-label="Upload file" />
+          }
+        >
+          <Upload className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Upload file</p>
+        </TooltipContent>
+      </Tooltip>
+      {showCwdButton && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNavigateToCwd} disabled={cwdLoading} aria-label="Go to terminal directory" />
+            }
+          >
+            <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Go to terminal directory</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
   );
 }
