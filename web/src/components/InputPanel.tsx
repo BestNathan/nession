@@ -157,14 +157,34 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
     }
   };
 
+  /** Paste: read from clipboard and append to input. */
   const handlePasteButton = () => {
-    const ta = textareaRef.current;
-    if (!ta) { return; }
-    ta.focus();
-    // execCommand('paste') works on HTTP with a user gesture (button click).
-    // The textarea's onPaste handler reads e.clipboardData and appends the
-    // pasted text, so no need to parse the result here.
-    try { document.execCommand('paste'); } catch { /* unsupported */ }
+    // Navigator API works on HTTPS and localhost.
+    if (navigator.clipboard?.readText) {
+      navigator.clipboard.readText()
+        .then((text) => { if (text) { setInputValue((prev) => prev + text); } })
+        .catch(() => { pasteViaExecCommand(); });
+    } else {
+      pasteViaExecCommand();
+    }
+  };
+
+  /** Fallback for HTTP: create a contenteditable element, focus it,
+   *  trigger the native browser paste, then read the result. */
+  const pasteViaExecCommand = () => {
+    const el = document.createElement('div');
+    el.contentEditable = 'true';
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.focus();
+    const worked = document.execCommand('paste');
+    if (worked) {
+      const text = el.innerText;
+      if (text) { setInputValue((prev) => prev + text); }
+    }
+    document.body.removeChild(el);
   };
 
   // Handle native paste events on the textarea (Cmd+V / long-press→Paste).
