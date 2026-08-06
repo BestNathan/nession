@@ -59,20 +59,18 @@ export function SidePanel({
         className="relative flex-shrink-0 h-full"
         style={{ '--sp-width': `${defaultWidth}px` } as React.CSSProperties}
       >
-        {/* Panel content — fixed overlay below lg, inline (push) at lg+.
-            Width below lg comes from defaultWidth; at lg+ the parent
-            ResizablePanelGroup sizes this panel. */}
-        {isOpen && (
-          <div
-            className={cn(
-              'border-r bg-muted/30 overflow-hidden',
-              'fixed inset-y-0 left-0 z-30 lg:static lg:z-auto lg:h-full',
-              'w-[var(--sp-width)] lg:w-auto',
-            )}
-          >
+        {/* Panel content — always rendered so the parent ResizablePanel
+            doesn't collapse when closed. Hidden via CSS when isOpen=false. */}
+        <div
+          className={cn(
+            'border-r bg-muted/30 overflow-hidden',
+            'fixed inset-y-0 left-0 z-30 lg:static lg:z-auto lg:h-full',
+            'w-[var(--sp-width)] lg:w-auto',
+            !isOpen && 'hidden',
+          )}
+        >
             <div className="h-full flex flex-col">{children}</div>
           </div>
-        )}
 
         {/* Toggle button */}
         <button
