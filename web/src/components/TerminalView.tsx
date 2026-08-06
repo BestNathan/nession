@@ -236,7 +236,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
           fileOps={fileOps}
           onTerminalReveal={() => terminalHandle?.refit()}
           fontSizeManager={terminalHandle?.fontSizeManager ?? null}
-          focusTerminal={() => terminalHandle?.focusTerminal()}
           onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
         />
       </div>

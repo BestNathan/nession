@@ -19,7 +19,6 @@ interface MobileTerminalLayoutProps {
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
-  focusTerminal?: () => void;
   onGetTerminalPwd?: () => Promise<string>;
 }
 
@@ -30,7 +29,6 @@ export function MobileTerminalLayout({
   toolbarDisabled,
   fileOps,
   fontSizeManager,
-  focusTerminal,
   onGetTerminalPwd,
 }: MobileTerminalLayoutProps) {
   const { isKeyboardOpen } = useVisualViewport();
@@ -84,7 +82,6 @@ export function MobileTerminalLayout({
         {/* Floating key bar overlay */}
         <FloatingKeyBar
           sendText={sendText}
-          focusTerminal={focusTerminal ?? (() => {})}
           visible={keyBar.visible}
           dismissed={keyBar.dismissed}
           onShow={keyBar.show}

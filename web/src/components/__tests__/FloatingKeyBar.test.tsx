@@ -6,7 +6,6 @@ import { KEY_DEFINITIONS } from '../floatingKeyBarKeys';
 describe('FloatingKeyBar', () => {
   const defaultProps = {
     sendText: vi.fn(),
-    focusTerminal: vi.fn(),
     visible: true,
     dismissed: false,
     onShow: vi.fn(),
@@ -48,11 +47,10 @@ describe('FloatingKeyBar', () => {
     expect(defaultProps.onRestore).toHaveBeenCalledOnce();
   });
 
-  it('clicking a key sends the escape sequence and refocuses terminal', () => {
+  it('clicking a key sends the escape sequence', () => {
     render(<FloatingKeyBar {...defaultProps} />);
     fireEvent.click(screen.getByText('↑'));
     expect(defaultProps.sendText).toHaveBeenCalledWith('\x1b[A');
-    expect(defaultProps.focusTerminal).toHaveBeenCalledOnce();
   });
 
   it('clicking Tab sends \\t', () => {

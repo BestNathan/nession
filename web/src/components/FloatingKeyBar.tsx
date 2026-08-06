@@ -5,7 +5,6 @@ import { KEY_DEFINITIONS } from './floatingKeyBarKeys';
 
 interface FloatingKeyBarProps {
   sendText: (text: string) => void;
-  focusTerminal: () => void;
   visible: boolean;
   dismissed: boolean;
   onShow: () => void;
@@ -16,7 +15,6 @@ interface FloatingKeyBarProps {
 
 export function FloatingKeyBar({
   sendText,
-  focusTerminal,
   visible,
   dismissed,
   onActivity,
@@ -25,7 +23,9 @@ export function FloatingKeyBar({
 }: FloatingKeyBarProps) {
   const handleKey = (command: string) => {
     sendText(command);
-    focusTerminal();
+    // Do NOT call focusTerminal() — on mobile it triggers the soft keyboard
+    // because xterm.focus() targets a hidden textarea. The escape sequence is
+    // sent directly via WebSocket; no DOM focus needed.
     onActivity();
   };
 

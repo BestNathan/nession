@@ -66,7 +66,7 @@ function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: Comma
         <Button
           variant="ghost"
           size="sm"
-          className={isTouch ? 'h-11 w-11 p-0 flex-shrink-0' : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive'}
+          className={isTouch ? 'h-6 w-6 p-0 flex-shrink-0' : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive'}
           disabled={disabled}
           onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
           aria-label="Delete"

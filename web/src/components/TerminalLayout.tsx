@@ -18,7 +18,6 @@ interface TerminalLayoutProps {
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
-  focusTerminal?: () => void;
   /** Called to get the terminal's current working directory. */
   onGetTerminalPwd?: () => Promise<string>;
 }
@@ -38,7 +37,6 @@ export function TerminalLayout({
   fileOps,
   onTerminalReveal,
   fontSizeManager,
-  focusTerminal,
   onGetTerminalPwd,
 }: TerminalLayoutProps) {
   const isMobile = useMediaQuery('(max-width: 1023px)');
@@ -58,7 +56,6 @@ export function TerminalLayout({
         fileOps={fileOps}
         onTerminalReveal={onTerminalReveal}
         fontSizeManager={fontSizeManager}
-        focusTerminal={focusTerminal}
         onGetTerminalPwd={onGetTerminalPwd}
       />
     );

@@ -157,11 +157,29 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
   };
 
   const handlePaste = async () => {
+    // Try Clipboard API first (requires HTTPS or localhost).
     try {
       const text = await navigator.clipboard.readText();
       setInputValue((prev) => prev + text);
+      return;
     } catch {
-      // clipboard unavailable
+      // Fallback for HTTP: create a hidden textarea, focus to trigger
+      // system paste dialog, then read the pasted value.
+    }
+    const helper = document.createElement('textarea');
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.focus();
+    const pasted = await new Promise<string>((resolve) => {
+      helper.addEventListener('paste', () => {
+        setTimeout(() => resolve(helper.value), 0);
+      }, { once: true });
+      setTimeout(() => resolve(''), 500);
+    });
+    document.body.removeChild(helper);
+    if (pasted) {
+      setInputValue((prev) => prev + pasted);
     }
   };
 
