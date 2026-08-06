@@ -18,19 +18,19 @@ describe('BottomSheet', () => {
 
   it('renders tab bar with Input, Commands, Env tabs', () => {
     render(<BottomSheet {...defaultProps} />);
-    expect(screen.getByRole('button', { name: /Input/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Commands/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Env/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Input/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Commands/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Env/ })).toBeInTheDocument();
   });
 
   it('renders Files tab when showFilesTab is true', () => {
     render(<BottomSheet {...defaultProps} showFilesTab={true} />);
-    expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Files/ })).toBeInTheDocument();
   });
 
   it('does not render Files tab when showFilesTab is false', () => {
     render(<BottomSheet {...defaultProps} showFilesTab={false} />);
-    expect(screen.queryByRole('button', { name: /Files/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Files/ })).toBeNull();
   });
 
   it('hides content area when collapsed', () => {
@@ -46,7 +46,7 @@ describe('BottomSheet', () => {
 
   it('calls onTabChange when clicking a tab', () => {
     render(<BottomSheet {...defaultProps} />);
-    fireEvent.click(screen.getByRole('button', { name: /Commands/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Commands/ }));
     expect(defaultProps.onTabChange).toHaveBeenCalledWith('commands');
   });
 

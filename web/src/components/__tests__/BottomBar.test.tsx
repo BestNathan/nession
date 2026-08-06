@@ -22,15 +22,15 @@ function setup(overrides: Partial<React.ComponentProps<typeof BottomBar>> = {}) 
 describe('BottomBar', () => {
   it('shows Input, Commands and Env tabs but not Files when showFilesTab is false', () => {
     setup({ showFilesTab: false });
-    expect(screen.getByRole('button', { name: /Input/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Commands/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Env/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Files/ })).toBeNull();
+    expect(screen.getByRole('tab', { name: /Input/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Commands/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Env/ })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Files/ })).toBeNull();
   });
 
   it('shows the Files tab when showFilesTab is true', () => {
     setup({ showFilesTab: true });
-    expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Files/ })).toBeInTheDocument();
   });
 
   it('renders the input panel when activeTab is input', () => {
@@ -47,13 +47,13 @@ describe('BottomBar', () => {
 
   it('selecting the Files tab activates it and opens the sheet', () => {
     const { props } = setup({ showFilesTab: true, activeTab: 'commands' });
-    fireEvent.click(screen.getByRole('button', { name: /Files/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Files/ }));
     expect(props.onTabChange).toHaveBeenCalledWith('files');
     expect(props.onSheetToggle).toHaveBeenCalledWith(true);
   });
 
   it('does not render Input tab when inputPanel is not provided', () => {
     setup({ inputPanel: undefined });
-    expect(screen.queryByRole('button', { name: /Input/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Input/ })).toBeNull();
   });
 });
