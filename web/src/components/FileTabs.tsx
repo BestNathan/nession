@@ -28,6 +28,7 @@ interface FileTabsProps {
   onSheetToggle: (open: boolean) => void;
   envPanel: React.ReactNode;
   commandsPanel: React.ReactNode;
+  inputPanel?: React.ReactNode;
   sessionId?: string;
   sessionName?: string;
   /** Called to get the terminal's current working directory. */
@@ -187,7 +188,7 @@ function useFileTabs(onTerminalReveal?: () => void) {
 
 export function FileTabs({
   fileOps, terminalElement, onTerminalReveal,
-  bottomTab, onBottomTabChange, sheetOpen, onSheetToggle, envPanel, commandsPanel,
+  bottomTab, onBottomTabChange, sheetOpen, onSheetToggle, envPanel, commandsPanel, inputPanel,
   sessionId, sessionName, onGetTerminalPwd,
 }: FileTabsProps) {
   const {
@@ -247,6 +248,7 @@ export function FileTabs({
           sheetOpen={sheetOpen}
           onSheetToggle={onSheetToggle}
           envPanel={envPanel}
+          inputPanel={inputPanel}
           commandsPanel={commandsPanel}
           filesPanel={
             <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />

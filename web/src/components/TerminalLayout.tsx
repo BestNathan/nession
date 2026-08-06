@@ -41,7 +41,7 @@ export function TerminalLayout({
 }: TerminalLayoutProps) {
   const isMobile = useMediaQuery('(max-width: 1023px)');
   // Desktop-only state — must be called unconditionally (rules-of-hooks)
-  const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
+  const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Mobile path — completely separate layout with FloatingKeyBar + BottomSheet
@@ -64,12 +64,8 @@ export function TerminalLayout({
   // ── Desktop path (≥1024px) ──────────────────────────────────────────
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
-  const commandsPanel = (
-    <div className="flex flex-col min-h-0">
-      <InputPanel sendText={sendText} disabled={toolbarDisabled} />
-      <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />
-    </div>
-  );
+  const inputPanel = <InputPanel sendText={sendText} disabled={toolbarDisabled} />;
+  const commandsPanel = <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />;
 
   if (fileOps) {
     return (
@@ -81,6 +77,7 @@ export function TerminalLayout({
         sheetOpen={sheetOpen}
         onSheetToggle={setSheetOpen}
         envPanel={envPanel}
+        inputPanel={inputPanel}
         commandsPanel={commandsPanel}
         sessionId={sessionId}
         sessionName={sessionName}
@@ -104,6 +101,7 @@ export function TerminalLayout({
         sheetOpen={sheetOpen}
         onSheetToggle={setSheetOpen}
         envPanel={envPanel}
+        inputPanel={inputPanel}
         commandsPanel={commandsPanel}
       />
     </>
