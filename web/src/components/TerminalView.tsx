@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
-import type { BottomTab } from './BottomBar';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
@@ -107,8 +106,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     setTerminalHandle(handle);
   }, []);
   const [toolbarDisabled, setToolbarDisabled] = useState(false);
-  const [bottomTab, setBottomTab] = useState<BottomTab>('commands');
-  const [sheetOpen, setSheetOpen] = useState(false);
   const {
     sessions,
     loading: sessionsLoading,
@@ -232,10 +229,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
       <div className="flex-1 min-h-0 flex flex-col">
         <TerminalLayout
           terminalElement={terminalElement}
-          bottomTab={bottomTab}
-          onBottomTabChange={setBottomTab}
-          sheetOpen={sheetOpen}
-          onSheetToggle={setSheetOpen}
           sessionId={sessionId}
           sessionName={sessionName}
           sendText={(text) => terminalHandle?.sendText(text)}
@@ -243,7 +236,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
           fileOps={fileOps}
           onTerminalReveal={() => terminalHandle?.refit()}
           fontSizeManager={terminalHandle?.fontSizeManager ?? null}
-          focusTerminal={() => terminalHandle?.focusTerminal()}
           onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
         />
       </div>

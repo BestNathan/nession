@@ -235,21 +235,21 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={loading} title="Refresh">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh} disabled={loading} title="Refresh">
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }} title="New file">
           <FilePlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }} title="New folder">
           <FolderPlus className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fileInputRef.current?.click()} title="Upload file">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => fileInputRef.current?.click()} title="Upload file">
           <Upload className="h-3.5 w-3.5" />
         </Button>
         {onGetTerminalPwd && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNavigateToCwd} disabled={cwdLoading} title="Go to terminal directory">
             <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />
           </Button>
         )}
@@ -298,7 +298,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       {/* Column headers */}
       <div className="flex items-center px-2 py-0.5 text-[10px] text-muted-foreground border-b select-none">
         {(['name', 'size', 'modified'] as const).map((key) => (
-          <button key={key} className={key === 'name' ? 'flex-1 text-left' : 'w-16 text-right'} onClick={() => handleSort(key)}>
+          <button key={key} className={key === 'name' ? 'flex-1 text-left min-w-0' : 'w-[72px] text-right flex-shrink-0'} onClick={() => handleSort(key)}>
             {key === 'name' ? 'Name' : key === 'size' ? 'Size' : 'Mod'}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
           </button>))}
       </div>
@@ -349,9 +349,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   ) : (
                     <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
                   )}
-                  <span className="flex-1 truncate">{entry.name}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-                  <span className="w-16 text-right text-muted-foreground flex-shrink-0">{formatRelativeTimeSeconds(entry.modified)}</span>
+                  <span className="flex-1 truncate min-w-0">{entry.name}</span>
+                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{entry.is_dir ? '' : formatSize(entry.size)}</span>
+                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>

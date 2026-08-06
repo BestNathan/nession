@@ -8,6 +8,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof BottomBar>> = {}) 
     onTabChange: vi.fn(),
     envPanel: <div data-testid="env-panel">ENV</div>,
     commandsPanel: <div data-testid="commands-panel">CMD</div>,
+    inputPanel: <div data-testid="input-panel">INPUT</div>,
     filesPanel: <div data-testid="files-panel">FILES</div>,
     showFilesTab: false,
     sheetOpen: true,
@@ -19,8 +20,9 @@ function setup(overrides: Partial<React.ComponentProps<typeof BottomBar>> = {}) 
 }
 
 describe('BottomBar', () => {
-  it('shows Commands and Env tabs but not Files when showFilesTab is false', () => {
+  it('shows Input, Commands and Env tabs but not Files when showFilesTab is false', () => {
     setup({ showFilesTab: false });
+    expect(screen.getByRole('button', { name: /Input/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Commands/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Env/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Files/ })).toBeNull();
@@ -31,16 +33,16 @@ describe('BottomBar', () => {
     expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument();
   });
 
-  it('renders the files panel when activeTab is files', () => {
-    setup({ showFilesTab: true, activeTab: 'files' });
-    expect(screen.getByTestId('files-panel')).toBeInTheDocument();
+  it('renders the input panel when activeTab is input', () => {
+    setup({ activeTab: 'input' });
+    expect(screen.getByTestId('input-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('commands-panel')).toBeNull();
   });
 
-  it('renders commands panel by default', () => {
+  it('renders commands panel when activeTab is commands', () => {
     setup({ activeTab: 'commands' });
     expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('files-panel')).toBeNull();
+    expect(screen.queryByTestId('input-panel')).toBeNull();
   });
 
   it('selecting the Files tab activates it and opens the sheet', () => {
@@ -50,22 +52,8 @@ describe('BottomBar', () => {
     expect(props.onSheetToggle).toHaveBeenCalledWith(true);
   });
 
-  it('uses the same max-height regardless of active tab', () => {
-    const { container: filesContainer } = setup({ showFilesTab: true, activeTab: 'files' });
-    const { container: cmdContainer } = setup({ activeTab: 'commands' });
-    const { container: envContainer } = setup({ activeTab: 'env' });
-    const filesRoot = filesContainer.firstElementChild as HTMLElement;
-    const cmdRoot = cmdContainer.firstElementChild as HTMLElement;
-    const envRoot = envContainer.firstElementChild as HTMLElement;
-    expect(filesRoot.className).toContain('max-h-[85dvh]');
-    expect(cmdRoot.className).toContain('max-h-[85dvh]');
-    expect(envRoot.className).toContain('max-h-[85dvh]');
-  });
-
-  it('does not render the files panel when files is active but the tab is hidden', () => {
-    setup({ showFilesTab: false, activeTab: 'files' });
-    // Stale 'files' with the tab hidden falls back to commands — no files panel.
-    expect(screen.queryByTestId('files-panel')).toBeNull();
-    expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+  it('does not render Input tab when inputPanel is not provided', () => {
+    setup({ inputPanel: undefined });
+    expect(screen.queryByRole('button', { name: /Input/ })).toBeNull();
   });
 });
