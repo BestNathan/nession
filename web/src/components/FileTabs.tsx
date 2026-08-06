@@ -8,6 +8,7 @@ import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { BottomBar, type BottomTab } from './BottomBar';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable';
 import { renderSlot } from '@/extensions/registry';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
@@ -206,55 +207,84 @@ export function FileTabs({
     onSheetToggle(false);
   }, [handleFileClick, onSheetToggle]);
 
-  return (
-    <div className="flex-1 min-h-0 flex flex-row">
-      {!isMobile && (
-        <SidePanel>
-          <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
-        </SidePanel>
-      )}
+  // Shared main-content column (TabBar + terminal/file viewer + BottomBar).
+  // Rendered inside the right ResizablePanel on desktop, and directly on mobile
+  // where there is no side panel.
+  const tabBar = (
+    <TabBar
+      openFiles={openFiles}
+      activeTabId={activeTabId}
+      dirtyFiles={dirtyFiles}
+      showTerminal={showTerminal}
+      terminalHeaderExtensions={terminalHeaderExtensions}
+      onSelect={setActiveTabId}
+      onClose={handleCloseFile}
+    />
+  );
 
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Tab bar */}
-        <TabBar
-          openFiles={openFiles}
-          activeTabId={activeTabId}
-          dirtyFiles={dirtyFiles}
-          showTerminal={showTerminal}
-          terminalHeaderExtensions={terminalHeaderExtensions}
-          onSelect={setActiveTabId}
-          onClose={handleCloseFile}
-        />
-
-        {/* Content */}
-        <div className="flex-1 min-h-0 relative">
-          {/* Terminal stays mounted at all times — hidden (not unmounted) when a
-              file tab is active — so its xterm instance and scrollback survive
-              tab switches. `hidden` sets display:none; refit happens on reveal. */}
-          <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
-            {terminalElement}
-          </div>
-          {!showTerminal && activeFile ? (
-            <div className="absolute inset-0">
-              <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
-            </div>
-          ) : null}
-        </div>
-
-        <BottomBar
-          activeTab={bottomTab}
-          onTabChange={onBottomTabChange}
-          showFilesTab={isMobile}
-          sheetOpen={sheetOpen}
-          onSheetToggle={onSheetToggle}
-          envPanel={envPanel}
-          inputPanel={inputPanel}
-          commandsPanel={commandsPanel}
-          filesPanel={
-            <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
-          }
-        />
+  const content = (
+    <div className="flex-1 min-h-0 relative">
+      {/* Terminal stays mounted at all times — hidden (not unmounted) when a
+          file tab is active — so its xterm instance and scrollback survive
+          tab switches. `hidden` sets display:none; refit happens on reveal. */}
+      <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
+        {terminalElement}
       </div>
+      {!showTerminal && activeFile ? (
+        <div className="absolute inset-0">
+          <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const bottomBar = (
+    <BottomBar
+      activeTab={bottomTab}
+      onTabChange={onBottomTabChange}
+      showFilesTab={isMobile}
+      sheetOpen={sheetOpen}
+      onSheetToggle={onSheetToggle}
+      envPanel={envPanel}
+      inputPanel={inputPanel}
+      commandsPanel={commandsPanel}
+      filesPanel={
+        <FileBrowser fileOps={fileOps} onFileClick={handleFileClickMobile} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
+      }
+    />
+  );
+
+  return (
+    <div className="flex-1 min-h-0">
+      {!isMobile ? (
+        /* Desktop: ResizablePanelGroup spans SidePanel + main content so the
+           user can drag the handle to resize the file browser column. */
+        <ResizablePanelGroup orientation="horizontal" className="gap-0">
+          <ResizablePanel defaultSize="20" minSize="15" maxSize="35">
+            <SidePanel>
+              <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
+            </SidePanel>
+          </ResizablePanel>
+
+          <ResizableHandle className="!w-1 hover:bg-primary/50 transition-colors" />
+
+          <ResizablePanel defaultSize="80" minSize="65">
+            <div className="h-full min-w-0 flex flex-col">
+              {tabBar}
+              {content}
+              {bottomBar}
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        /* Mobile: no side panel — the file browser lives in BottomBar's Files
+           tab. Keep the same main-content column. */
+        <div className="h-full min-w-0 flex flex-col">
+          {tabBar}
+          {content}
+          {bottomBar}
+        </div>
+      )}
     </div>
   );
 }
