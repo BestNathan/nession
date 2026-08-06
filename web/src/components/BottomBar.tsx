@@ -1,6 +1,6 @@
 import { Keyboard, TerminalIcon, Package, FolderTree, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 export type BottomTab = 'input' | 'commands' | 'env' | 'files';
 
@@ -54,41 +54,36 @@ export function BottomBar({
   ];
 
   return (
-    <div className={cn('border-t border-border/50 flex-shrink-0 flex flex-col pb-[env(safe-area-inset-bottom)]', maxH)}>
-      <Tabs value={effectiveTab} onValueChange={(v) => selectTab(v as BottomTab)} className="flex items-center border-b flex-shrink-0 flex-row">
-        <TabsList
-          variant="line"
-          className="h-auto gap-0 rounded-none border-b-0 bg-transparent p-0"
-        >
+    <Tabs
+      value={effectiveTab}
+      onValueChange={(v) => selectTab(v as BottomTab)}
+      className={cn('flex-shrink-0 flex flex-col gap-0', maxH)}
+    >
+      <div className="flex items-center gap-2 px-2 pt-1">
+        <TabsList className="text-xs">
           {tabs.map(({ id, icon, label, show }) => {
             if (!show) {
               return null;
             }
             const Icon = icon;
             return (
-              <TabsTrigger
-                key={id}
-                value={id}
-                className="flex items-center gap-1 px-3 py-1 text-xs h-auto rounded-none
-                  border-b-2 border-transparent
-                  data-active:border-primary data-active:text-foreground data-active:shadow-none
-                  text-muted-foreground hover:text-foreground"
-              >
-                <Icon className="w-3 h-3" /> {label}
+              <TabsTrigger key={id} value={id} className="gap-1 text-xs">
+                <Icon className="h-3 w-3" /> {label}
               </TabsTrigger>
             );
           })}
         </TabsList>
-        {/* Mobile-only sheet toggle: expand when collapsed, collapse when open. */}
+        {/* Mobile-only sheet toggle */}
         <button
           type="button"
           onClick={() => onSheetToggle(!sheetOpen)}
-          className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
+          className="ml-auto p-1 text-muted-foreground hover:text-foreground sm:hidden"
           title={sheetOpen ? 'Collapse' : 'Expand'}
         >
-          {sheetOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          {sheetOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
         </button>
-      </Tabs>
+      </div>
+
       {/* Content: always shown at sm+; on mobile only when the sheet is open */}
       <div
         className={cn(
@@ -96,8 +91,11 @@ export function BottomBar({
           sheetOpen ? 'block' : 'hidden sm:block',
         )}
       >
-        {effectiveTab === 'input' ? inputPanel : effectiveTab === 'files' ? filesPanel : effectiveTab === 'env' ? envPanel : commandsPanel}
+        <TabsContent value="input" className="mt-0 h-full">{inputPanel}</TabsContent>
+        <TabsContent value="commands" className="mt-0 h-full">{commandsPanel}</TabsContent>
+        <TabsContent value="env" className="mt-0 h-full">{envPanel}</TabsContent>
+        {showFilesTab && <TabsContent value="files" className="mt-0 h-full">{filesPanel}</TabsContent>}
       </div>
-    </div>
+    </Tabs>
   );
 }
