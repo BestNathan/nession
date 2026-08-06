@@ -6,6 +6,7 @@ import { SearchBar } from './SearchBar';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { RefreshButton } from './ui/RefreshButton';
 import { Button } from './ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useWebSocket } from '../hooks/useWebSocket';
 import pkg from '../../package.json';
 
@@ -139,9 +140,18 @@ export function DashboardHeader({
           <ServerInfoInline refreshKey={serverRefreshKey ?? 0} />
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7">
-            <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7" />
+              }
+            >
+              <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Environment Files</p>
+            </TooltipContent>
+          </Tooltip>
           <RefreshButton onClick={fetchSessions} loading={loadingAgents} variant="default" />
         </div>
       </header>
@@ -156,9 +166,18 @@ export function DashboardHeader({
       {error && (
         <div className="px-6 py-2 bg-destructive/10 text-destructive text-sm flex items-center gap-2">
           <span>{error}</span>
-          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={clearError}>
-            <X className="h-3 w-3" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={clearError} />
+              }
+            >
+              <X className="h-3 w-3" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Dismiss</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       )}
     </>
