@@ -66,7 +66,7 @@ export function SidePanel({
             'border-r bg-muted/30 overflow-hidden',
             'fixed inset-y-0 left-0 z-30 lg:static lg:z-auto lg:h-full',
             'w-[var(--sp-width)] lg:w-auto',
-            !isOpen && 'hidden',
+            !isOpen && 'lg:!block hidden',
           )}
         >
             <div className="h-full flex flex-col">{children}</div>
@@ -76,7 +76,7 @@ export function SidePanel({
         <button
           onClick={toggle}
           className={cn(
-            'fixed lg:absolute top-1/2 -translate-y-1/2 h-16 w-5 flex items-center justify-center',
+            'fixed lg:hidden top-1/2 -translate-y-1/2 h-16 w-5 flex items-center justify-center',
             'border shadow-sm cursor-pointer transition-all z-40',
             isOpen
               ? 'bg-muted rounded-r-md hover:bg-accent lg:-right-5 left-[var(--sp-width)] lg:left-auto'

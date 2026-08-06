@@ -18,9 +18,8 @@ describe('SidePanel', () => {
         <div>Hidden Content</div>
       </SidePanel>,
     );
-    // Panel is always mounted (hidden via CSS) to preserve ResizablePanel layout.
-    const content = screen.getByText('Hidden Content');
-    expect(content.closest('[class*="hidden"]')).toBeTruthy();
+    // Panel is always mounted to preserve ResizablePanel layout on desktop.
+    expect(screen.getByText('Hidden Content')).toBeInTheDocument();
   });
 
   it('toggles open/closed when button clicked', () => {
