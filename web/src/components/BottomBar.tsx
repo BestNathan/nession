@@ -38,7 +38,7 @@ export function BottomBar({
   // Stale fallback
   const effectiveTab = activeTab === 'files' && !showFilesTab ? 'commands' : activeTab;
 
-  const maxH = 'max-h-[85dvh] sm:max-h-[40dvh]';
+  const maxH = 'max-h-[85dvh] sm:h-[30vh]';
 
   const tabs: Array<{
     id: BottomTab;
