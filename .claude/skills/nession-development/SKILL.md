@@ -139,6 +139,24 @@ cd web && npx tsc --noEmit     # TypeScript check
 cd web && npm run lint         # ESLint
 ```
 
+### shadcn/ui Component Conventions
+
+**Before building any new UI pattern, check if shadcn has a primitive for it.**
+
+**📋 Full inventory:** [`references/shadcn-components.md`](references/shadcn-components.md) — installed primitives, custom-component-to-shadcn mapping, priority queue for uninstalled components, golden rules. Always consult this before hand-rolling a layout pattern.
+
+**Golden rules (condensed):**
+1. **Check the inventory first** — shadcn likely has a primitive for tabs, tooltips, resizable panels, command palettes, etc.
+2. **Install via CLI only** — `npx shadcn@latest add <name> --yes`, never hand-write shadcn components
+3. **Custom wrappers are the intended pattern** — thin domain wrappers over shadcn primitives (e.g., `ConnectionStatusBadge` wraps `Badge`)
+4. **Destructive confirms → AlertDialog** (not Dialog)
+5. **Hand-rolled tab strips → use shadcn Tabs** (duplicated in 5 sites)
+6. **Raw resize listeners → use shadcn Resizable** (currently in SidePanel)
+
+**Installed (18 primitives):** AlertDialog, Badge, Button, Card, Checkbox, Collapsible, ContextMenu, Dialog, DropdownMenu, Input, Label, ScrollArea, Select, Separator, Sheet, Skeleton, Sonner, Textarea
+
+**High-priority to install:** Tabs, Resizable, Tooltip, Command
+
 ## 3. Tests
 
 Rust unit tests go in `#[cfg(test)]` modules inside `src/` or standalone files under `crates/*/tests/`. All async, using `#[tokio::test]`. Web uses `tsc --noEmit` + `eslint` as quality gates (no test runner).

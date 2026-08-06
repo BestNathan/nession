@@ -44,7 +44,7 @@ nession/
 │       ├── services/
 │       │   └── websocket.ts  # WebSocketService singleton (connection, auth, events)
 │       └── components/
-│           ├── ui/           # shadcn/ui primitives (13 components, auto-generated)
+│           ├── ui/           # shadcn/ui primitives (18 components + 2 custom wrappers, auto-generated)
 │           ├── LoginPage.tsx         # Connection form (Card + Input + Button + Badge)
 │           ├── Dashboard.tsx         # Main view: agent cards grid + session list
 │           ├── AgentCard.tsx         # Agent status card (Badge + relative time)
@@ -113,10 +113,16 @@ tmux sessions (per-node)
 - **Web UI theming:** shadcn/ui default dark theme (Zinc/neutral palette). Terminal keeps Catppuccin Mocha independent of UI theme.
 - **WebSocket singleton:** `WebSocketService` is a global singleton for the browser session — request/response correlation, event pub/sub, auto-reconnect.
 - **CSS:** Tailwind v4 via `@tailwindcss/vite`. Only one CSS file (`index.css`). All component styles are Tailwind utilities.
-- **shadcn components:** Individual primitives in `components/ui/`, added via CLI, version-controlled.
+- **shadcn components:** Individual primitives in `components/ui/`, added via CLI, version-controlled. See the shadcn component mapping below for what's installed and what to use for new features.
 - **ESLint:** `eslint-disable` comments are forbidden. All lint violations must be fixed properly (type narrowing, destructuring deps, extracting non-component exports). `--max-warnings 0` is enforced.
 - **Event handlers:** Never pass a function with optional parameters directly to `onClick`/`onChange` — React events will be passed as the first argument and may flow into `JSON.stringify`, causing circular-reference errors. Always wrap: `onClick={() => fn()}`.
 - **React effect ordering:** Child component effects run before parent effects on first mount. Hooks managing async connection state must initialize to the optimistic in-progress value (`'connecting'`), not `'disconnected'` — otherwise child effects that depend on the connection will reject before the parent has a chance to start it. Also, under StrictMode (dev), effects run mount→cleanup→mount; don't reject in-flight promise waiters in cleanup — let them survive on a ref and settle on the second mount.
+
+### shadcn/ui Component Map
+
+Full component inventory and custom-component-to-primitive mapping: **`.claude/skills/nession-development/references/shadcn-components.md`**
+
+Summary: 18 installed primitives + 2 custom wrappers. No component fully duplicates an installed shadcn primitive. Three sites would benefit from installing new primitives (Tabs, Resizable, Tooltip). See the reference doc for the complete audit, priority queue, and golden rules.
 
 ---
 

@@ -234,6 +234,12 @@ rtk proxy not installed. Without it, use raw commands directly (e.g., `git statu
 ### shadcn `cn` import fails
 Tailwind/shadcn not initialized. Run from `web/`: `npx shadcn@latest init` then `npm install`.
 
+### Adding a shadcn component
+```bash
+cd web && npx shadcn@latest add <component-name> --yes
+```
+Components land in `web/src/components/ui/` and are committed to git. See `CLAUDE.md` → "shadcn/ui Component Map" for the full inventory of installed and recommended components.
+
 ### ESLint fails with "Cannot find package 'typescript-eslint'"
 The ESLint flat config (`eslint.config.js`) requires the `typescript-eslint` umbrella package. Run:
 ```bash
