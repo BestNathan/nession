@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { X, Copy, ClipboardPaste, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useCommandHistory, type HistoryEntry } from '../hooks/useCommandHistory';
 
 interface InputPanelProps {
@@ -52,50 +53,83 @@ function ActionButtons({
 }: ActionButtonsProps) {
   return (
     <div className="flex items-center gap-1 px-2 pt-1.5 pb-0.5 flex-shrink-0">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        disabled={disabled || !inputValue}
-        onClick={onClear}
-        aria-label="Clear input"
-        title="Clear"
-      >
-        <X className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        disabled={disabled || !inputValue}
-        onClick={onCopy}
-        aria-label="Copy input"
-        title="Copy"
-      >
-        <Copy className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        disabled={disabled}
-        onClick={onPaste}
-        aria-label="Paste to input"
-        title="Paste"
-      >
-        <ClipboardPaste className="h-3.5 w-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={disabled || !inputValue}
+              onClick={onClear}
+              aria-label="Clear input"
+            />
+          }
+        >
+          <X className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Clear</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={disabled || !inputValue}
+              onClick={onCopy}
+              aria-label="Copy input"
+            />
+          }
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Copy to clipboard</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={disabled}
+              onClick={onPaste}
+              aria-label="Paste to input"
+            />
+          }
+        >
+          <ClipboardPaste className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Paste from clipboard</p>
+        </TooltipContent>
+      </Tooltip>
       <div className="flex-1" />
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 gap-1"
-        disabled={disabled || !inputValue.trim()}
-        onClick={onSend}
-        aria-label="Send"
-      >
-        <SendHorizontal className="h-3.5 w-3.5" /> Send
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1"
+              disabled={disabled || !inputValue.trim()}
+              onClick={onSend}
+              aria-label="Send"
+            >
+              <SendHorizontal className="h-3.5 w-3.5" /> Send
+            </Button>
+          }
+        />
+        <TooltipContent side="bottom">
+          <p>Send (Enter)</p>
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }
