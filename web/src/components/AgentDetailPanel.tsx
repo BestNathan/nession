@@ -548,11 +548,10 @@ export function AgentDetailPanel({
         </div>
 
         {/* ── Sticky Tab Bar ── */}
-        <div className="flex-shrink-0 sticky top-0 z-10 bg-background">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="-mx-4 px-4">
-            <TabsList
-              variant="line"
-              className="h-auto gap-0 rounded-none border-b border-border bg-transparent p-0 w-full justify-start"
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="flex-shrink-0 sticky top-0 z-10 bg-background -mx-4 px-4">
+          <TabsList
+            variant="line"
+            className="h-auto gap-0 rounded-none border-b border-border bg-transparent p-0 w-full justify-start"
             >
               {TABS.map((tab) => (
                 <TabsTrigger
@@ -572,7 +571,6 @@ export function AgentDetailPanel({
               ))}
             </TabsList>
           </Tabs>
-        </div>
 
         {/* ── Tab Content (scrollable) ── */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
