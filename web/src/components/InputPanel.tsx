@@ -157,17 +157,14 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
     }
   };
 
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        setInputValue((prev) => prev + text);
-      }
-    } catch {
-      // Clipboard API unavailable (non-HTTPS). Focus the textarea so the
-      // user can long-press and select "Paste" from the native context menu.
-      textareaRef.current?.focus();
-    }
+  const handlePasteButton = () => {
+    const ta = textareaRef.current;
+    if (!ta) { return; }
+    ta.focus();
+    // execCommand('paste') works on HTTP with a user gesture (button click).
+    // The textarea's onPaste handler reads e.clipboardData and appends the
+    // pasted text, so no need to parse the result here.
+    try { document.execCommand('paste'); } catch { /* unsupported */ }
   };
 
   // Handle native paste events on the textarea (Cmd+V / long-press→Paste).
@@ -188,7 +185,7 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
         disabled={disabled}
         onClear={() => setInputValue('')}
         onCopy={handleCopy}
-        onPaste={handlePaste}
+        onPaste={handlePasteButton}
         onSend={doSend}
       />
 

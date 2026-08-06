@@ -43,22 +43,16 @@ describe('QuickCommandsPanel', () => {
     }
   });
 
-  it('clicking a preset send button sends the correct command', () => {
+  it('clicking a preset row sends the correct command', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
-    // Find the run button in the row containing 'Ctrl+C'
-    const rows = screen.getAllByText('Ctrl+C');
-    const row = rows[0].closest('div')!;
-    const runBtn = row.querySelector('button');
-    fireEvent.click(runBtn!);
+    // The entire row is a button now.
+    fireEvent.click(screen.getByText('Ctrl+C'));
     expect(defaultProps.sendText).toHaveBeenCalledWith('\x03');
   });
 
   it('non-raw presets append \\r', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
-    const rows = screen.getAllByText('clear');
-    const row = rows[0].closest('div')!;
-    const runBtn = row.querySelector('button');
-    fireEvent.click(runBtn!);
+    fireEvent.click(screen.getByText('clear'));
     expect(defaultProps.sendText).toHaveBeenCalledWith('clear\r');
   });
 
@@ -71,7 +65,7 @@ describe('QuickCommandsPanel', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
     expect(screen.getByPlaceholderText('Label')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Command')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Command/)).toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.getByText('Ctrl+')).toBeInTheDocument();
   });
@@ -80,8 +74,8 @@ describe('QuickCommandsPanel', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
     fireEvent.click(screen.getByText('Ctrl+'));
-    expect(screen.queryByPlaceholderText('Command')).toBeNull();
-    expect(screen.getByPlaceholderText('Key')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Command/)).toBeNull();
+    expect(screen.getByPlaceholderText('K')).toBeInTheDocument();
   });
 
   it('presets do not have delete buttons', () => {
@@ -111,7 +105,7 @@ describe('QuickCommandsPanel', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
     fireEvent.change(screen.getByPlaceholderText('Label'), { target: { value: 'My Cmd' } });
-    fireEvent.change(screen.getByPlaceholderText('Command'), { target: { value: 'echo test' } });
+    fireEvent.change(screen.getByPlaceholderText(/Command/), { target: { value: 'echo test' } });
     fireEvent.click(screen.getByText('Save'));
     expect(mockAddCommand).toHaveBeenCalledWith('My Cmd', 'echo test', false);
   });
@@ -120,7 +114,7 @@ describe('QuickCommandsPanel', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
     fireEvent.click(screen.getByText(/Add Command/));
     fireEvent.click(screen.getByText('Ctrl+'));
-    fireEvent.change(screen.getByPlaceholderText('Key'), { target: { value: 'k' } });
+    fireEvent.change(screen.getByPlaceholderText('K'), { target: { value: 'k' } });
     fireEvent.click(screen.getByText('Save'));
     expect(mockAddCommand).toHaveBeenCalledWith('Ctrl+K', '\x0b', true);
   });

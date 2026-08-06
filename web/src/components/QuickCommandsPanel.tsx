@@ -1,19 +1,15 @@
-// Quick-command flat list panel (presets + user commands + add form).
-// Each command is one row with a run button; user commands also get a delete
-// button. The add form supports Plain Text (sends command + "\r") and Ctrl+
-// (picks a single letter A-Z, sends the raw control char) modes.
-//
-// Uses the server-backed useQuickCommands hook directly — it is shared by
-// the mobile (BottomSheet) and desktop (BottomBar) terminal layouts.
+// Quick-command panel — presets and user commands in a clean list.
+// Uses the server-backed useQuickCommands hook. Shared by mobile (BottomSheet)
+// and desktop (BottomBar) terminal layouts.
 
 import { useState } from 'react';
-import { Plus, X, Play } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Badge } from './ui/badge';
+import { Separator } from './ui/separator';
 import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
-import { useMediaQuery } from '../hooks/useMediaQuery';
-
 interface QuickCommandsPanelProps {
   sendText: (text: string) => void;
   disabled: boolean;
@@ -21,80 +17,27 @@ interface QuickCommandsPanelProps {
 
 type AddMode = 'plain' | 'ctrl';
 
-interface CommandRowProps {
-  cmd: QuickCommand;
-  isPreset: boolean;
-  disabled: boolean;
-  isTouch: boolean;
-  onRun: (cmd: QuickCommand) => void;
-  onDelete: (id: string) => void;
-}
-
-function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: CommandRowProps) {
-  // Touch: entire row is tappable, delete is a subtle text ×.
-  // Desktop: hover-reveal Run button + X delete button.
+function DeleteButton({ onClick }: { onClick: () => void }) {
   return (
-    <div
-      className="flex items-center gap-1 px-1 rounded hover:bg-accent/50 group cursor-pointer"
-      onClick={() => onRun(cmd)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRun(cmd); } }}
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      aria-label="Delete"
     >
-      <span className="text-xs flex-1 min-w-0 truncate">{cmd.label}</span>
-      {cmd.raw && (
-        <span className="text-[10px] text-muted-foreground flex-shrink-0">
-          {cmd.label.includes('Ctrl+') ? cmd.label.replace('Ctrl+', '') : 'raw'}
-        </span>
-      )}
-      {!isTouch && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100"
-          disabled={disabled}
-          onClick={(e) => { e.stopPropagation(); onRun(cmd); }}
-          aria-label="Run"
-          title="Run"
-        >
-          <Play className="h-3 w-3" />
-        </Button>
-      )}
-      {!isPreset && !isTouch && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive"
-          disabled={disabled}
-          onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
-          aria-label="Delete"
-          title="Delete"
-        >
-          <X className="h-3 w-3" />
-        </Button>
-      )}
-      {!isPreset && isTouch && (
-        <button
-          type="button"
-          className="text-muted-foreground/50 text-xs px-1 flex-shrink-0"
-          disabled={disabled}
-          onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
-          aria-label="Delete"
-        >
-          ×
-        </button>
-      )}
-    </div>
+      <X className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
 interface AddCommandFormProps {
   disabled: boolean;
-  onSave: (label: string, command: string, raw: boolean) => void;
+  onAdd: (label: string, command: string, raw: boolean) => Promise<void>;
   onCancel: () => void;
 }
 
-function AddCommandForm({ disabled, onSave, onCancel }: AddCommandFormProps) {
+function AddCommandForm({ disabled, onAdd, onCancel }: AddCommandFormProps) {
   const [mode, setMode] = useState<AddMode>('plain');
   const [label, setLabel] = useState('');
   const [command, setCommand] = useState('');
@@ -103,87 +46,32 @@ function AddCommandForm({ disabled, onSave, onCancel }: AddCommandFormProps) {
   const handleSave = () => {
     if (mode === 'ctrl') {
       const letter = ctrlKey.trim().toUpperCase();
-      if (!letter || letter.length !== 1 || letter < 'A' || letter > 'Z') {
-        return;
-      }
-      const ctrlLabel = label.trim() || `Ctrl+${letter}`;
-      const ctrlCommand = String.fromCharCode(letter.charCodeAt(0) - 64);
-      onSave(ctrlLabel, ctrlCommand, true);
+      if (!letter || letter.length !== 1 || letter < 'A' || letter > 'Z') { return; }
+      void onAdd(label.trim() || `Ctrl+${letter}`, String.fromCharCode(letter.charCodeAt(0) - 64), true);
     } else {
-      const trimmedLabel = label.trim();
-      const trimmedCommand = command.trim();
-      if (!trimmedLabel || !trimmedCommand) {
-        return;
-      }
-      onSave(trimmedLabel, trimmedCommand, false);
+      if (!label.trim() || !command.trim()) { return; }
+      void onAdd(label.trim(), command.trim(), false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2 p-2">
       <div className="flex gap-1">
-        <Button
-          variant={mode === 'plain' ? 'default' : 'outline'}
-          size="sm"
-          className="h-6 text-[11px] px-2"
-          onClick={() => setMode('plain')}
-        >
-          Plain
-        </Button>
-        <Button
-          variant={mode === 'ctrl' ? 'default' : 'outline'}
-          size="sm"
-          className="h-6 text-[11px] px-2"
-          onClick={() => setMode('ctrl')}
-        >
-          Ctrl+
-        </Button>
+        <Button variant={mode === 'plain' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-2" onClick={() => setMode('plain')}>Plain</Button>
+        <Button variant={mode === 'ctrl' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-2" onClick={() => setMode('ctrl')}>Ctrl+</Button>
       </div>
-      <Input
-        placeholder="Label"
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
-        className="h-6 text-[11px]"
-        disabled={disabled}
-      />
+      <Input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} className="h-7 text-xs" disabled={disabled} />
       {mode === 'plain' ? (
-        <Input
-          placeholder="Command"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          className="h-6 text-[11px]"
-          disabled={disabled}
-        />
+        <Input placeholder="Command (sent as: command + Enter)" value={command} onChange={(e) => setCommand(e.target.value)} className="h-7 text-xs" disabled={disabled} />
       ) : (
-        <div className="flex items-center gap-1">
-          <span className="text-[11px] text-muted-foreground">Ctrl+</span>
-          <Input
-            placeholder="Key"
-            value={ctrlKey}
-            onChange={(e) => setCtrlKey(e.target.value.slice(0, 1))}
-            maxLength={1}
-            className="h-6 w-12 text-[11px] text-center"
-            disabled={disabled}
-          />
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Ctrl +</span>
+          <Input placeholder="K" value={ctrlKey} onChange={(e) => setCtrlKey(e.target.value.slice(0, 1))} maxLength={1} className="h-7 w-14 text-xs text-center" disabled={disabled} />
         </div>
       )}
-      <div className="flex gap-1">
-        <Button
-          size="sm"
-          className="h-6 text-[11px] px-2"
-          disabled={disabled}
-          onClick={handleSave}
-        >
-          Save
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 text-[11px] px-2"
-          onClick={onCancel}
-        >
-          Cancel
-        </Button>
+      <div className="flex gap-1.5">
+        <Button size="sm" className="h-7 text-xs" disabled={disabled} onClick={handleSave}>Save</Button>
+        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>Cancel</Button>
       </div>
     </div>
   );
@@ -192,7 +80,6 @@ function AddCommandForm({ disabled, onSave, onCancel }: AddCommandFormProps) {
 export function QuickCommandsPanel({ sendText, disabled }: QuickCommandsPanelProps) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const [showAddForm, setShowAddForm] = useState(false);
-  const isTouch = useMediaQuery('(pointer: coarse)');
 
   const handleRun = (cmd: QuickCommand) => {
     sendText(cmd.raw ? cmd.command : cmd.command + '\r');
@@ -203,42 +90,43 @@ export function QuickCommandsPanel({ sendText, disabled }: QuickCommandsPanelPro
     setShowAddForm(false);
   };
 
+  const allCommands = [...PRESETS, ...userCommands];
+  const presetIds = new Set(PRESETS.map((p) => p.id));
+  const presetCount = PRESETS.length;
+
   return (
-    <div className="flex flex-col min-h-0 p-1.5 gap-0.5">
+    <div className="flex flex-col min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {[...PRESETS, ...userCommands].map((cmd) => (
-          <CommandRow
-            key={cmd.id}
-            cmd={cmd}
-            isPreset={PRESETS.some((p) => p.id === cmd.id)}
-            disabled={disabled}
-            isTouch={isTouch}
-            onRun={handleRun}
-            onDelete={(id) => {
-              void deleteCommand(id);
-            }}
-          />
-        ))}
+        {allCommands.map((cmd, i) => {
+          const isPreset = presetIds.has(cmd.id);
+          return (
+            <div key={cmd.id}>
+              {i === presetCount && i > 0 && <Separator />}
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/40 transition-colors disabled:opacity-50"
+                disabled={disabled}
+                onClick={() => handleRun(cmd)}
+              >
+                <span className="text-sm font-mono flex-1 min-w-0 truncate">{cmd.label}</span>
+                {cmd.raw && (
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 font-normal flex-shrink-0">
+                    {cmd.label.includes('Ctrl+') ? cmd.label.replace('Ctrl+', '') : 'raw'}
+                  </Badge>
+                )}
+                {!isPreset && <DeleteButton onClick={() => { void deleteCommand(cmd.id); }} />}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="border-t pt-1 flex-shrink-0">
+      <div className="border-t flex-shrink-0">
         {showAddForm ? (
-          <AddCommandForm
-            disabled={disabled}
-            onSave={(label, command, raw) => {
-              void handleAdd(label, command, raw);
-            }}
-            onCancel={() => setShowAddForm(false)}
-          />
+          <AddCommandForm disabled={disabled} onAdd={handleAdd} onCancel={() => setShowAddForm(false)} />
         ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs w-full"
-            disabled={disabled}
-            onClick={() => setShowAddForm(true)}
-          >
-            <Plus className="h-3 w-3 mr-1" /> Add Command
+          <Button variant="ghost" size="sm" className="h-8 text-xs w-full rounded-none" disabled={disabled} onClick={() => setShowAddForm(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Command
           </Button>
         )}
       </div>
