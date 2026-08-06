@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,14 +69,23 @@ function SessionRow({
         </p>
       </div>
       {!isCurrent && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-xs flex-shrink-0 text-destructive border-destructive hover:bg-destructive/10"
-          onClick={(e) => { e.stopPropagation(); onKill(); }}
-        >
-          Kill
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs flex-shrink-0 text-destructive border-destructive hover:bg-destructive/10"
+                onClick={(e) => { e.stopPropagation(); onKill(); }}
+              />
+            }
+          >
+            Kill
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Kill session</p>
+          </TooltipContent>
+        </Tooltip>
       )}
     </div>
   );
