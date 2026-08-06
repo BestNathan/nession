@@ -259,7 +259,7 @@ export function FileTabs({
       {!isMobile ? (
         /* Desktop: ResizablePanelGroup spans SidePanel + main content so the
            user can drag the handle to resize the file browser column. */
-        <ResizablePanelGroup orientation="horizontal" className="gap-0">
+        <ResizablePanelGroup key={sessionId ?? 'default'} orientation="horizontal" className="gap-0">
           <ResizablePanel defaultSize={20} minSize={15} maxSize={35}>
             <SidePanel>
               <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />

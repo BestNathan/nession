@@ -18,8 +18,8 @@ describe('SidePanel', () => {
         <div>Hidden Content</div>
       </SidePanel>,
     );
-    // Panel is unmounted when closed — children are not in the DOM.
-    expect(screen.queryByText('Hidden Content')).not.toBeInTheDocument();
+    // Panel is always mounted to preserve ResizablePanel layout on desktop.
+    expect(screen.getByText('Hidden Content')).toBeInTheDocument();
   });
 
   it('toggles open/closed when button clicked', () => {
