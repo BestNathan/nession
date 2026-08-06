@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useCommandHistory } from '../hooks/useCommandHistory';
@@ -34,20 +35,28 @@ function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: b
   return (
     <div className="flex flex-wrap gap-0.5 px-2 py-1.5 border-b flex-shrink-0">
       {PHYS_KEYS.map((k) => (
-        <Button
-          key={k.label}
-          variant="secondary"
-          size="sm"
-          className="h-7 px-2 text-xs font-mono"
-          disabled={disabled}
-          onClick={() => onKey(k.seq)}
-        >
-          {k.label === '←' ? <ArrowLeft className="h-3 w-3" /> :
-           k.label === '↑' ? <ArrowUp className="h-3 w-3" /> :
-           k.label === '↓' ? <ArrowDown className="h-3 w-3" /> :
-           k.label === '→' ? <ArrowRight className="h-3 w-3" /> :
-           k.label}
-        </Button>
+        <Tooltip key={k.label}>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-7 px-2 text-xs font-mono"
+                disabled={disabled}
+                onClick={() => onKey(k.seq)}
+              />
+            }
+          >
+            {k.label === '←' ? <ArrowLeft className="h-3 w-3" /> :
+             k.label === '↑' ? <ArrowUp className="h-3 w-3" /> :
+             k.label === '↓' ? <ArrowDown className="h-3 w-3" /> :
+             k.label === '→' ? <ArrowRight className="h-3 w-3" /> :
+             k.label}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{k.label}</p>
+          </TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );
@@ -170,14 +179,23 @@ function PlainForm({ onSave, onCancel, disabled }: { onSave: (label: string, com
 
 function DeleteButton({ onClick }: { onClick: () => void }) {
   return (
-    <Button
-      variant="ghost" size="icon"
-      className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive"
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      aria-label="Delete"
-    >
-      <X className="h-3.5 w-3.5" />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost" size="icon"
+            className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            aria-label="Delete"
+          />
+        }
+      >
+        <X className="h-3.5 w-3.5" />
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>Delete command</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

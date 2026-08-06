@@ -49,7 +49,10 @@ describe('SessionPanel', () => {
     const ws = makeWsService();
     return render(
       <WebSocketContext.Provider value={ws}>
+        {/* These tests exercise SessionPanel content, not the collapsed state —
+            force the SidePanel open so children are mounted. */}
         <SessionPanel
+          defaultOpen={true}
           sessions={props.sessions ?? []}
           loading={props.loading ?? false}
           error={props.error ?? null}
@@ -80,6 +83,7 @@ describe('SessionPanel', () => {
     render(
       <WebSocketContext.Provider value={ws}>
         <SessionPanel
+          defaultOpen={true}
           sessions={[]}
           loading={false}
           error="fetch failed"

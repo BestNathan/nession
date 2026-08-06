@@ -122,7 +122,7 @@ describe('FileTabs', () => {
       />,
     );
     expect(screen.queryByTitle('Open panel')).toBeNull();
-    expect(screen.getByRole('button', { name: /Files/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Files/ })).toBeInTheDocument();
   });
 
   it('on mobile, opening a file from the Files panel collapses the sheet', async () => {
