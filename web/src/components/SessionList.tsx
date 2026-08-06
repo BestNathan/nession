@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import type { Session } from '../types';
 import type { SortField, SortDirection } from '../hooks/useDashboard';
 
@@ -97,21 +98,39 @@ export function SessionList({
                 </div>
               </div>
               <div className="flex gap-1.5 flex-shrink-0 whitespace-nowrap">
-                <Button
-                  size="sm"
-                  onClick={() => onAttach(session)}
-                  className="flex-1 md:flex-none min-h-11 md:min-h-7"
-                >
-                  Attach
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onKill(session)}
-                  className="flex-1 md:flex-none min-h-11 md:min-h-7 text-destructive border-destructive hover:bg-destructive/10"
-                >
-                  Kill
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        onClick={() => onAttach(session)}
+                        className="flex-1 md:flex-none min-h-11 md:min-h-7"
+                      />
+                    }
+                  >
+                    Attach
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>Attach to session</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onKill(session)}
+                        className="flex-1 md:flex-none min-h-11 md:min-h-7 text-destructive border-destructive hover:bg-destructive/10"
+                      />
+                    }
+                  >
+                    Kill
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>Kill session</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           ))}
