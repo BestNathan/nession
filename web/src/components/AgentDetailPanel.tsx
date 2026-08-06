@@ -15,6 +15,7 @@ import { Card, CardContent } from './ui/card';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
 import { cn } from '../lib/utils';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { ClaudeCodeSection } from '../extensions/claude-code/components/ClaudeCodeSection';
 
 /** Max heartbeat entries to display in timeline. */
@@ -336,32 +337,6 @@ const TABS = [
 ];
 type TabId = (typeof TABS)[number]['id'];
 
-function TabBar({ active, onSelect, hasClaudeCode }: { active: TabId; onSelect: (id: TabId) => void; hasClaudeCode?: boolean }) {
-  return (
-    <div className="flex border-b border-border -mx-4 px-4">
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => onSelect(tab.id)}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-[1px] relative',
-            active === tab.id
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <tab.icon className="w-3.5 h-3.5" />
-          {tab.label}
-          {tab.id === 'claude-code' && hasClaudeCode && (
-            <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-primary" />
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── Overview Tab ────────────────────────────────────────────────────────────
 
 function OverviewTab({
@@ -574,7 +549,29 @@ export function AgentDetailPanel({
 
         {/* ── Sticky Tab Bar ── */}
         <div className="flex-shrink-0 sticky top-0 z-10 bg-background">
-          <TabBar active={activeTab} onSelect={setActiveTab} hasClaudeCode={hasClaudeCode} />
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="-mx-4 px-4">
+            <TabsList
+              variant="line"
+              className="h-auto gap-0 rounded-none border-b border-border bg-transparent p-0 w-full justify-start"
+            >
+              {TABS.map((tab) => (
+                <TabsTrigger
+                  key={tab.id}
+                  value={tab.id}
+                  className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium h-auto rounded-none
+                    border-b-2 border-transparent
+                    data-active:border-primary data-active:text-foreground data-active:shadow-none
+                    text-muted-foreground hover:text-foreground relative"
+                >
+                  <tab.icon className="w-3.5 h-3.5" />
+                  {tab.label}
+                  {tab.id === 'claude-code' && hasClaudeCode && (
+                    <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-primary" />
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
 
         {/* ── Tab Content (scrollable) ── */}
