@@ -14,13 +14,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-91a4665
+  newTag: agent-970c3fd
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-91a4665
+  newTag: server-970c3fd
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-91a4665
+  newTag: ui-970c3fd
 
 # Isolate staging data on shared PVC via subPath.
 patchesStrategicMerge:
@@ -28,7 +28,7 @@ patchesStrategicMerge:
 
 patches:
 - path: patch-ingress.yaml
-- path: patch-agent-env.yaml
+- path: patch-agent-970c3fdnv.yaml
 - patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
