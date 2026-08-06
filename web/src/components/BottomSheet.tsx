@@ -117,7 +117,7 @@ export function BottomSheet({
       value={effectiveTab}
       onValueChange={(v) => onTabChange(v as BottomTab)}
       className={cn(
-        'border-t flex-shrink-0 flex flex-col gap-0 bg-background',
+        'border-t border-border/50 flex-shrink-0 flex flex-col gap-0 bg-background',
         'h-[40vh] landscape:h-[30vh]',
         collapsed && 'h-auto',
       )}
