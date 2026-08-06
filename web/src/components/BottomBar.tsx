@@ -1,5 +1,6 @@
 import { Keyboard, TerminalIcon, Package, FolderTree, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 
 export type BottomTab = 'input' | 'commands' | 'env' | 'files';
 
@@ -54,36 +55,42 @@ export function BottomBar({
 
   return (
     <div className={cn('border-t flex-shrink-0 flex flex-col pb-[env(safe-area-inset-bottom)]', maxH)}>
-      <div className="flex border-b items-center">
-        {tabs.map(({ id, icon, label, show }) => {
-          if (!show) { return null; }
-          const Icon = icon;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => selectTab(id)}
-              className={cn(
-                'flex items-center gap-1 px-3 py-1 text-xs transition-colors border-b-2 -mb-px',
-                effectiveTab === id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="w-3 h-3" /> {label}
-            </button>
-          );
-        })}
-        {/* Mobile-only sheet toggle: expand when collapsed, collapse when open. */}
-        <button
-          type="button"
-          onClick={() => onSheetToggle(!sheetOpen)}
-          className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
-          title={sheetOpen ? 'Collapse' : 'Expand'}
-        >
-          {sheetOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-        </button>
-      </div>
+      <Tabs value={effectiveTab} onValueChange={(v) => selectTab(v as BottomTab)} className="flex-shrink-0">
+        <div className="flex border-b items-center">
+          <TabsList
+            variant="line"
+            className="h-auto gap-0 rounded-none border-b-0 bg-transparent p-0"
+          >
+            {tabs.map(({ id, icon, label, show }) => {
+              if (!show) {
+                return null;
+              }
+              const Icon = icon;
+              return (
+                <TabsTrigger
+                  key={id}
+                  value={id}
+                  className="flex items-center gap-1 px-3 py-1 text-xs h-auto rounded-none
+                    border-b-2 border-transparent
+                    data-active:border-primary data-active:text-foreground data-active:shadow-none
+                    text-muted-foreground hover:text-foreground"
+                >
+                  <Icon className="w-3 h-3" /> {label}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+          {/* Mobile-only sheet toggle: expand when collapsed, collapse when open. */}
+          <button
+            type="button"
+            onClick={() => onSheetToggle(!sheetOpen)}
+            className="ml-auto px-3 py-1 text-xs text-muted-foreground hover:text-foreground sm:hidden"
+            title={sheetOpen ? 'Collapse' : 'Expand'}
+          >
+            {sheetOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </Tabs>
       {/* Content: always shown at sm+; on mobile only when the sheet is open */}
       <div
         className={cn(
