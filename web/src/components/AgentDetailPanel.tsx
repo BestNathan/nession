@@ -552,7 +552,7 @@ export function AgentDetailPanel({
           <TabsList
             variant="line"
             className="h-auto gap-0 rounded-none border-b border-border bg-transparent p-0 w-full justify-start"
-            >
+          >
               {TABS.map((tab) => (
                 <TabsTrigger
                   key={tab.id}
