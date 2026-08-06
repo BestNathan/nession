@@ -58,8 +58,12 @@ export function useCommandHistory(): UseCommandHistoryReturn {
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadFromStorage());
 
   const addEntry = useCallback((command: string) => {
+    const trimmed = command.trim();
+    if (!trimmed) {
+      return;
+    }
     setHistory((prev) => {
-      const existingIdx = prev.findIndex((e) => e.command === command);
+      const existingIdx = prev.findIndex((e) => e.command === trimmed);
       let next: HistoryEntry[];
       if (existingIdx !== -1) {
         const existing = prev[existingIdx];
@@ -70,7 +74,7 @@ export function useCommandHistory(): UseCommandHistoryReturn {
         ];
       } else {
         next = [
-          { id: generateId(), command, timestamp: Date.now() },
+          { id: generateId(), command: trimmed, timestamp: Date.now() },
           ...prev,
         ];
       }

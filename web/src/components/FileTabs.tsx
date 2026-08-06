@@ -198,6 +198,7 @@ export function FileTabs({
   } = useFileTabs(onTerminalReveal);
 
   const isMobile = useMediaQuery('(max-width: 1023px)');
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const terminalHeaderExtensions = renderSlot('terminal-header', { sessionId: sessionId ?? '', sessionName: sessionName ?? '' });
 
   // On mobile the browser lives in the Bottom Bar; opening a file collapses the
@@ -260,15 +261,15 @@ export function FileTabs({
         /* Desktop: ResizablePanelGroup spans SidePanel + main content so the
            user can drag the handle to resize the file browser column. */
         <ResizablePanelGroup orientation="horizontal" className="gap-0">
-          <ResizablePanel defaultSize="20" minSize="15" maxSize="35">
-            <SidePanel>
+          <ResizablePanel defaultSize={sidePanelOpen ? 20 : 0} minSize={sidePanelOpen ? 15 : 0} maxSize={35}>
+            <SidePanel defaultOpen={sidePanelOpen} onOpenChange={setSidePanelOpen}>
               <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
             </SidePanel>
           </ResizablePanel>
 
-          <ResizableHandle className="!w-1 hover:bg-primary/50 transition-colors" />
+          {sidePanelOpen && <ResizableHandle className="!w-1 hover:bg-primary/50 transition-colors" />}
 
-          <ResizablePanel defaultSize="80" minSize="65">
+          <ResizablePanel defaultSize={sidePanelOpen ? 80 : 100} minSize={sidePanelOpen ? 65 : 100}>
             <div className="h-full min-w-0 flex flex-col">
               {tabBar}
               {content}

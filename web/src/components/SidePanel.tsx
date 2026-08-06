@@ -8,6 +8,8 @@ export interface SidePanelProps {
   defaultWidth?: number;
   minWidth?: number;
   maxWidth?: number;
+  /** Called when the panel is toggled open/closed. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -28,12 +30,17 @@ export function SidePanel({
   children,
   defaultOpen = false,
   defaultWidth = 260,
+  onOpenChange,
 }: SidePanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const toggle = useCallback(() => {
-    setIsOpen((prev) => !prev);
-  }, []);
+    setIsOpen((prev) => {
+      const next = !prev;
+      onOpenChange?.(next);
+      return next;
+    });
+  }, [onOpenChange]);
 
   return (
     <>
