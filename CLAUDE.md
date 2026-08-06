@@ -44,7 +44,7 @@ nession/
 │       ├── services/
 │       │   └── websocket.ts  # WebSocketService singleton (connection, auth, events)
 │       └── components/
-│           ├── ui/           # shadcn/ui primitives (18 components + 2 custom wrappers, auto-generated)
+│           ├── ui/           # shadcn/ui primitives (21 components + 2 custom wrappers, auto-generated)
 │           ├── LoginPage.tsx         # Connection form (Card + Input + Button + Badge)
 │           ├── Dashboard.tsx         # Main view: agent cards grid + session list
 │           ├── AgentCard.tsx         # Agent status card (Badge + relative time)
@@ -122,7 +122,7 @@ tmux sessions (per-node)
 
 Full component inventory and custom-component-to-primitive mapping: **`.claude/skills/nession-development/references/shadcn-components.md`**
 
-Summary: 18 installed primitives + 2 custom wrappers. No component fully duplicates an installed shadcn primitive. Three sites would benefit from installing new primitives (Tabs, Resizable, Tooltip). See the reference doc for the complete audit, priority queue, and golden rules.
+Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips, raw resize logic, and destructive confirms have been replaced with shadcn equivalents (Tabs, Resizable, AlertDialog). ~20 Tooltips added to icon-only buttons. See the reference doc for the complete inventory, priority queue, and golden rules.
 
 ---
 

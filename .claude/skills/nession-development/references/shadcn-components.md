@@ -1,8 +1,8 @@
 # Nession shadcn/ui Component Inventory
 
-Last updated: 2026-08-06
+Last updated: 2026-08-06 (post-standardization refactor)
 
-## Installed Primitives (18)
+## Installed Primitives (21)
 
 Generated via `npx shadcn@latest add`, version-controlled in `web/src/components/ui/`.
 
@@ -25,7 +25,10 @@ Generated via `npx shadcn@latest add`, version-controlled in `web/src/components
 | Sheet | `ui/sheet.tsx` | `@radix-ui/react-dialog` | Slide-over panels (AgentDetailPanel) |
 | Skeleton | `ui/skeleton.tsx` | (none) | Loading placeholders |
 | Sonner | `ui/sonner.tsx` | `sonner` | Toast notifications |
+| Tabs | `ui/tabs.tsx` | `@base-ui/react` | Tab strips (BottomBar, BottomSheet, AgentDetailPanel) |
 | Textarea | `ui/textarea.tsx` | (none) | Multi-line text input (InputPanel) |
+| Tooltip | `ui/tooltip.tsx` | `@base-ui/react` | Icon button hints (~20 sites) |
+| Resizable | `ui/resizable.tsx` | `react-resizable-panels` | Drag-resize panels (SidePanel + FileTabs) |
 
 ## Custom UI Wrappers (2)
 
