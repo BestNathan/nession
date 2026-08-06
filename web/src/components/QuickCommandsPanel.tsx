@@ -17,47 +17,65 @@ import { useCommandHistory } from '../hooks/useCommandHistory';
 
 interface PhysKey { label: string; seq: string; }
 
-const PHYS_KEYS: PhysKey[] = [
-  { label: '←', seq: '\x1b[D' },
-  { label: '↑', seq: '\x1b[A' },
-  { label: '↓', seq: '\x1b[B' },
-  { label: '→', seq: '\x1b[C' },
-  { label: 'Home', seq: '\x1b[H' },
-  { label: 'End', seq: '\x1b[F' },
-  { label: 'PgUp', seq: '\x1b[5~' },
-  { label: 'PgDn', seq: '\x1b[6~' },
-  { label: 'Tab', seq: '\t' },
-  { label: 'Esc', seq: '\x1b' },
-  { label: 'Del', seq: '\x1b[3~' },
-];
-
 function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: boolean }) {
+  const otherKeys: PhysKey[] = [
+    { label: 'Esc', seq: '\x1b' },
+    { label: 'Tab', seq: '\t' },
+    { label: 'Del', seq: '\x1b[3~' },
+    { label: 'Home', seq: '\x1b[H' },
+    { label: 'PgUp', seq: '\x1b[5~' },
+    { label: 'End', seq: '\x1b[F' },
+    { label: 'PgDn', seq: '\x1b[6~' },
+  ];
+
+  const arrowKeys: PhysKey[] = [
+    { label: '↑', seq: '\x1b[A' },
+    { label: '←', seq: '\x1b[D' },
+    { label: '↓', seq: '\x1b[B' },
+    { label: '→', seq: '\x1b[C' },
+  ];
+
+  const KeyButton = ({ k }: { k: PhysKey }) => (
+    <Tooltip key={k.label}>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-8 w-10 text-xs font-mono"
+            disabled={disabled}
+            onClick={() => onKey(k.seq)}
+          />
+        }
+      >
+        {k.label === '←' ? <ArrowLeft className="h-3 w-3" /> :
+         k.label === '↑' ? <ArrowUp className="h-3 w-3" /> :
+         k.label === '↓' ? <ArrowDown className="h-3 w-3" /> :
+         k.label === '→' ? <ArrowRight className="h-3 w-3" /> :
+         k.label}
+      </TooltipTrigger>
+      <TooltipContent side="top"><p>{k.label}</p></TooltipContent>
+    </Tooltip>
+  );
+
   return (
-    <div className="flex flex-wrap gap-0.5 px-2 py-1.5 border-b flex-shrink-0">
-      {PHYS_KEYS.map((k) => (
-        <Tooltip key={k.label}>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-7 px-2 text-xs font-mono"
-                disabled={disabled}
-                onClick={() => onKey(k.seq)}
-              />
-            }
-          >
-            {k.label === '←' ? <ArrowLeft className="h-3 w-3" /> :
-             k.label === '↑' ? <ArrowUp className="h-3 w-3" /> :
-             k.label === '↓' ? <ArrowDown className="h-3 w-3" /> :
-             k.label === '→' ? <ArrowRight className="h-3 w-3" /> :
-             k.label}
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>{k.label}</p>
-          </TooltipContent>
-        </Tooltip>
-      ))}
+    <div className="flex justify-between gap-2 px-2 py-1.5 border-b flex-shrink-0">
+      {/* Left: other keys in a 3x3 grid (Esc/Tab/Del top, Home/PgUp/End middle, PgDn bottom-left) */}
+      <div className="grid grid-cols-3 gap-1">
+        {otherKeys.slice(0, 3).map((k) => <KeyButton key={k.label} k={k} />)}
+        {otherKeys.slice(3, 6).map((k) => <KeyButton key={k.label} k={k} />)}
+        <KeyButton k={otherKeys[6]} />
+      </div>
+
+      {/* Right: arrows in 凸 (T-shape) */}
+      <div className="grid grid-cols-3 grid-rows-2 gap-1">
+        <div /> {/* empty */}
+        <KeyButton k={arrowKeys[0]} /> {/* ↑ */}
+        <div /> {/* empty */}
+        <KeyButton k={arrowKeys[1]} /> {/* ← */}
+        <KeyButton k={arrowKeys[2]} /> {/* ↓ */}
+        <KeyButton k={arrowKeys[3]} /> {/* → */}
+      </div>
     </div>
   );
 }
@@ -250,7 +268,7 @@ export function QuickCommandsPanel({ sendText, disabled }: { sendText: (text: st
               {sep && <Separator />}
               <button
                 type="button"
-                className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-accent/40 transition-colors disabled:opacity-50"
+                className="w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-accent/40 transition-colors disabled:opacity-50"
                 disabled={disabled}
                 onClick={() => handleRun(cmd)}
               >
@@ -260,7 +278,11 @@ export function QuickCommandsPanel({ sendText, disabled }: { sendText: (text: st
                     {[...cmd.command].map((c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`).join('')}
                   </span>
                 )}
-                {!isPreset && <DeleteButton onClick={() => { void deleteCommand(cmd.id); }} />}
+                {isPreset ? (
+                  <span className="text-[10px] text-muted-foreground/40 flex-shrink-0">built-in</span>
+                ) : (
+                  <DeleteButton onClick={() => { void deleteCommand(cmd.id); }} />
+                )}
               </button>
             </div>
           );
