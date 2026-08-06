@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { X, Copy, ClipboardPaste, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -129,6 +129,7 @@ function HistorySection({ entries, inputValue, onSelect }: HistorySectionProps) 
 
 export function InputPanel({ sendText, disabled }: InputPanelProps) {
   const [inputValue, setInputValue] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { filterHistory, addEntry, clearHistory } = useCommandHistory();
 
   const doSend = () => {
@@ -157,29 +158,24 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
   };
 
   const handlePaste = async () => {
-    // Try Clipboard API first (requires HTTPS or localhost).
     try {
       const text = await navigator.clipboard.readText();
-      setInputValue((prev) => prev + text);
-      return;
+      if (text) {
+        setInputValue((prev) => prev + text);
+      }
     } catch {
-      // Fallback for HTTP: create a hidden textarea, focus to trigger
-      // system paste dialog, then read the pasted value.
+      // Clipboard API unavailable (non-HTTPS). Focus the textarea so the
+      // user can long-press and select "Paste" from the native context menu.
+      textareaRef.current?.focus();
     }
-    const helper = document.createElement('textarea');
-    helper.style.position = 'fixed';
-    helper.style.opacity = '0';
-    document.body.appendChild(helper);
-    helper.focus();
-    const pasted = await new Promise<string>((resolve) => {
-      helper.addEventListener('paste', () => {
-        setTimeout(() => resolve(helper.value), 0);
-      }, { once: true });
-      setTimeout(() => resolve(''), 500);
-    });
-    document.body.removeChild(helper);
-    if (pasted) {
-      setInputValue((prev) => prev + pasted);
+  };
+
+  // Handle native paste events on the textarea (Cmd+V / long-press→Paste).
+  const handleTextareaPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData?.getData('text');
+    if (text) {
+      e.preventDefault();
+      setInputValue((prev) => prev + text);
     }
   };
 
@@ -199,11 +195,13 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
       {/* Textarea — fixed height, 2-3 rows */}
       <div className="px-2 pb-1 flex-shrink-0">
         <Textarea
+          ref={textareaRef}
           placeholder="Type to send… (Enter to submit, Shift+Enter for newline)"
           value={inputValue}
           rows={3}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handleTextareaPaste}
           className="text-xs resize-none h-[3.25rem] field-sizing-fixed py-1.5"
           disabled={disabled}
         />

@@ -31,19 +31,15 @@ interface CommandRowProps {
 }
 
 function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: CommandRowProps) {
-  // On touch devices: buttons always visible, row is tappable.
-  // On desktop: hover-reveal pattern with compact buttons.
-  const btnClass = isTouch
-    ? 'h-8 w-8 p-0 flex-shrink-0'
-    : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100';
-
+  // Touch: entire row is tappable, delete is a subtle text ×.
+  // Desktop: hover-reveal Run button + X delete button.
   return (
     <div
-      className="flex items-center gap-1 px-1 rounded hover:bg-accent/50 group"
-      onClick={isTouch ? () => onRun(cmd) : undefined}
-      role={isTouch ? 'button' : undefined}
-      tabIndex={isTouch ? 0 : undefined}
-      onKeyDown={isTouch ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRun(cmd); } } : undefined}
+      className="flex items-center gap-1 px-1 rounded hover:bg-accent/50 group cursor-pointer"
+      onClick={() => onRun(cmd)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRun(cmd); } }}
     >
       <span className="text-xs flex-1 min-w-0 truncate">{cmd.label}</span>
       {cmd.raw && (
@@ -51,22 +47,24 @@ function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: Comma
           {cmd.label.includes('Ctrl+') ? cmd.label.replace('Ctrl+', '') : 'raw'}
         </span>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className={btnClass}
-        disabled={disabled}
-        onClick={(e) => { e.stopPropagation(); onRun(cmd); }}
-        aria-label="Run"
-        title="Run"
-      >
-        <Play className="h-3 w-3" />
-      </Button>
-      {!isPreset && (
+      {!isTouch && (
         <Button
           variant="ghost"
           size="sm"
-          className={isTouch ? 'h-6 w-6 p-0 flex-shrink-0' : 'h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive'}
+          className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100"
+          disabled={disabled}
+          onClick={(e) => { e.stopPropagation(); onRun(cmd); }}
+          aria-label="Run"
+          title="Run"
+        >
+          <Play className="h-3 w-3" />
+        </Button>
+      )}
+      {!isPreset && !isTouch && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive"
           disabled={disabled}
           onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
           aria-label="Delete"
@@ -74,6 +72,17 @@ function CommandRow({ cmd, isPreset, disabled, isTouch, onRun, onDelete }: Comma
         >
           <X className="h-3 w-3" />
         </Button>
+      )}
+      {!isPreset && isTouch && (
+        <button
+          type="button"
+          className="text-muted-foreground/50 text-xs px-1 flex-shrink-0"
+          disabled={disabled}
+          onClick={(e) => { e.stopPropagation(); onDelete(cmd.id); }}
+          aria-label="Delete"
+        >
+          ×
+        </button>
       )}
     </div>
   );
