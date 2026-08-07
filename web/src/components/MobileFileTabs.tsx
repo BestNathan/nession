@@ -16,7 +16,7 @@ interface MobileTabBarProps {
 /** Compact scrollable tab strip — no dirty dots, no extension tabs. */
 function MobileTabBar({ openFiles, activeTabId, showTerminal, onSelect, onClose }: MobileTabBarProps) {
   return (
-    <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
+    <div className="absolute top-0 left-0 right-0 z-10 flex items-center border-b bg-muted/20 overflow-x-auto">
       <button
         onClick={() => onSelect('terminal')}
         className={cn(
@@ -79,8 +79,8 @@ export function MobileFileTabs({
   }, [handleFileClick, onFileClickRef]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      {/* Tab bar — only visible when files are open */}
+    <div className="flex-1 min-h-0 relative">
+      {/* Tab bar — absolute overlay, doesn't push content down */}
       {openFiles.length > 0 && (
         <MobileTabBar
           openFiles={openFiles}
@@ -91,15 +91,18 @@ export function MobileFileTabs({
         />
       )}
 
-      {/* Content area — terminal or FileViewer */}
-      <div className="flex-1 min-h-0 relative">
+      {/* Content area — terminal or FileViewer, always fills full height */}
+      <div className={cn(
+        'absolute inset-0 flex flex-col',
+        openFiles.length > 0 && 'top-8',
+      )}>
         {/* Terminal — always mounted, hidden when file tab is active */}
-        <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
+        <div className={cn('flex-1 min-h-0 relative', !showTerminal && 'hidden')}>
           {terminalElement}
         </div>
         {/* FileViewer — shown when a file tab is active */}
         {!showTerminal && activeFile ? (
-          <div className="absolute inset-0">
+          <div className="flex-1 min-h-0 relative">
             <FileViewer
               key={activeFile.id}
               fileOps={fileOps}
