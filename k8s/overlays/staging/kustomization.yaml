@@ -28,7 +28,7 @@ patchesStrategicMerge:
 
 patches:
 - path: patch-ingress.yaml
-- path: patch-agent-970c3fdnv.yaml
+- path: patch-agent-env.yaml
 - patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
