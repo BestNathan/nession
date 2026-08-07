@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { BottomSheet, type BottomTab } from './BottomSheet';
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { EnvPanel } from './env/EnvPanel';
 import { FileBrowser } from './FileBrowser';
-import type { FileOps } from '../services/fileOps';
+import { MobileFileTabs } from './MobileFileTabs';
+import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 
 interface MobileTerminalLayoutProps {
@@ -35,13 +36,17 @@ export function MobileTerminalLayout({
     setSheetCollapsed((prev) => !prev);
   }, []);
 
+  // Ref populated by MobileFileTabs so FileBrowser in BottomSheet
+  // can trigger file opens in the tab strip above.
+  const fileClickRef = useRef<((entry: FileEntry) => void) | null>(null);
+
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const commandsPanel = <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />;
   const inputPanel = <InputPanel sendText={sendText} disabled={toolbarDisabled} />;
   const filesPanel = fileOps ? (
     <FileBrowser
       fileOps={fileOps}
-      onFileClick={() => {}}
+      onFileClick={(entry) => fileClickRef.current?.(entry)}
       onFileDeleted={() => {}}
       onFileRenamed={() => {}}
       onGetTerminalPwd={onGetTerminalPwd}
@@ -50,9 +55,18 @@ export function MobileTerminalLayout({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">
-      <div className="flex-1 min-h-0 relative">
-        {terminalElement}
-      </div>
+      {/* Mobile tab strip + content (terminal or FileViewer) */}
+      {fileOps ? (
+        <MobileFileTabs
+          fileOps={fileOps}
+          terminalElement={<div className="flex-1 min-h-0 relative">{terminalElement}</div>}
+          sessionId={sessionId}
+          onGetTerminalPwd={onGetTerminalPwd}
+          onFileClickRef={fileClickRef}
+        />
+      ) : (
+        <div className="flex-1 min-h-0 relative">{terminalElement}</div>
+      )}
       <BottomSheet
         activeTab={bottomTab}
         onTabChange={setBottomTab}

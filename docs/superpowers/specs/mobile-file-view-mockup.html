@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>移动端文件查看 - Before/After</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    background: #18181b; color: #e4e4e7; padding: 16px;
+    display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+  }
+  .phone {
+    width: 375px; height: 700px; border-radius: 24px;
+    border: 3px solid #3f3f46; overflow: hidden; display: flex; flex-direction: column;
+    background: #09090b; flex-shrink: 0;
+  }
+  .label {
+    text-align: center; padding: 12px 0 8px; font-weight: 600; font-size: 14px;
+    color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .status-bar { height: 28px; background: #18181b; display: flex; align-items: center; padding: 0 16px; font-size: 11px; color: #71717a; }
+  .header {
+    height: 40px; background: #27272a; display: flex; align-items: center; padding: 0 12px;
+    border-bottom: 1px solid #3f3f46; font-size: 12px; gap: 8px;
+  }
+  .header .btn { padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+  .header .back { background: transparent; color: #a1a1aa; border: none; }
+  .header .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #3b82f6; color: #fff; }
+  .main { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+
+  /* Terminal area */
+  .terminal-area { flex: 1; background: #0d0d0d; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* Tab strip */
+  .tab-strip {
+    display: flex; align-items: center; height: 32px; background: #1c1c1f;
+    border-bottom: 1px solid #3f3f46; overflow-x: auto; flex-shrink: 0; gap: 0;
+  }
+  .tab-strip .tab {
+    display: flex; align-items: center; gap: 4px; padding: 0 10px; height: 100%;
+    font-size: 11px; color: #71717a; border-bottom: 2px solid transparent;
+    white-space: nowrap; flex-shrink: 0; cursor: default;
+  }
+  .tab-strip .tab.active {
+    color: #e4e4e7; border-bottom-color: #3b82f6; background: #09090b;
+  }
+  .tab-strip .tab .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tab-strip .tab .close { font-size: 14px; line-height: 1; opacity: 0.5; }
+
+  /* Pseudo terminal content */
+  .term-content { flex: 1; padding: 8px 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #a1a1aa; overflow: hidden; }
+  .term-content .line { line-height: 1.5; }
+  .term-content .prompt { color: #22c55e; }
+  .term-content .cursor { display: inline-block; width: 7px; height: 14px; background: #e4e4e7; animation: blink 1s infinite; vertical-align: -2px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* File viewer */
+  .file-viewer { flex: 1; display: flex; flex-direction: column; background: #0d0d0d; }
+  .file-viewer .toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 8px; background: #1c1c1f; border-bottom: 1px solid #3f3f46;
+    font-size: 11px; color: #71717a;
+  }
+  .file-viewer .editor {
+    flex: 1; padding: 8px 12px; font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px; color: #e4e4e7; overflow-y: auto; white-space: pre-wrap; line-height: 1.6;
+  }
+  .file-viewer .editor .keyword { color: #c084fc; }
+  .file-viewer .editor .string { color: #22c55e; }
+  .file-viewer .editor .comment { color: #52525b; font-style: italic; }
+
+  /* Bottom sheet */
+  .bottom-sheet {
+    border-top: 1px solid #3f3f46; background: #18181b; display: flex; flex-direction: column;
+  }
+  .bottom-sheet.collapsed { height: auto; }
+  .bottom-sheet:not(.collapsed) { height: 40%; }
+  .bottom-tabs {
+    display: flex; align-items: center; padding: 4px 8px; gap: 4px;
+  }
+  .bottom-tab {
+    padding: 3px 8px; border-radius: 4px; font-size: 10px; color: #71717a;
+    display: flex; align-items: center; gap: 3px; background: transparent; cursor: default;
+  }
+  .bottom-tab.active { background: #27272a; color: #e4e4e7; }
+  .bottom-content { flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 0; }
+
+  /* File list items */
+  .file-item {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px;
+    font-size: 11px; cursor: default;
+  }
+  .file-item:hover { background: #27272a; }
+  .file-item .icon { font-size: 14px; flex-shrink: 0; }
+  .file-item .name { flex: 1; truncate: true; }
+  .file-item .size { color: #52525b; font-size: 10px; flex-shrink: 0; }
+
+  /* Badge */
+  .badge-new { background: #f59e0b; color: #000; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: 700; }
+
+  .x-mark { color: #ef4444; font-weight: bold; font-size: 18px; }
+</style>
+</head>
+<body>
+
+<!-- ========== BEFORE: Current State ========== -->
+<div>
+  <div class="label">❌ 现在 — 点击文件，什么也不发生</div>
+  <div class="phone">
+    <div class="status-bar">9:41 &nbsp; ●●●● &nbsp; Wi-Fi &nbsp; ▮▮▮</div>
+    <div class="header">
+      <span class="btn back">← Back</span>
+      <span style="font-size:11px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">debug</span>
+      <span class="badge">RELAY</span>
+    </div>
+    <div class="main">
+      <!-- Terminal (full height) -->
+      <div class="terminal-area">
+        <div class="term-content">
+          <div class="line"><span class="prompt">user@host:~$</span> ls</div>
+          <div class="line">src/ &nbsp; package.json &nbsp; README.md</div>
+          <div class="line"><span class="prompt">user@host:~$</span> vim config.ts</div>
+          <div class="line"><span class="cursor"></span></div>
+        </div>
+      </div>
+
+      <!-- BottomSheet: Files tab active -->
+      <div class="bottom-sheet">
+        <div class="bottom-tabs">
+          <span class="bottom-tab">⌨ Input</span>
+          <span class="bottom-tab">⚡ Commands</span>
+          <span class="bottom-tab">📦 Env</span>
+          <span class="bottom-tab active">📁 Files</span>
+        </div>
+        <div class="bottom-content">
+          <div class="file-item">
+            <span class="icon">📁</span><span class="name">src/</span>
+          </div>
+          <div class="file-item" style="background:#27272a;outline:1px solid #3b82f6;outline-offset:-1px;">
+            <span class="icon">📄</span><span class="name">config.ts</span>
+            <span class="size">2.3 KB</span>
+          </div>
+          <div class="file-item">
+            <span class="icon">📄</span><span class="name">package.json</span>
+            <span class="size">1.1 KB</span>
+          </div>
+          <div class="file-item">
+            <span class="icon">📄</span><span class="name">README.md</span>
+            <span class="size">4.5 KB</span>
+          </div>
+          <div style="text-align:center;padding:20px;color:#52525b;font-size:11px;">
+            <span class="x-mark">✗</span><br>
+            点击 config.ts<br>什么也不会发生
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== AFTER: Proposed ========== -->
+<div>
+  <div class="label">✅ 改后 — Tab 条 + FileViewer，跟桌面一致</div>
+  <div class="phone">
+    <div class="status-bar">9:41 &nbsp; ●●●● &nbsp; Wi-Fi &nbsp; ▮▮▮</div>
+    <div class="header">
+      <span class="btn back">← Back</span>
+      <span style="font-size:11px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">debug</span>
+      <span class="badge">RELAY</span>
+    </div>
+    <div class="main">
+      <!-- Tab strip (NEW) -->
+      <div class="tab-strip">
+        <span class="tab" style="color:#a1a1aa;">
+          <span style="font-size:14px;">⬢</span> Terminal
+        </span>
+        <span class="tab active">
+          config.ts <span class="close">×</span>
+        </span>
+        <span class="tab" style="background:#27272a;border-radius:4px;margin:0 4px;padding:2px 6px;font-size:10px;">+</span>
+      </div>
+
+      <!-- File viewer (replaced terminal) -->
+      <div class="file-viewer">
+        <div class="toolbar">
+          <span>📄 config.ts <span class="badge-new">NEW</span></span>
+          <span style="display:flex;gap:6px;">
+            <span style="color:#22c55e;font-weight:600;">✎ Edit</span>
+          </span>
+        </div>
+        <div class="editor">
+          <span class="keyword">import</span> &#123; defineConfig &#125; <span class="keyword">from</span> <span class="string">'vite'</span>
+          <span class="keyword">import</span> react <span class="keyword">from</span> <span class="string">'@vitejs/plugin-react'</span>
+
+          <span class="keyword">export default</span> defineConfig(&#123;
+            plugins: [react()],
+            server: &#123;
+              port: <span class="string">13000</span>,
+              proxy: &#123;
+                <span class="string">'/ws'</span>: <span class="string">'http://localhost:19090'</span>
+              &#125;
+            &#125;
+          &#125;)
+        </div>
+      </div>
+
+      <!-- BottomSheet: Files tab still available -->
+      <div class="bottom-sheet">
+        <div class="bottom-tabs">
+          <span class="bottom-tab">⌨ Input</span>
+          <span class="bottom-tab">⚡ Commands</span>
+          <span class="bottom-tab">📦 Env</span>
+          <span class="bottom-tab active">📁 Files</span>
+        </div>
+        <div class="bottom-content">
+          <div class="file-item">
+            <span class="icon">📁</span><span class="name">src/</span>
+          </div>
+          <div class="file-item" style="background:#27272a;">
+            <span class="icon">📄</span><span class="name">config.ts</span>
+            <span class="size">2.3 KB</span>
+            <span style="font-size:9px;color:#3b82f6;">← opened</span>
+          </div>
+          <div class="file-item">
+            <span class="icon">📄</span><span class="name">package.json</span>
+            <span class="size">1.1 KB</span>
+          </div>
+          <div class="file-item">
+            <span class="icon">📄</span><span class="name">README.md</span>
+            <span class="size">4.5 KB</span>
+          </div>
+          <div style="text-align:center;padding:12px;color:#22c55e;font-size:10px;">
+            ✓ 点击文件 → 上方打开<br>
+            ✓ Terminal tab → 切回终端<br>
+            ✓ 可同时打开多个文件
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
