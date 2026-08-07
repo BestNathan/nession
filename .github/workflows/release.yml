@@ -712,31 +712,46 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old package versions (keep last 5)
+      - name: Delete old package versions (keep last 5 logical versions)
+        env:
+          KEEP: 5
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           PACKAGE="nession"
 
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
           VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
-            --paginate \
-            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+              --paginate \
+              -q '.[] | (.metadata.container.tags // []) as $t |
+                  [ $t[] | select(test("^(server|agent|ui)-[0-9]+\\.[0-9]+\\.[0-9]+")) ] |
+                  if length > 0 then
+                    { id: .id,
+                      created: .created_at,
+                      norm: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
+                  else empty end' 2>/dev/null) || true
 
           if [ -z "$VERSIONS" ]; then
-            echo "No versions found — skipping cleanup."
+            echo "No version-tagged versions found — skipping cleanup."
             exit 0
           fi
 
-          COUNT=0
-          for ID in $VERSIONS; do
-            COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
-              echo "Deleting version ${ID} (position: ${COUNT})"
-              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
-                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
-            else
-              echo "Keeping version ${ID} (position: ${COUNT})"
-            fi
+          TO_DELETE=$(echo "$VERSIONS" | jq -s \
+            "group_by(.norm) |
+             map({ ids: [.[].id] | unique, created: max_by(.created).created }) |
+             sort_by(.created) | reverse |
+             .[${KEEP}:] | [.[].ids[]]" 2>/dev/null) || true
+
+          if [ "$TO_DELETE" = "[]" ] || [ -z "$TO_DELETE" ]; then
+            echo "Nothing to delete (≤ ${KEEP} logical-version groups)."
+            exit 0
+          fi
+
+          echo "$TO_DELETE" | jq -r '.[]' | while read -r ID; do
+            [ -z "$ID" ] && continue
+            echo "Deleting version ${ID}"
+            gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
+              -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed"
           done
 
-          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."
+          DELETED=$(echo "$TO_DELETE" | jq 'length')
+          echo "Cleanup complete. Deleted ${DELETED} package versions."
