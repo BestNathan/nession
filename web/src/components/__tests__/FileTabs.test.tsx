@@ -65,7 +65,7 @@ describe('FileTabs', () => {
     // A file tab is now active — but the terminal element must STILL be in the
     // DOM (hidden), so its xterm instance and scrollback survive.
     await waitFor(() => {
-      const tabs = screen.getAllByRole('button', { name: /f\.txt/i });
+      const tabs = screen.getAllByRole('tab', { name: /f\.txt/i });
       expect(tabs.length).toBeGreaterThan(0);
     });
     expect(screen.getByTestId('terminal-marker')).toBeInTheDocument();
@@ -87,13 +87,13 @@ describe('FileTabs', () => {
     // Open a file tab.
     fireEvent.click(screen.getByTitle('Open panel'));
     fireEvent.click(await screen.findByText('f.txt'));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /f\.txt/i }).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByRole('tab', { name: /f\.txt/i }).length).toBeGreaterThan(0));
 
     // Not called yet (terminal was already visible on mount).
     expect(onTerminalReveal).not.toHaveBeenCalled();
 
     // Switch back to the Terminal tab.
-    const tabBar = screen.getByRole('button', { name: /Terminal/i });
+    const tabBar = screen.getByRole('tab', { name: /Terminal/i });
     fireEvent.click(tabBar);
 
     await waitFor(() => expect(onTerminalReveal).toHaveBeenCalledTimes(1));
