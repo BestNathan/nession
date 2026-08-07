@@ -55,12 +55,14 @@ describe('MobileFileTabs', () => {
     onFileClickRef: { current: null },
   };
 
-  it('renders terminal when no files are open, no tab strip', () => {
+  it('renders terminal when no files are open, tab bar shows Terminal tab', () => {
     render(<MobileFileTabs {...baseProps} />);
 
     expect(screen.getByTestId('terminal-marker')).toBeInTheDocument();
-    // No tab strip — no "Terminal" button should be visible
-    expect(screen.queryByRole('button', { name: /Terminal/ })).toBeNull();
+    // Tab bar always visible — Terminal tab is always present
+    expect(screen.getByRole('button', { name: /^Terminal/ })).toBeInTheDocument();
+    // No file tabs when no files are open
+    expect(screen.queryByTestId('file-tab-config.ts')).toBeNull();
   });
 
   it('shows tab strip with Terminal + file tabs when files are open', () => {
@@ -83,11 +85,11 @@ describe('MobileFileTabs', () => {
     expect(screen.getByTestId('terminal-marker')).toBeInTheDocument();
   });
 
-  it('hides tab strip when last file is closed', () => {
+  it('keeps Terminal tab visible when last file is closed', () => {
     const { rerender } = render(<MobileFileTabs {...baseProps} />);
 
-    // No tab strip initially
-    expect(screen.queryByRole('button', { name: /Terminal/ })).toBeNull();
+    // Terminal tab is always visible
+    expect(screen.getByRole('button', { name: /^Terminal/ })).toBeInTheDocument();
 
     // Simulate opening a file
     mockUseFileTabs.mockImplementation(() =>
@@ -99,12 +101,14 @@ describe('MobileFileTabs', () => {
       }),
     );
     rerender(<MobileFileTabs {...baseProps} />);
-    expect(screen.getByRole('button', { name: /Terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Terminal/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /a\.ts/i })).toBeInTheDocument();
 
-    // Simulate closing the file
+    // Simulate closing the file — Terminal tab still visible
     mockUseFileTabs.mockImplementation(() => defaultHookReturn());
     rerender(<MobileFileTabs {...baseProps} />);
-    expect(screen.queryByRole('button', { name: /Terminal/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Terminal/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /a\.ts/i })).toBeNull();
   });
 
   it('exposes handleFileClick via onFileClickRef', () => {

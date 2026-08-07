@@ -16,7 +16,7 @@ interface MobileTabBarProps {
 /** Compact scrollable tab strip — no dirty dots, no extension tabs. */
 function MobileTabBar({ openFiles, activeTabId, showTerminal, onSelect, onClose }: MobileTabBarProps) {
   return (
-    <div className="absolute top-0 left-0 right-0 z-10 flex items-center border-b bg-muted/20 overflow-x-auto">
+    <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
       <button
         onClick={() => onSelect('terminal')}
         className={cn(
@@ -79,30 +79,26 @@ export function MobileFileTabs({
   }, [handleFileClick, onFileClickRef]);
 
   return (
-    <div className="flex-1 min-h-0 relative">
-      {/* Tab bar — absolute overlay, doesn't push content down */}
-      {openFiles.length > 0 && (
-        <MobileTabBar
-          openFiles={openFiles}
-          activeTabId={activeTabId}
-          showTerminal={showTerminal}
-          onSelect={setActiveTabId}
-          onClose={handleCloseFile}
-        />
-      )}
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* Tab bar — always rendered so its height never changes.
+          When no files are open it shows only the Terminal tab. */}
+      <MobileTabBar
+        openFiles={openFiles}
+        activeTabId={activeTabId}
+        showTerminal={showTerminal}
+        onSelect={setActiveTabId}
+        onClose={handleCloseFile}
+      />
 
-      {/* Content area — terminal or FileViewer, always fills full height */}
-      <div className={cn(
-        'absolute inset-0 flex flex-col',
-        openFiles.length > 0 && 'top-8',
-      )}>
+      {/* Content area — terminal or FileViewer */}
+      <div className="flex-1 min-h-0 relative">
         {/* Terminal — always mounted, hidden when file tab is active */}
-        <div className={cn('flex-1 min-h-0 relative', !showTerminal && 'hidden')}>
+        <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
           {terminalElement}
         </div>
         {/* FileViewer — shown when a file tab is active */}
         {!showTerminal && activeFile ? (
-          <div className="flex-1 min-h-0 relative">
+          <div className="absolute inset-0">
             <FileViewer
               key={activeFile.id}
               fileOps={fileOps}
