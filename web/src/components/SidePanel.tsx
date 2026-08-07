@@ -66,7 +66,7 @@ export function SidePanel({
             'border-r bg-muted/30 overflow-hidden',
             'fixed inset-y-0 left-0 z-30 lg:static lg:z-auto lg:h-full',
             'w-[var(--sp-width)] lg:w-auto',
-            !isOpen && 'lg:!block hidden',
+            !isOpen && 'hidden lg:block',
           )}
         >
             <div className="h-full flex flex-col">{children}</div>
