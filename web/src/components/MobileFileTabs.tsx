@@ -80,20 +80,21 @@ export function MobileFileTabs({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {/* Tab bar — always rendered so its height never changes.
-          When no files are open it shows only the Terminal tab. */}
-      <MobileTabBar
-        openFiles={openFiles}
-        activeTabId={activeTabId}
-        showTerminal={showTerminal}
-        onSelect={setActiveTabId}
-        onClose={handleCloseFile}
-      />
+      {/* Tab bar — only shown when files are open */}
+      {openFiles.length > 0 && (
+        <MobileTabBar
+          openFiles={openFiles}
+          activeTabId={activeTabId}
+          showTerminal={showTerminal}
+          onSelect={setActiveTabId}
+          onClose={handleCloseFile}
+        />
+      )}
 
       {/* Content area — terminal or FileViewer */}
       <div className="flex-1 min-h-0 relative">
         {/* Terminal — always mounted, hidden when file tab is active */}
-        <div className={cn('absolute inset-0', !showTerminal && 'hidden')}>
+        <div className={cn('absolute inset-0 flex flex-col', !showTerminal && 'hidden')}>
           {terminalElement}
         </div>
         {/* FileViewer — shown when a file tab is active */}
