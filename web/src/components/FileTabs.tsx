@@ -260,7 +260,7 @@ export function FileTabs({
         /* Desktop: ResizablePanelGroup spans SidePanel + main content so the
            user can drag the handle to resize the file browser column. */
         <ResizablePanelGroup key={sessionId ?? 'default'} orientation="horizontal" className="gap-0">
-          <ResizablePanel defaultSize={20} minSize={15} maxSize={35}>
+          <ResizablePanel defaultSize="20" minSize="15" maxSize="35">
             <SidePanel>
               <FileBrowser fileOps={fileOps} onFileClick={handleFileClick} onFileDeleted={handleFileDeleted} onFileRenamed={handleFileRenamed} onGetTerminalPwd={onGetTerminalPwd} />
             </SidePanel>
@@ -268,7 +268,7 @@ export function FileTabs({
 
           <ResizableHandle className="!w-1 hover:bg-primary/50 transition-colors" />
 
-          <ResizablePanel defaultSize={80} minSize={65}>
+          <ResizablePanel defaultSize="80" minSize="65">
             <div className="h-full min-w-0 flex flex-col">
               {tabBar}
               {content}
