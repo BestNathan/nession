@@ -27,7 +27,9 @@ export function SwipeableViewport({
 }: SwipeableViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragOffset, setDragOffset] = useState(0);
+  const dragOffsetRef = useRef(0); // ref for latest value — avoids stale closure in touchEnd
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false); // ref for handleTouchMove — avoids stale closure
   const startXRef = useRef(0);
   const startYRef = useRef(0);
   const lockedRef = useRef<'horizontal' | 'vertical' | null>(null);
@@ -38,10 +40,13 @@ export function SwipeableViewport({
     startYRef.current = touch.clientY;
     lockedRef.current = null;
     setIsDragging(true);
+    isDraggingRef.current = true;
+    setDragOffset(0);
+    dragOffsetRef.current = 0;
   }, []);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!isDragging) {
+    if (!isDraggingRef.current) {
       return;
     }
     const touch = e.touches[0];
@@ -60,27 +65,31 @@ export function SwipeableViewport({
 
     if (lockedRef.current === 'horizontal') {
       e.preventDefault();
+      dragOffsetRef.current = deltaX;
       setDragOffset(deltaX);
     }
-  }, [isDragging]);
+  }, []);
 
   const handleTouchEnd = useCallback(() => {
-    if (!isDragging) {
+    if (!isDraggingRef.current) {
       return;
     }
     setIsDragging(false);
+    isDraggingRef.current = false;
 
-    const absDelta = Math.abs(dragOffset);
+    const finalOffset = dragOffsetRef.current;
+    const absDelta = Math.abs(finalOffset);
     if (absDelta > SWIPE_THRESHOLD) {
-      const direction = dragOffset > 0 ? -1 : 1;
+      const direction = finalOffset > 0 ? -1 : 1;
       const newIndex = Math.max(0, Math.min(children.length - 1, activeIndex + direction));
       if (newIndex !== activeIndex) {
         onIndexChange(newIndex);
       }
     }
     setDragOffset(0);
+    dragOffsetRef.current = 0;
     lockedRef.current = null;
-  }, [isDragging, dragOffset, activeIndex, children.length, onIndexChange]);
+  }, [activeIndex, children.length, onIndexChange]);
 
   const translateX = -(activeIndex * 100) + (dragOffset / (containerRef.current?.offsetWidth || 1)) * 100;
 

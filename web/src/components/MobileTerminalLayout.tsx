@@ -43,45 +43,55 @@ function CollapsibleInputBar({
   onToggle: () => void;
 }) {
   return (
-    <Collapsible
-      open={!collapsed}
-      onOpenChange={(open) => { if (open !== !collapsed) { onToggle(); } }}
-      className="flex-shrink-0 border-t bg-background"
-    >
-      <div className="flex items-center justify-between px-2 pt-1">
-        <CollapsibleTrigger
-          render={
-            <Button variant="ghost" size="sm" className="gap-1 text-xs">
-              {collapsed ? (
-                <>
-                  <ChevronUp className="size-3" /> Input
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="size-3" /> Hide
-                </>
-              )}
-            </Button>
-          }
-        />
-      </div>
-      <CollapsibleContent className="overflow-hidden">
-        <Tabs defaultValue="input" className="flex flex-col">
-          <TabsList className="mx-2 text-xs">
-            <TabsTrigger value="input" className="text-xs gap-1">Input</TabsTrigger>
-            <TabsTrigger value="commands" className="text-xs gap-1">Commands</TabsTrigger>
-          </TabsList>
-          <div className="h-[30vh] overflow-y-auto">
-            <TabsContent value="input" className="mt-0 h-full">
+    <Tabs defaultValue="input" className="flex-shrink-0 border-t bg-background">
+      <Collapsible
+        open={!collapsed}
+        onOpenChange={(open) => { if (open !== !collapsed) { onToggle(); } }}
+      >
+        {/* Toggle bar — always visible, compact when collapsed */}
+        <div className="flex items-center gap-2 px-2 h-8">
+          <CollapsibleTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1 text-xs h-6"
+              >
+                {collapsed ? (
+                  <>
+                    <ChevronUp className="size-3" />
+                    Input & Commands
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="size-3" />
+                    Hide
+                  </>
+                )}
+              </Button>
+            }
+          />
+          {/* Tab switcher — only visible when expanded */}
+          {!collapsed && (
+            <TabsList className="text-xs h-7">
+              <TabsTrigger value="input" className="text-xs gap-1 px-2 h-6">Input</TabsTrigger>
+              <TabsTrigger value="commands" className="text-xs gap-1 px-2 h-6">Commands</TabsTrigger>
+            </TabsList>
+          )}
+        </div>
+
+        <CollapsibleContent className="overflow-hidden">
+          <div className="max-h-[35vh] overflow-y-auto border-t">
+            <TabsContent value="input" className="mt-0">
               <InputPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
-            <TabsContent value="commands" className="mt-0 h-full">
+            <TabsContent value="commands" className="mt-0">
               <QuickCommandsPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
           </div>
-        </Tabs>
-      </CollapsibleContent>
-    </Collapsible>
+        </CollapsibleContent>
+      </Collapsible>
+    </Tabs>
   );
 }
 
@@ -137,7 +147,7 @@ export function MobileTerminalLayout({
   onGetTerminalPwd,
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
-  const [inputCollapsed, setInputCollapsed] = useState(false);
+  const [inputCollapsed, setInputCollapsed] = useState(true);
 
   const {
     selectedFile,
