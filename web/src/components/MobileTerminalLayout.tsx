@@ -65,7 +65,7 @@ function CollapsibleInputBar({
           }
         />
       </div>
-      <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden">
+      <CollapsibleContent className="overflow-hidden">
         <Tabs defaultValue="input" className="flex flex-col">
           <TabsList className="mx-2 text-xs">
             <TabsTrigger value="input" className="text-xs gap-1">Input</TabsTrigger>
