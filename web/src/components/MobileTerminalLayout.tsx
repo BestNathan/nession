@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Square, Trash2, Search } from 'lucide-react';
+import { ChevronDown, ChevronUp, Square, Trash2, Search } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { EnvPanel } from './env/EnvPanel';
@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
+import { cn } from '@/lib/utils';
 
 interface MobileTerminalLayoutProps {
   terminalElement: React.ReactNode | null;
@@ -207,6 +208,95 @@ function useFilesPanelNav() {
   };
 }
 
+interface FilesPanelProps {
+  fileOps: FileOps;
+  onGetTerminalPwd?: () => Promise<string>;
+}
+
+/**
+ * Files panel with top-bottom split layout.
+ * Top: FileViewer (or empty state) — flex-[6] when browser visible, flex-1 when collapsed
+ * Bottom: Collapsible FileBrowser — flex-[4] when visible, hidden when collapsed
+ */
+function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
+  const [browserCollapsed, setBrowserCollapsed] = useState(false);
+  const {
+    selectedFile,
+    handleFileClick,
+    handleFileDeleted,
+    handleFileRenamed,
+  } = useFilesPanelNav();
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* FileViewer area */}
+      <div
+        className={cn(
+          'min-h-0 flex flex-col',
+          browserCollapsed ? 'flex-1' : 'flex-[6]',
+        )}
+      >
+        {selectedFile ? (
+          <>
+            {/* File header bar */}
+            <div className="flex items-center gap-2 px-2 py-1 border-b flex-shrink-0">
+              <span className="text-xs font-medium truncate">{selectedFile.name}</span>
+            </div>
+            <div className="flex-1 min-h-0">
+              <FileViewer
+                key={selectedFile.path}
+                fileOps={fileOps}
+                path={selectedFile.path}
+                filename={selectedFile.name}
+                onClose={() => {}}
+                onDirtyChange={() => {}}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Select a file to view
+          </div>
+        )}
+      </div>
+
+      {/* Browser area */}
+      <div
+        className={cn(
+          'border-t bg-background flex-shrink-0 flex flex-col',
+          browserCollapsed ? 'hidden' : 'flex-[4] min-h-0',
+        )}
+      >
+        {/* Collapse toggle */}
+        <div className="flex items-center px-2 h-8 flex-shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-xs h-6"
+            onClick={() => setBrowserCollapsed((prev) => !prev)}
+          >
+            {browserCollapsed ? (
+              <ChevronUp className="size-3" />
+            ) : (
+              <ChevronDown className="size-3" />
+            )}
+            Files
+          </Button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <FileBrowser
+            fileOps={fileOps}
+            onFileClick={handleFileClick}
+            onFileDeleted={handleFileDeleted}
+            onFileRenamed={handleFileRenamed}
+            onGetTerminalPwd={onGetTerminalPwd}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Mobile terminal layout with swipe-to-switch between Terminal, Files, and Envs.
  */
@@ -221,14 +311,6 @@ export function MobileTerminalLayout({
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
-
-  const {
-    selectedFile,
-    handleFileClick,
-    handleBack,
-    handleFileDeleted,
-    handleFileRenamed,
-  } = useFilesPanelNav();
 
   const panels = [
     // Panel 0: Terminal
@@ -250,49 +332,7 @@ export function MobileTerminalLayout({
     // Panel 1: Files
     <div key="files" className="h-full flex flex-col">
       {fileOps ? (
-        selectedFile ? (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center gap-2 px-2 py-1 border-b flex-shrink-0">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={handleBack}
-                      aria-label="Back to files"
-                    />
-                  }
-                >
-                  <ArrowLeft className="size-4" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>Back to files</p>
-                </TooltipContent>
-              </Tooltip>
-              <span className="text-xs truncate">{selectedFile.name}</span>
-            </div>
-            <div className="flex-1 min-h-0">
-              <FileViewer
-                key={selectedFile.path}
-                fileOps={fileOps}
-                path={selectedFile.path}
-                filename={selectedFile.name}
-                onClose={handleBack}
-                onDirtyChange={() => {}}
-              />
-            </div>
-          </div>
-        ) : (
-          <FileBrowser
-            fileOps={fileOps}
-            onFileClick={handleFileClick}
-            onFileDeleted={handleFileDeleted}
-            onFileRenamed={handleFileRenamed}
-            onGetTerminalPwd={onGetTerminalPwd}
-          />
-        )
+        <FilesPanel fileOps={fileOps} onGetTerminalPwd={onGetTerminalPwd} />
       ) : (
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           File browser unavailable
