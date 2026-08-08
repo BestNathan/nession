@@ -219,6 +219,14 @@ watch_ci() {
 watch_k8s() {
   local env="$1" namespace="$2"
 
+  # Verify kubectl connectivity
+  if ! kubectl get ns "$namespace" >/dev/null 2>&1; then
+    yellow "  ⚠ kubectl cannot reach namespace '$namespace' — skipping k8s check"
+    note "  Verify: kubectl config use-context <cluster> && kubectl get ns $namespace"
+    note "  CI already updated the kustomize manifests — ArgoCD will sync automatically."
+    return 0
+  fi
+
   step "K8s ($env) — waiting for rollout in namespace '$namespace'..."
 
   sleep 5  # Give ArgoCD a moment to pick up the kustomize change
@@ -277,9 +285,11 @@ watch_k8s() {
 
 # ── Main ────────────────────────────────────────────────────────────────
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && usage
-[[ $# -lt 1 ]] && die "Expected: staging or prod\nUsage: ./scripts/deploy-watch.sh <staging|prod>"
+[[ $# -lt 1 ]] && die "Expected: staging or prod\nUsage: ./scripts/deploy-watch.sh <staging|prod> [--skip-k8s]"
 
 ENV="$1"
+SKIP_K8S=false
+[[ "${2:-}" == "--skip-k8s" ]] && SKIP_K8S=true
 
 case "$ENV" in
   staging)
@@ -287,14 +297,14 @@ case "$ENV" in
     [[ "$BRANCH" =~ ^(feat|fix)/ ]] || die "Expected feat/* or fix/* branch for staging. Current: $BRANCH"
 
     watch_ci "$BRANCH" "$STAGING_WORKFLOW" "staging"
-    watch_k8s "staging" "$STAGING_NS"
+    $SKIP_K8S || watch_k8s "staging" "$STAGING_NS"
     ;;
 
   prod)
     BRANCH="main"
 
     watch_ci "$BRANCH" "$PROD_WORKFLOW" "production"
-    watch_k8s "production" "$PROD_NS"
+    $SKIP_K8S || watch_k8s "production" "$PROD_NS"
     ;;
 
   *)
