@@ -92,10 +92,11 @@ export function SwipeableViewport({
   }, [activeIndex, children.length, onIndexChange]);
 
   // CSS translateX(%) is relative to the element's own width.
-  // The inner flex container is children.length * 100% wide, so we must
-  // divide the pixel drag offset by children.length to get the correct %.
+  // The inner flex container is children.length * 100% wide (e.g. 300% for 3 panels).
+  // Convert pixel offset to CSS %: percent = pixelOffset * 100 / (viewportWidth * children.length)
   const viewportWidth = containerRef.current?.offsetWidth || 1;
-  const translateX = -(activeIndex * 100) + (dragOffset / viewportWidth) * (100 / children.length);
+  const pixelOffset = -(activeIndex * viewportWidth) + dragOffset;
+  const translateX = (pixelOffset * 100) / (viewportWidth * children.length);
 
   return (
     <div
