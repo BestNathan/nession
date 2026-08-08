@@ -161,14 +161,42 @@ export class TerminalView {
         },
       );
 
-      // Tap the terminal area → focus our textarea.
-      const handleTouchStart = () => {
+      // Tap the terminal area → focus our textarea. Use touchstart +
+      // touchend to detect taps (no movement) vs scrolls/swipes so the
+      // keyboard only appears on deliberate taps, not during scrolling.
+      let tapStartX = 0;
+      let tapStartY = 0;
+      const TAP_MOVE_THRESHOLD = 10; // px — max movement to count as a tap
+
+      const handleTouchStart = (e: TouchEvent) => {
+        if (this.isDisposed) { return; }
+        const t = e.touches[0];
+        tapStartX = t.clientX;
+        tapStartY = t.clientY;
+      };
+
+      const handleTouchEnd = () => {
         if (this.isDisposed) { return; }
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { return; }
         this.mobileInput!.focus();
       };
+
+      // Use a pointer-tracking wrapper: record start position on touchstart,
+      // then only focus on touchend IF the touch didn't move much.
+      // The actual focus call is wrapped so we can discard scroll gestures.
+      const touchEndWrapper = (e: TouchEvent) => {
+        if (this.isDisposed) { return; }
+        const t = e.changedTouches[0];
+        const dx = t.clientX - tapStartX;
+        const dy = t.clientY - tapStartY;
+        if (Math.abs(dx) < TAP_MOVE_THRESHOLD && Math.abs(dy) < TAP_MOVE_THRESHOLD) {
+          handleTouchEnd();
+        }
+      };
+
       scrollContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+      scrollContainer.addEventListener('touchend', touchEndWrapper, { passive: true });
     }
 
     // MouseIntentResolver (see above) distinguishes click from drag.
