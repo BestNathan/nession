@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, type TouchEvent, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { ModeBar } from './ModeBar';
 
 interface SwipeableViewportProps {
   children: ReactNode[];
@@ -106,9 +107,15 @@ export function SwipeableViewport({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      <ModeBar
+        count={children.length}
+        activeIndex={activeIndex}
+        dragOffset={dragOffset}
+        isDragging={isDragging}
+      />
       <div
         className={cn(
-          'flex h-full',
+          'flex h-full pt-[2px]',
           !isDragging && 'transition-transform duration-200',
         )}
         style={{

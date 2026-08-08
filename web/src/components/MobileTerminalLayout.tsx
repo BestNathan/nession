@@ -6,7 +6,6 @@ import { EnvPanel } from './env/EnvPanel';
 import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
 import { SwipeableViewport } from './SwipeableViewport';
-import { BottomNavIndicator } from './BottomNavIndicator';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
@@ -69,9 +68,9 @@ function TerminalInputBar({
             render={
               <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
                 {collapsed ? (
-                  <ChevronUp className="size-3" />
+                  <ChevronUp className="size-3" data-icon="inline-start" />
                 ) : (
-                  <ChevronDown className="size-3" />
+                  <ChevronDown className="size-3" data-icon="inline-start" />
                 )}
                 {collapsed ? 'Input & Commands' : 'Hide'}
               </Button>
@@ -97,7 +96,7 @@ function TerminalInputBar({
                     />
                   }
                 >
-                  <Square className="size-3.5" />
+                  <Square className="size-3.5" data-icon />
                 </TooltipTrigger>
                 <TooltipContent side="top"><p>Ctrl-C</p></TooltipContent>
               </Tooltip>
@@ -114,7 +113,7 @@ function TerminalInputBar({
                     />
                   }
                 >
-                  <Trash2 className="size-3.5" />
+                  <Trash2 className="size-3.5" data-icon />
                 </TooltipTrigger>
                 <TooltipContent side="top"><p>Clear</p></TooltipContent>
               </Tooltip>
@@ -131,7 +130,7 @@ function TerminalInputBar({
                     />
                   }
                 >
-                  <Search className="size-3.5" />
+                  <Search className="size-3.5" data-icon />
                 </TooltipTrigger>
                 <TooltipContent side="top"><p>Ctrl-R</p></TooltipContent>
               </Tooltip>
@@ -276,9 +275,9 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
             onClick={() => setBrowserCollapsed((prev) => !prev)}
           >
             {browserCollapsed ? (
-              <ChevronUp className="size-3" />
+              <ChevronUp className="size-3" data-icon="inline-start" />
             ) : (
-              <ChevronDown className="size-3" />
+              <ChevronDown className="size-3" data-icon="inline-start" />
             )}
             Files
           </Button>
@@ -331,18 +330,28 @@ export function MobileTerminalLayout({
 
     // Panel 1: Files
     <div key="files" className="h-full flex flex-col">
-      {fileOps ? (
-        <FilesPanel fileOps={fileOps} onGetTerminalPwd={onGetTerminalPwd} />
-      ) : (
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-          File browser unavailable
-        </div>
-      )}
+      <div className="flex items-center px-3 h-7 border-b flex-shrink-0">
+        <span className="text-xs text-muted-foreground font-medium">Files</span>
+      </div>
+      <div className="flex-1 min-h-0">
+        {fileOps ? (
+          <FilesPanel fileOps={fileOps} onGetTerminalPwd={onGetTerminalPwd} />
+        ) : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            File browser unavailable
+          </div>
+        )}
+      </div>
     </div>,
 
     // Panel 2: Envs
-    <div key="envs" className="h-full">
-      <EnvPanel sessionId={sessionId} />
+    <div key="envs" className="h-full flex flex-col">
+      <div className="flex items-center px-3 h-7 border-b flex-shrink-0">
+        <span className="text-xs text-muted-foreground font-medium">Environment</span>
+      </div>
+      <div className="flex-1 min-h-0">
+        <EnvPanel sessionId={sessionId} />
+      </div>
     </div>,
   ];
 
@@ -354,7 +363,6 @@ export function MobileTerminalLayout({
       >
         {panels}
       </SwipeableViewport>
-      <BottomNavIndicator count={3} activeIndex={activePanel} />
     </div>
   );
 }
