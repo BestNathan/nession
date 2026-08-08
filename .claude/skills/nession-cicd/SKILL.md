@@ -16,6 +16,27 @@ Local dev → cargo run / npm run dev → verify locally
   → CI builds multi-arch images → ArgoCD syncs to k8s
 ```
 
+## Deployment Monitoring
+
+Use `scripts/deploy-watch.sh` to monitor deployments end-to-end:
+
+```bash
+# After pushing a feat/fix branch — watch CI + staging rollout
+./scripts/deploy-watch.sh staging
+
+# After merging to main + version bump — watch release + prod rollout
+./scripts/deploy-watch.sh prod
+```
+
+**What it does:**
+- Watches the appropriate GitHub Actions workflow (cicd.yml for staging, release.yml for prod)
+- Shows only key phases (Check → Versions → Build → Docker → Merge → Kustomize)
+- On CI failure: shows the failed job's log tail and suggests fixes based on error patterns
+- On CI success: monitors k8s rollout status for all 3 deployments with pod health checks
+- Exits non-zero on any failure so it can be used in scripts/CI
+
+**Prerequisites:** `gh`, `kubectl`, `jq`
+
 ## ⛔ Iron Law
 
 ```
