@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Square, Trash2, Search } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { EnvPanel } from './env/EnvPanel';
@@ -8,6 +8,7 @@ import { FileViewer } from './FileViewer';
 import { SwipeableViewport } from './SwipeableViewport';
 import { BottomNavIndicator } from './BottomNavIndicator';
 import { Button } from './ui/button';
+import { Separator } from './ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -26,62 +27,133 @@ interface MobileTerminalLayoutProps {
   onGetTerminalPwd?: () => Promise<string>;
 }
 
-/**
- * Collapsible input bar below the terminal on mobile. Collapsed: terminal
- * fills to bottom. Expanded: tabs for Input (text entry) and Commands
- * (quick commands).
- */
-function CollapsibleInputBar({
-  sendText,
-  disabled,
-  collapsed,
-  onToggle,
-}: {
+interface TerminalInputBarProps {
   sendText: (text: string) => void;
   disabled: boolean;
   collapsed: boolean;
   onToggle: () => void;
-}) {
+  onReveal?: () => void;
+}
+
+/**
+ * Collapsible input bar below the terminal. Collapsed: compact toolbar
+ * with quick-action buttons. Expanded: full Tabs (Input | Commands).
+ * Triggers onReveal after animation so the terminal refits.
+ */
+function TerminalInputBar({
+  sendText,
+  disabled,
+  collapsed,
+  onToggle,
+  onReveal,
+}: TerminalInputBarProps) {
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (open !== !collapsed) {
+        onToggle();
+        // Wait for collapse animation (~250ms), then trigger terminal refit
+        setTimeout(() => onReveal?.(), 250);
+      }
+    },
+    [collapsed, onToggle, onReveal],
+  );
+
   return (
     <Tabs defaultValue="input" className="flex-shrink-0 border-t bg-background">
-      <Collapsible
-        open={!collapsed}
-        onOpenChange={(open) => { if (open !== !collapsed) { onToggle(); } }}
-      >
-        {/* Toggle bar — always visible, compact when collapsed */}
-        <div className="flex items-center gap-2 px-2 h-8">
+      <Collapsible open={!collapsed} onOpenChange={handleOpenChange}>
+        {/* Toolbar — always visible */}
+        <div className="flex items-center gap-1 px-2 h-9">
+          {/* Collapse toggle */}
           <CollapsibleTrigger
             render={
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-1 text-xs h-6"
-              >
+              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
                 {collapsed ? (
-                  <>
-                    <ChevronUp className="size-3" />
-                    Input & Commands
-                  </>
+                  <ChevronUp className="size-3" />
                 ) : (
-                  <>
-                    <ChevronDown className="size-3" />
-                    Hide
-                  </>
+                  <ChevronDown className="size-3" />
                 )}
+                {collapsed ? 'Input & Commands' : 'Hide'}
               </Button>
             }
           />
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Quick-action buttons — only when collapsed */}
+          {collapsed && (
+            <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => sendText('\x03')}
+                      disabled={disabled}
+                      aria-label="Send Ctrl-C"
+                    />
+                  }
+                >
+                  <Square className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top"><p>Ctrl-C</p></TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => sendText('clear\n')}
+                      disabled={disabled}
+                      aria-label="Clear terminal"
+                    />
+                  }
+                >
+                  <Trash2 className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top"><p>Clear</p></TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => sendText('\x12')}
+                      disabled={disabled}
+                      aria-label="Send Ctrl-R"
+                    />
+                  }
+                >
+                  <Search className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top"><p>Ctrl-R</p></TooltipContent>
+              </Tooltip>
+            </>
+          )}
+
           {/* Tab switcher — only visible when expanded */}
           {!collapsed && (
             <TabsList className="text-xs h-7">
-              <TabsTrigger value="input" className="text-xs gap-1 px-2 h-6">Input</TabsTrigger>
-              <TabsTrigger value="commands" className="text-xs gap-1 px-2 h-6">Commands</TabsTrigger>
+              <TabsTrigger value="input" className="text-xs gap-1 px-2 h-6">
+                Input
+              </TabsTrigger>
+              <TabsTrigger value="commands" className="text-xs gap-1 px-2 h-6">
+                Commands
+              </TabsTrigger>
             </TabsList>
           )}
         </div>
 
+        {/* Content — only when expanded */}
         <CollapsibleContent className="overflow-hidden">
-          <div className="max-h-[35vh] overflow-y-auto border-t">
+          <Separator />
+          <div className="max-h-[35vh] overflow-y-auto">
             <TabsContent value="input" className="mt-0">
               <InputPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
@@ -144,6 +216,7 @@ export function MobileTerminalLayout({
   sendText,
   toolbarDisabled,
   fileOps,
+  onTerminalReveal,
   onGetTerminalPwd,
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
@@ -165,11 +238,12 @@ export function MobileTerminalLayout({
       ) : (
         <div className="flex-1 min-h-0" />
       )}
-      <CollapsibleInputBar
+      <TerminalInputBar
         sendText={sendText}
         disabled={toolbarDisabled}
         collapsed={inputCollapsed}
         onToggle={() => setInputCollapsed((prev) => !prev)}
+        onReveal={onTerminalReveal}
       />
     </div>,
 
