@@ -15,8 +15,17 @@ REPO="BestNathan/nession"
 STAGING_WORKFLOW="cicd.yml"
 PROD_WORKFLOW="release.yml"
 K8S_NS="nession"
-STAGING_DEPLOYS=("nession-server-staging" "nession-agent-staging" "nession-ui-staging")
-PROD_DEPLOYS=("nession-server" "nession-agent" "nession-ui")
+# Deployment name → pod component label (component is stable across envs)
+STAGING_DEPLOYS=(
+  "nession-server-staging server"
+  "nession-agent-staging agent"
+  "nession-ui-staging ui"
+)
+PROD_DEPLOYS=(
+  "nession-server server"
+  "nession-agent agent"
+  "nession-ui ui"
+)
 K8S_TIMEOUT=300  # seconds to wait for pods to match expected image
 
 # CI phase → job name pattern
@@ -173,9 +182,10 @@ watch_ci() {
 
   local sha
   sha=$(gh run view "$run_id" --repo "$REPO" --log --job "$versions_job" 2>/dev/null \
-    | grep -oP 'SHA:\s*\K[a-f0-9]{7}' | head -1)
+    | grep -oE 'SHA: [a-f0-9]{7}' | head -1 | awk '{print $2}')
 
-  if [[ -z "$sha" ]]; then
+  # Validate — must be exactly 7 hex chars
+  if [[ ! "$sha" =~ ^[a-f0-9]{7}$ ]]; then
     sha=$(git rev-parse --short=7 HEAD)
     yellow "  ⚠ Could not extract SHA from CI log — using local HEAD: $sha"
   fi
@@ -185,10 +195,10 @@ watch_ci() {
 }
 
 # ── K8s Monitoring ──────────────────────────────────────────────────────
-# Args: label, sha, deploy1 deploy2 deploy3
+# Args: label, sha, "deploy1 component1" "deploy2 component2" ...
 watch_k8s() {
   local label="$1" sha="$2"; shift 2
-  local -a deploys=("$@")
+  local -a pairs=("$@")
 
   # Verify kubectl connectivity
   if ! kubectl get ns "$K8S_NS" >/dev/null 2>&1; then
@@ -205,50 +215,43 @@ watch_k8s() {
   local -A deploy_done
 
   while [[ $elapsed -lt $K8S_TIMEOUT ]]; do
-    local -i all_ok=1
-
-    for deploy in "${deploys[@]}"; do
+    for pair in "${pairs[@]}"; do
+      read -r deploy component <<<"$pair"
       [[ -n "${deploy_done[$deploy]:-}" ]] && continue
 
-      # Get the image tag currently running on this deployment's pods
+      # Get the image tag from pods matching this component label
       local current_tag
       current_tag=$(kubectl get pods -n "$K8S_NS" \
-        -l "app=$deploy" \
+        -l "component=$component" \
         -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null \
         | rev | cut -d: -f1 | rev)
 
-      if [[ -z "$current_tag" ]]; then
-        all_ok=0
-        continue  # No pods yet
-      fi
+      [[ -z "$current_tag" ]] && continue  # No pods yet
 
-      local current_hash="${current_tag##*-}"  # e.g. "server-fb7d3e3" → "fb7d3e3"
+      local current_hash="${current_tag##*-}"  # "server-fb7d3e3" → "fb7d3e3"
 
       if [[ "$current_hash" == "$normalized_sha" ]]; then
         deploy_done["$deploy"]=1
         note "  $deploy → ${current_tag} ✓"
-      else
-        all_ok=0
       fi
     done
 
-    # Check if all done
+    # All matched?
     local -i done_count=0
-    for deploy in "${deploys[@]}"; do
+    for pair in "${pairs[@]}"; do
+      read -r deploy _ <<<"$pair"
       [[ -n "${deploy_done[$deploy]:-}" ]] && done_count=$((done_count + 1))
     done
 
-    if [[ $done_count -eq ${#deploys[@]} ]]; then
+    if [[ $done_count -eq ${#pairs[@]} ]]; then
       echo ""
       info "All $label pods running expected image '$normalized_sha'"
       kubectl get pods -n "$K8S_NS" -o wide
       return 0
     fi
 
-    # Show progress every 10s
     if [[ $((elapsed % 10)) -eq 0 && $elapsed -gt 0 ]]; then
-      local -i remaining=$((K8S_TIMEOUT - elapsed))
-      note "  ... waiting (${elapsed}s elapsed, ${remaining}s timeout) — ${done_count}/${#deploys[@]} matched"
+      note "  ... ${elapsed}s elapsed, ${done_count}/${#pairs[@]} matched (timeout ${K8S_TIMEOUT}s)"
     fi
 
     sleep 5
@@ -262,16 +265,15 @@ watch_k8s() {
   bold "Expected image tag: $normalized_sha"
   bold "Currently deployed:"
   echo ""
-
-  for deploy in "${deploys[@]}"; do
+  for pair in "${pairs[@]}"; do
+    read -r deploy component <<<"$pair"
     local deployed_tag status
     deployed_tag=$(kubectl get pods -n "$K8S_NS" \
-      -l "app=$deploy" \
+      -l "component=$component" \
       -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null || echo "N/A")
     status=$(kubectl get pods -n "$K8S_NS" \
-      -l "app=$deploy" \
+      -l "component=$component" \
       -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "N/A")
-
     local deployed_hash="${deployed_tag##*-}"
     if [[ "$deployed_hash" == "$normalized_sha" ]]; then
       info "  $deploy: $deployed_tag ($status)"
@@ -279,12 +281,9 @@ watch_k8s() {
       red "  $deploy: $deployed_tag ($status) — expected *-${normalized_sha}"
     fi
   done
-
   echo ""
-  note "  Possible reasons:"
-  note "  1. ArgoCD hasn't synced yet — wait and re-run: ./scripts/deploy-watch.sh $label"
-  note "  2. Image pull failure — check: kubectl describe pod -n $K8S_NS -l app=${deploys[0]} | grep -A5 Events"
-  note "  3. kustomize wasn't updated — check the 'update-*-kustomize' CI job"
+  note "  ArgoCD may not have synced yet — re-run: ./scripts/deploy-watch.sh $label"
+  note "  Or check manually: kubectl get pods -n $K8S_NS -o wide"
   exit 1
 }
 
