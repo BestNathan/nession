@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Square, Trash2, Search } from 'lucide-react';
+import { ChevronUp, ChevronDown, Square, Trash2, Search, CornerDownLeft, X } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { EnvPanel } from './env/EnvPanel';
@@ -10,7 +10,6 @@ import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 import { cn } from '@/lib/utils';
@@ -36,9 +35,11 @@ interface TerminalInputBarProps {
 }
 
 /**
- * Collapsible input bar below the terminal. Collapsed: compact toolbar
- * with quick-action buttons. Expanded: full Tabs (Input | Commands).
- * Triggers onReveal after animation so the terminal refits.
+ * Mobile terminal input bar redesigned for touch:
+ * - h-10 toolbar with minimum 40px touch targets
+ * - Collapsed: expand chevron + quick-action buttons (Ctrl-C, Enter, Clear, Search)
+ * - Expanded: Tabs (Input|Commands) integrated in toolbar + close button
+ * - Both tab panels share a fixed 30vh container — no height jumping
  */
 function TerminalInputBar({
   sendText,
@@ -51,7 +52,6 @@ function TerminalInputBar({
     (open: boolean) => {
       if (open !== !collapsed) {
         onToggle();
-        // Wait for collapse animation (~250ms), then trigger terminal refit
         setTimeout(() => onReveal?.(), 250);
       }
     },
@@ -61,92 +61,64 @@ function TerminalInputBar({
   return (
     <Tabs defaultValue="input" className="flex-shrink-0 border-t bg-background">
       <Collapsible open={!collapsed} onOpenChange={handleOpenChange}>
-        {/* Toolbar — always visible */}
-        <div className="flex items-center gap-1 px-2 h-9">
-          {/* Collapse toggle */}
+        {/* Toolbar — always visible, fixed height */}
+        <div className="flex items-center gap-1.5 px-2 h-10">
+          {/* Expand toggle — always present */}
           <CollapsibleTrigger
             render={
-              <Button variant="ghost" size="sm" className="gap-1 text-xs h-7">
-                {collapsed ? (
-                  <ChevronUp className="size-3" data-icon="inline-start" />
-                ) : (
-                  <ChevronDown className="size-3" data-icon="inline-start" />
-                )}
-                {collapsed ? 'Input & Commands' : 'Hide'}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('h-9 w-9', !collapsed && 'text-primary')}
+                aria-label={collapsed ? 'Open input panel' : 'Close input panel'}
+              >
+                <ChevronUp
+                  className={cn(
+                    'size-4 transition-transform duration-200',
+                    collapsed && 'rotate-180',
+                  )}
+                  data-icon
+                />
               </Button>
             }
           />
 
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Quick-action buttons — only when collapsed */}
-          {collapsed && (
+          {/* Collapsed state: text label + quick actions */}
+          {collapsed ? (
             <>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => sendText('\x03')}
-                      disabled={disabled}
-                      aria-label="Send Ctrl-C"
-                    />
-                  }
-                >
-                  <Square className="size-3.5" data-icon />
-                </TooltipTrigger>
-                <TooltipContent side="top"><p>Ctrl-C</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => sendText('clear\n')}
-                      disabled={disabled}
-                      aria-label="Clear terminal"
-                    />
-                  }
-                >
-                  <Trash2 className="size-3.5" data-icon />
-                </TooltipTrigger>
-                <TooltipContent side="top"><p>Clear</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => sendText('\x12')}
-                      disabled={disabled}
-                      aria-label="Send Ctrl-R"
-                    />
-                  }
-                >
-                  <Search className="size-3.5" data-icon />
-                </TooltipTrigger>
-                <TooltipContent side="top"><p>Ctrl-R</p></TooltipContent>
-              </Tooltip>
-            </>
-          )}
-
-          {/* Tab switcher — only visible when expanded */}
-          {!collapsed && (
-            <TabsList className="text-xs h-7">
-              <TabsTrigger value="input" className="text-xs gap-1 px-2 h-6">
+              <span className="text-xs text-muted-foreground font-medium select-none">
                 Input
-              </TabsTrigger>
-              <TabsTrigger value="commands" className="text-xs gap-1 px-2 h-6">
-                Commands
-              </TabsTrigger>
-            </TabsList>
+              </span>
+              <div className="flex-1" />
+
+              {/* Quick-action icon buttons */}
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
+            </>
+          ) : (
+            <>
+              {/* Expanded state: Tabs in toolbar + spacer + close */}
+              <TabsList className="text-xs h-8">
+                <TabsTrigger value="input" className="text-xs px-2.5 h-7">
+                  Input
+                </TabsTrigger>
+                <TabsTrigger value="commands" className="text-xs px-2.5 h-7">
+                  Commands
+                </TabsTrigger>
+              </TabsList>
+              <div className="flex-1" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={onToggle}
+                aria-label="Close input panel"
+              >
+                <X className="size-4" data-icon />
+              </Button>
+            </>
           )}
         </div>
 

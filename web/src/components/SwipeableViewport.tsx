@@ -103,6 +103,7 @@ export function SwipeableViewport({
     <div
       ref={containerRef}
       className="flex-1 min-h-0 overflow-hidden relative"
+      style={{ touchAction: 'pan-y' }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
