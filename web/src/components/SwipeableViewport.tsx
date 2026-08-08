@@ -124,7 +124,7 @@ export function SwipeableViewport({
         }}
       >
         {children.map((child, i) => (
-          <div key={i} className="flex-1 min-w-0 h-full overflow-hidden">
+          <div key={i} className="flex-1 min-w-0 h-full">
             {child}
           </div>
         ))}
