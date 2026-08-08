@@ -167,7 +167,7 @@ export function SessionDropdown({
                 </Button>
               </div>
             ) : loading ? (
-              <div className="space-y-1 px-2 py-1">
+              <div className="flex flex-col gap-1 px-2 py-1">
                 <Skeleton className="h-8 w-full rounded-sm" />
                 <Skeleton className="h-8 w-full rounded-sm" />
                 <Skeleton className="h-8 w-full rounded-sm" />

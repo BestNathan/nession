@@ -29,7 +29,7 @@ export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
       )}
       onClick={onClick}
     >
-      <CardContent className="p-4 space-y-1.5">
+      <CardContent className="flex flex-col p-4 gap-1.5">
         {/* Row 1: Status badge */}
         <div>
           <Badge variant={getStatusVariant(agent.status)} className="capitalize text-xs">

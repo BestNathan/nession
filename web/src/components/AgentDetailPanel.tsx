@@ -200,7 +200,7 @@ function HeartbeatTimeline({ history }: { history: string[] }) {
   const recent = [...history].reverse().slice(0, MAX_HEARTBEATS);
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1.5">
         {recent.map((iso, i) => {
           const diffMs = Date.now() - new Date(iso).getTime();
@@ -244,13 +244,13 @@ function AgentIdRow({ agentId }: { agentId: string }) {
 /** System information card with two-column grid. */
 function SystemInfoCard({ agent }: { agent: Agent }) {
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <Cpu className="w-4 h-4 text-muted-foreground" />
         <h3 className="text-sm font-medium">System Information</h3>
       </div>
       <Card size="sm">
-        <CardContent className="p-3 space-y-2.5">
+        <CardContent className="flex flex-col p-3 gap-2.5">
           {/* Network */}
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Network</p>
@@ -305,7 +305,7 @@ function RecentSessions({ sessions }: { sessions: Session[] }) {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-col gap-1.5">
       {sessions.slice(0, 5).map((s) => (
         <div
           key={s.session_id}
@@ -355,7 +355,7 @@ function OverviewTab({
     : null;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {/* Stats Cards */}
       <div className="flex gap-2 flex-wrap sm:flex-nowrap">
         <StatCard
@@ -497,7 +497,7 @@ export function AgentDetailPanel({
         className="w-full sm:w-[400px] md:w-[640px] lg:w-[720px] max-w-[100vw] flex flex-col p-0 pb-[env(safe-area-inset-bottom)]"
       >
         {/* ── Header ── */}
-        <div className="p-4 pb-2 flex-shrink-0 space-y-2">
+        <div className="flex flex-col p-4 pb-2 flex-shrink-0 gap-2">
           {/* Status + quick stats */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

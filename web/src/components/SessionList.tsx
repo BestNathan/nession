@@ -30,7 +30,7 @@ export function SessionList({
 }: SessionListProps) {
   if (loading) {
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <Skeleton className="h-12 w-full rounded-md" />
         <Skeleton className="h-12 w-full rounded-md" />
         <Skeleton className="h-12 w-full rounded-md" />

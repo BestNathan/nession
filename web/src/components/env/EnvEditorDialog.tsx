@@ -66,11 +66,11 @@ export function EnvEditorDialog({
             e.preventDefault();
             editor.submit();
           }}
-          className="space-y-4"
+          className="flex flex-col gap-4"
         >
           {!editor.isEdit && (
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <Label htmlFor="env-name">File Name</Label>
                 <Input
                   ref={nameRef}
@@ -82,7 +82,7 @@ export function EnvEditorDialog({
                   autoComplete="off"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <Label htmlFor="env-source">Location</Label>
                 <Select
                   value={editor.source}
@@ -101,7 +101,7 @@ export function EnvEditorDialog({
             </div>
           )}
           {!editor.isEdit && editor.source === 'agent' && (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="env-agent">Agent</Label>
               <Select
                 value={editor.agentId}
@@ -130,7 +130,7 @@ export function EnvEditorDialog({
           />
           <ParsePreview content={editor.content} />
           {editor.isEdit && editing && (
-            <details className="space-y-1">
+            <details className="flex flex-col gap-1">
               <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
                 Preview Changes
               </summary>
@@ -156,7 +156,7 @@ export function EnvEditorDialog({
 /** Warning shown when the file is in use by running sessions. */
 function InUseWarning({ sessions }: { sessions: string[] }) {
   return (
-    <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+    <div className="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
       <p className="text-sm text-destructive font-medium">
         This file is in use by {sessions.length} session(s)
       </p>
@@ -216,7 +216,7 @@ function ParsePreview({ content }: { content: string }) {
 
   if (!parsed) {
     return (
-      <div className="space-y-1">
+      <div className="flex flex-col gap-1">
         <Label className="text-xs text-muted-foreground">Parsed Variables</Label>
         <p className="text-xs text-muted-foreground">(empty)</p>
       </div>
@@ -226,7 +226,7 @@ function ParsePreview({ content }: { content: string }) {
   const hasWarnings = parsed.warnings.length > 0;
 
   return (
-    <details className="space-y-1" open={hasWarnings}>
+    <details className="flex flex-col gap-1" open={hasWarnings}>
       <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
         Parsed Variables ({parsed.vars.length})
         {hasWarnings && (
@@ -289,7 +289,7 @@ function EnvContentEditor({
   const overlayRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <Label htmlFor="env-content">Content</Label>
         <MaskToggleButton hideSecrets={hideSecrets} onToggle={onToggleSecrets} />

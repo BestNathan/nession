@@ -119,7 +119,7 @@ function SessionListBody({
 
   if (loading) {
     return (
-      <div className="space-y-2 px-3 py-2">
+      <div className="flex flex-col gap-2 px-3 py-2">
         <Skeleton className="h-10 w-full rounded-md" />
         <Skeleton className="h-10 w-full rounded-md" />
         <Skeleton className="h-10 w-full rounded-md" />
