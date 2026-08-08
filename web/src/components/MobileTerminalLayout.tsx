@@ -150,10 +150,10 @@ function TerminalInputBar({
           )}
         </div>
 
-        {/* Content — only when expanded */}
+        {/* Content — fixed height, both tabs share same container */}
         <CollapsibleContent className="overflow-hidden">
           <Separator />
-          <div className="max-h-[35vh] overflow-y-auto">
+          <div className="h-[30vh] overflow-y-auto">
             <TabsContent value="input" className="mt-0">
               <InputPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
@@ -315,7 +315,9 @@ export function MobileTerminalLayout({
     // Panel 0: Terminal
     <div key="terminal" className="h-full flex flex-col">
       {terminalElement ? (
-        <div className="flex-1 min-h-0 relative">{terminalElement}</div>
+        <div className="flex-1 min-h-0 relative flex flex-col">
+          {terminalElement}
+        </div>
       ) : (
         <div className="flex-1 min-h-0" />
       )}
