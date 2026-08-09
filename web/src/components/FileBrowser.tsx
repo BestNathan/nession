@@ -11,6 +11,7 @@ import {
   Pencil,
   Trash2,
   FolderSync,
+  Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
@@ -196,6 +197,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     renameState.cancelRename();
   };
 
+  const handleCopyPath = (entry: FileEntry) => {
+    navigator.clipboard.writeText(entry.path).then(
+      () => { toast.success('Path copied'); },
+      () => { toast.error('Failed to copy path'); },
+    );
+  };
+
   const handleDelete = async (entry: FileEntry) => {
     dialogs.setDeleteTarget(entry);
   };
@@ -352,6 +360,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
+                  <ContextMenuItem onClick={() => handleCopyPath(entry)}>
+                    <Copy /> Copy path
+                  </ContextMenuItem>
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>
                     <Pencil /> Rename
                   </ContextMenuItem>
