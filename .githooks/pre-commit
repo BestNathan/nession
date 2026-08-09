@@ -39,6 +39,25 @@ if [ -n "$STAGED_TSX" ]; then
   fi
 fi
 
+# ── Root PNG check ───────────────────────────────────────────────────────────
+ROOT_PNGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.png$' || true)
+
+if [ -n "$ROOT_PNGS" ]; then
+  echo -e "${RED}✗ PNG files found in project root — not allowed${NC}"
+  echo ""
+  echo "  Staged PNGs at root:"
+  for f in $ROOT_PNGS; do
+    echo -e "    ${YELLOW}• $f${NC}"
+  done
+  echo ""
+  echo "  Screenshots & temp images → .playwright-mcp/ (gitignored, auto-cleaned)"
+  echo "  Project assets           → docs/screenshots/ or web/src/assets/"
+  echo ""
+  echo "  Remove from commit:  git reset HEAD $ROOT_PNGS"
+  echo "  Or move & re-stage:  mv <file> <proper-dir>/ && git add ..."
+  HAS_ERROR=1
+fi
+
 # ── Result ──────────────────────────────────────────────────────────────────
 if [ $HAS_ERROR -eq 1 ]; then
   echo -e "\n${RED}Commit blocked — fix issues above${NC}"
