@@ -41,6 +41,8 @@ import { useNewEntryForm } from '../hooks/useNewEntryForm';
 import { useRenameState } from '../hooks/useRenameState';
 import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
 import type { FileOps, FileEntry } from '../services/fileOps';
+import { preloadExtensions } from '@/lib/viewerRegistry';
+import { preload } from '@/lib/codeMirrorLanguages';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
@@ -54,7 +56,7 @@ export interface FileBrowserProps {
   onGetTerminalPwd?: () => Promise<string>;
 }
 
-const MAX_SIZE_WARNING = 1 * 1024 * 1024; // 1 MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB — hard gate, matches backend limit
 
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
@@ -77,6 +79,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     try {
       const result = await fileOps.listDir(path);
       setEntries(result.entries);
+      const exts = preloadExtensions(result.entries.map((e) => e.path));
+      if (exts.length > 0) {
+        preload(exts);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load directory';
       setError(msg);
@@ -102,8 +108,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     if (entry.is_dir) {
       setCurrentPath(entry.path);
     } else {
-      if (entry.size > MAX_SIZE_WARNING) {
-        dialogs.setLargeFileTarget(entry);
+      if (entry.size > MAX_FILE_SIZE) {
+        toast.error(`File too large for preview (>${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB)`);
         return;
       }
       onFileClick(entry);
@@ -362,11 +368,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
       <FileBrowserDialogs
         deleteTarget={dialogs.deleteTarget}
-        largeFileTarget={dialogs.largeFileTarget}
         onDeleteTargetChange={dialogs.setDeleteTarget}
-        onLargeFileTargetChange={dialogs.setLargeFileTarget}
         onDeleteConfirm={handleDeleteConfirm}
-        onFileClick={onFileClick}
       />
     </div>
   );
@@ -374,53 +377,30 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
 interface FileBrowserDialogsProps {
   deleteTarget: FileEntry | null;
-  largeFileTarget: FileEntry | null;
   onDeleteTargetChange: (target: FileEntry | null) => void;
-  onLargeFileTargetChange: (target: FileEntry | null) => void;
   onDeleteConfirm: () => void;
-  onFileClick: (entry: FileEntry) => void;
 }
 
 function FileBrowserDialogs({
   deleteTarget,
-  largeFileTarget,
   onDeleteTargetChange,
-  onLargeFileTargetChange,
   onDeleteConfirm,
-  onFileClick,
 }: FileBrowserDialogsProps) {
   return (
-    <>
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { onDeleteTargetChange(null); } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleteTarget?.is_dir ? 'directory' : 'file'}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete {deleteTarget?.is_dir ? `directory "${deleteTarget?.name}"` : `"${deleteTarget?.name}"`}? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={largeFileTarget !== null} onOpenChange={(open) => { if (!open) { onLargeFileTargetChange(null); } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Large file warning</AlertDialogTitle>
-            <AlertDialogDescription>
-              This file is {largeFileTarget ? formatSize(largeFileTarget.size) : ''}. Loading large files may be slow. Continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { if (largeFileTarget) { onFileClick(largeFileTarget); } onLargeFileTargetChange(null); }}>Continue</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { onDeleteTargetChange(null); } }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {deleteTarget?.is_dir ? 'directory' : 'file'}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Delete {deleteTarget?.is_dir ? `directory "${deleteTarget?.name}"` : `"${deleteTarget?.name}"`}? This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
