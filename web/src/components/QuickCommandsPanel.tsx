@@ -3,78 +3,112 @@
 // Shared by mobile (BottomSheet) and desktop (BottomBar) terminal layouts.
 
 import { useState } from 'react';
-import { Plus, X, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Plus, X, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, MoreHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useCommandHistory } from '../hooks/useCommandHistory';
 
-/* ── Physical keys (mobile keyboard lacks these) ─────────────────── */
+/* ── Physical key grid (mobile keyboard lacks these) ──────────────── */
 
 interface PhysKey { label: string; seq: string; }
 
+const MAIN_KEYS: PhysKey[] = [
+  { label: 'Esc', seq: '\x1b' },
+  { label: 'Tab', seq: '\t' },
+  { label: 'Ctrl-C', seq: '\x03' },
+  { label: 'Space', seq: ' ' },
+  { label: 'Enter', seq: '\r' },
+  { label: '←', seq: '\x1b[D' },
+  { label: '↑', seq: '\x1b[A' },
+  { label: '↓', seq: '\x1b[B' },
+  { label: '→', seq: '\x1b[C' },
+];
+
+const OVERFLOW_KEYS: PhysKey[] = [
+  { label: 'Del', seq: '\x1b[3~' },
+  { label: 'Home', seq: '\x1b[H' },
+  { label: 'End', seq: '\x1b[F' },
+  { label: 'PgUp', seq: '\x1b[5~' },
+  { label: 'PgDn', seq: '\x1b[6~' },
+];
+
+/** 2×5 uniform grid.  When total keys > 10 the last slot becomes a
+ *  dropdown that exposes the overflow set. */
 function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: boolean }) {
-  const otherKeys: PhysKey[] = [
-    { label: 'Esc', seq: '\x1b' },
-    { label: 'Tab', seq: '\t' },
-    { label: 'Del', seq: '\x1b[3~' },
-    { label: 'Home', seq: '\x1b[H' },
-    { label: 'PgUp', seq: '\x1b[5~' },
-    { label: 'End', seq: '\x1b[F' },
-    { label: 'PgDn', seq: '\x1b[6~' },
-  ];
+  const totalKeys = MAIN_KEYS.length + OVERFLOW_KEYS.length;
+  const hasOverflow = totalKeys > 10;
+  // When overflowing we show 9 main keys + 1 dropdown; otherwise all main keys.
+  const visibleCount = hasOverflow ? 9 : MAIN_KEYS.length;
+  const visibleKeys = MAIN_KEYS.slice(0, visibleCount);
+  const dropdownKeys = hasOverflow
+    ? [...MAIN_KEYS.slice(visibleCount), ...OVERFLOW_KEYS]
+    : OVERFLOW_KEYS;
 
-  const arrowKeys: PhysKey[] = [
-    { label: '↑', seq: '\x1b[A' },
-    { label: '←', seq: '\x1b[D' },
-    { label: '↓', seq: '\x1b[B' },
-    { label: '→', seq: '\x1b[C' },
-  ];
+  const KeyButton = ({ k }: { k: PhysKey }) => {
+    const iconEl =
+      k.label === '←' ? <ArrowLeft className="size-3.5" /> :
+      k.label === '↑' ? <ArrowUp className="size-3.5" /> :
+      k.label === '↓' ? <ArrowDown className="size-3.5" /> :
+      k.label === '→' ? <ArrowRight className="size-3.5" /> :
+      null;
 
-  const KeyButton = ({ k }: { k: PhysKey }) => (
-    <Tooltip key={k.label}>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-8 w-10 text-xs font-mono"
-            disabled={disabled}
-            onClick={() => onKey(k.seq)}
-          />
-        }
+    return (
+      <Button
+        variant="secondary"
+        size="sm"
+        className="h-9 w-full text-xs font-mono"
+        disabled={disabled}
+        onClick={() => onKey(k.seq)}
+        aria-label={k.label}
       >
-        {k.label === '←' ? <ArrowLeft className="h-3 w-3" /> :
-         k.label === '↑' ? <ArrowUp className="h-3 w-3" /> :
-         k.label === '↓' ? <ArrowDown className="h-3 w-3" /> :
-         k.label === '→' ? <ArrowRight className="h-3 w-3" /> :
-         k.label}
-      </TooltipTrigger>
-      <TooltipContent side="top"><p>{k.label}</p></TooltipContent>
-    </Tooltip>
-  );
+        {iconEl ?? k.label}
+      </Button>
+    );
+  };
 
   return (
-    <div className="flex justify-between gap-2 px-2 py-1.5 border-b flex-shrink-0">
-      {/* Left: other keys in a 3x3 grid (Esc/Tab/Del top, Home/PgUp/End middle, PgDn bottom-left) */}
-      <div className="grid grid-cols-3 gap-1">
-        {otherKeys.slice(0, 3).map((k) => <KeyButton key={k.label} k={k} />)}
-        {otherKeys.slice(3, 6).map((k) => <KeyButton key={k.label} k={k} />)}
-        <KeyButton k={otherKeys[6]} />
-      </div>
-
-      {/* Right: arrows in 凸 (T-shape) */}
-      <div className="grid grid-cols-3 grid-rows-2 gap-1">
-        <div /> {/* empty */}
-        <KeyButton k={arrowKeys[0]} /> {/* ↑ */}
-        <div /> {/* empty */}
-        <KeyButton k={arrowKeys[1]} /> {/* ← */}
-        <KeyButton k={arrowKeys[2]} /> {/* ↓ */}
-        <KeyButton k={arrowKeys[3]} /> {/* → */}
+    <div className="px-2 py-1.5 border-b flex-shrink-0">
+      <div className="grid grid-cols-5 gap-1">
+        {visibleKeys.map((k) => <KeyButton key={k.label} k={k} />)}
+        {(hasOverflow || OVERFLOW_KEYS.length > 0) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-9 w-full text-xs"
+                  disabled={disabled}
+                  aria-label="More keys"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="min-w-[100px]">
+              {dropdownKeys.map((k) => (
+                <DropdownMenuItem
+                  key={k.label}
+                  onClick={() => onKey(k.seq)}
+                  className="text-xs font-mono cursor-pointer"
+                >
+                  {k.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </div>
   );

@@ -91,8 +91,9 @@ function TerminalInputBar({
               </span>
               <div className="flex-1" />
 
-              {/* Quick-action icon buttons */}
+              {/* Quick-action buttons — 5 equal-size touch targets */}
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>

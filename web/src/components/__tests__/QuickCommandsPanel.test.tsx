@@ -47,10 +47,14 @@ describe('QuickCommandsPanel', () => {
 
   it('renders physical key row', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
+    // Main grid keys (always visible)
     expect(screen.getByText('Esc')).toBeInTheDocument();
     expect(screen.getByText('Tab')).toBeInTheDocument();
-    expect(screen.getByText('Home')).toBeInTheDocument();
-    expect(screen.getByText('Del')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl-C')).toBeInTheDocument();
+    expect(screen.getByText('Space')).toBeInTheDocument();
+    expect(screen.getByText('Enter')).toBeInTheDocument();
+    // Overflow keys (Home, Del, etc.) are in a dropdown — not visible until opened
+    expect(screen.getByLabelText('More keys')).toBeInTheDocument();
   });
 
   it('clicking a preset row sends the correct command', () => {
