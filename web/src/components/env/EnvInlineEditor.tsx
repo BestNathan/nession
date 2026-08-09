@@ -49,7 +49,7 @@ function EditorPreviews({ state, parsed, hasWarnings, hasDiff }: {
 }) {
   return (
     <>
-      <details className="space-y-1" open={hasWarnings}>
+      <details className="flex flex-col gap-1" open={hasWarnings}>
         <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
           Parsed Variables ({parsed.vars.length})
           {hasWarnings && <span className="ml-2 text-amber-500">{parsed.warnings.length} warning{parsed.warnings.length !== 1 ? 's' : ''}</span>}
@@ -82,7 +82,7 @@ function EditorPreviews({ state, parsed, hasWarnings, hasDiff }: {
       </details>
 
       {state.isEdit && (
-        <details className="space-y-1">
+        <details className="flex flex-col gap-1">
           <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
             Preview Changes{hasDiff && <span className="ml-1.5 text-primary">•</span>}
           </summary>
@@ -93,7 +93,7 @@ function EditorPreviews({ state, parsed, hasWarnings, hasDiff }: {
       )}
 
       {state.inUseBy.length > 0 && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 gap-1">
           <p className="text-sm text-destructive font-medium">In use by {state.inUseBy.length} session(s)</p>
           <p className="text-xs text-muted-foreground">Forcing will re-source in: {state.inUseBy.join(', ')}</p>
         </div>
@@ -117,11 +117,11 @@ function EditorFormBody({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="flex flex-col p-4 gap-4">
       {/* Name + source + agent */}
       <div className="flex gap-3 items-end">
         {!state.isEdit && (
-          <div className="space-y-1.5 flex-[2] min-w-0">
+          <div className="flex flex-col gap-1.5 flex-[2] min-w-0">
             <Label className="text-xs">File Name</Label>
             <Input
               value={state.name}
@@ -131,7 +131,7 @@ function EditorFormBody({
             />
           </div>
         )}
-        <div className={cn('space-y-1.5 min-w-0', state.isEdit ? 'flex-1' : 'flex-[1]')}>
+        <div className={cn('gap-1.5 min-w-0', state.isEdit ? 'flex-1' : 'flex-[1]')}>
           <Label className="text-xs">Location</Label>
           <Select value={state.source} onValueChange={(v) => v && set('source', v as EnvSource)} disabled={state.loading}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -142,7 +142,7 @@ function EditorFormBody({
           </Select>
         </div>
         {state.source === 'agent' && (
-          <div className="space-y-1.5 flex-[1] min-w-0">
+          <div className="flex flex-col gap-1.5 flex-[1] min-w-0">
             <Label className="text-xs">Agent</Label>
             <Select value={state.agentId} onValueChange={(v) => { if (v) { set('agentId', v); } }} disabled={state.loading}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Select agent" /></SelectTrigger>
@@ -157,7 +157,7 @@ function EditorFormBody({
       </div>
 
       {/* Textarea */}
-      <div className="space-y-1.5 flex flex-col flex-1 min-h-[300px]">
+      <div className="flex flex-col gap-1.5 flex flex-col flex-1 min-h-[300px]">
         <div className="flex items-center justify-between">
           <Label className="text-xs">Content</Label>
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs"

@@ -57,7 +57,7 @@ export function BottomBar({
     <Tabs
       value={effectiveTab}
       onValueChange={(v) => selectTab(v as BottomTab)}
-      className={cn('flex-shrink-0 flex flex-col gap-0', maxH)}
+      className={cn('flex-shrink-0 flex flex-col gap-0 border-t border-border/50 pb-[env(safe-area-inset-bottom)]', maxH)}
     >
       <div className="flex items-center gap-2 px-2 pt-1">
         <TabsList className="text-xs">

@@ -298,7 +298,7 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
       {/* File list */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-2 space-y-1">
+          <div className="flex flex-col p-2 gap-1">
             {[1, 2, 3, 4, 5].map((i) => (<Skeleton key={i} className="h-6 w-full" />))}
           </div>
         ) : error ? (

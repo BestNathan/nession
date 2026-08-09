@@ -47,10 +47,22 @@ describe('QuickCommandsPanel', () => {
 
   it('renders physical key row', () => {
     render(<QuickCommandsPanel {...defaultProps} />);
+    // Left: 2-row × 5-col quick keys (10 total, no overflow dropdown)
     expect(screen.getByText('Esc')).toBeInTheDocument();
     expect(screen.getByText('Tab')).toBeInTheDocument();
-    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByText('Shift')).toBeInTheDocument();
+    expect(screen.getByText('Space')).toBeInTheDocument();
+    expect(screen.getByText('Enter')).toBeInTheDocument();
     expect(screen.getByText('Del')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByText('PgUp')).toBeInTheDocument();
+    expect(screen.getByText('PgDn')).toBeInTheDocument();
+    expect(screen.getByText('End')).toBeInTheDocument();
+    // Right: arrow keys in T-shape (rendered as icons with aria-labels)
+    expect(screen.getByLabelText('↑')).toBeInTheDocument();
+    expect(screen.getByLabelText('←')).toBeInTheDocument();
+    expect(screen.getByLabelText('↓')).toBeInTheDocument();
+    expect(screen.getByLabelText('→')).toBeInTheDocument();
   });
 
   it('clicking a preset row sends the correct command', () => {

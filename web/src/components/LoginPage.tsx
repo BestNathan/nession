@@ -55,10 +55,10 @@ export function LoginPage({
         <CardHeader>
           <CardTitle>Connect to Server</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <ConnectionStatusBadge status={connectionStatus} />
 
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="serverUrl">Server URL</Label>
             <Input
               id="serverUrl"
@@ -70,7 +70,7 @@ export function LoginPage({
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="authToken">Auth Token</Label>
             <Input
               id="authToken"
@@ -82,7 +82,7 @@ export function LoginPage({
             />
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <Checkbox
               id="remember"
               checked={remember}
@@ -124,7 +124,7 @@ export function LoginPage({
           <CardTitle>Features</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-2 text-sm">
+          <ul className="gap-2 text-sm">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-start gap-2">
                 <span className="text-green-500 flex-shrink-0">&#10003;</span>

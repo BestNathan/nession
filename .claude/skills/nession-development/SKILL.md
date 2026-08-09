@@ -439,6 +439,8 @@ Every PR must include these three sections:
 
 CI triggers on merge to main — builds multi-arch Docker images, pushes tags, updates k8s manifests. No manual steps after merge.
 
+**Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after pushing a branch, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
+
 ### Playwright Functional Verification
 
 **⚠ CRITICAL: Any change involving WebUI interaction, layout, terminal behavior, or visual appearance MUST be verified in a real browser via Playwright MCP before the change is considered complete.** Tests and type checks catch logic errors but cannot verify visual correctness, interaction flows, or terminal rendering — only a real browser can.

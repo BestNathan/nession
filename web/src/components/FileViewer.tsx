@@ -115,7 +115,7 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
       {/* Content */}
       <div className="flex-1 min-h-0">
         {loading ? (
-          <div className="p-3 space-y-2">
+          <div className="flex flex-col p-3 gap-2">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-1/2" />

@@ -44,7 +44,7 @@ function AgentSelect({
   const displayText = selectedAgent ? agentDisplayName(selectedAgent) : 'Select an agent';
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor="agent">Agent</Label>
       <Select value={value} onValueChange={(v) => v && onChange(v)} disabled={disabled}>
         <SelectTrigger id="agent" className="w-full">
@@ -150,9 +150,9 @@ export function CreateSessionDialog({
         <DialogHeader>
           <DialogTitle>Create Session</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <AgentSelect agents={onlineAgents} value={agentId} onChange={setAgentId} disabled={loading} />
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="name">Session Name</Label>
             <Input
               ref={nameInputRef}
@@ -165,7 +165,7 @@ export function CreateSessionDialog({
               autoComplete="off"
             />
           </div>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label>Env Files (optional)</Label>
             <EnvFileMultiSelect
               files={envFiles}

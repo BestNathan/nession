@@ -154,8 +154,8 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
         <DialogHeader>
           <DialogTitle>Attach{session ? `: ${session.session_name}` : ''}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
             <Label>Connection Mode</Label>
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
@@ -230,7 +230,7 @@ function RendererToggle({
   webglSupported: boolean;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label>Renderer</Label>
       <div className="grid grid-cols-2 gap-2">
         <button
@@ -286,7 +286,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
       : 'browser will decide / relay';
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <Label>Connection Path</Label>
         {onRetest ? (
@@ -299,7 +299,7 @@ function PathList({ candidates, latencyByUrl, bestUrl, selectedUrl, onSelect, on
           </button>
         ) : null}
       </div>
-      <div className="space-y-1 max-h-56 overflow-y-auto">
+      <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
         <AddressRow
           label="Auto"
           sublabel={autoSublabel}
@@ -410,7 +410,7 @@ function EnvPickerSection({
     localStorage.setItem('attach-env-expanded', String(next));
   };
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <button
         type="button"
         onClick={toggle}

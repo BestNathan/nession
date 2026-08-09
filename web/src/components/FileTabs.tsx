@@ -8,6 +8,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useFileTabs, type OpenFile } from '../hooks/useFileTabs';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { renderSlot } from '@/extensions/registry';
 import type { FileOps, FileEntry } from '../services/fileOps';
 
@@ -29,7 +30,7 @@ interface FileTabsProps {
   onGetTerminalPwd?: () => Promise<string>;
 }
 
-interface TabBarProps {
+interface FileTabBarProps {
   openFiles: OpenFile[];
   activeTabId: string;
   dirtyFiles: Set<string>;
@@ -40,37 +41,54 @@ interface TabBarProps {
 }
 
 /** Horizontal tab strip: a fixed Terminal tab followed by extension tabs, then one tab per open file. */
-function TabBar({ openFiles, activeTabId, dirtyFiles, showTerminal, terminalHeaderExtensions, onSelect, onClose }: TabBarProps) {
+function FileTabBar({
+  openFiles,
+  activeTabId,
+  dirtyFiles,
+  showTerminal,
+  terminalHeaderExtensions,
+  onSelect,
+  onClose,
+}: FileTabBarProps) {
   return (
-    <div className="flex items-center border-b bg-muted/20 flex-shrink-0 overflow-x-auto">
-      <button
-        onClick={() => onSelect('terminal')}
-        className={cn(
-          'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0',
-          showTerminal ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
-        )}
-      >
-        <Terminal className="h-3 w-3" /> Terminal
-      </button>
-
-      {/* Extension tabs */}
-      {terminalHeaderExtensions}
-
-      {openFiles.map((file) => (
-        <button
-          key={file.id}
-          onClick={() => onSelect(file.id)}
-          className={cn(
-            'flex items-center gap-1 px-3 py-1.5 text-xs border-r border-b-2 transition-colors flex-shrink-0 max-w-[160px]',
-            activeTabId === file.id ? 'border-b-primary bg-background text-foreground' : 'border-b-transparent text-muted-foreground hover:text-foreground',
-          )}
+    <Tabs
+      value={showTerminal ? 'terminal' : activeTabId}
+      onValueChange={(v) => onSelect(v)}
+      className="flex-shrink-0"
+    >
+      <TabsList className="rounded-none border-b bg-muted/20 h-auto p-0 gap-0 overflow-x-auto w-full justify-start">
+        <TabsTrigger
+          value="terminal"
+          className="gap-1 text-xs rounded-none border-r border-b-2 border-b-transparent data-active:border-b-primary data-active:bg-background h-auto py-1.5 px-3 flex-none"
         >
-          <span className="truncate">{file.filename}</span>
-          {dirtyFiles.has(file.id) && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />}
-          <X className="h-3 w-3 flex-shrink-0 hover:text-destructive ml-0.5" onClick={(e) => { e.stopPropagation(); onClose(file.id); }} />
-        </button>
-      ))}
-    </div>
+          <Terminal className="size-3" data-icon="inline-start" />
+          Terminal
+        </TabsTrigger>
+
+        {/* Extension tabs */}
+        {terminalHeaderExtensions}
+
+        {openFiles.map((file) => (
+          <TabsTrigger
+            key={file.id}
+            value={file.id}
+            className="group gap-1 text-xs rounded-none border-r border-b-2 border-b-transparent data-active:border-b-primary data-active:bg-background h-auto py-1.5 px-3 flex-none max-w-[160px] [&_.tab-close]:pointer-events-auto"
+          >
+            <span className="truncate">{file.filename}</span>
+            {dirtyFiles.has(file.id) && (
+              <span className="size-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+            )}
+            <X
+              className="tab-close size-3 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive ml-0.5 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(file.id);
+              }}
+            />
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -94,11 +112,11 @@ export function FileTabs({
     onSheetToggle(false);
   }, [handleFileClick, onSheetToggle]);
 
-  // Shared main-content column (TabBar + terminal/file viewer + BottomBar).
+  // Shared main-content column (FileTabBar + terminal/file viewer + BottomBar).
   // Rendered inside the right ResizablePanel on desktop, and directly on mobile
   // where there is no side panel.
-  const tabBar = (
-    <TabBar
+  const fileTabBar = (
+    <FileTabBar
       openFiles={openFiles}
       activeTabId={activeTabId}
       dirtyFiles={dirtyFiles}
@@ -157,7 +175,7 @@ export function FileTabs({
 
           <ResizablePanel defaultSize="80" minSize="65">
             <div className="h-full min-w-0 flex flex-col">
-              {tabBar}
+              {fileTabBar}
               {content}
               {bottomBar}
             </div>
@@ -167,7 +185,7 @@ export function FileTabs({
         /* Mobile: no side panel — the file browser lives in BottomBar's Files
            tab. Keep the same main-content column. */
         <div className="h-full min-w-0 flex flex-col">
-          {tabBar}
+          {fileTabBar}
           {content}
           {bottomBar}
         </div>

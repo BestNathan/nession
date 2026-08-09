@@ -64,14 +64,14 @@ export function EnvUploadDialog({ isOpen, onClose, agents, onUpload }: EnvUpload
         <DialogHeader>
           <DialogTitle>Upload Env File</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <FileDropZone
             file={file}
             inputRef={inputRef}
             onSelect={setFile}
             disabled={uploading}
           />
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Label>Source</Label>
             <Select
               value={source}
@@ -88,7 +88,7 @@ export function EnvUploadDialog({ isOpen, onClose, agents, onUpload }: EnvUpload
             </Select>
           </div>
           {source === 'agent' && (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               <Label>Agent</Label>
               <Select
                 value={agentId}

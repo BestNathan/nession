@@ -104,7 +104,7 @@ function FileListPanel({ files, loading, search, onSearchChange, selected, isNew
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {loading ? (
-          <div className="p-2 space-y-1">
+          <div className="flex flex-col p-2 gap-1">
             {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12 w-full rounded" />)}
           </div>
         ) : filtered.length === 0 ? (
