@@ -2,15 +2,8 @@ import { useEffect, useRef, useCallback } from 'react';
 import { EditorState, Compartment, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { json } from '@codemirror/lang-json';
-import { yaml } from '@codemirror/lang-yaml';
-import { markdown } from '@codemirror/lang-markdown';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { detectLanguage } from '../lib/codeMirrorLanguages';
+import { detectLanguage, getLanguage } from '../lib/codeMirrorLanguages';
 
 export interface CodeMirrorEditorProps {
   value: string;
@@ -21,26 +14,11 @@ export interface CodeMirrorEditorProps {
 }
 
 function getLanguageExtensions(language: string): Extension[] {
-  switch (language) {
-    case 'javascript':
-      return [javascript()];
-    case 'typescript':
-      return [javascript({ typescript: true })];
-    case 'python':
-      return [python()];
-    case 'json':
-      return [json()];
-    case 'yaml':
-      return [yaml()];
-    case 'markdown':
-      return [markdown()];
-    case 'html':
-      return [html()];
-    case 'css':
-      return [css()];
-    default:
-      return [];
+  if (language === 'text') {
+    return [];
   }
+  const loaded = getLanguage(language);
+  return loaded ?? [];
 }
 
 export function CodeMirrorEditor({

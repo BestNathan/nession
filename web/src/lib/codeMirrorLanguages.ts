@@ -1,26 +1,134 @@
-export const detectLanguage = (filename: string): string => {
-  const ext = filename.split('.').pop()?.toLowerCase();
-  const map: Record<string, string> = {
-    js: 'javascript',
-    jsx: 'javascript',
-    ts: 'typescript',
-    tsx: 'typescript',
-    py: 'python',
-    json: 'json',
-    yaml: 'yaml',
-    yml: 'yaml',
-    sh: 'shell',
-    bash: 'shell',
-    md: 'markdown',
-    html: 'html',
-    css: 'css',
-  };
-  return map[ext || ''] || 'text';
+import type { Extension } from '@codemirror/state';
+import { StreamLanguage, LanguageSupport } from '@codemirror/language';
+
+// Static imports for bundled languages (already in the project)
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { json } from '@codemirror/lang-json';
+import { yaml } from '@codemirror/lang-yaml';
+import { markdown } from '@codemirror/lang-markdown';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+
+// Static extension map for bundled languages
+const STATIC_EXTS: Record<string, Extension[]> = {
+  javascript: [javascript()],
+  typescript: [javascript({ typescript: true })],
+  python: [python()],
+  json: [json()],
+  yaml: [yaml()],
+  markdown: [markdown()],
+  html: [html()],
+  css: [css()],
 };
 
-export const LANGUAGE_EXTENSIONS = [
-  'javascript', 'typescript', 'python', 'json', 'yaml',
-  'markdown', 'html', 'css', 'shell', 'text',
-] as const;
+// Lazy loader registry for dynamically-loaded languages
+type LangLoader = () => Promise<LanguageSupport>;
 
-export type SupportedLanguage = (typeof LANGUAGE_EXTENSIONS)[number];
+const LAZY_LOADERS: Record<string, LangLoader> = {
+  go:       () => import('@codemirror/lang-go').then(m => m.go()),
+  rust:     () => import('@codemirror/lang-rust').then(m => m.rust()),
+  cpp:      () => import('@codemirror/lang-cpp').then(m => m.cpp()),
+  sql:      () => import('@codemirror/lang-sql').then(m => m.sql()),
+  xml:      () => import('@codemirror/lang-xml').then(m => m.xml()),
+};
+
+const loaded = new Map<string, LanguageSupport>();
+const failed = new Set<string>();
+const pending = new Map<string, Promise<unknown>>();
+
+// Extension → language key mapping (same as viewerRegistry's EXT_LANG_MAP)
+const EXT_LANG_MAP: Record<string, string> = {
+  js: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  py: 'python',
+  json: 'json',
+  yaml: 'yaml', yml: 'yaml',
+  md: 'markdown',
+  html: 'html',
+  css: 'css',
+  sh: 'shell', bash: 'shell', zsh: 'shell',
+  go: 'go',
+  rs: 'rust',
+  c: 'cpp', cpp: 'cpp', h: 'cpp', hpp: 'cpp',
+  sql: 'sql',
+  xml: 'xml',
+};
+
+/**
+ * Detect language from filename. Returns 'text' when no match.
+ * Synchronous — always returns the correct key even if the language
+ * package hasn't loaded yet; getLanguage handles the actual retrieval.
+ */
+export function detectLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  if (ext === undefined) { return 'text'; }
+  return EXT_LANG_MAP[ext] || 'text';
+}
+
+/**
+ * Preload language packages for the given extensions.
+ * Fire-and-forget — call when a directory listing arrives.
+ * Already-loaded and already-failed languages are skipped.
+ */
+export function preload(exts: string[]): void {
+  for (const ext of exts) {
+    const langKey = EXT_LANG_MAP[ext];
+    if (langKey === undefined) { continue; }
+    if (loaded.has(langKey) || failed.has(langKey) || pending.has(langKey)) { continue; }
+
+    if (langKey === 'shell') {
+      // Shell uses legacy mode — load it from @codemirror/legacy-modes
+      const promise = import('@codemirror/legacy-modes/mode/shell')
+        .then((mod) => {
+          // Create a LanguageSupport from the legacy mode using StreamLanguage
+          const shellLang = new LanguageSupport(StreamLanguage.define(mod.shell), []);
+          loaded.set(langKey, shellLang);
+          pending.delete(langKey);
+          return shellLang;
+        })
+        .catch(() => {
+          failed.add(langKey);
+          pending.delete(langKey);
+        });
+      pending.set(langKey, promise);
+      continue;
+    }
+
+    const loader = LAZY_LOADERS[langKey];
+    if (loader === undefined) { continue; } // static language, no lazy load needed
+
+    const promise = loader()
+      .then((lang) => {
+        loaded.set(langKey, lang);
+        pending.delete(langKey);
+        return lang;
+      })
+      .catch(() => {
+        failed.add(langKey);
+        pending.delete(langKey);
+      });
+
+    pending.set(langKey, promise);
+  }
+}
+
+/**
+ * Synchronously get language extensions for a language key.
+ * Returns extensions array for static languages, LanguageSupport for lazy ones,
+ * or undefined if the language hasn't loaded yet.
+ */
+export function getLanguage(langKey: string): Extension[] | undefined {
+  // Check static extensions first
+  if (langKey in STATIC_EXTS) {
+    return STATIC_EXTS[langKey];
+  }
+  // Check lazy-loaded extensions
+  const lang = loaded.get(langKey);
+  return lang !== undefined ? [lang] : undefined;
+}
+
+/** Diagnostic: list language keys that are currently loaded. */
+export function getLoadedLanguages(): string[] {
+  return [...Object.keys(STATIC_EXTS), ...loaded.keys()];
+}
