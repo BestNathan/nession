@@ -11,13 +11,9 @@ interface SwipeableViewportProps {
 
 /**
  * Horizontally-swipeable panel viewport. Renders children side-by-side
- * and translates between them via CSS transform.
- *
- * **Long-press activation:** A quick horizontal swipe is treated as scroll
- * (browser handles it natively via touch-action:pan-y).  To switch panels
- * the user must press-and-hold (~400 ms) until the ModeBar expands, then
- * drag horizontally.  This prevents accidental panel switches during
- * vertical scrolling in the terminal or file browser.
+ * and translates between them via CSS transform. Touch-driven with
+ * directional locking — vertical scrolls in panels don't trigger
+ * horizontal switches.
  */
 export function SwipeableViewport({
   children,
@@ -28,7 +24,6 @@ export function SwipeableViewport({
   const {
     dragOffset,
     isDragging,
-    isLongPress,
     onTouchStart,
     onTouchMove,
     onTouchEnd,
@@ -56,7 +51,6 @@ export function SwipeableViewport({
         activeIndex={activeIndex}
         dragOffset={dragOffset}
         isDragging={isDragging}
-        isLongPress={isLongPress}
       />
       <div
         className={cn(
