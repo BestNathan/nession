@@ -31,7 +31,21 @@ const LAZY_LOADERS: Record<string, LangLoader> = {
   cpp:      () => import('@codemirror/lang-cpp').then(m => m.cpp()),
   sql:      () => import('@codemirror/lang-sql').then(m => m.sql()),
   xml:      () => import('@codemirror/lang-xml').then(m => m.xml()),
+  java:     () => import('@codemirror/lang-java').then(m => m.java()),
+  php:      () => import('@codemirror/lang-php').then(m => m.php()),
 };
+
+/** Languages that use @codemirror/legacy-modes instead of official packages. */
+const LEGACY_LANGS = new Set([
+  'shell', 'ruby', 'swift', 'haskell', 'clojure',
+  'r', 'julia', 'lua', 'perl', 'groovy',
+]);
+
+/** Load a legacy mode from @codemirror/legacy-modes/mode/<name> and wrap with StreamLanguage. */
+function loadLegacyMode(langKey: string): Promise<LanguageSupport> {
+  return import(`@codemirror/legacy-modes/mode/${langKey}`)
+    .then((mod) => new LanguageSupport(StreamLanguage.define(mod[langKey]), []));
+}
 
 const loaded = new Map<string, LanguageSupport>();
 const failed = new Set<string>();
@@ -53,6 +67,21 @@ const EXT_LANG_MAP: Record<string, string> = {
   c: 'cpp', cpp: 'cpp', h: 'cpp', hpp: 'cpp',
   sql: 'sql',
   xml: 'xml',
+  java: 'java',
+  php: 'php',
+  rb: 'ruby',
+  swift: 'swift',
+  kt: 'kotlin',
+  scala: 'scala',
+  hs: 'haskell',
+  clj: 'clojure', cljs: 'clojure', edn: 'clojure',
+  r: 'r',
+  jl: 'julia',
+  dart: 'dart',
+  lua: 'lua',
+  pl: 'perl', pm: 'perl',
+  groovy: 'groovy',
+  cs: 'csharp',
 };
 
 /**
@@ -77,15 +106,12 @@ export function preload(exts: string[]): void {
     if (langKey === undefined) { continue; }
     if (loaded.has(langKey) || failed.has(langKey) || pending.has(langKey)) { continue; }
 
-    if (langKey === 'shell') {
-      // Shell uses legacy mode — load it from @codemirror/legacy-modes
-      const promise = import('@codemirror/legacy-modes/mode/shell')
-        .then((mod) => {
-          // Create a LanguageSupport from the legacy mode using StreamLanguage
-          const shellLang = new LanguageSupport(StreamLanguage.define(mod.shell), []);
-          loaded.set(langKey, shellLang);
+    if (LEGACY_LANGS.has(langKey)) {
+      const promise = loadLegacyMode(langKey)
+        .then((lang) => {
+          loaded.set(langKey, lang);
           pending.delete(langKey);
-          return shellLang;
+          return lang;
         })
         .catch(() => {
           failed.add(langKey);

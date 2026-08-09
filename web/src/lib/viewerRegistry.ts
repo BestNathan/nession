@@ -26,6 +26,22 @@ const EXT_LANG_MAP: Record<string, string> = {
   toml: 'toml',
   java: 'java',
   rb: 'ruby',
+  php: 'php',
+  swift: 'swift',
+  kt: 'kotlin', kotlin: 'kotlin',
+  scala: 'scala',
+  hs: 'haskell',
+  exs: 'elixir', ex: 'elixir',
+  clj: 'clojure', cljs: 'clojure', edn: 'clojure',
+  r: 'r',
+  jl: 'julia',
+  dart: 'dart',
+  lua: 'lua',
+  pl: 'perl', pm: 'perl',
+  groovy: 'groovy',
+  cs: 'csharp',
+  fs: 'fsharp', fsi: 'fsharp', fsx: 'fsharp',
+  m: 'objectivec', mm: 'objectivec',
 };
 
 /** Return the viewer type for a file extension, or null for unsupported. */
