@@ -144,41 +144,58 @@ function TerminalInputBar({
 
 /**
  * Internal file navigation state for the Files panel on mobile.
- * Simple stack: FileBrowser → FileViewer with back arrow.
+ * Supports multiple open files with tab switching.
  */
 function useFilesPanelNav() {
-  const [selectedFile, setSelectedFile] = useState<FileEntry | null>(null);
+  const [openFiles, setOpenFiles] = useState<FileEntry[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const handleFileClick = useCallback((entry: FileEntry) => {
-    setSelectedFile(entry);
-  }, []);
-
-  const handleBack = useCallback(() => {
-    setSelectedFile(null);
-  }, []);
-
-  const handleFileDeleted = useCallback((path: string) => {
-    if (selectedFile && selectedFile.path === path) {
-      setSelectedFile(null);
-    }
-  }, [selectedFile]);
-
-  const handleFileRenamed = useCallback((oldPath: string, newPath: string) => {
-    setSelectedFile((prev) => {
-      if (prev && prev.path === oldPath) {
-        const newName = newPath.split('/').pop() || newPath;
-        return { ...prev, path: newPath, name: newName };
+    setOpenFiles((prev) => {
+      const existing = prev.findIndex((f) => f.path === entry.path);
+      if (existing >= 0) {
+        setActiveIndex(existing);
+        return prev;
       }
-      return prev;
+      setActiveIndex(prev.length);
+      return [...prev, entry];
     });
   }, []);
 
+  const handleTabClose = useCallback((index: number) => {
+    setOpenFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) { return next; }
+      setActiveIndex((a) => Math.min(a, next.length - 1));
+      return next;
+    });
+  }, []);
+
+  const handleFileDeleted = useCallback((path: string) => {
+    setOpenFiles((prev) => {
+      const idx = prev.findIndex((f) => f.path === path);
+      const next = prev.filter((f) => f.path !== path);
+      if (next.length === 0) { return next; }
+      if (idx >= 0 && activeIndex >= idx) { setActiveIndex(Math.max(0, activeIndex - 1)); }
+      return next;
+    });
+  }, [activeIndex]);
+
+  const handleFileRenamed = useCallback((oldPath: string, newPath: string) => {
+    setOpenFiles((prev) => prev.map((f) => {
+      if (f.path === oldPath) {
+        const newName = newPath.split('/').pop() || newPath;
+        return { ...f, path: newPath, name: newName };
+      }
+      return f;
+    }));
+  }, []);
+
   return {
-    selectedFile,
-    handleFileClick,
-    handleBack,
-    handleFileDeleted,
-    handleFileRenamed,
+    openFiles, activeIndex,
+    handleFileClick, handleTabClose,
+    handleFileDeleted, handleFileRenamed,
+    setActiveIndex,
   };
 }
 
@@ -188,18 +205,20 @@ interface FilesPanelProps {
 }
 
 /**
- * Files panel with top-bottom split layout.
- * Top: FileViewer (or empty state) — flex-[6] when browser visible, flex-1 when collapsed
- * Bottom: Collapsible FileBrowser — flex-[4] when visible, hidden when collapsed
+ * Files panel with multi-tab viewer + collapsible file browser.
+ * Top: File tabs + viewer (or empty state)
+ * Bottom: Collapsible FileBrowser — slim bar when collapsed, flex-[4] when open
  */
 function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
   const [browserCollapsed, setBrowserCollapsed] = useState(false);
   const {
-    selectedFile,
-    handleFileClick,
-    handleFileDeleted,
-    handleFileRenamed,
+    openFiles, activeIndex,
+    handleFileClick, handleTabClose,
+    handleFileDeleted, handleFileRenamed,
+    setActiveIndex,
   } = useFilesPanelNav();
+
+  const activeFile = openFiles[activeIndex] ?? null;
 
   return (
     <div className="h-full flex flex-col">
@@ -210,19 +229,38 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
           browserCollapsed ? 'flex-1' : 'flex-[6]',
         )}
       >
-        {selectedFile ? (
+        {openFiles.length > 0 && activeFile ? (
           <>
-            {/* File header bar */}
-            <div className="flex items-center gap-2 px-2 py-1 border-b flex-shrink-0">
-              <span className="text-xs font-medium truncate">{selectedFile.name}</span>
+            {/* Tab bar */}
+            <div className="flex items-center gap-0.5 px-1 py-0.5 border-b flex-shrink-0 overflow-x-auto">
+              {openFiles.map((f, i) => (
+                <button
+                  key={f.path}
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-0.5 text-xs rounded-t whitespace-nowrap max-w-[120px]',
+                    i === activeIndex
+                      ? 'bg-background border border-b-background -mb-px'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  onClick={() => setActiveIndex(i)}
+                >
+                  <span className="truncate">{f.name}</span>
+                  <X
+                    className="size-3 flex-shrink-0 hover:text-destructive"
+                    onClick={(e) => { e.stopPropagation(); handleTabClose(i); }}
+                  />
+                </button>
+              ))}
             </div>
+            {/* Viewer */}
             <div className="flex-1 min-h-0">
               <FileViewer
-                key={selectedFile.path}
+                key={activeFile.path}
                 fileOps={fileOps}
-                path={selectedFile.path}
-                filename={selectedFile.name}
-                onClose={() => {}}
+                path={activeFile.path}
+                filename={activeFile.name}
+                onClose={() => handleTabClose(activeIndex)}
                 onDirtyChange={() => {}}
               />
             </div>
@@ -234,15 +272,14 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
         )}
       </div>
 
-      {/* Browser area */}
+      {/* Browser area — always shows toggle, collapsible content */}
       <div
         className={cn(
           'border-t bg-background flex-shrink-0 flex flex-col',
-          browserCollapsed ? 'hidden' : 'flex-[4] min-h-0',
+          browserCollapsed ? '' : 'flex-[4] min-h-0',
         )}
       >
-        {/* Collapse toggle */}
-        <div className="flex items-center px-2 h-8 flex-shrink-0">
+        <div className="flex items-center px-2 h-7 flex-shrink-0 gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -256,16 +293,23 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
             )}
             Files
           </Button>
+          {browserCollapsed && openFiles.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {openFiles.length} open
+            </span>
+          )}
         </div>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <FileBrowser
-            fileOps={fileOps}
-            onFileClick={handleFileClick}
-            onFileDeleted={handleFileDeleted}
-            onFileRenamed={handleFileRenamed}
-            onGetTerminalPwd={onGetTerminalPwd}
-          />
-        </div>
+        {!browserCollapsed && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <FileBrowser
+              fileOps={fileOps}
+              onFileClick={handleFileClick}
+              onFileDeleted={handleFileDeleted}
+              onFileRenamed={handleFileRenamed}
+              onGetTerminalPwd={onGetTerminalPwd}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

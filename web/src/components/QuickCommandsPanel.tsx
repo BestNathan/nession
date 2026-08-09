@@ -34,6 +34,7 @@ interface PhysKey { label: string; seq: string; }
 const LEFT_KEYS: PhysKey[] = [
   { label: 'Esc', seq: '\x1b' },
   { label: 'Tab', seq: '\t' },
+  { label: 'Shift', seq: '' },
   { label: 'Space', seq: ' ' },
   { label: 'Enter', seq: '\r' },
   { label: 'Del', seq: '\x1b[3~' },

@@ -50,6 +50,7 @@ describe('QuickCommandsPanel', () => {
     // Left: 2-row × 5-col quick keys (10 total, no overflow dropdown)
     expect(screen.getByText('Esc')).toBeInTheDocument();
     expect(screen.getByText('Tab')).toBeInTheDocument();
+    expect(screen.getByText('Shift')).toBeInTheDocument();
     expect(screen.getByText('Space')).toBeInTheDocument();
     expect(screen.getByText('Enter')).toBeInTheDocument();
     expect(screen.getByText('Del')).toBeInTheDocument();
