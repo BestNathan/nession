@@ -2,7 +2,7 @@
 // Uses server-backed useQuickCommands + local useCommandHistory for run tracking.
 // Shared by mobile (BottomSheet) and desktop (BottomBar) terminal layouts.
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Plus, X, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, MoreHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -15,6 +15,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useCommandHistory } from '../hooks/useCommandHistory';
@@ -46,13 +52,31 @@ const ARROW_KEYS: PhysKey[] = [
   { label: '→', seq: '\x1b[C' },
 ];
 
-function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: boolean }) {
+const CHAIN_LONG_PRESS_MS = 400;
+
+interface KeyRowProps {
+  onKey: (seq: string) => void;
+  disabled: boolean;
+  /** Chain buffer visible to parent for badging */
+  chainBuffer: string[];
+  isChaining: boolean;
+  onChainStart: (seq: string) => void;
+  onChainAdd: (seq: string) => void;
+}
+
+function KeyRow({
+  onKey, disabled,
+  chainBuffer, isChaining,
+  onChainStart, onChainAdd,
+}: KeyRowProps) {
   const hasOverflow = LEFT_KEYS.length > 10;
   const visibleCount = hasOverflow ? 9 : LEFT_KEYS.length;
   const visibleKeys = LEFT_KEYS.slice(0, visibleCount);
   const dropdownKeys = hasOverflow ? LEFT_KEYS.slice(visibleCount) : [];
 
   const KeyButton = ({ k }: { k: PhysKey }) => {
+    const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     const iconEl =
       k.label === '←' ? <ArrowLeft className="size-3.5" /> :
       k.label === '↑' ? <ArrowUp className="size-3.5" /> :
@@ -60,13 +84,47 @@ function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: b
       k.label === '→' ? <ArrowRight className="size-3.5" /> :
       null;
 
+    const handlePointerDown = () => {
+      if (disabled) {return;}
+      pressTimerRef.current = setTimeout(() => {
+        if (isChaining) {
+          const combined = [...chainBuffer.map((s) => s), k.seq].join('');
+          onKey(combined);
+        } else {
+          onChainStart(k.seq);
+        }
+      }, CHAIN_LONG_PRESS_MS);
+    };
+
+    const handlePointerUp = () => {
+      if (pressTimerRef.current) {
+        clearTimeout(pressTimerRef.current);
+        pressTimerRef.current = null;
+      }
+      if (isChaining) {
+        onChainAdd(k.seq);
+      } else {
+        onKey(k.seq);
+      }
+    };
+
+    const handlePointerLeave = useCallback(() => {
+      if (pressTimerRef.current) {
+        clearTimeout(pressTimerRef.current);
+        pressTimerRef.current = null;
+      }
+    }, []);
+
     return (
       <Button
         variant="secondary"
         size="sm"
         className="h-9 w-full text-xs font-mono"
         disabled={disabled}
-        onClick={() => onKey(k.seq)}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
+        onContextMenu={(e) => e.preventDefault()}
         aria-label={k.label}
       >
         {iconEl ?? k.label}
@@ -124,7 +182,14 @@ function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: b
 
 /* ── Modifier toggles for composite key builder ──────────────────── */
 
-type Modifier = 'Ctrl' | 'Alt';
+type Modifier = 'Ctrl' | 'Alt' | 'Shift' | 'Tab';
+
+const MODIFIERS: { key: Modifier; label: string }[] = [
+  { key: 'Ctrl', label: 'Ctrl' },
+  { key: 'Alt', label: 'Alt' },
+  { key: 'Shift', label: 'Shift' },
+  { key: 'Tab', label: 'Tab' },
+];
 
 interface ComboBuilderProps {
   onSave: (label: string, seq: string) => void;
@@ -149,14 +214,15 @@ function ComboBuilder({ onSave, onCancel, disabled }: ComboBuilderProps) {
     let seq = '';
     const letter = key.trim();
     if (!letter) { return ''; }
-    // Alt prefix: Esc before the combo
     if (mods.has('Alt')) { seq += '\x1b'; }
-    // Ctrl mask: for A-Z, subtract 64 from char code
+    if (mods.has('Tab')) { seq += '\t'; }
     if (mods.has('Ctrl')) {
       const upper = letter.toUpperCase();
       if (upper >= 'A' && upper <= 'Z') {
         seq += String.fromCharCode(upper.charCodeAt(0) - 64);
       }
+    } else if (mods.has('Shift')) {
+      seq += letter.toUpperCase();
     } else {
       seq += letter;
     }
@@ -173,45 +239,46 @@ function ComboBuilder({ onSave, onCancel, disabled }: ComboBuilderProps) {
   };
 
   return (
-    <div className="flex flex-col gap-2 p-2">
-      <div className="flex gap-1.5">
-        {(['Ctrl', 'Alt'] as Modifier[]).map((m) => (
+    <div className="flex flex-col gap-3">
+      {/* Modifier toggles — 2 rows */}
+      <div className="flex flex-wrap gap-1.5">
+        {MODIFIERS.map((m) => (
           <Button
-            key={m}
-            variant={mods.has(m) ? 'default' : 'outline'}
+            key={m.key}
+            variant={mods.has(m.key) ? 'default' : 'outline'}
             size="sm"
-            className="h-7 text-xs px-2.5"
-            onClick={() => toggleMod(m)}
+            className="h-8 text-xs px-3"
+            onClick={() => toggleMod(m.key)}
           >
-            {m}
+            {m.label}
           </Button>
         ))}
       </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">Key</span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground flex-shrink-0">Key</span>
         <Input
           placeholder="A"
           value={key}
           onChange={(e) => setKey(e.target.value.slice(0, 4))}
-          className="h-7 w-16 text-xs text-center font-mono"
+          className="h-8 w-16 text-xs text-center font-mono"
           disabled={disabled}
         />
         {preview && (
-          <Badge variant="secondary" className="text-[10px] h-4 font-mono">
+          <Badge variant="secondary" className="text-[10px] h-5 font-mono">
             {previewLabel} → {[...preview].map((c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`).join(' ')}
           </Badge>
         )}
       </div>
       <Input
-        placeholder="Label (optional, auto-generated)"
+        placeholder="Label (optional, auto-generated from combo)"
         value={label}
         onChange={(e) => setLabel(e.target.value)}
-        className="h-7 text-xs"
+        className="h-8 text-xs"
         disabled={disabled}
       />
-      <div className="flex gap-1.5">
-        <Button size="sm" className="h-7 text-xs" disabled={disabled || !preview} onClick={handleSave}>Save</Button>
-        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>Cancel</Button>
+      <div className="flex gap-2 justify-end">
+        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" className="h-8 text-xs" disabled={disabled || !preview} onClick={handleSave}>Save</Button>
       </div>
     </div>
   );
@@ -224,12 +291,12 @@ function PlainForm({ onSave, onCancel, disabled }: { onSave: (label: string, com
   const [command, setCommand] = useState('');
 
   return (
-    <div className="flex flex-col gap-2 p-2">
-      <Input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} className="h-7 text-xs" disabled={disabled} />
-      <Input placeholder="Command (sent as: command + Enter)" value={command} onChange={(e) => setCommand(e.target.value)} className="h-7 text-xs font-mono" disabled={disabled} />
-      <div className="flex gap-1.5">
-        <Button size="sm" className="h-7 text-xs" disabled={disabled || !label.trim() || !command.trim()} onClick={() => onSave(label.trim(), command.trim())}>Save</Button>
-        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>Cancel</Button>
+    <div className="flex flex-col gap-3">
+      <Input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} className="h-8 text-xs" disabled={disabled} />
+      <Input placeholder="Command (sent as: command + Enter)" value={command} onChange={(e) => setCommand(e.target.value)} className="h-8 text-xs font-mono" disabled={disabled} />
+      <div className="flex gap-2 justify-end">
+        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" className="h-8 text-xs" disabled={disabled || !label.trim() || !command.trim()} onClick={() => onSave(label.trim(), command.trim())}>Save</Button>
       </div>
     </div>
   );
@@ -259,15 +326,96 @@ function DeleteButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/* ── Main panel ───────────────────────────────────────────────────── */
+/* ── Add Command Dialog ───────────────────────────────────────────── */
 
 type AddMode = 'plain' | 'combo';
+
+function AddCommandDialog({
+  open, onOpenChange, disabled,
+  onAddPlain, onAddCombo,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled: boolean;
+  onAddPlain: (label: string, command: string) => Promise<void>;
+  onAddCombo: (label: string, seq: string) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<AddMode>('combo');
+
+  const handleSavePlain = async (label: string, command: string) => {
+    await onAddPlain(label, command);
+    onOpenChange(false);
+  };
+
+  const handleSaveCombo = async (label: string, seq: string) => {
+    await onAddCombo(label, seq);
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add Command</DialogTitle>
+        </DialogHeader>
+        <div className="flex gap-1.5 mb-3">
+          <Button
+            variant={mode === 'combo' ? 'default' : 'outline'}
+            size="sm" className="h-7 text-xs px-2.5"
+            onClick={() => setMode('combo')}
+          >
+            Combo
+          </Button>
+          <Button
+            variant={mode === 'plain' ? 'default' : 'outline'}
+            size="sm" className="h-7 text-xs px-2.5"
+            onClick={() => setMode('plain')}
+          >
+            Plain
+          </Button>
+        </div>
+        {mode === 'combo' ? (
+          <ComboBuilder disabled={disabled} onSave={handleSaveCombo} onCancel={() => onOpenChange(false)} />
+        ) : (
+          <PlainForm disabled={disabled} onSave={handleSavePlain} onCancel={() => onOpenChange(false)} />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ── Chain indicator bar ──────────────────────────────────────────── */
+
+const SEQ_LABELS: Record<string, string> = {
+  '\x1b': 'Esc', '\t': 'Tab', '\r': 'Enter', ' ': 'Space', '\x03': 'Ctrl-C',
+};
+
+function formatSeq(s: string): string {
+  return SEQ_LABELS[s] ?? (s.length === 1 ? s : `\\x${s.charCodeAt(0).toString(16)}`);
+}
+
+function ChainBar({
+  buffer, onCancel, onSend,
+}: { buffer: string[]; onCancel: () => void; onSend: () => void }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1 bg-primary/10 border-b text-xs flex-shrink-0">
+      <span className="text-muted-foreground">Chain:</span>
+      <code className="font-mono text-primary">{buffer.map(formatSeq).join(' ')}</code>
+      <div className="flex-1" />
+      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={onCancel}>Cancel</Button>
+      <Button variant="default" size="sm" className="h-6 text-[10px]" onClick={onSend}>Send</Button>
+    </div>
+  );
+}
+
+/* ── Main panel ───────────────────────────────────────────────────── */
 
 export function QuickCommandsPanel({ sendText, disabled }: { sendText: (text: string) => void; disabled: boolean }) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const { addEntry } = useCommandHistory();
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [addMode, setAddMode] = useState<AddMode>('combo');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [chainBuffer, setChainBuffer] = useState<string[]>([]);
+  const [isChaining, setIsChaining] = useState(false);
 
   const handleRun = (cmd: QuickCommand) => {
     const text = cmd.raw ? cmd.command : cmd.command + '\r';
@@ -275,35 +423,44 @@ export function QuickCommandsPanel({ sendText, disabled }: { sendText: (text: st
     addEntry(cmd.command);
   };
 
-  const handlePhysKey = (seq: string) => {
+  const handlePhysKey = useCallback((seq: string) => {
     sendText(seq);
-  };
+    setIsChaining(false);
+    setChainBuffer([]);
+  }, [sendText]);
 
-  const handleAddPlain = async (label: string, command: string) => {
-    await addCommand(label, command, false);
-    setShowAddForm(false);
-  };
+  const handleChainStart = useCallback((seq: string) => {
+    setIsChaining(true);
+    setChainBuffer([seq]);
+  }, []);
 
-  const handleAddCombo = async (label: string, seq: string) => {
-    // Store the human-readable label with the raw escape sequence.
-    // raw=true so no \r is appended when run.
-    await addCommand(label, seq, true);
-    setShowAddForm(false);
-  };
+  const handleChainAdd = useCallback((seq: string) => {
+    setChainBuffer((prev) => [...prev, seq]);
+  }, []);
+
+  const cancelChain = useCallback(() => { setIsChaining(false); setChainBuffer([]); }, []);
+  const sendChain = useCallback(() => {
+    sendText(chainBuffer.join(''));
+    setIsChaining(false);
+    setChainBuffer([]);
+  }, [sendText, chainBuffer]);
 
   const allCommands = [...PRESETS, ...userCommands];
   const presetIds = new Set(PRESETS.map((p) => p.id));
 
   return (
-    <div className="flex flex-col min-h-0">
-      {/* Physical key row — always visible */}
-      <KeyRow onKey={handlePhysKey} disabled={disabled} />
+    <div className="flex flex-col h-full">
+      {isChaining && <ChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />}
 
-      {/* Command list */}
+      <KeyRow
+        onKey={handlePhysKey} disabled={disabled}
+        chainBuffer={chainBuffer} isChaining={isChaining}
+        onChainStart={handleChainStart} onChainAdd={handleChainAdd}
+      />
+
       <div className="flex-1 min-h-0 overflow-y-auto">
         {allCommands.map((cmd, i) => {
           const isPreset = presetIds.has(cmd.id);
-          // Separator between presets and user commands
           const sep = i === PRESETS.length && i > 0;
           return (
             <div key={cmd.id}>
@@ -331,25 +488,16 @@ export function QuickCommandsPanel({ sendText, disabled }: { sendText: (text: st
         })}
       </div>
 
-      {/* Add form */}
       <div className="border-t flex-shrink-0">
-        {showAddForm ? (
-          <div>
-            <div className="flex gap-1 px-2 pt-2">
-              <Button variant={addMode === 'combo' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-2" onClick={() => setAddMode('combo')}>Combo</Button>
-              <Button variant={addMode === 'plain' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-2" onClick={() => setAddMode('plain')}>Plain</Button>
-            </div>
-            {addMode === 'combo' ? (
-              <ComboBuilder disabled={disabled} onSave={handleAddCombo} onCancel={() => setShowAddForm(false)} />
-            ) : (
-              <PlainForm disabled={disabled} onSave={handleAddPlain} onCancel={() => setShowAddForm(false)} />
-            )}
-          </div>
-        ) : (
-          <Button variant="ghost" size="sm" className="h-8 text-xs w-full rounded-none" disabled={disabled} onClick={() => setShowAddForm(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Command
-          </Button>
-        )}
+        <AddCommandDialog
+          open={dialogOpen} onOpenChange={setDialogOpen} disabled={disabled}
+          onAddPlain={async (l, c) => { await addCommand(l, c, false); }}
+          onAddCombo={async (l, s) => { await addCommand(l, s, true); }}
+        />
+        <Button variant="ghost" size="sm" className="h-8 text-xs w-full rounded-none"
+          disabled={disabled} onClick={() => setDialogOpen(true)}>
+          <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Command
+        </Button>
       </div>
     </div>
   );

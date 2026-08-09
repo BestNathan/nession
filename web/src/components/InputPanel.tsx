@@ -233,32 +233,35 @@ export function InputPanel({ sendText, disabled }: InputPanelProps) {
   const matchingHistory = filterHistory(inputValue);
 
   return (
-    <div className="flex flex-col min-h-0 h-full">
-      <ActionButtons
-        inputValue={inputValue}
-        disabled={disabled}
-        onClear={() => setInputValue('')}
-        onCopy={handleCopy}
-        onPaste={handlePasteButton}
-        onSend={doSend}
-      />
-
-      {/* Textarea — fixed height, 2-3 rows */}
-      <div className="px-2 pb-1 flex-shrink-0">
-        <Textarea
-          ref={textareaRef}
-          placeholder="Type to send… (Enter to submit, Shift+Enter for newline)"
-          value={inputValue}
-          rows={3}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handleTextareaPaste}
-          className="text-xs resize-none h-[3.25rem] field-sizing-fixed py-1.5"
+    <div className="flex flex-col h-full">
+      {/* Fixed area: action buttons + textarea */}
+      <div className="flex-shrink-0">
+        <ActionButtons
+          inputValue={inputValue}
           disabled={disabled}
+          onClear={() => setInputValue('')}
+          onCopy={handleCopy}
+          onPaste={handlePasteButton}
+          onSend={doSend}
         />
+
+        {/* Textarea — fixed height, 3 rows */}
+        <div className="px-2 pb-1">
+          <Textarea
+            ref={textareaRef}
+            placeholder="Type to send… (Enter to submit, Shift+Enter for newline)"
+            value={inputValue}
+            rows={3}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handleTextareaPaste}
+            className="text-xs resize-none h-[3.25rem] field-sizing-fixed py-1.5"
+            disabled={disabled}
+          />
+        </div>
       </div>
 
-      {/* History */}
+      {/* Scrollable: history */}
       <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
         {inputValue ? (
           <div className="text-[11px] text-muted-foreground mb-1 px-1">

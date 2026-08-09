@@ -48,6 +48,8 @@ function TerminalInputBar({
   onToggle,
   onReveal,
 }: TerminalInputBarProps) {
+  const [activeTab, setActiveTab] = useState('input');
+
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open !== !collapsed) {
@@ -59,7 +61,7 @@ function TerminalInputBar({
   );
 
   return (
-    <Tabs defaultValue="input" className="flex-shrink-0 border-t bg-background">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-shrink-0 border-t bg-background">
       <Collapsible open={!collapsed} onOpenChange={handleOpenChange}>
         {/* Toolbar — always visible, fixed height */}
         <div className="flex items-center gap-1.5 px-2 h-10">
@@ -123,14 +125,14 @@ function TerminalInputBar({
           )}
         </div>
 
-        {/* Content — fixed height, both tabs share same container */}
+        {/* Content — fixed height, panels handle their own scroll */}
         <CollapsibleContent className="overflow-hidden">
           <Separator />
-          <div className="h-[30vh] overflow-y-auto">
-            <TabsContent value="input" className="mt-0">
+          <div className="h-[30vh] overflow-hidden">
+            <TabsContent value="input" className="mt-0 h-full">
               <InputPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
-            <TabsContent value="commands" className="mt-0">
+            <TabsContent value="commands" className="mt-0 h-full">
               <QuickCommandsPanel sendText={sendText} disabled={disabled} />
             </TabsContent>
           </div>
