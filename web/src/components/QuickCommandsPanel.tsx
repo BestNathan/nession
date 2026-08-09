@@ -19,41 +19,38 @@ import { PRESETS, type QuickCommand } from './quickCommands';
 import { useQuickCommands } from '../hooks/useQuickCommands';
 import { useCommandHistory } from '../hooks/useCommandHistory';
 
-/* ── Physical key grid (mobile keyboard lacks these) ──────────────── */
+/* ── Physical key row — left-right layout ──────────────────────────── */
 
 interface PhysKey { label: string; seq: string; }
 
-const MAIN_KEYS: PhysKey[] = [
+/** Left-area quick keys (2 rows × max 5 cols).  When > 10 the 10th slot
+ *  becomes a dropdown that exposes the overflow set. */
+const LEFT_KEYS: PhysKey[] = [
   { label: 'Esc', seq: '\x1b' },
   { label: 'Tab', seq: '\t' },
   { label: 'Ctrl-C', seq: '\x03' },
   { label: 'Space', seq: ' ' },
   { label: 'Enter', seq: '\r' },
-  { label: '←', seq: '\x1b[D' },
+  { label: 'Del', seq: '\x1b[3~' },
+  { label: 'Home', seq: '\x1b[H' },
+  { label: 'PgUp', seq: '\x1b[5~' },
+  { label: 'PgDn', seq: '\x1b[6~' },
+  { label: 'End', seq: '\x1b[F' },
+];
+
+/** Right-area arrow keys in 凸 (T-shape) layout. */
+const ARROW_KEYS: PhysKey[] = [
   { label: '↑', seq: '\x1b[A' },
+  { label: '←', seq: '\x1b[D' },
   { label: '↓', seq: '\x1b[B' },
   { label: '→', seq: '\x1b[C' },
 ];
 
-const OVERFLOW_KEYS: PhysKey[] = [
-  { label: 'Del', seq: '\x1b[3~' },
-  { label: 'Home', seq: '\x1b[H' },
-  { label: 'End', seq: '\x1b[F' },
-  { label: 'PgUp', seq: '\x1b[5~' },
-  { label: 'PgDn', seq: '\x1b[6~' },
-];
-
-/** 2×5 uniform grid.  When total keys > 10 the last slot becomes a
- *  dropdown that exposes the overflow set. */
 function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: boolean }) {
-  const totalKeys = MAIN_KEYS.length + OVERFLOW_KEYS.length;
-  const hasOverflow = totalKeys > 10;
-  // When overflowing we show 9 main keys + 1 dropdown; otherwise all main keys.
-  const visibleCount = hasOverflow ? 9 : MAIN_KEYS.length;
-  const visibleKeys = MAIN_KEYS.slice(0, visibleCount);
-  const dropdownKeys = hasOverflow
-    ? [...MAIN_KEYS.slice(visibleCount), ...OVERFLOW_KEYS]
-    : OVERFLOW_KEYS;
+  const hasOverflow = LEFT_KEYS.length > 10;
+  const visibleCount = hasOverflow ? 9 : LEFT_KEYS.length;
+  const visibleKeys = LEFT_KEYS.slice(0, visibleCount);
+  const dropdownKeys = hasOverflow ? LEFT_KEYS.slice(visibleCount) : [];
 
   const KeyButton = ({ k }: { k: PhysKey }) => {
     const iconEl =
@@ -78,10 +75,11 @@ function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: b
   };
 
   return (
-    <div className="px-2 py-1.5 border-b flex-shrink-0">
-      <div className="grid grid-cols-5 gap-1">
+    <div className="flex justify-between gap-2 px-2 py-1.5 border-b flex-shrink-0">
+      {/* Left: 2-row × 5-col quick key grid */}
+      <div className="grid grid-cols-5 gap-1 flex-1">
         {visibleKeys.map((k) => <KeyButton key={k.label} k={k} />)}
-        {(hasOverflow || OVERFLOW_KEYS.length > 0) && (
+        {hasOverflow && (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -109,6 +107,16 @@ function KeyRow({ onKey, disabled }: { onKey: (seq: string) => void; disabled: b
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+      </div>
+
+      {/* Right: arrow keys in 凸 (T-shape) */}
+      <div className="grid grid-cols-3 grid-rows-2 gap-1 flex-shrink-0">
+        <div />
+        <KeyButton k={ARROW_KEYS[0]} /> {/* ↑ */}
+        <div />
+        <KeyButton k={ARROW_KEYS[1]} /> {/* ← */}
+        <KeyButton k={ARROW_KEYS[2]} /> {/* ↓ */}
+        <KeyButton k={ARROW_KEYS[3]} /> {/* → */}
       </div>
     </div>
   );
