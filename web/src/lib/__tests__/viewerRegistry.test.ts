@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getViewerType, getLangKey, preloadExtensions, isViewable, parseExt } from '../viewerRegistry';
+import { getViewerType, getLangKey, preloadExtensions, isViewable, parseExt, isMarkdownExt } from '../viewerRegistry';
 
 describe('getViewerType', () => {
   it.each(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'])('returns "image" for .%s', (ext) => {
@@ -106,6 +106,30 @@ describe('parseExt', () => {
 
   it('returns lowercase', () => {
     expect(parseExt('FILE.PDF')).toBe('pdf');
+  });
+});
+
+describe('isMarkdownExt', () => {
+  it('returns true for .md', () => {
+    expect(isMarkdownExt('md')).toBe(true);
+  });
+
+  it('returns true for .markdown', () => {
+    expect(isMarkdownExt('markdown')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isMarkdownExt('MD')).toBe(true);
+    expect(isMarkdownExt('Markdown')).toBe(true);
+  });
+
+  it('returns false for other extensions', () => {
+    expect(isMarkdownExt('js')).toBe(false);
+    expect(isMarkdownExt('txt')).toBe(false);
+  });
+
+  it('returns false for empty string', () => {
+    expect(isMarkdownExt('')).toBe(false);
   });
 });
 
