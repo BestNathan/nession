@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type ComponentType } from 'react';
 import { Edit3, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { toastError } from '@/lib/errorHelpers';
@@ -93,9 +93,13 @@ interface FileViewerContentProps {
 function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, filename, content, isReadOnly, onRetry, onChange,
 }: FileViewerContentProps) {
-  const MediaViewerComponent = viewerType
-    ? { image: ImageViewer, video: VideoViewer, audio: AudioViewer, pdf: PdfViewer }[viewerType]
-    : null;
+  const mediaViewers: Partial<Record<ViewerType, ComponentType<{ blobUrl: string; filename: string }>>> = {
+    image: ImageViewer,
+    video: VideoViewer,
+    audio: AudioViewer,
+    pdf: PdfViewer,
+  };
+  const MediaViewerComponent = viewerType ? mediaViewers[viewerType] : null;
 
   return (
     <div className="flex-1 min-h-0">
