@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useRef, type ComponentType } from 'react';
-import { Edit3, Save } from 'lucide-react';
-import { toast } from 'sonner';
-import { toastError } from '@/lib/errorHelpers';
+import type { ComponentType } from 'react';
+import { Edit3, Save, Eye, Code, Info } from 'lucide-react';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
+import { MarkdownPreview } from './MarkdownPreview';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { AudioViewer } from './AudioViewer';
@@ -19,7 +18,8 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from './ui/alert-dialog';
-import { getViewerType, parseExt, type ViewerType } from '@/lib/viewerRegistry';
+import { type ViewerType } from '@/lib/viewerRegistry';
+import { useFileViewer, type ViewMode } from '@/hooks/useFileViewer';
 import type { FileOps } from '../services/fileOps';
 
 export interface FileViewerProps {
@@ -30,31 +30,26 @@ export interface FileViewerProps {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-/** Decode base64 content to a Blob URL for media viewers. */
-function base64ToBlobUrl(base64: string, mimeType: string): string {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
-}
-
 interface FileViewerToolbarProps {
   filename: string;
   isDirty: boolean;
   isText: boolean;
   isReadOnly: boolean;
   saving: boolean;
+  isMarkdown: boolean;
+  viewMode: ViewMode;
   onSave: () => void;
   onEditToggle: () => void;
+  onSetViewMode: (mode: ViewMode) => void;
   onCloseClick: () => void;
 }
 
 function FileViewerToolbar({
-  filename, isDirty, isText, isReadOnly, saving, onSave, onEditToggle, onCloseClick,
+  filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, onSave, onEditToggle, onSetViewMode, onCloseClick,
 }: FileViewerToolbarProps) {
+  // Markdown files get a Preview/Raw mode toggle; Edit is only offered in raw mode.
+  const showEditToggle = isText && (!isMarkdown || viewMode === 'raw');
+
   return (
     <div className="flex items-center justify-between px-2 py-1 border-b flex-shrink-0">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -67,7 +62,29 @@ function FileViewerToolbar({
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
-        {isText && (
+        {isMarkdown && (
+          <div className="flex items-center rounded-md bg-muted/60 p-0.5" role="group" aria-label="View mode">
+            <Button
+              variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={() => onSetViewMode('preview')}
+              aria-pressed={viewMode === 'preview'}
+            >
+              <Eye className="h-3 w-3 mr-1" />Preview
+            </Button>
+            <Button
+              variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={() => onSetViewMode('raw')}
+              aria-pressed={viewMode === 'raw'}
+            >
+              <Code className="h-3 w-3 mr-1" />Raw
+            </Button>
+          </div>
+        )}
+        {showEditToggle && (
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
@@ -84,144 +101,158 @@ interface FileViewerContentProps {
   viewerType: ViewerType | null;
   mediaBlobUrl: string | null;
   filename: string;
+  originalContent: string;
   content: string;
   isReadOnly: boolean;
+  isDirty: boolean;
+  isMarkdown: boolean;
+  viewMode: ViewMode;
+  showSuggestion: boolean;
   onRetry: () => void;
   onChange: (value: string) => void;
+  onSuggestionPreview: () => void;
+  onSuggestionDismiss: () => void;
 }
 
 function FileViewerContent({
-  loading, error, viewerType, mediaBlobUrl, filename, content, isReadOnly, onRetry, onChange,
+  loading, error, viewerType, mediaBlobUrl, filename, originalContent, content,
+  isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
+  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss,
 }: FileViewerContentProps) {
-  const mediaViewers: Partial<Record<ViewerType, ComponentType<{ blobUrl: string; filename: string }>>> = {
-    image: ImageViewer,
-    video: VideoViewer,
-    audio: AudioViewer,
-    pdf: PdfViewer,
-  };
-  const MediaViewerComponent = viewerType ? mediaViewers[viewerType] : null;
+  // Media viewers
+  if (viewerType && viewerType !== 'markdown') {
+    const mediaViewers: Partial<Record<ViewerType, ComponentType<{ blobUrl: string; filename: string }>>> = {
+      image: ImageViewer,
+      video: VideoViewer,
+      audio: AudioViewer,
+      pdf: PdfViewer,
+    };
+    const MediaViewerComponent = viewerType ? mediaViewers[viewerType] : null;
 
+    return (
+      <div className="flex-1 min-h-0">
+        {loading ? (
+          <div className="flex flex-col p-3 gap-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+            <p className="text-destructive">{error}</p>
+            <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+          </div>
+        ) : MediaViewerComponent && mediaBlobUrl ? (
+          <MediaViewerComponent blobUrl={mediaBlobUrl} filename={filename} />
+        ) : null}
+      </div>
+    );
+  }
+
+  // Markdown preview mode
+  if (isMarkdown && viewMode === 'preview') {
+    return (
+      <div className="flex-1 min-h-0 flex flex-col">
+        {isDirty && originalContent !== content && (
+          <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-amber-950/30 border-amber-800 text-amber-200">
+            <Info className="h-3 w-3 shrink-0" />
+            <span>Preview shows the saved version. Save to update preview.</span>
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          {loading ? (
+            <div className="flex flex-col p-3 gap-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+              <p className="text-destructive">{error}</p>
+              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+            </div>
+          ) : (
+            <MarkdownPreview content={originalContent} filename={filename} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Raw text mode (CodeMirror)
   return (
-    <div className="flex-1 min-h-0">
-      {loading ? (
-        <div className="flex flex-col p-3 gap-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
+    <div className="flex-1 min-h-0 flex flex-col">
+      {showSuggestion && (
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-blue-950/50 border-blue-800 text-blue-200">
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          <span>This file looks like Markdown</span>
+          <button
+            onClick={onSuggestionPreview}
+            className="ml-auto px-2 py-0.5 rounded text-xs bg-blue-800 hover:bg-blue-700 text-blue-100"
+          >
+            Preview
+          </button>
+          <button
+            onClick={onSuggestionDismiss}
+            className="px-1 py-0.5 text-blue-400 hover:text-blue-200"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
         </div>
-      ) : error ? (
-        <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
-          <p className="text-destructive">{error}</p>
-          <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
-        </div>
-      ) : MediaViewerComponent && mediaBlobUrl ? (
-        <MediaViewerComponent blobUrl={mediaBlobUrl} filename={filename} />
-      ) : (
-        <CodeMirrorEditor
-          value={content}
-          onChange={onChange}
-          readOnly={isReadOnly}
-          filename={filename}
-        />
       )}
+      <div className="flex-1 min-h-0">
+        {loading ? (
+          <div className="flex flex-col p-3 gap-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 p-3 text-sm">
+            <p className="text-destructive">{error}</p>
+            <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+          </div>
+        ) : (
+          <CodeMirrorEditor
+            value={content}
+            onChange={onChange}
+            readOnly={isReadOnly}
+            filename={filename}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
 export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: FileViewerProps) {
-  const ext = parseExt(path);
-  const viewerType: ViewerType | null = ext ? getViewerType(ext) : null;
-  const isText = viewerType === null;
-
-  const [content, setContent] = useState('');
-  const [originalContent, setOriginalContent] = useState('');
-  const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isReadOnly, setIsReadOnly] = useState(true);
-  const [isDirty, setIsDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
-  const blobUrlRef = useRef<string | null>(null);
-
-  // Revoke blob URL on unmount
-  useEffect(() => {
-    return () => {
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
-    };
-  }, []);
-
-  const loadFile = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fileOps.readFile(path);
-
-      if (viewerType) {
-        // Media file: create blob URL
-        const newBlobUrl = base64ToBlobUrl(data.content, data.mime_type);
-        // Revoke previous blob URL if any
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-        }
-        blobUrlRef.current = newBlobUrl;
-        setMediaBlobUrl(newBlobUrl);
-      } else {
-        // Text file: decode to UTF-8
-        const decoded = fileOps.base64Decode(data.content);
-        setContent(decoded);
-        setOriginalContent(decoded);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setLoading(false);
-    }
-  }, [path, fileOps, viewerType]);
-
-  useEffect(() => {
-    loadFile();
-  }, [loadFile]);
-
-  const handleEditToggle = () => { setIsReadOnly((prev) => !prev); };
-
-  const handleContentChange = (newContent: string) => {
-    setContent(newContent);
-    const dirty = newContent !== originalContent;
-    setIsDirty(dirty);
-    onDirtyChange?.(dirty);
-  };
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    try {
-      await fileOps.writeFile(path, content);
-      setOriginalContent(content);
-      setIsDirty(false);
-      onDirtyChange?.(false);
-      toast.success(`Saved ${filename}`);
-    } catch (err) {
-      toastError(err, 'Failed to save file');
-    } finally {
-      setSaving(false);
-    }
-  }, [fileOps, path, content, filename, onDirtyChange]);
-
-  const handleCloseClick = () => {
-    if (isDirty) {
-      setShowUnsavedDialog(true);
-      return;
-    }
-    onClose();
-  };
-
-  const handleConfirmClose = () => {
-    setShowUnsavedDialog(false);
-    onClose();
-  };
+  const {
+    viewerType,
+    isMarkdown,
+    viewMode,
+    showSuggestion,
+    content,
+    originalContent,
+    mediaBlobUrl,
+    loading,
+    error,
+    isReadOnly,
+    isDirty,
+    saving,
+    showUnsavedDialog,
+    isText,
+    setShowUnsavedDialog,
+    loadFile,
+    handleEditToggle,
+    handleSetViewMode,
+    handleContentChange,
+    handleSave,
+    handleCloseClick,
+    handleConfirmClose,
+    handleSuggestionPreview,
+    handleSuggestionDismiss,
+  } = useFileViewer({ fileOps, path, filename, onClose, onDirtyChange });
 
   return (
     <div className="flex flex-col h-full">
@@ -231,8 +262,11 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
         isText={isText}
         isReadOnly={isReadOnly}
         saving={saving}
+        isMarkdown={isMarkdown}
+        viewMode={viewMode}
         onSave={handleSave}
         onEditToggle={handleEditToggle}
+        onSetViewMode={handleSetViewMode}
         onCloseClick={handleCloseClick}
       />
       <FileViewerContent
@@ -241,10 +275,17 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
         viewerType={viewerType}
         mediaBlobUrl={mediaBlobUrl}
         filename={filename}
+        originalContent={originalContent}
         content={content}
         isReadOnly={isReadOnly}
+        isDirty={isDirty}
+        isMarkdown={isMarkdown}
+        viewMode={viewMode}
+        showSuggestion={showSuggestion}
         onRetry={loadFile}
         onChange={handleContentChange}
+        onSuggestionPreview={handleSuggestionPreview}
+        onSuggestionDismiss={handleSuggestionDismiss}
       />
 
       <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
