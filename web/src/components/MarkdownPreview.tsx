@@ -1,3 +1,5 @@
+import 'katex/dist/katex.min.css';
+import 'highlight.js/styles/github-dark.css';
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -57,19 +59,17 @@ const LARGE_FILE_THRESHOLD = 1_048_576; // 1MB
 /**
  * Sanitize schema for markdown previews.
  *
- * Extends the default GitHub-style schema to let structural class names
- * through from KaTeX (`katex`, `katex-display`, `katex-html`, `base`, …) and
- * highlight.js (`hljs-*`). Class attributes are not an XSS vector; the default
- * schema otherwise strips scripts, event handlers, inline styles, and
- * `javascript:` URLs.
+ * Extends the default GitHub-style schema so the raw markdown HTML can be
+ * sanitized *before* KaTeX and highlight.js run (they generate trusted HTML of
+ * their own afterwards). remark-math marks math spans with
+ * `math-inline` / `math-display` on `<code>`, so those class names must survive
+ * the sanitize pass for rehype-katex to pick them up.
  */
 const markdownSanitizeSchema = {
   ...defaultSchema,
   attributes: {
     ...(defaultSchema.attributes ?? {}),
-    span: [...(defaultSchema.attributes?.span ?? []), 'className'],
-    div: [...(defaultSchema.attributes?.div ?? []), 'className'],
-    code: [...(defaultSchema.attributes?.code ?? []), 'className'],
+    code: [['className', /^language-./, 'math-inline', 'math-display']],
   },
 };
 
@@ -110,9 +110,9 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[
+              [rehypeSanitize, markdownSanitizeSchema],
               rehypeHighlight,
               rehypeKatex,
-              [rehypeSanitize, markdownSanitizeSchema],
             ]}
           >
             {content}
