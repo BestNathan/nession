@@ -16,6 +16,8 @@ export interface P2PFallbackResult {
   manualOverride: string | null;
   /** Set/clear the manual address override. */
   setManualOverride: (url: string | null) => void;
+  /** True while a manually-selected address is being connected to. */
+  isSwitching: boolean;
 }
 
 interface UseP2PWithFallbackOptions {
@@ -64,7 +66,25 @@ export function useP2PWithFallback(
   // browser-tested order.
   const plan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
   const [addressIndex, setAddressIndex] = useState(0);
-  const [forcedRelay, setForcedRelay] = useState(false);
+
+  // forcedRelay is held in state (set by the fallback driver effect), but
+  // we derive the effective value: when manualOverride is non-null, the user
+  // explicitly chose a P2P route — ignore any stale relay fallback state
+  // on the SAME render, no effect gap.
+  const [forcedRelayState, setForcedRelay] = useState(false);
+  const forcedRelay = manualOverride ? false : forcedRelayState;
+
+  // When manualOverride transitions null→url, reset the underlying state so
+  // the derived value stays consistent on future renders after manualOverride
+  // returns to null.
+  const prevManualRef = useRef(manualOverride);
+  useEffect(() => {
+    const prev = prevManualRef.current;
+    prevManualRef.current = manualOverride;
+    if (manualOverride && !prev) {
+      setForcedRelay(false);
+    }
+  }, [manualOverride]);
 
   // A new attach (or re-planned addresses) resets rotation + relay fallback.
   // Key on the URL list as a stable string so the effect only fires when the
@@ -72,7 +92,6 @@ export function useP2PWithFallback(
   const planUrlsKey = plan.urls.join(',');
   useEffect(() => {
     setAddressIndex(0);
-    setForcedRelay(false);
   }, [planUrlsKey]);
 
   const isP2P = attachInfo.mode === 'p2p' && !forcedRelay;
@@ -126,6 +145,8 @@ export function useP2PWithFallback(
     }
   }, [isP2P, plan, activeUrl, attemptKey, p2pState, addressIndex]);
 
+  const isSwitching = manualOverride !== null && p2pConnection?.connectionState !== 'connected';
+
   return {
     p2pConnection,
     effectiveMode: isP2P ? 'p2p' : 'relay',
@@ -133,5 +154,6 @@ export function useP2PWithFallback(
     forcedRelay,
     manualOverride,
     setManualOverride,
+    isSwitching,
   };
 }
