@@ -92,6 +92,7 @@ export function useP2PWithFallback(
   const planUrlsKey = plan.urls.join(',');
   useEffect(() => {
     setAddressIndex(0);
+    setForcedRelay(false);
   }, [planUrlsKey]);
 
   const isP2P = attachInfo.mode === 'p2p' && !forcedRelay;
@@ -138,12 +139,15 @@ export function useP2PWithFallback(
       if (addressIndex + 1 < plan.urls.length) {
         console.log(`[P2P] Address ${plan.urls[addressIndex]} failed; trying next candidate`);
         setAddressIndex((i) => i + 1);
-      } else {
+      } else if (!manualOverride) {
+        // With a manual override active the user explicitly chose this route —
+        // don't latch relay state; let the connection sit in terminal
+        // 'disconnected' (mode stays 'p2p') so the user can switch manually.
         console.log('[P2P] All addresses exhausted; falling back to relay');
         setForcedRelay(true);
       }
     }
-  }, [isP2P, plan, activeUrl, attemptKey, p2pState, addressIndex]);
+  }, [isP2P, plan, activeUrl, attemptKey, p2pState, addressIndex, manualOverride]);
 
   const isSwitching = manualOverride !== null && p2pConnection?.connectionState !== 'connected';
 
