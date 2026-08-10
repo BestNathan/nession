@@ -114,7 +114,7 @@ function AddressListItems({
                 : 'cursor-pointer hover:bg-accent',
               isSelected && 'bg-accent',
             )}
-            onClick={() => { if (!isUnreachable) onSelect(addr.url); }}
+            onClick={() => { if (!isUnreachable) { onSelect(addr.url); } }}
           >
             <ReachIcon reachable={reachable} />
             <span className="text-sm font-medium flex-1">
