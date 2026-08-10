@@ -16,6 +16,8 @@ describe('AddressSelector', () => {
         activeUrl="ws://a/ws"
         isAuto
         onSelect={vi.fn()}
+        isSwitching={false}
+        effectiveMode="p2p"
       />,
     );
     expect(container).toBeEmptyDOMElement();
@@ -29,6 +31,8 @@ describe('AddressSelector', () => {
         activeUrl="ws://a/ws"
         isAuto
         onSelect={vi.fn()}
+        isSwitching={false}
+        effectiveMode="p2p"
       />,
     );
     // Trigger renders the "Route:" prefix and is labelled for a11y.

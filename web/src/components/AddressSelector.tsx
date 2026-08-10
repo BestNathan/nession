@@ -25,6 +25,10 @@ interface AddressSelectorProps {
   isAuto: boolean;
   /** Choose an address manually, or pass null to return to automatic. */
   onSelect: (url: string | null) => void;
+  /** True while the connection for a manually-selected address is being established. */
+  isSwitching: boolean;
+  /** Current transport mode — used to determine icon colour on mobile. */
+  effectiveMode: 'p2p' | 'relay';
 }
 
 /** Browser reachability for an address: true/false, or undefined if untested. */
