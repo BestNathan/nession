@@ -103,14 +103,18 @@ function AddressListItems({
         const latency = latencyByUrl.get(addr.url);
         const reachable = browserReachable(addr.url, latencyByUrl);
         const isSelected = !isAuto && activeUrl === addr.url;
+        const isUnreachable = reachable === false;
         return (
           <div
             key={addr.url}
             className={cn(
-              'flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11',
+              'flex items-center gap-2 px-3 py-2.5 rounded-md min-h-11',
+              isUnreachable
+                ? 'opacity-40 cursor-not-allowed'
+                : 'cursor-pointer hover:bg-accent',
               isSelected && 'bg-accent',
             )}
-            onClick={() => onSelect(addr.url)}
+            onClick={() => { if (!isUnreachable) onSelect(addr.url); }}
           >
             <ReachIcon reachable={reachable} />
             <span className="text-sm font-medium flex-1">
@@ -118,7 +122,9 @@ function AddressListItems({
             </span>
             {latency !== null && latency !== undefined ? (
               <span className="text-xs text-muted-foreground">{latency}ms</span>
-            ) : null}
+            ) : (
+              <span className="text-xs text-muted-foreground/50">unreachable</span>
+            )}
           </div>
         );
       })}
@@ -156,14 +162,17 @@ function AddressSelectorDesktop({
           const latencyByUrl = new Map(latencies.map((l) => [l.url, l.latencyMs]));
           const latency = latencyByUrl.get(addr.url);
           const reachable = browserReachable(addr.url, latencyByUrl);
+          const isUnreachable = reachable === false;
           return (
-            <SelectItem key={addr.url} value={addr.url}>
+            <SelectItem key={addr.url} value={addr.url} disabled={isUnreachable}>
               <span className="flex items-center gap-1.5">
                 <ReachIcon reachable={reachable} />
                 <span className="font-medium">{addr.label ?? addr.network_type}</span>
                 {latency !== null && latency !== undefined ? (
                   <span className="text-[10px] text-muted-foreground">{latency}ms</span>
-                ) : null}
+                ) : (
+                  <span className="text-[10px] text-muted-foreground/50">unreachable</span>
+                )}
               </span>
             </SelectItem>
           );
