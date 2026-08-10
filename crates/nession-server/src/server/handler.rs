@@ -16,6 +16,11 @@ use nession_common::protocol::{
     EnvFileRef, EnvSnapshot, EnvSource, ProtocolMessage, ServerTerminalResizePayload,
 };
 
+/// Per-agent deadline for the force-refresh session query. Deliberately much
+/// shorter than the general 10s command timeout: a user is watching a spinner,
+/// and a slow agent is reported as stale rather than blocking the response.
+const SESSION_REFRESH_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
     /// Send an optional reply message back to the sender.
@@ -273,6 +278,9 @@ impl ConnectionHandler {
                 payload.agent_id,
                 removed
             );
+            // Tell web clients the list shrank — otherwise their view keeps
+            // showing sessions the registry no longer has.
+            self.broadcast_sessions().await;
         }
 
         info!("Agent {} registered successfully", payload.agent_id);
@@ -398,6 +406,7 @@ impl ConnectionHandler {
             // files can be edited/deleted again. Without this, externally
             // killed sessions leave stale locks in memory.
             self.env_service.usage.clear_session(&session_id);
+            self.broadcast_sessions().await;
             return Ok(HandlerAction::Reply(None));
         }
 
@@ -444,8 +453,19 @@ impl ConnectionHandler {
             session_name, agent_id, session_info.status, window_count, attached_clients
         );
         self.session_registry.update_session(session_info).await;
+        self.broadcast_sessions().await;
 
         Ok(HandlerAction::Reply(None))
+    }
+
+    /// Push the current session list to every connected web client.
+    ///
+    /// Called after any mutation so browsers don't have to poll or wait for a
+    /// manual refresh to notice changes.
+    async fn broadcast_sessions(&self) {
+        self.web_client_registry
+            .broadcast_sessions_changed(Arc::clone(&self.session_registry))
+            .await;
     }
 
     async fn handle_client_auth(
@@ -747,6 +767,12 @@ impl ConnectionHandler {
     }
 
     /// Handle `client.sessions.list` - returns all sessions, optionally filtered by agent_id.
+    ///
+    /// With `force: true` the server first queries every online agent for its
+    /// live tmux state and rebuilds the registry from the answers, so the
+    /// client gets strongly-consistent data instead of whatever the last
+    /// watcher poll happened to leave behind. Agents that fail to answer keep
+    /// their existing entries and are named in `stale_agents`.
     async fn handle_client_sessions_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -768,6 +794,21 @@ impl ConnectionHandler {
         }
 
         let agent_id = msg.payload.get("agent_id").and_then(|v| v.as_str());
+        let force = msg
+            .payload
+            .get("force")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        let stale_agents = if force {
+            let stale = self.refresh_sessions_from_agents(agent_id).await;
+            // The rebuild may have changed the list for everyone, not just the
+            // requester — push it so other open browsers converge too.
+            self.broadcast_sessions().await;
+            stale
+        } else {
+            Vec::new()
+        };
 
         let sessions = if let Some(aid) = agent_id {
             self.session_registry.list_by_agent(aid).await
@@ -775,30 +816,13 @@ impl ConnectionHandler {
             self.session_registry.list().await
         };
 
-        let sessions_json: Vec<serde_json::Value> = sessions
-            .iter()
-            .map(|s| {
-                json!({
-                    "session_id": s.session_id,
-                    "agent_id": s.agent_id,
-                    "session_name": s.session_name,
-                    "status": match s.status {
-                        SessionStatus::Active => "active",
-                        SessionStatus::Detached => "detached",
-                        SessionStatus::Recovering => "recovering",
-                        SessionStatus::Orphaned => "orphaned",
-                        SessionStatus::Zombie => "zombie",
-                    },
-                    "window_count": s.window_count,
-                    "attached_clients": s.attached_clients,
-                    "last_activity": s.last_activity.to_rfc3339(),
-                })
-            })
-            .collect();
+        let sessions_json: Vec<serde_json::Value> = sessions.iter().map(session_to_json).collect();
 
         info!(
-            "Client requested sessions list, returning {} sessions",
-            sessions_json.len()
+            "Client requested sessions list (force: {}), returning {} sessions, {} stale agent(s)",
+            force,
+            sessions_json.len(),
+            stale_agents.len()
         );
 
         Ok(HandlerAction::Reply(Some(Message::Text(
@@ -807,11 +831,79 @@ impl ConnectionHandler {
                 "id": msg.id,
                 "timestamp": current_timestamp(),
                 "payload": {
-                    "sessions": sessions_json
+                    "sessions": sessions_json,
+                    "stale_agents": stale_agents,
                 }
             })
             .to_string(),
         ))))
+    }
+
+    /// Query online agents for their live tmux sessions and rebuild the
+    /// registry from the answers. Scoped to `only_agent` when given.
+    ///
+    /// Returns the IDs of agents that did not answer. Their registry entries
+    /// are deliberately left alone: a transient timeout must not delete
+    /// sessions that are still alive in tmux, so the client is told the data
+    /// may be stale instead.
+    async fn refresh_sessions_from_agents(&self, only_agent: Option<&str>) -> Vec<String> {
+        let targets: Vec<String> = self
+            .agent_registry
+            .list()
+            .await
+            .into_iter()
+            // Offline agents have no live control connection — `send_command`
+            // would drop the sender immediately, so skip rather than wait.
+            .filter(|a| a.status == AgentStatus::Online)
+            .filter(|a| only_agent.is_none_or(|want| a.agent_id == want))
+            .map(|a| a.agent_id)
+            .collect();
+
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        // Fan out concurrently: this runs while a user waits on a button
+        // click, so the cost must be one timeout, not N.
+        let results = futures_util::future::join_all(targets.iter().map(|agent_id| async move {
+            let outcome = self
+                .agent_command_with_timeout(
+                    agent_id,
+                    "server.sessions.list",
+                    json!({}),
+                    SESSION_REFRESH_TIMEOUT,
+                )
+                .await;
+            (agent_id.clone(), outcome)
+        }))
+        .await;
+
+        let mut stale = Vec::new();
+        for (agent_id, outcome) in results {
+            match outcome {
+                Ok(resp) => {
+                    let incoming = parse_agent_sessions(&agent_id, &resp);
+                    let removed = self
+                        .session_registry
+                        .replace_agent_sessions(&agent_id, incoming)
+                        .await;
+                    // Sessions that vanished must release their env locks so
+                    // the files become editable again.
+                    for session_id in &removed {
+                        self.env_service.usage.clear_session(session_id);
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "sessions.list refresh from agent {} failed: {}",
+                        agent_id, e
+                    );
+                    stale.push(agent_id);
+                }
+            }
+        }
+
+        stale
     }
 
     /// Handle `client.session.attach` - returns P2P agent address or enters relay mode.
@@ -1376,6 +1468,7 @@ impl ConnectionHandler {
                         last_activity: chrono::Utc::now(),
                     };
                     self.session_registry.update_session(session_info).await;
+                    self.broadcast_sessions().await;
                     // Record create-time env usage for visibility + in-use lock.
                     if !env_refs.is_empty() {
                         self.env_service.usage.record_create(&sid, &env_refs, None);
@@ -1810,7 +1903,21 @@ impl ConnectionHandler {
         &self,
         agent_id: &str,
         msg_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.agent_command_with_timeout(agent_id, msg_type, payload, Duration::from_secs(10))
+            .await
+    }
+
+    /// Same as [`Self::agent_command`] but with a caller-chosen timeout.
+    /// Interactive paths (a user waiting on a click) want a much shorter
+    /// deadline than background bookkeeping.
+    async fn agent_command_with_timeout(
+        &self,
+        agent_id: &str,
+        msg_type: &str,
         mut payload: serde_json::Value,
+        timeout: Duration,
     ) -> Result<serde_json::Value, String> {
         let request_id = uuid::Uuid::new_v4().to_string();
         if let Some(obj) = payload.as_object_mut() {
@@ -1820,7 +1927,7 @@ impl ConnectionHandler {
             .command_broker
             .send_command(agent_id, msg_type, &request_id, payload)
             .await;
-        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => Err("Agent disconnected".to_string()),
             Err(_) => Err("Timeout waiting for agent response".to_string()),
@@ -2766,6 +2873,84 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+/// Serialise a session for the wire. Shared by `client.sessions.list` and the
+/// `sessions.changed` broadcast so both always agree on the field set — the
+/// web client feeds either straight into the same state setter.
+pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
+    json!({
+        "session_id": s.session_id,
+        "agent_id": s.agent_id,
+        "session_name": s.session_name,
+        "status": match s.status {
+            SessionStatus::Active => "active",
+            SessionStatus::Detached => "detached",
+            SessionStatus::Recovering => "recovering",
+            SessionStatus::Orphaned => "orphaned",
+            SessionStatus::Zombie => "zombie",
+        },
+        "window_count": s.window_count,
+        "attached_clients": s.attached_clients,
+        "last_activity": s.last_activity.to_rfc3339(),
+    })
+}
+
+/// Convert an agent's `sessions.list` reply into registry entries.
+///
+/// The agent reports raw tmux fields only; status is derived here from
+/// `attached_clients` using the same rule as the agent's SessionWatcher, so
+/// the mapping lives in exactly one place. Malformed or unnamed entries are
+/// skipped rather than failing the whole refresh.
+fn parse_agent_sessions(
+    agent_id: &str,
+    resp: &serde_json::Value,
+) -> Vec<crate::registry::SessionInfo> {
+    let now = chrono::Utc::now();
+    resp.get("sessions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| {
+                    let name = s.get("name").and_then(|v| v.as_str())?;
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let attached_clients = u32::try_from(
+                        s.get("attached_clients")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                    )
+                    .unwrap_or(0);
+                    let window_count = u32::try_from(
+                        s.get("window_count")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                    )
+                    .unwrap_or(0);
+                    let created_at = s
+                        .get("created_at")
+                        .and_then(serde_json::Value::as_i64)
+                        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                        .unwrap_or(now);
+                    Some(crate::registry::SessionInfo {
+                        session_id: format!("{agent_id}:{name}"),
+                        agent_id: agent_id.to_string(),
+                        session_name: name.to_string(),
+                        status: if attached_clients > 0 {
+                            SessionStatus::Active
+                        } else {
+                            SessionStatus::Detached
+                        },
+                        window_count,
+                        attached_clients,
+                        created_at,
+                        last_activity: now,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3425,6 +3610,235 @@ mod tests {
         let reply = parse_reply(action);
         let sessions = reply["payload"]["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 2);
+    }
+
+    // ---- client.sessions.list force refresh ----
+
+    /// Registering via `agent.register` marks the agent Online but does not
+    /// give it a CommandBroker control connection, so a force refresh will
+    /// find it unreachable — exactly the "agent went away" case.
+    async fn handler_with_online_agent() -> ConnectionHandler {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        h.handle_message(proto_msg(
+            "agent.register",
+            json!({
+                "agent_id": "a1",
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap();
+        h
+    }
+
+    async fn add_session(h: &mut ConnectionHandler, agent_id: &str, name: &str) {
+        h.handle_message(proto_msg(
+            "agent.session.update",
+            json!({
+                "agent_id": agent_id,
+                "session_name": name,
+                "status": "detached",
+                "window_count": 1,
+                "attached_clients": 0,
+            }),
+        ))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn force_refresh_with_no_agents_is_a_noop() {
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        assert!(reply["payload"]["sessions"].as_array().unwrap().is_empty());
+        assert!(reply["payload"]["stale_agents"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    /// The core failure-semantics guarantee: an agent that cannot answer keeps
+    /// its sessions and is reported stale, rather than having live sessions
+    /// deleted because of a transient blip.
+    #[tokio::test]
+    async fn force_refresh_keeps_sessions_of_unreachable_agent_and_marks_stale() {
+        let mut h = handler_with_online_agent().await;
+        add_session(&mut h, "a1", "s1").await;
+
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({ "force": true })))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+
+        // Session survived.
+        let sessions = reply["payload"]["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["session_id"], "a1:s1");
+        // And the agent is flagged so the UI can warn.
+        let stale = reply["payload"]["stale_agents"].as_array().unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0], "a1");
+    }
+
+    /// Without `force`, no agent is contacted, so nothing is ever stale.
+    #[tokio::test]
+    async fn non_force_list_never_reports_stale() {
+        let mut h = handler_with_online_agent().await;
+        add_session(&mut h, "a1", "s1").await;
+
+        let action = h
+            .handle_message(proto_msg("client.sessions.list", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+
+        assert_eq!(reply["payload"]["sessions"].as_array().unwrap().len(), 1);
+        assert!(reply["payload"]["stale_agents"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    /// The `agent_id` filter narrows the fan-out targets: an id matching no
+    /// agent contacts nobody, so nothing is stale and nothing is returned.
+    #[tokio::test]
+    async fn force_refresh_scopes_fanout_to_the_requested_agent() {
+        let mut h = handler_with_online_agent().await;
+        add_session(&mut h, "a1", "s1").await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "client.sessions.list",
+                json!({ "force": true, "agent_id": "nonexistent" }),
+            ))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+
+        assert!(reply["payload"]["stale_agents"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(reply["payload"]["sessions"].as_array().unwrap().is_empty());
+        // a1's session was left alone — it was never a refresh target.
+        assert_eq!(h.session_registry.list().await.len(), 1);
+    }
+
+    /// The happy path: the agent answers with its live tmux state and the
+    /// registry is rebuilt from it — stale entries dropped, real ones kept,
+    /// and the agent is not reported stale.
+    #[tokio::test]
+    async fn force_refresh_rebuilds_registry_from_agent_reply() {
+        let mut h = handler_with_online_agent().await;
+        // Registry believes "ghost" exists; tmux will say otherwise.
+        add_session(&mut h, "a1", "ghost").await;
+
+        let (sender, mut rx) = WsMessageSender::new();
+        h.command_broker.register_agent("a1", sender).await;
+
+        let broker = Arc::clone(&h.command_broker);
+        let list_fut =
+            h.handle_message(proto_msg("client.sessions.list", json!({ "force": true })));
+        let agent_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("agent should receive sessions.list")
+                .to_text()
+                .unwrap()
+                .to_string();
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(parsed["msg_type"], "server.sessions.list");
+            let request_id = parsed["payload"]["request_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            broker
+                .resolve_command(
+                    "a1",
+                    &request_id,
+                    json!({
+                        "success": true,
+                        "sessions": [
+                            {
+                                "name": "real",
+                                "window_count": 2,
+                                "attached_clients": 1,
+                                "created_at": 1000,
+                            },
+                        ],
+                    }),
+                )
+                .await;
+        };
+        let (action, ()) = tokio::join!(list_fut, agent_fut);
+        let reply = parse_reply(action.unwrap());
+
+        let sessions = reply["payload"]["sessions"].as_array().unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "ghost should be gone, real should remain"
+        );
+        assert_eq!(sessions[0]["session_id"], "a1:real");
+        assert_eq!(sessions[0]["status"], "active");
+        assert_eq!(sessions[0]["window_count"], 2);
+        assert!(reply["payload"]["stale_agents"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    // ---- parse_agent_sessions ----
+    #[test]
+    fn parse_agent_sessions_derives_status_from_attached_clients() {
+        let resp = json!({
+            "sessions": [
+                { "name": "idle", "window_count": 1, "attached_clients": 0, "created_at": 1000 },
+                { "name": "busy", "window_count": 2, "attached_clients": 3, "created_at": 2000 },
+            ]
+        });
+        let mut got = parse_agent_sessions("a1", &resp);
+        got.sort_by(|a, b| a.session_name.cmp(&b.session_name));
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].session_id, "a1:busy");
+        assert_eq!(got[0].status, SessionStatus::Active);
+        assert_eq!(got[0].window_count, 2);
+        assert_eq!(got[1].session_id, "a1:idle");
+        assert_eq!(got[1].status, SessionStatus::Detached);
+    }
+
+    #[test]
+    fn parse_agent_sessions_handles_missing_and_empty() {
+        assert!(parse_agent_sessions("a1", &json!({})).is_empty());
+        assert!(parse_agent_sessions("a1", &json!({ "sessions": [] })).is_empty());
+        // Entries without a usable name are skipped, not fatal.
+        let resp = json!({ "sessions": [{ "window_count": 1 }, { "name": "" }] });
+        assert!(parse_agent_sessions("a1", &resp).is_empty());
+    }
+
+    #[test]
+    fn parse_agent_sessions_tolerates_absent_optional_fields() {
+        let resp = json!({ "sessions": [{ "name": "bare" }] });
+        let got = parse_agent_sessions("a1", &resp);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].window_count, 0);
+        assert_eq!(got[0].attached_clients, 0);
+        assert_eq!(got[0].status, SessionStatus::Detached);
     }
 
     // ---- client.session.attach ----

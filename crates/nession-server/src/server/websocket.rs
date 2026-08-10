@@ -102,6 +102,7 @@ impl WebSocketServer {
             let session_registry = Arc::clone(&self.session_registry);
             let command_broker = Arc::clone(&self.command_broker);
             let env_service = Arc::clone(&self.env_service);
+            let web_client_registry = Arc::clone(&self.web_client_registry);
             // Sweep at the heartbeat cadence (min 1s) so detection latency stays
             // close to the configured timeout.
             let sweep_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
@@ -121,6 +122,7 @@ impl WebSocketServer {
                         let session_registry = Arc::clone(&session_registry);
                         let agent_registry = Arc::clone(&agent_registry);
                         let env_service = Arc::clone(&env_service);
+                        let web_client_registry = Arc::clone(&web_client_registry);
                         let agent_id_clone = agent_id.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -137,6 +139,15 @@ impl WebSocketServer {
                                         session_registry.remove_by_agent(&agent_id_clone).await;
                                     for session_id in &removed {
                                         env_service.usage.clear_session(session_id);
+                                    }
+                                    if !removed.is_empty() {
+                                        // Push the shrunken list so browsers stop
+                                        // showing sessions that are now gone.
+                                        web_client_registry
+                                            .broadcast_sessions_changed(Arc::clone(
+                                                &session_registry,
+                                            ))
+                                            .await;
                                     }
                                 }
                             }
