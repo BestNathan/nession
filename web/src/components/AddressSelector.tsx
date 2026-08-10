@@ -75,10 +75,14 @@ function mobileIcon(
 function AddressListItems({
   addresses,
   latencies,
+  activeUrl,
+  isAuto,
   onSelect,
 }: {
   addresses: ProbedAddress[];
   latencies: AddressLatency[];
+  activeUrl: string | null;
+  isAuto: boolean;
   onSelect: (url: string | null) => void;
 }) {
   const latencyByUrl = new Map(latencies.map((l) => [l.url, l.latencyMs]));
@@ -86,7 +90,10 @@ function AddressListItems({
   return (
     <>
       <div
-        className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11"
+        className={cn(
+          'flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11',
+          isAuto && 'bg-accent',
+        )}
         onClick={() => onSelect(null)}
       >
         <Wifi className="w-4 h-4 text-green-500 shrink-0" />
@@ -95,10 +102,14 @@ function AddressListItems({
       {addresses.map((addr) => {
         const latency = latencyByUrl.get(addr.url);
         const reachable = browserReachable(addr.url, latencyByUrl);
+        const isSelected = !isAuto && activeUrl === addr.url;
         return (
           <div
             key={addr.url}
-            className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11"
+            className={cn(
+              'flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11',
+              isSelected && 'bg-accent',
+            )}
             onClick={() => onSelect(addr.url)}
           >
             <ReachIcon reachable={reachable} />
@@ -167,6 +178,8 @@ function AddressSelectorDesktop({
 function AddressSelectorMobile({
   addresses,
   latencies,
+  activeUrl,
+  isAuto,
   isSwitching,
   effectiveMode,
   onSelect,
@@ -208,6 +221,8 @@ function AddressSelectorMobile({
           <AddressListItems
             addresses={addresses}
             latencies={latencies}
+            activeUrl={activeUrl}
+            isAuto={isAuto}
             onSelect={handleSelect}
           />
         </div>
