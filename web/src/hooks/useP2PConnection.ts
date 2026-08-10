@@ -48,7 +48,8 @@ function buildWsUrl(agentUrl: string, connectionToken?: string): string {
 interface ConnectWsContext {
   agentUrl: string;
   connectionToken: string | undefined;
-  activeRef: React.MutableRefObject<boolean>;
+  generation: number;
+  generationRef: React.MutableRefObject<number>;
   reconnectAttemptRef: React.MutableRefObject<number>;
   setConnectionState: (s: ConnectionState) => void;
   setReconnectAttempt: (n: number) => void;
@@ -63,6 +64,7 @@ interface ConnectWsContext {
 
 /** Create a WebSocket connection wired to the hook's refs and state setters. */
 function connectWs(ctx: ConnectWsContext) {
+  const { generationRef } = ctx;
   const wsUrl = buildWsUrl(ctx.agentUrl, ctx.connectionToken);
   console.log('[P2P] Connecting to:', wsUrl);
 
@@ -75,7 +77,7 @@ function connectWs(ctx: ConnectWsContext) {
   }
 
   ws.onopen = () => {
-    if (!ctx.activeRef.current) { ws.close(); return; }
+    if (generationRef.current !== ctx.generation) { ws.close(); return; }
     console.log('[P2P] Connected');
     ctx.reconnectAttemptRef.current = 0;
     ctx.setReconnectAttempt(0);
@@ -83,7 +85,7 @@ function connectWs(ctx: ConnectWsContext) {
   };
 
   ws.onmessage = (event) => {
-    if (!ctx.activeRef.current) {return;}
+    if (generationRef.current !== ctx.generation) {return;}
     try {
       if (typeof event.data === 'string') {
         const msg: P2PMessage = JSON.parse(event.data);
@@ -97,14 +99,14 @@ function connectWs(ctx: ConnectWsContext) {
 
   ws.onerror = () => {
     console.error('[P2P] WebSocket error');
-    if (ctx.activeRef.current && ctx.reconnectAttemptRef.current === 0) {
+    if (generationRef.current === ctx.generation && ctx.reconnectAttemptRef.current === 0) {
       ctx.onError?.(new Error('P2P WebSocket connection error'));
     }
   };
 
   ws.onclose = () => {
     console.log('[P2P] WebSocket closed');
-    if (!ctx.activeRef.current) {return;}
+    if (generationRef.current !== ctx.generation) {return;}
     const attempt = ctx.reconnectAttemptRef.current;
     if (attempt >= ctx.maxReconnectAttempts) {
       console.log('[P2P] Max reconnect attempts reached');
@@ -120,7 +122,7 @@ function connectWs(ctx: ConnectWsContext) {
 
     ctx.reconnectTimerRef.current = setTimeout(() => {
       ctx.reconnectTimerRef.current = null;
-      if (ctx.activeRef.current) {ctx.connectSelf();}
+      if (generationRef.current === ctx.generation) {ctx.connectSelf();}
     }, delay);
   };
 }
@@ -137,7 +139,9 @@ export function useP2PConnection(
 ): P2PConnection | null {
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
-  const activeRef = useRef(true);
+  // Generation counter — incremented each time agentUrl changes so stale
+  // WebSocket events from cancelled connections can't update state.
+  const generationRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   // Start in 'connecting' when we have an agent to reach. Child effects (e.g.
@@ -206,10 +210,19 @@ export function useP2PConnection(
 
   useEffect(() => {
     if (!agentUrl) {return;}
-    activeRef.current = true;
+
+    // Bump the generation BEFORE connecting: any WebSocket event from an
+    // earlier generation will now see generationRef.current !== ctx.generation
+    // and self-discard — even if it fires before React runs the old effect's
+    // cleanup (the failure mode the old activeRef boolean couldn't prevent).
+    generationRef.current += 1;
+    const myGeneration = generationRef.current;
 
     const ctx: ConnectWsContext = {
-      agentUrl, connectionToken, activeRef, reconnectAttemptRef,
+      agentUrl, connectionToken,
+      generation: myGeneration,
+      generationRef,
+      reconnectAttemptRef,
       setConnectionState, setReconnectAttempt, handlersRef,
       maxReconnectAttempts, reconnectBaseDelay, onError,
       reconnectTimerRef, wsRef,
@@ -219,7 +232,9 @@ export function useP2PConnection(
 
     const handlers = handlersRef.current;
     return () => {
-      activeRef.current = false;
+      // The generation was already bumped when this effect re-ran, so stale
+      // callbacks from the old connection self-discard. Only clean up timers
+      // and sockets here.
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
       handlers.clear();
