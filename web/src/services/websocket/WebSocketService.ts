@@ -26,6 +26,7 @@ import type {
   SessionEnvActiveResponse,
   SessionEnvQueryResponse,
   ServerInfo,
+  SessionsListResponse,
   CommandsListResponse,
   CommandsAddResponse,
   CommandsRemoveResponse,
@@ -130,6 +131,14 @@ export class WebSocketService {
 
   async listSessions(agentId?: string): Promise<Session[]> {
     return this.requests.listSessions(agentId);
+  }
+
+  /** Fetch sessions with the full response (including `stale_agents`).
+   *  Pass `force: true` to make the server re-query every online agent. */
+  async fetchSessions(
+    opts: { agentId?: string; force?: boolean } = {},
+  ): Promise<SessionsListResponse> {
+    return this.requests.fetchSessions(opts);
   }
 
   async requestAttach(

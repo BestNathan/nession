@@ -25,6 +25,80 @@ const defaultProps = {
 };
 
 describe('SessionList', () => {
+  describe('stale agent marking', () => {
+    it('marks sessions whose agent failed to answer the refresh', () => {
+      render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          staleAgents={['agent-1']}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      expect(screen.getByTestId('stale-badge-agent-1:sess-1')).toBeInTheDocument();
+    });
+
+    it('does not mark sessions when no agent is stale', () => {
+      render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      expect(screen.queryByTestId('stale-badge-agent-1:sess-1')).not.toBeInTheDocument();
+    });
+
+    /** Only the unreachable agent's rows are flagged — a healthy agent in the
+     *  same list must stay unmarked. */
+    it('marks only the stale agent when several agents are listed', () => {
+      const sessions: Session[] = [
+        makeSession({ session_id: 'agent-1:a', agent_id: 'agent-1' }),
+        makeSession({ session_id: 'agent-2:b', agent_id: 'agent-2' }),
+      ];
+
+      render(
+        <SessionList
+          sessions={sessions}
+          loading={false}
+          staleAgents={['agent-2']}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      expect(screen.queryByTestId('stale-badge-agent-1:a')).not.toBeInTheDocument();
+      expect(screen.getByTestId('stale-badge-agent-2:b')).toBeInTheDocument();
+    });
+
+    /** A stale session is still fully usable — the badge is informational, so
+     *  Attach must keep working. */
+    it('keeps a stale session attachable', async () => {
+      const onAttach = vi.fn();
+      render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          staleAgents={['agent-1']}
+          onAttach={onAttach}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /attach/i }));
+      expect(onAttach).toHaveBeenCalledTimes(1);
+    });
+  });
+
+
   it('renders session rows', () => {
     const sessions: Session[] = [
       makeSession({ session_name: 'dev', status: 'active' }),
