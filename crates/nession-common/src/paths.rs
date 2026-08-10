@@ -98,15 +98,25 @@ pub fn ensure_component_dirs() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serialise tests that touch the NESSION_HOME env var — Rust runs tests in
+    /// parallel by default, and `set_var`/`remove_var` are process-global (not
+    /// thread-safe).  Without this guard `test_nession_home_env_override` can
+    /// overwrite the env var while `test_nession_home` is reading it, causing
+    /// a spurious assertion failure in CI.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_nession_home() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let home = nession_home().unwrap();
         assert!(home.to_string_lossy().ends_with(".nession"));
     }
 
     #[test]
     fn test_nession_home_env_override() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         let tmp = std::env::temp_dir().join("nession-test-home");
         std::env::set_var("NESSION_HOME", tmp.to_string_lossy().as_ref());
         let home = nession_home().unwrap();

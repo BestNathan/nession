@@ -174,14 +174,11 @@ export function useP2PConnection(
   // pattern. React re-renders this component synchronously before committing,
   // so the ref below ends at 'connecting' and children only ever mount with
   // 'connecting' — they correctly wait. An effect would be too late (child
-  // effects run first). The prev-url guard means a genuine terminal
-  // 'disconnected' (max reconnects hit, same url) is NOT flipped back.
+  // effects run first). The prev-url guard ensures a genuine terminal
+  // 'disconnected' (max reconnects hit, same url) is NOT flipped back —
+  // agentUrl hasn't changed, so the guard won't match.
   const prevAgentUrlRef = useRef<string | undefined>(undefined);
-  if (
-    agentUrl &&
-    agentUrl !== prevAgentUrlRef.current &&
-    connectionState === 'disconnected'
-  ) {
+  if (agentUrl && agentUrl !== prevAgentUrlRef.current) {
     setConnectionState('connecting');
   }
   // When agentUrl goes from a value to null (session switch while plan

@@ -75,10 +75,14 @@ function mobileIcon(
 function AddressListItems({
   addresses,
   latencies,
+  activeUrl,
+  isAuto,
   onSelect,
 }: {
   addresses: ProbedAddress[];
   latencies: AddressLatency[];
+  activeUrl: string | null;
+  isAuto: boolean;
   onSelect: (url: string | null) => void;
 }) {
   const latencyByUrl = new Map(latencies.map((l) => [l.url, l.latencyMs]));
@@ -86,7 +90,10 @@ function AddressListItems({
   return (
     <>
       <div
-        className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11"
+        className={cn(
+          'flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11',
+          isAuto && 'bg-accent',
+        )}
         onClick={() => onSelect(null)}
       >
         <Wifi className="w-4 h-4 text-green-500 shrink-0" />
@@ -95,11 +102,19 @@ function AddressListItems({
       {addresses.map((addr) => {
         const latency = latencyByUrl.get(addr.url);
         const reachable = browserReachable(addr.url, latencyByUrl);
+        const isSelected = !isAuto && activeUrl === addr.url;
+        const isUnreachable = reachable === false;
         return (
           <div
             key={addr.url}
-            className="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent rounded-md min-h-11"
-            onClick={() => onSelect(addr.url)}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2.5 rounded-md min-h-11',
+              isUnreachable
+                ? 'opacity-40 cursor-not-allowed'
+                : 'cursor-pointer hover:bg-accent',
+              isSelected && 'bg-accent',
+            )}
+            onClick={() => { if (!isUnreachable) { onSelect(addr.url); } }}
           >
             <ReachIcon reachable={reachable} />
             <span className="text-sm font-medium flex-1">
@@ -107,7 +122,9 @@ function AddressListItems({
             </span>
             {latency !== null && latency !== undefined ? (
               <span className="text-xs text-muted-foreground">{latency}ms</span>
-            ) : null}
+            ) : (
+              <span className="text-xs text-muted-foreground/50">unreachable</span>
+            )}
           </div>
         );
       })}
@@ -145,14 +162,17 @@ function AddressSelectorDesktop({
           const latencyByUrl = new Map(latencies.map((l) => [l.url, l.latencyMs]));
           const latency = latencyByUrl.get(addr.url);
           const reachable = browserReachable(addr.url, latencyByUrl);
+          const isUnreachable = reachable === false;
           return (
-            <SelectItem key={addr.url} value={addr.url}>
+            <SelectItem key={addr.url} value={addr.url} disabled={isUnreachable}>
               <span className="flex items-center gap-1.5">
                 <ReachIcon reachable={reachable} />
                 <span className="font-medium">{addr.label ?? addr.network_type}</span>
                 {latency !== null && latency !== undefined ? (
                   <span className="text-[10px] text-muted-foreground">{latency}ms</span>
-                ) : null}
+                ) : (
+                  <span className="text-[10px] text-muted-foreground/50">unreachable</span>
+                )}
               </span>
             </SelectItem>
           );
@@ -167,6 +187,8 @@ function AddressSelectorDesktop({
 function AddressSelectorMobile({
   addresses,
   latencies,
+  activeUrl,
+  isAuto,
   isSwitching,
   effectiveMode,
   onSelect,
@@ -208,6 +230,8 @@ function AddressSelectorMobile({
           <AddressListItems
             addresses={addresses}
             latencies={latencies}
+            activeUrl={activeUrl}
+            isAuto={isAuto}
             onSelect={handleSelect}
           />
         </div>

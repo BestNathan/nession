@@ -106,9 +106,11 @@ export function useP2PWithFallback(
           connectionToken: attachInfo.connection_token,
           sessionName,
           // While other candidates remain, give up quickly (2 attempts) so we
-          // rotate fast. On the last candidate, use the full backoff budget so
-          // a flaky-but-working endpoint gets a fair chance before relay.
-          maxReconnectAttempts: hasMoreCandidates ? 2 : 10,
+          // rotate fast. On the last auto candidate, use the full backoff budget
+          // so a flaky-but-working endpoint gets a fair chance before relay.
+          // Manual addresses fail fast (2 attempts) — user picked it, if it
+          // doesn't work there's nothing to rotate to.
+          maxReconnectAttempts: manualOverride ? 2 : (hasMoreCandidates ? 2 : 10),
         }
       : null,
   );
