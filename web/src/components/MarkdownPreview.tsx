@@ -1,5 +1,5 @@
 import 'katex/dist/katex.min.css';
-import 'highlight.js/styles/github-dark.css';
+import 'highlight.js/styles/github-dark-dimmed.css';
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -75,7 +75,7 @@ const markdownSanitizeSchema = {
 
 /**
  * Renders markdown content with GFM, LaTeX math, and syntax highlighting.
- * Code blocks use highlight.js github-dark theme.
+ * Code blocks use highlight.js github-dark-dimmed theme.
  */
 export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
   const isLargeFile = content.length > LARGE_FILE_THRESHOLD;
@@ -95,17 +95,20 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           </div>
         )}
         <div className="prose prose-sm max-w-none dark:prose-invert
-          prose-headings:text-foreground prose-p:text-foreground
-          prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-          prose-code:text-amber-300 prose-code:bg-muted/50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-          prose-pre:bg-muted prose-pre:border prose-pre:border-border
-          prose-blockquote:border-l-2 prose-blockquote:border-blue-500 prose-blockquote:pl-3 prose-blockquote:text-muted-foreground
-          prose-table:border prose-table:border-border
-          prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-3 prose-th:py-1
-          prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-1
+          prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight
+          prose-h1:text-lg prose-h2:text-base prose-h3:text-sm
+          prose-p:text-foreground/85 prose-p:leading-relaxed
+          prose-a:text-blue-300/80 prose-a:no-underline hover:prose-a:text-blue-300 hover:prose-a:underline
+          prose-code:text-foreground/80 prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-normal
+          prose-pre:bg-muted/70 prose-pre:rounded-lg prose-pre:shadow-sm
+          prose-blockquote:border-l-2 prose-blockquote:border-border prose-blockquote:pl-3 prose-blockquote:text-muted-foreground prose-blockquote:not-italic
+          prose-table:border prose-table:border-border prose-table:rounded-lg prose-table:overflow-hidden
+          prose-th:border prose-th:border-border prose-th:bg-muted/40 prose-th:px-3 prose-th:py-2 prose-th:text-xs prose-th:font-medium
+          prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-xs
           prose-hr:border-border
-          prose-img:rounded
-          prose-li:marker:text-muted-foreground
+          prose-img:rounded-lg
+          prose-li:marker:text-muted-foreground prose-li:my-0.5
+          prose-strong:text-foreground/90
         ">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
