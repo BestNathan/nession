@@ -27,18 +27,18 @@ const SCAN_LIMIT = 4096;
 const HIGH_THRESHOLD = 3;
 const MEDIUM_THRESHOLD = 1;
 
-/** Check if content appears to be binary/non-text. */
+/** Check if content appears to be binary/non-text. Only scans SCAN_LIMIT chars. */
 function isBinary(content: string): boolean {
   if (content.length === 0) {
     return false;
   }
-  // Check for null bytes
-  if (content.includes('\x00')) {
+  const sample = content.slice(0, SCAN_LIMIT);
+  // Check for null bytes within the scan window
+  if (sample.includes('\x00')) {
     return true;
   }
   // Count non-printable characters (excluding common whitespace)
   let nonPrintable = 0;
-  const sample = content.slice(0, SCAN_LIMIT);
   for (let i = 0; i < sample.length; i++) {
     const code = sample.charCodeAt(i);
     // Allow: tab(9), newline(10), carriage return(13), space(32) through ~(126)
