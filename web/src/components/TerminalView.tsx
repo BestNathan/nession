@@ -32,13 +32,14 @@ interface TerminalHeaderProps {
   currentSessionId: string;
   onSwitchSession: (session: Session, choice: AttachChoice) => void;
   probeCache: ReturnType<typeof useAddressProbeCache>;
+  isSwitching: boolean;
 }
 
 function TerminalHeader({
   onBack, sessionName, effectiveMode,
   attachInfo, forcedRelay, latencies, activeUrl, manualOverride, setManualOverride,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-  currentSessionId, onSwitchSession, probeCache,
+  currentSessionId, onSwitchSession, probeCache, isSwitching,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
@@ -59,13 +60,15 @@ function TerminalHeader({
         {effectiveMode.toUpperCase()}
         {forcedRelay && attachInfo.mode === 'p2p' ? ' (fallback)' : ''}
       </Badge>
-      {attachInfo.mode === 'p2p' && !forcedRelay && attachInfo.addresses ? (
+      {attachInfo.mode === 'p2p' && attachInfo.addresses ? (
         <AddressSelector
           addresses={attachInfo.addresses}
           latencies={latencies ?? []}
           activeUrl={activeUrl ?? null}
           isAuto={manualOverride === null}
           onSelect={setManualOverride}
+          isSwitching={isSwitching}
+          effectiveMode={effectiveMode}
         />
       ) : null}
     </header>
@@ -123,6 +126,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     forcedRelay,
     manualOverride,
     setManualOverride,
+    isSwitching,
   } = useP2PWithFallback(attachInfo, sessionName, {
     orderedUrls: orderedUrls ?? null,
     initialSelectedAddress: selectedAddress ?? null,
@@ -224,6 +228,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         currentSessionId={sessionId}
         onSwitchSession={handleSwitchSession}
         probeCache={probeCache}
+        isSwitching={isSwitching}
       />
 
       <div className="flex-1 min-h-0 flex flex-col">
