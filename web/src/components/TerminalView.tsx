@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { Badge } from './ui/badge';
@@ -231,7 +231,12 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         isSwitching={isSwitching}
       />
 
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col relative">
+        {isSwitching && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm pointer-events-auto">
+            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
         <TerminalLayout
           terminalElement={terminalElement}
           sessionId={sessionId}
