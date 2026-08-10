@@ -77,6 +77,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Transport came back after a drop: clear banner and redraw tmux.
       view.setExternalBanner('none', 0);
       view.reattach();
+    } else if (p2pState === 'connecting') {
+      // User switched addresses or a fresh connect started — cancel any
+      // stale 'reconnecting' banner from the previous connection attempt.
+      view.setExternalBanner('none', 0);
     }
     // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
   }, [mode, p2pState, p2pConnection]);
