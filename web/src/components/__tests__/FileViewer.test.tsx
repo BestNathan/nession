@@ -52,12 +52,49 @@ describe('FileViewer markdown integration', () => {
       expect(screen.getByText('Preview')).toBeInTheDocument();
     });
 
-    // Click Raw
+    // Click Raw to switch from preview to raw view mode
     await userEvent.click(screen.getByText('Raw'));
 
+    // Edit button appears only in raw view mode — proves the mode changed
     await waitFor(() => {
-      // Preview button should now be visible (switched to raw mode)
-      expect(screen.getByText('Preview')).toBeInTheDocument();
+      expect(screen.getByText('Edit')).toBeInTheDocument();
+    });
+
+    // Switch back to preview
+    await userEvent.click(screen.getByText('Preview'));
+
+    // Edit button hidden again in preview mode
+    await waitFor(() => {
+      expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+    });
+  });
+
+  it('dismisses suggestion banner and hides preview UI after dismiss', async () => {
+    const content = `# Just a comment
+
+echo "hello world"
+
+# Another comment
+`;
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/script',
+        content: btoa(content),
+        mime_type: 'text/plain',
+      }),
+    });
+    const onClose = vi.fn();
+    render(<FileViewer fileOps={ops} path="/test/script" filename="script" onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/looks like Markdown/i)).toBeInTheDocument();
+    });
+
+    // Dismiss the suggestion
+    await userEvent.click(screen.getByLabelText('Dismiss'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/looks like Markdown/i)).not.toBeInTheDocument();
     });
   });
 
