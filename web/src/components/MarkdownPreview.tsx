@@ -26,7 +26,7 @@ interface ErrorBoundaryState {
 }
 
 /** Catches rendering errors and shows a fallback UI. */
-class MarkdownErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class MarkdownErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -75,7 +75,7 @@ const markdownSanitizeSchema = {
 
 /**
  * Renders markdown content with GFM, LaTeX math, and syntax highlighting.
- * Uses Catppuccin Mocha theme for code blocks.
+ * Code blocks use highlight.js github-dark theme.
  */
 export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
   const isLargeFile = content.length > LARGE_FILE_THRESHOLD;

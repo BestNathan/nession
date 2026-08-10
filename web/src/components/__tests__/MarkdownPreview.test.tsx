@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MarkdownPreview } from '../MarkdownPreview';
+import { MarkdownPreview, MarkdownErrorBoundary } from '../MarkdownPreview';
 
 describe('MarkdownPreview', () => {
   it('renders headings', () => {
@@ -111,5 +111,37 @@ describe('MarkdownPreview', () => {
   it('renders empty content without error', () => {
     render(<MarkdownPreview content="" filename="empty.md" />);
     expect(document.body.contains(document.querySelector('[class*="markdown"]'))).toBeTruthy();
+  });
+});
+
+describe('MarkdownErrorBoundary', () => {
+  it('renders children when no error', () => {
+    const { container } = render(
+      <MarkdownErrorBoundary onFallback={() => {}}>
+        <p>Safe content</p>
+      </MarkdownErrorBoundary>
+    );
+    expect(container.textContent).toContain('Safe content');
+  });
+
+  it('shows fallback UI on render error', () => {
+    // Suppress React's error log for this test
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const handleFallback = vi.fn();
+    const Thrower = () => {
+      throw new Error('Test render error');
+    };
+
+    render(
+      <MarkdownErrorBoundary onFallback={handleFallback}>
+        <Thrower />
+      </MarkdownErrorBoundary>
+    );
+
+    expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Show raw')).toBeInTheDocument();
+
+    spy.mockRestore();
   });
 });
