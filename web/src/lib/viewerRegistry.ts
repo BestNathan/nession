@@ -1,4 +1,4 @@
-export type ViewerType = 'image' | 'video' | 'audio' | 'pdf';
+export type ViewerType = 'image' | 'video' | 'audio' | 'pdf' | 'markdown';
 
 const EXT_VIEWER_MAP: Record<string, ViewerType> = {
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image',
@@ -69,6 +69,12 @@ export function parseExt(path: string): string {
     return '';
   }
   return filename.slice(dot + 1).toLowerCase();
+}
+
+/** Return true if the extension indicates a markdown file. */
+export function isMarkdownExt(ext: string): boolean {
+  const key = ext.toLowerCase();
+  return key === 'md' || key === 'markdown';
 }
 
 /**
