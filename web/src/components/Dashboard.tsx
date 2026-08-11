@@ -1,11 +1,17 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
-import type { ConnectionStatus } from '../types';
+import { useAtom, useSetAtom } from 'jotai';
+import type { ConnectionStatus, Session } from '../types';
 import { useDashboard } from '../hooks/useDashboard';
-import { useAttachFlow } from '../hooks/useAttachFlow';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
+import {
+  hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
+  attachToSessionAtom, disconnectAtom,
+} from '../atoms/terminal';
+import { saveAttachPrefs } from '../services/attachPrefs';
+import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
 import { DashboardHeader } from './DashboardHeader';
 import { RenderTerminal } from './RenderTerminal';
@@ -14,7 +20,6 @@ import { SessionsSection } from './SessionsSection';
 import { AgentDetailPanel } from './AgentDetailPanel';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
-import { AttachDialog } from './env/AttachDialog';
 export { AgentSection };
 
 interface DashboardProps {
@@ -25,16 +30,16 @@ interface DashboardProps {
 function resolveRouteView(opts: {
   terminalMatch: ReturnType<typeof useMatch>; envMatch: ReturnType<typeof useMatch>;
   connectionStatus: ConnectionStatus;
-  attachedSession: ReturnType<typeof useAttachFlow>['attachedSession'];
-  backToDashboard: () => void; confirmAttach: ReturnType<typeof useAttachFlow>['confirmAttach'];
+  hasActiveSession: boolean; sessionId: string;
+  handleBackToDashboard: () => void;
   handleTerminalDisconnect: () => void; handleTerminalError: (err: Error) => void;
   agents: ReturnType<typeof useDashboard>['agents']; navigate: ReturnType<typeof useNavigate>;
 }): ReactNode {
-  const { terminalMatch, envMatch, connectionStatus, attachedSession, backToDashboard,
-    confirmAttach, handleTerminalDisconnect, handleTerminalError, agents, navigate } = opts;
-  if (terminalMatch && attachedSession) {
-    return (<RenderTerminal key={attachedSession.sessionId} attachedSession={attachedSession}
-      handleBackToDashboard={backToDashboard} handleSwitchSession={confirmAttach}
+  const { terminalMatch, envMatch, connectionStatus, hasActiveSession, sessionId,
+    handleBackToDashboard, handleTerminalDisconnect, handleTerminalError, agents, navigate } = opts;
+  if (terminalMatch && hasActiveSession) {
+    return (<RenderTerminal key={sessionId}
+      handleBackToDashboard={handleBackToDashboard}
       handleTerminalDisconnect={handleTerminalDisconnect}
       handleTerminalError={handleTerminalError} />);
   }
@@ -48,6 +53,55 @@ function resolveRouteView(opts: {
   }
 
   return null;
+}
+
+/**
+ * Owns the attach-dialog state and wires the attach/back actions to the jotai
+ * atoms. Also handles deep-link restoration for /terminal/:sessionId.
+ */
+function useTerminalAttach(
+  navigate: ReturnType<typeof useNavigate>,
+  location: ReturnType<typeof useLocation>,
+  sessions: Session[],
+  loadingSessions: boolean,
+) {
+  const [hasActiveSession] = useAtom(hasActiveSessionAtom);
+  const [sessionId] = useAtom(sessionIdAtom);
+  const [sessionName] = useAtom(sessionNameAtom);
+  const [attachInfo] = useAtom(attachInfoAtom);
+  const [sessionIdFromUrl, setSessionIdFromUrl] = useAtom(sessionIdFromUrlAtom);
+  const doAttach = useSetAtom(attachToSessionAtom);
+  const doDisconnect = useSetAtom(disconnectAtom);
+
+  // Deep-link restore: parse session ID from URL.
+  useEffect(() => {
+    setSessionIdFromUrl(location.pathname.match(/^\/terminal\/(.+)$/)?.[1] ?? null);
+  }, [location.pathname, setSessionIdFromUrl]);
+
+  const [attachDialogSession, setAttachDialogSession] = useState<Session | null>(null);
+
+  const onAttach = useCallback((session: Session) => setAttachDialogSession(session), []);
+
+  const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
+    setAttachDialogSession(null);
+    saveAttachPrefs({ mode: choice.mode, renderer: choice.renderer });
+    doAttach(session, choice, navigate);
+  }, [doAttach, navigate]);
+
+  // Deep-link restoration: on /terminal/:sessionId, auto-attach the session.
+  useDeepLinkRestore({
+    pendingSessionId: sessionIdFromUrl,
+    attachedSession: hasActiveSession && attachInfo ? { sessionId, sessionName, attachInfo } : null,
+    loadingSessions,
+    sessions,
+    confirmAttach,
+    navigate,
+  });
+
+  return {
+    hasActiveSession, sessionId, doDisconnect,
+    attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
+  };
 }
 
 export function Dashboard({ connectionStatus }: DashboardProps) {
@@ -65,12 +119,12 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   } = useDashboard();
 
   const {
-    attachedSession, attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
-    backToDashboard, pendingTerminalSessionId,
-  } = useAttachFlow(fetchSessions, navigate, location);
+    hasActiveSession, sessionId, doDisconnect,
+    attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
+  } = useTerminalAttach(navigate, location, sessions, loadingSessions);
 
   const probeCache = useAddressProbeCache(agents);
-  const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); backToDashboard(); }, [backToDashboard]);
+  const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); doDisconnect(navigate); }, [doDisconnect, navigate]);
   const handleTerminalError = useCallback((err: Error) => { toast.error(`Terminal error: ${err.message}`); }, []);
 
   // Incremented after session create/kill to trigger server info refresh.
@@ -79,19 +133,10 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const onlineCount = agents.filter((a) => a.status === 'online').length;
   const offlineCount = agents.filter((a) => a.status !== 'online').length;
 
-  // Deep-link restoration: on /terminal/:sessionId, auto-attach the session.
-  useDeepLinkRestore({
-    pendingSessionId: pendingTerminalSessionId,
-    attachedSession,
-    loadingSessions,
-    sessions,
-    confirmAttach,
-    navigate,
-  });
-
   const routeView = resolveRouteView({
-    terminalMatch, envMatch, connectionStatus, attachedSession,
-    backToDashboard, confirmAttach, handleTerminalDisconnect,
+    terminalMatch, envMatch, connectionStatus, hasActiveSession, sessionId,
+    handleBackToDashboard: () => doDisconnect(navigate),
+    handleTerminalDisconnect,
     handleTerminalError, agents, navigate,
   });
   if (routeView !== null) { return routeView; }

@@ -1,21 +1,21 @@
-import { TerminalView, type AttachedSession } from './TerminalView';
-import type { Session } from '../types';
-import type { AttachChoice } from './env/AttachDialog';
+import { TerminalView } from './TerminalView';
 
 export function RenderTerminal({
-  attachedSession, handleBackToDashboard, handleSwitchSession, handleTerminalDisconnect, handleTerminalError,
+  handleBackToDashboard,
+  handleTerminalDisconnect,
+  handleTerminalError,
 }: {
-  attachedSession: AttachedSession;
   handleBackToDashboard: () => void;
-  handleSwitchSession: (session: Session, choice: AttachChoice) => void;
   handleTerminalDisconnect: () => void;
   handleTerminalError: (err: Error) => void;
 }) {
+  // TerminalView reads all session state from the jotai atoms (atoms/terminal.ts),
+  // so no session props are needed here.
   return (
-    <TerminalView session={attachedSession}
+    <TerminalView
       onBack={handleBackToDashboard}
-      onSwitchSession={handleSwitchSession}
       onDisconnect={handleTerminalDisconnect}
-      onError={handleTerminalError} />
+      onError={handleTerminalError}
+    />
   );
 }

@@ -52,12 +52,10 @@ export interface TerminalHandle {
   focusTerminal: () => void;
 }
 
-/** Props for the Terminal React component — unchanged from current API. */
+/** Props for the Terminal React component. Session identity, mode, and the P2P
+ *  connection are read from jotai atoms (see web/src/atoms/terminal.ts); only
+ *  the transport service, relay endpoint, and UI callbacks remain props. */
 export interface TerminalProps {
-  sessionId: string;
-  sessionName: string;
-  mode: 'p2p' | 'relay';
-  p2pConnection?: P2PConnection | null;
   serverConnection?: WebSocketService;
   relayUrl?: string | null;
   onDisconnect?: () => void;

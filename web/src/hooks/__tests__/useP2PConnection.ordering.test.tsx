@@ -54,7 +54,7 @@ function setupMock() {
 // ---------------------------------------------------------------------------
 // A parent/child tree that reproduces the FileBrowser ordering:
 //   - Parent starts with null options (address plan resolving), then flips to
-//     a URL — exactly what useP2PWithFallback does when useAddressPlan resolves.
+//     a URL — exactly what TerminalView does when the active P2P URL resolves.
 //   - Child mounts the same render the connection object appears and, in its
 //     mount effect (which runs BEFORE the parent's connect effect), issues a
 //     waitForConnection() — like FileBrowser's load-on-mount listDir().

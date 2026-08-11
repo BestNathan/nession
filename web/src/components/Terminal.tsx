@@ -1,8 +1,15 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { useAtom } from 'jotai';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 import { detectWebGLSupport } from '../terminal/Renderer';
 import { useLatest } from '../hooks/useLatest';
+import {
+  sessionIdAtom,
+  sessionNameAtom,
+  effectiveModeAtom,
+  p2pConnectionAtom,
+} from '../atoms/terminal';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -12,16 +19,18 @@ import { useLatest } from '../hooks/useLatest';
  * and exposes sendText/refit via imperative handle.
  *
  * TerminalView is rebuilt only when session identity or connection mode
- * changes (sessionId, sessionName, mode, p2pConnection, serverConnection).
+ * changes. sessionId, sessionName, mode, and p2pConnection are read from the
+ * jotai atoms (atoms/terminal.ts) — written by attachToSessionAtom /
+ * disconnectAtom / useP2PConnection — so this component subscribes without
+ * prop-drilling from TerminalView. serverConnection and relayUrl still arrive
+ * via props because they are WebSocketService transport concerns, not session
+ * state.
+ *
  * P2P connectionState transitions (connecting → connected → reconnecting)
  * are handled internally by ConnectionManager and do NOT trigger a rebuild.
  */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
-    sessionId,
-    sessionName,
-    mode,
-    p2pConnection,
     serverConnection,
     relayUrl,
     onDisconnect,
@@ -32,6 +41,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   },
   ref,
 ) {
+  // Session state is owned by the atoms in ../atoms/terminal. Reading it here
+  // (instead of receiving it as props) keeps Terminal in sync with the attach
+  // flow and P2P connection without prop-drilling from TerminalView.
+  const [sessionId] = useAtom(sessionIdAtom);
+  const [sessionName] = useAtom(sessionNameAtom);
+  const [mode] = useAtom(effectiveModeAtom);
+  const [p2pConnection] = useAtom(p2pConnectionAtom);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalView | null>(null);
   // Bump this each time viewRef.current is populated or cleared. The
@@ -57,8 +74,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   // Observe P2P transport reconnects. connectionState is a getter (no re-render
   // on change), but this component re-renders whenever the owner does, and the
-  // owner (via useP2PWithFallback) re-renders on every P2P state transition —
-  // so reading it here in an effect keyed on the value tracks it correctly.
+  // owner (TerminalView) re-renders on every P2P state transition via
+  // useP2PConnection's internal state — so reading it here in an effect keyed
+  // on the value tracks it correctly.
   const p2pState = p2pConnection?.connectionState;
   const prevP2pStateRef = useRef(p2pState);
   useEffect(() => {
@@ -77,12 +95,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Transport came back after a drop: clear banner and redraw tmux.
       view.setExternalBanner('none', 0);
       view.reattach();
+    } else if (p2pState === 'connected' && prev !== 'connected') {
+      // Initial connect (or any non-reconnect transition to connected):
+      // the P2P socket just opened — send client.attach to bind the
+      // session.  Don't wait for the 50ms timer in TerminalView; by then
+      // the user may already have typed and terminal.input would race
+      // ahead of client.attach.
+      view.setExternalBanner('none', 0);
+      view.reattach();
     } else if (p2pState === 'connecting') {
       // User switched addresses or a fresh connect started — cancel any
       // stale 'reconnecting' banner from the previous connection attempt.
       view.setExternalBanner('none', 0);
     }
-    // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
+    // 'disconnected' is handled by the P2P fallback layer (relay fallback), not here.
   }, [mode, p2pState, p2pConnection]);
 
   // Create/dispose TerminalView — only rebuild on session/mode change.
@@ -92,8 +118,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // Do NOT build the xterm view in p2p mode until the connection object
     // exists. On first render the address plan is still resolving, so
-    // useP2PWithFallback yields p2pConnection=null while effectiveMode is
-    // already 'p2p'. Building here would open() a connectionless terminal,
+    // p2pConnectionAtom is null while effectiveModeAtom is already 'p2p'.
+    // Building here would open() a connectionless terminal,
     // and one render later — when the connection resolves and this prop flips
     // null→object — the effect tears that view down. xterm's Viewport
     // constructor schedules an un-cancellable `setTimeout(syncScrollArea)`

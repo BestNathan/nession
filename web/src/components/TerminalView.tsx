@@ -1,45 +1,52 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { useAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../types';
 import { Terminal, type TerminalHandle } from './Terminal';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { useP2PWithFallback } from '../hooks/useP2PWithFallback';
+import { useP2PConnection } from '../hooks/useP2PConnection';
 import { createFileOps } from '../services/fileOps';
 import { AddressSelector } from './AddressSelector';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useTerminalSessions } from '../hooks/useTerminalSessions';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { SessionDropdown } from './SessionDropdown';
-import type { AttachChoice } from './env/AttachDialog';
 import { TerminalLayout } from './TerminalLayout';
+import {
+  sessionIdAtom,
+  sessionNameAtom,
+  attachInfoAtom,
+  activeUrlAtom,
+  effectiveModeAtom,
+  isSwitchingAtom,
+  manualOverrideAtom,
+  forcedRelayAtom,
+  p2pConnectionAtom,
+  rendererAtom,
+  envRefsAtom,
+} from '../atoms/terminal';
 
 interface TerminalHeaderProps {
   onBack: () => void;
   sessionName: string;
   effectiveMode: 'p2p' | 'relay';
-  attachInfo: AttachInfo;
+  attachInfo: AttachInfo | null;
   forcedRelay: boolean;
   latencies?: AddressLatency[];
-  activeUrl: string | null;
-  manualOverride: string | null;
-  setManualOverride: (url: string | null) => void;
   // NEW — session list data for the dropdown
   sessions: Session[];
   sessionsLoading: boolean;
   sessionsError: string | null;
   onRetrySessions: () => void;
-  currentSessionId: string;
-  onSwitchSession: (session: Session, choice: AttachChoice) => void;
   probeCache: ReturnType<typeof useAddressProbeCache>;
-  isSwitching: boolean;
 }
 
 function TerminalHeader({
   onBack, sessionName, effectiveMode,
-  attachInfo, forcedRelay, latencies, activeUrl, manualOverride, setManualOverride,
+  attachInfo, forcedRelay, latencies,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-  currentSessionId, onSwitchSession, probeCache, isSwitching,
+  probeCache,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
@@ -51,23 +58,17 @@ function TerminalHeader({
         loading={sessionsLoading}
         error={sessionsError}
         onRetry={onRetrySessions}
-        currentSessionId={currentSessionId}
         currentSessionName={sessionName}
-        onSwitchSession={onSwitchSession}
         probeCache={probeCache}
       />
       <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
         {effectiveMode.toUpperCase()}
-        {forcedRelay && attachInfo.mode === 'p2p' ? ' (fallback)' : ''}
+        {forcedRelay && attachInfo?.mode === 'p2p' ? ' (fallback)' : ''}
       </Badge>
-      {attachInfo.mode === 'p2p' && attachInfo.addresses ? (
+      {attachInfo && attachInfo.mode === 'p2p' && attachInfo.addresses ? (
         <AddressSelector
           addresses={attachInfo.addresses}
           latencies={latencies ?? []}
-          activeUrl={activeUrl ?? null}
-          isAuto={manualOverride === null}
-          onSelect={setManualOverride}
-          isSwitching={isSwitching}
           effectiveMode={effectiveMode}
         />
       ) : null}
@@ -75,6 +76,11 @@ function TerminalHeader({
   );
 }
 
+/**
+ * Shell attach descriptor for deep-link restoration. Dashboard derives this
+ * from the jotai atoms and passes it to useDeepLinkRestore; TerminalView itself
+ * no longer consumes it — all session state now lives in atoms.
+ */
 export interface AttachedSession {
   attachInfo: AttachInfo;
   sessionId: string;
@@ -90,15 +96,24 @@ export interface AttachedSession {
 }
 
 interface TerminalViewProps {
-  session: AttachedSession;
   onBack: () => void;
-  onSwitchSession: (session: Session, choice: AttachChoice) => void;
   onDisconnect: () => void;
   onError: (error: Error) => void;
 }
 
-export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, onError }: TerminalViewProps) {
-  const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer, relayUrl } = session;
+export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProps) {
+  const [sessionId] = useAtom(sessionIdAtom);
+  const [sessionName] = useAtom(sessionNameAtom);
+  const [attachInfo] = useAtom(attachInfoAtom);
+  const [effectiveMode] = useAtom(effectiveModeAtom);
+  const [activeUrl] = useAtom(activeUrlAtom);
+  const [forcedRelay] = useAtom(forcedRelayAtom);
+  const [manualOverride] = useAtom(manualOverrideAtom);
+  const [isSwitching] = useAtom(isSwitchingAtom);
+  const [renderer] = useAtom(rendererAtom);
+  const [envRefs] = useAtom(envRefsAtom);
+  const [p2pConnection] = useAtom(p2pConnectionAtom);
+
   const wsService = useWebSocket();
   // Callback ref backed by state so the parent re-renders when the child
   // populates the imperative handle. Without this, `fontSizeManager` on
@@ -117,21 +132,28 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   } = useTerminalSessions(wsService);
   const probeCache = useAddressProbeCache([]);
 
-  // Multi-address P2P: connect the browser-tested best path (resolved in the
-  // attach dialog), rotate on failure, fall back to relay.
-  const {
-    p2pConnection,
-    effectiveMode,
-    activeUrl,
-    forcedRelay,
-    manualOverride,
-    setManualOverride,
-    isSwitching,
-  } = useP2PWithFallback(attachInfo, sessionName, {
-    orderedUrls: orderedUrls ?? null,
-    initialSelectedAddress: selectedAddress ?? null,
-  });
   const isP2P = effectiveMode === 'p2p';
+
+  // Drive the P2P WebSocket. useP2PConnection writes p2pConnectionAtom +
+  // p2pStateAtom from its ws events, and we read them back below (Terminal
+  // subscribes to sessionIdAtom/sessionNameAtom/effectiveModeAtom/
+  // p2pConnectionAtom directly). The options are derived purely from atoms:
+  // activeUrl (manual override or best candidate) is the endpoint, forcedRelay
+  // flips effectiveMode to relay which nulls activeUrl.
+  useP2PConnection(
+    isP2P && activeUrl && attachInfo
+      ? {
+          agentUrl: activeUrl,
+          connectionToken: attachInfo.connection_token,
+          sessionName,
+          // A manual address fails fast (2 attempts) — the user picked it, so
+          // there's nothing to rotate to. Auto candidates get the full backoff
+          // budget so a flaky-but-working endpoint gets a fair chance.
+          maxReconnectAttempts: manualOverride ? 2 : 10,
+        }
+      : null,
+  );
+
   // End relay synchronously before navigating away, so that the
   // server's relay loop exits and subsequent messages (e.g. sessions.list)
   // are processed by the server handler rather than forwarded to the agent.
@@ -141,12 +163,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-  const handleSwitchSession = useCallback((s: Session, choice: AttachChoice) => {
-    if (effectiveMode === 'relay' && wsService?.isConnected()) {
-      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
-    }
-    onSwitchSession(s, choice);
-  }, [effectiveMode, wsService, sessionId, onSwitchSession]);
+
   const sendMessage = p2pConnection?.sendMessage;
   const onMessage = p2pConnection?.onMessage;
   const waitForConnection = p2pConnection?.waitForConnection;
@@ -165,8 +182,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   // re-apply, while switching to a different session sources fresh.
   const envSourcedRef = useRef<string | null>(null);
   useEffect(() => {
-    const refs = session.envRefs;
-    if (!refs || refs.length === 0 || envSourcedRef.current === sessionId) {
+    if (!envRefs || envRefs.length === 0 || envSourcedRef.current === sessionId) {
       return;
     }
     const apply = () => {
@@ -174,7 +190,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         return;
       }
       envSourcedRef.current = sessionId;
-      for (const ref of refs) {
+      for (const ref of envRefs) {
         void wsService.applySessionEnv(sessionId, [ref]).catch(() => {});
       }
     };
@@ -185,7 +201,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     if (p2pConnection) {
       void p2pConnection.waitForConnection().then(apply).catch(() => {});
     }
-  }, [session.envRefs, sessionId, effectiveMode, p2pConnection, wsService]);
+  }, [envRefs, sessionId, effectiveMode, p2pConnection, wsService]);
 
   const handleGetTerminalPwd = useCallback(async () => {
     if (!fileOps) {throw new Error('File ops not available');}
@@ -195,12 +211,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   const terminalElement = (
     <Terminal
       ref={terminalRef}
-      sessionId={sessionId}
-      sessionName={sessionName}
-      mode={effectiveMode}
-      p2pConnection={isP2P ? p2pConnection : undefined}
       serverConnection={!isP2P ? wsService : undefined}
-      relayUrl={relayUrl}
       onDisconnect={onDisconnect}
       onError={onError}
       onBannerChange={setToolbarDisabled}
@@ -217,18 +228,11 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         effectiveMode={effectiveMode}
         attachInfo={attachInfo}
         forcedRelay={forcedRelay}
-        latencies={latencies}
-        activeUrl={activeUrl ?? null}
-        manualOverride={manualOverride}
-        setManualOverride={setManualOverride}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
         onRetrySessions={refetchSessions}
-        currentSessionId={sessionId}
-        onSwitchSession={handleSwitchSession}
         probeCache={probeCache}
-        isSwitching={isSwitching}
       />
 
       <div className="flex-1 min-h-0 flex flex-col relative">
