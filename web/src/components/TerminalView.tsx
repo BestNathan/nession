@@ -77,10 +77,9 @@ function TerminalHeader({
 }
 
 /**
- * Transitional type: the attach flow layer (useAttachFlow / useDeepLinkRestore /
- * RenderTerminal) still builds this object until Task 8 removes useAttachFlow and
- * writes the session straight into the jotai atoms below. TerminalView itself no
- * longer consumes it — all session state now lives in atoms.
+ * Shell attach descriptor for deep-link restoration. Dashboard derives this
+ * from the jotai atoms and passes it to useDeepLinkRestore; TerminalView itself
+ * no longer consumes it — all session state now lives in atoms.
  */
 export interface AttachedSession {
   attachInfo: AttachInfo;

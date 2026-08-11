@@ -317,8 +317,9 @@ export function useP2PConnection(
   // identity changes — returning a fresh object literal every render (the old
   // behaviour) made unrelated re-renders (e.g. toggling the bottom-bar tab)
   // tear down and recreate the terminal. Consumers that need reactivity read
-  // the primitive getter value into an effect dependency (e.g. useP2PWithFallback),
-  // which still updates because the owning component re-renders on setState.
+  // the primitive getter value into an effect dependency (e.g. an effect keyed
+  // on connectionState), which still updates because the owning component
+  // re-renders on setState.
   const connection = useMemo<P2PConnection>(() => ({
     sendMessage,
     onMessage,

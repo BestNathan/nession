@@ -108,7 +108,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // stale 'reconnecting' banner from the previous connection attempt.
       view.setExternalBanner('none', 0);
     }
-    // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
+    // 'disconnected' is handled by the P2P fallback layer (relay fallback), not here.
   }, [mode, p2pState, p2pConnection]);
 
   // Create/dispose TerminalView — only rebuild on session/mode change.
@@ -118,8 +118,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // Do NOT build the xterm view in p2p mode until the connection object
     // exists. On first render the address plan is still resolving, so
-    // useP2PWithFallback yields p2pConnection=null while effectiveMode is
-    // already 'p2p'. Building here would open() a connectionless terminal,
+    // p2pConnectionAtom is null while effectiveModeAtom is already 'p2p'.
+    // Building here would open() a connectionless terminal,
     // and one render later — when the connection resolves and this prop flips
     // null→object — the effect tears that view down. xterm's Viewport
     // constructor schedules an un-cancellable `setTimeout(syncScrollArea)`
