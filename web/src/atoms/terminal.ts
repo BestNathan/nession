@@ -31,9 +31,9 @@ export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
 /** Currently active P2P URL — manual override, or best candidate, or null in relay. */
 export const activeUrlAtom = atom<string | null>((get) => {
+  if (get(forcedRelayAtom)) { return null; }
   const override = get(manualOverrideAtom);
   if (override) { return override; }
-  if (get(forcedRelayAtom)) { return null; }
   return get(orderedUrlsAtom)[0] ?? null;
 });
 
@@ -89,10 +89,13 @@ export const disconnectAtom = atom(
   },
 );
 
-/** Set a manual P2P address override. Called by AddressSelector. */
+/** Set a manual P2P address override. Resets forcedRelay so the user
+ *  can recover from an all-candidates-failed relay fallback by
+ *  explicitly picking a route. */
 export const switchAddressAtom = atom(
   null,
   (_get, set, url: string | null) => {
     set(manualOverrideAtom, url);
+    if (url !== null) { set(forcedRelayAtom, false); }
   },
 );

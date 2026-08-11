@@ -79,9 +79,10 @@ describe('derived atoms', () => {
     expect(store.get(activeUrlAtom)).toBe('ws://b:2/ws');
   });
 
-  it('activeUrlAtom: returns null when forcedRelay', () => {
+  it('activeUrlAtom: returns null when forcedRelay (override ignored)', () => {
     const store = createStore();
     store.set(orderedUrlsAtom, ['ws://a:1/ws']);
+    store.set(manualOverrideAtom, 'ws://b:2/ws');
     store.set(forcedRelayAtom, true);
     expect(store.get(activeUrlAtom)).toBeNull();
   });
@@ -178,10 +179,12 @@ describe('action atoms', () => {
     expect(store.get(p2pStateAtom)).toBe('disconnected');
   });
 
-  it('switchAddressAtom sets manualOverride', () => {
+  it('switchAddressAtom sets manualOverride and resets forcedRelay', () => {
     const store = createStore();
+    store.set(forcedRelayAtom, true);
     store.set(switchAddressAtom, 'ws://b:2/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://b:2/ws');
+    expect(store.get(forcedRelayAtom)).toBe(false);
 
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
