@@ -27,6 +27,29 @@ export const p2pStateAtom = atom<ConnectionState>('disconnected');
 /** Stable P2P connection object. Written from useP2PConnection after construction. */
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
+// ── Terminal session state machine ─────────────────────────────
+
+/**
+ * Drives all protocol decisions for a terminal session.
+ *
+ *   idle → connecting        socket created (attachToSessionAtom)
+ *   connecting → connected   ws.onopen / relay authenticated
+ *   connected → attached     client.attach ok received
+ *   connected → reconnecting attach timeout (10s)
+ *   connected → failed       agent error (session not found)
+ *   attached → reconnecting  socket drop
+ *   reconnecting → connecting retry timer fires
+ *   reconnecting → failed    max retries (10) exceeded
+ *   failed → idle            manual disconnect
+ *   any → idle               disconnectAtom / attachToSessionAtom
+ */
+export const terminalSessionStateAtom = atom<
+  'idle' | 'connecting' | 'connected' | 'attached' | 'reconnecting' | 'failed'
+>('idle');
+
+/** Survives ConnectionManager rebuilds so reconnects preserve PTY size. */
+export const lastResizeAtom = atom<{ cols: number; rows: number } | null>(null);
+
 // ── Derived atoms ────────────────────────────────────────────────
 
 /** Currently active P2P URL — manual override, or best candidate, or null in relay. */
@@ -69,6 +92,7 @@ export const attachToSessionAtom = atom(
     set(envRefsAtom, choice.envRefs ?? []);
     set(manualOverrideAtom, choice.selectedUrl ?? null);
     set(forcedRelayAtom, false);
+    set(terminalSessionStateAtom, 'connecting');
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
   },
 );
@@ -85,6 +109,7 @@ export const disconnectAtom = atom(
     set(forcedRelayAtom, false);
     set(p2pConnectionAtom, null);
     set(p2pStateAtom, 'disconnected');
+    set(terminalSessionStateAtom, 'idle');
     navigate('/');
   },
 );

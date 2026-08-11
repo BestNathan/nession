@@ -49,9 +49,6 @@ export class TerminalView {
   private mobileInput: MobileInput | null = null;
 
   private isDisposed = false;
-  private attachTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Latest resize dimensions from ResizeObserver — passed to attach(). */
-  private pendingResize: { cols: number; rows: number } | null = null;
 
   onStateChange: ((state: TerminalViewState) => void) | null = null;
   onCtrlD: (() => void) | null = null;
@@ -212,17 +209,6 @@ export class TerminalView {
         this.size.handleResize(this.terminal.cols, this.terminal.rows);
       }
     });
-
-    // Deferred attach (survives React StrictMode double-mount).
-    // If the ResizeObserver fired before this timer, we pass the real
-    // viewport dimensions so the agent pre-resizes tmux correctly.
-    this.attachTimer = setTimeout(() => {
-      if (this.isDisposed) { return; }
-      const r = this.pendingResize;
-      this.connection
-        .attach(r?.cols, r?.rows)
-        .catch(() => {});
-    }, 50);
   }
 
   sendText(text: string): void {
@@ -248,7 +234,6 @@ export class TerminalView {
     if (this.isDisposed) {
       return;
     }
-    this.pendingResize = { cols, rows };
     // Optimistic local update — xterm re-renders immediately.
     this.size.handleResize(cols, rows);
     // Then tell tmux (agent → tmux resize-window → %window-resize → broadcast).
@@ -287,17 +272,17 @@ export class TerminalView {
     });
   }
 
-  /** Re-issue attach (tmux redraw) after a transport reconnect. */
+  /** Re-issue attach (tmux redraw) after a transport reconnect.
+   *  Attach timing is now owned by the React state machine
+   *  (terminalSessionStateAtom) — ConnectionManager is pure transport.
+   *  Kept as a no-op so Terminal.tsx's P2P effect still compiles until the
+   *  state machine effect lands. */
   reattach(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    this.connection.reattach().catch(() => {});
+    // client.attach is driven by the React layer, not ConnectionManager.
   }
 
   dispose(): void {
     this.isDisposed = true;
-    if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.mobileInput?.dispose();
     this.mouseIntent.dispose();
     this.input.dispose();
