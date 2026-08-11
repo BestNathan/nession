@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent, AddressLatency } from '../types';
 import { testAddresses, orderByLatency } from '../services/addressSelection';
+
+/** Stable string that changes only when online agents or their addresses differ. */
+function computeFingerprint(agents: Agent[]): string {
+  return agents
+    .filter((a) => a.status === 'online' && (a.addresses?.length ?? 0) > 0)
+    .map((a) => {
+      const urls = (a.addresses ?? []).map((addr) => addr.url).sort().join(',');
+      return `${a.agent_id}:${a.status}:${urls}`;
+    })
+    .sort()
+    .join('|');
+}
 
 /** One agent's cached browser-latency probe. */
 export interface AgentProbe {
@@ -35,6 +47,8 @@ export function useAddressProbeCache(
   now: () => number = Date.now,
 ): AddressProbeCache {
   const [cache, setCache] = useState<Map<string, AgentProbe>>(new Map());
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
 
   // Keep the latest agents list in a ref so the interval callback reads current
   // data without being re-created (which would reset the timer each render).
@@ -69,6 +83,31 @@ export function useAddressProbeCache(
     const timer = setInterval(probeAll, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [probeAll]);
+
+  // Reactive probe: when agents arrive or addresses change after mount, probe
+  // only the genuinely new/changed agents. The initial mount is covered by the
+  // effect above — this one only fires on subsequent fingerprint changes.
+  const fingerprint = useMemo(() => computeFingerprint(agents), [agents]);
+  const prevFingerprintRef = useRef<string>(fingerprint);
+  useEffect(() => {
+    const prev = prevFingerprintRef.current;
+    prevFingerprintRef.current = fingerprint;
+    if (prev === fingerprint) { return; } // mount or no-op re-render
+
+    // Build a set of agents that are currently online with addresses.
+    const currentMap = new Map(
+      agents
+        .filter((a) => a.status === 'online' && (a.addresses?.length ?? 0) > 0)
+        .map((a) => [a.agent_id, a] as const),
+    );
+
+    // Probe agents that aren't already cached (new or changed addresses).
+    for (const [id, a] of currentMap) {
+      if (!cacheRef.current.has(id)) {
+        void probeAgent(a);
+      }
+    }
+  }, [fingerprint, agents, probeAgent]);
 
   const getProbe = useCallback(
     (agentId: string): AgentProbe | undefined => {
