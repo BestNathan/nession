@@ -121,14 +121,13 @@ export class ConnectionManager {
   private async attachP2P(w?: number, h?: number): Promise<void> {
     const conn = this.p2pConnection!;
     if (this.p2pAttachSent) {
-      // Re-issue attach on reconnect so tmux redraws — skip the wait.
+      // Initial attach already sent from setupP2P().  Don't send a second
+      // client.attach just for the ResizeObserver dimensions — the agent
+      // would process two attaches and produce redundant output.  Send a
+      // terminal.resize instead (the ResizeObserver already fires one, but
+      // the 50ms timer may have fresher values).
       if (w !== undefined && h !== undefined) {
-        conn.sendMessage({
-          msg_type: 'client.attach',
-          id: generateId(),
-          timestamp: Math.floor(Date.now() / 1000),
-          payload: { session_name: this.sessionName, width: w, height: h },
-        });
+        this.sendResize(w, h);
       }
       return;
     }
