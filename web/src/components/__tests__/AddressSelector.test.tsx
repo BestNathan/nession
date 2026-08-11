@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { AddressSelector } from '../AddressSelector';
 import { manualOverrideAtom } from '../../atoms/terminal';
@@ -34,6 +34,14 @@ function renderSelector(
       </Provider>,
     ),
   };
+}
+
+// user-event instance that skips the pointer-events check. The Base UI
+// Select/Sheet popups set inline `pointer-events: none` during their open
+// transition frame, which races user-event's default check when the popup is
+// clicked immediately after the trigger under full-suite load (flaky in CI).
+function setupUser() {
+  return userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
 }
 
 // Stub matchMedia — desktop by default (min-width: 640px = true).
@@ -70,7 +78,7 @@ describe('AddressSelector', () => {
 
     it('writes manualOverrideAtom when a manual address is chosen', async () => {
       const { store } = renderSelector();
-      const user = userEvent.setup();
+      const user = setupUser();
 
       await user.click(screen.getByLabelText('P2P route'));
       await user.click(screen.getByText('LAN'));
@@ -82,7 +90,7 @@ describe('AddressSelector', () => {
       const store = createStore();
       // Start with a manual override so Auto is a meaningful choice.
       store.set(manualOverrideAtom, 'ws://a/ws');
-      const user = userEvent.setup();
+      const user = setupUser();
       renderSelector({}, store);
 
       await user.click(screen.getByLabelText('P2P route'));
@@ -116,7 +124,7 @@ describe('AddressSelector', () => {
 
     it('writes manualOverrideAtom and closes Sheet when an address is chosen', async () => {
       const { store } = renderSelector();
-      const user = userEvent.setup();
+      const user = setupUser();
 
       await user.click(screen.getByLabelText('P2P route'));
       await user.click(screen.getByText('LAN'));
