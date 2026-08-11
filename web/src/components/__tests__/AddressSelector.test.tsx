@@ -1,24 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createStore, Provider } from 'jotai';
 import { AddressSelector } from '../AddressSelector';
+import { manualOverrideAtom } from '../../atoms/terminal';
 import type { ProbedAddress } from '../../types';
 
 function probed(url: string, label: string, status: ProbedAddress['status'] = 'reachable'): ProbedAddress {
   return { url, label, network_type: 'lan', priority: 10, status };
 }
 
-// Default props for tests.
+// AddressSelector now reads selection state from jotai atoms; only server
+// data (addresses/latencies) and effectiveMode are props.
 function defaultProps(overrides: Partial<Parameters<typeof AddressSelector>[0]> = {}) {
   return {
     addresses: [probed('ws://a/ws', 'LAN'), probed('ws://b/ws', 'VPN')],
     latencies: [{ url: 'ws://a/ws', latencyMs: 12 }, { url: 'ws://b/ws', latencyMs: 8 }],
-    activeUrl: 'ws://a/ws',
-    isAuto: true,
-    onSelect: vi.fn(),
-    isSwitching: false,
     effectiveMode: 'p2p' as const,
     ...overrides,
+  };
+}
+
+/** Render inside a jotai Provider so atom writes are isolated per test. */
+function renderSelector(
+  overrides: Partial<Parameters<typeof AddressSelector>[0]> = {},
+  store = createStore(),
+) {
+  return {
+    store,
+    ...render(
+      <Provider store={store}>
+        <AddressSelector {...defaultProps(overrides)} />
+      </Provider>,
+    ),
   };
 }
 
@@ -40,11 +54,7 @@ describe('AddressSelector', () => {
   describe('shared', () => {
     it('renders nothing when there is at most one address', () => {
       setDesktop(true);
-      const { container } = render(
-        <AddressSelector
-          {...defaultProps({ addresses: [probed('ws://a/ws', 'LAN')] })}
-        />,
-      );
+      const { container } = renderSelector({ addresses: [probed('ws://a/ws', 'LAN')] });
       expect(container).toBeEmptyDOMElement();
     });
   });
@@ -53,31 +63,32 @@ describe('AddressSelector', () => {
     beforeEach(() => setDesktop(true));
 
     it('shows the route Select trigger with "Route:" label', () => {
-      render(<AddressSelector {...defaultProps()} />);
+      renderSelector();
       expect(screen.getByText('Route:')).toBeInTheDocument();
       expect(screen.getByLabelText('P2P route')).toBeInTheDocument();
     });
 
-    it('calls onSelect with url when a manual address is chosen', async () => {
-      const onSelect = vi.fn();
+    it('writes manualOverrideAtom when a manual address is chosen', async () => {
+      const { store } = renderSelector();
       const user = userEvent.setup();
-      render(<AddressSelector {...defaultProps({ onSelect })} />);
 
       await user.click(screen.getByLabelText('P2P route'));
       await user.click(screen.getByText('LAN'));
 
-      expect(onSelect).toHaveBeenCalledWith('ws://a/ws');
+      expect(store.get(manualOverrideAtom)).toBe('ws://a/ws');
     });
 
-    it('calls onSelect with null when Auto is chosen', async () => {
-      const onSelect = vi.fn();
+    it('writes null to manualOverrideAtom when Auto is chosen', async () => {
+      const store = createStore();
+      // Start with a manual override so Auto is a meaningful choice.
+      store.set(manualOverrideAtom, 'ws://a/ws');
       const user = userEvent.setup();
-      render(<AddressSelector {...defaultProps({ onSelect })} />);
+      renderSelector({}, store);
 
       await user.click(screen.getByLabelText('P2P route'));
       await user.click(screen.getByText('Auto (lowest latency)'));
 
-      expect(onSelect).toHaveBeenCalledWith(null);
+      expect(store.get(manualOverrideAtom)).toBeNull();
     });
   });
 
@@ -85,7 +96,7 @@ describe('AddressSelector', () => {
     beforeEach(() => setDesktop(false));
 
     it('renders an icon button', () => {
-      render(<AddressSelector {...defaultProps()} />);
+      renderSelector();
       expect(screen.getByLabelText('P2P route')).toBeInTheDocument();
       // Should NOT have the "Route:" text label.
       expect(screen.queryByText('Route:')).not.toBeInTheDocument();
@@ -93,7 +104,7 @@ describe('AddressSelector', () => {
 
     it('opens Sheet when icon is clicked', async () => {
       const user = userEvent.setup();
-      render(<AddressSelector {...defaultProps()} />);
+      renderSelector();
 
       await user.click(screen.getByLabelText('P2P route'));
 
@@ -103,26 +114,27 @@ describe('AddressSelector', () => {
       expect(screen.getByText('VPN')).toBeInTheDocument();
     });
 
-    it('calls onSelect and closes Sheet when an address is chosen', async () => {
-      const onSelect = vi.fn();
+    it('writes manualOverrideAtom and closes Sheet when an address is chosen', async () => {
+      const { store } = renderSelector();
       const user = userEvent.setup();
-      render(<AddressSelector {...defaultProps({ onSelect })} />);
 
       await user.click(screen.getByLabelText('P2P route'));
       await user.click(screen.getByText('LAN'));
 
-      expect(onSelect).toHaveBeenCalledWith('ws://a/ws');
+      expect(store.get(manualOverrideAtom)).toBe('ws://a/ws');
     });
 
     it('shows Loader2 spinner when isSwitching is true', () => {
-      render(<AddressSelector {...defaultProps({ isSwitching: true })} />);
-      // The spinner icon has animate-spin class.
+      const store = createStore();
+      // p2pStateAtom defaults to 'disconnected' → isSwitching is true.
+      store.set(manualOverrideAtom, 'ws://a/ws');
+      renderSelector({}, store);
       const btn = screen.getByLabelText('P2P route');
       expect(btn.querySelector('.animate-spin')).toBeTruthy();
     });
 
     it('shows amber WifiOff when in relay fallback mode', () => {
-      render(<AddressSelector {...defaultProps({ effectiveMode: 'relay' })} />);
+      renderSelector({ effectiveMode: 'relay' });
       const btn = screen.getByLabelText('P2P route');
       expect(btn.querySelector('.text-amber-500')).toBeTruthy();
     });

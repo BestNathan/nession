@@ -21,9 +21,6 @@ interface TerminalHeaderProps {
   attachInfo: AttachInfo;
   forcedRelay: boolean;
   latencies?: AddressLatency[];
-  activeUrl: string | null;
-  manualOverride: string | null;
-  setManualOverride: (url: string | null) => void;
   // NEW — session list data for the dropdown
   sessions: Session[];
   sessionsLoading: boolean;
@@ -32,14 +29,13 @@ interface TerminalHeaderProps {
   currentSessionId: string;
   onSwitchSession: (session: Session, choice: AttachChoice) => void;
   probeCache: ReturnType<typeof useAddressProbeCache>;
-  isSwitching: boolean;
 }
 
 function TerminalHeader({
   onBack, sessionName, effectiveMode,
-  attachInfo, forcedRelay, latencies, activeUrl, manualOverride, setManualOverride,
+  attachInfo, forcedRelay, latencies,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-  currentSessionId, onSwitchSession, probeCache, isSwitching,
+  currentSessionId, onSwitchSession, probeCache,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
@@ -64,10 +60,6 @@ function TerminalHeader({
         <AddressSelector
           addresses={attachInfo.addresses}
           latencies={latencies ?? []}
-          activeUrl={activeUrl ?? null}
-          isAuto={manualOverride === null}
-          onSelect={setManualOverride}
-          isSwitching={isSwitching}
           effectiveMode={effectiveMode}
         />
       ) : null}
@@ -122,10 +114,7 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
   const {
     p2pConnection,
     effectiveMode,
-    activeUrl,
     forcedRelay,
-    manualOverride,
-    setManualOverride,
     isSwitching,
   } = useP2PWithFallback(attachInfo, sessionName, {
     orderedUrls: orderedUrls ?? null,
@@ -218,9 +207,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         attachInfo={attachInfo}
         forcedRelay={forcedRelay}
         latencies={latencies}
-        activeUrl={activeUrl ?? null}
-        manualOverride={manualOverride}
-        setManualOverride={setManualOverride}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
@@ -228,7 +214,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         currentSessionId={sessionId}
         onSwitchSession={handleSwitchSession}
         probeCache={probeCache}
-        isSwitching={isSwitching}
       />
 
       <div className="flex-1 min-h-0 flex flex-col relative">
