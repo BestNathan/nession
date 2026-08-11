@@ -77,6 +77,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Transport came back after a drop: clear banner and redraw tmux.
       view.setExternalBanner('none', 0);
       view.reattach();
+    } else if (p2pState === 'connected' && prev !== 'connected') {
+      // Initial connect (or any non-reconnect transition to connected):
+      // the P2P socket just opened — send client.attach to bind the
+      // session.  Don't wait for the 50ms timer in TerminalView; by then
+      // the user may already have typed and terminal.input would race
+      // ahead of client.attach.
+      view.setExternalBanner('none', 0);
+      view.reattach();
     } else if (p2pState === 'connecting') {
       // User switched addresses or a fresh connect started — cancel any
       // stale 'reconnecting' banner from the previous connection attempt.

@@ -238,12 +238,10 @@ export class ConnectionManager {
       }
     });
 
-    // Trigger attach as soon as the P2P socket is ready — don't wait for the
-    // 50ms deferred timer in TerminalView.  The 50ms window is long enough for
-    // the socket to open and for the user to start typing, which sends
-    // terminal.input before client.attach and gets "not_attached" errors.
-    void this.attach().catch(() => {});
-
+    // Attach is driven by the React layer: Terminal.tsx watches p2pState
+    // transitions and calls view.reattach() when the socket reaches
+    // 'connected'.  This keeps ConnectionManager a pure transport layer —
+    // it sends/receives messages but doesn't initiate protocol actions.
     this.pingTimer = setInterval(() => {
       if (this.disposed) { return; }
       conn.sendMessage({
