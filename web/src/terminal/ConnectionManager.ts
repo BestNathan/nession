@@ -34,6 +34,8 @@ const RELAY_MAX_ATTEMPTS = 10;
 
 export class ConnectionManager {
   private mode: 'p2p' | 'relay';
+  /** Public so TerminalView's 50ms timer can branch on transport. */
+  get isP2P(): boolean { return this.mode === 'p2p'; }
   private sessionName: string;
   private sessionId: string;
   private p2pConnection?: ConnectionOptions['p2pConnection'];

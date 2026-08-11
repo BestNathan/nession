@@ -214,14 +214,19 @@ export class TerminalView {
     });
 
     // Deferred attach (survives React StrictMode double-mount).
-    // If the ResizeObserver fired before this timer, we pass the real
-    // viewport dimensions so the agent pre-resizes tmux correctly.
+    // P2P: the React layer (Terminal.tsx effect) drives client.attach when
+    // the socket reaches 'connected'.  This timer only corrects the PTY
+    // size once the ResizeObserver has settled — sending another
+    // client.attach here would race with the effect.
+    // Relay: attach() sends beginRelay through the main WebSocket.
     this.attachTimer = setTimeout(() => {
       if (this.isDisposed) { return; }
       const r = this.pendingResize;
-      this.connection
-        .attach(r?.cols, r?.rows)
-        .catch(() => {});
+      if (this.connection.isP2P) {
+        if (r) { this.connection.sendResize(r.cols, r.rows); }
+      } else {
+        this.connection.attach(r?.cols, r?.rows).catch(() => {});
+      }
     }, 50);
   }
 
