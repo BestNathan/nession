@@ -285,7 +285,8 @@ export function useP2PConnection(
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
     setConnectionState('disconnected');
-  }, []);
+    setP2pState('disconnected');
+  }, [setP2pState]);
 
   const waitForConnection = useCallback((timeoutMs = 15_000): Promise<void> => {
     const state = connectionStateRef.current;
@@ -337,8 +338,9 @@ export function useP2PConnection(
     }
     return () => {
       setP2pConnection(null);
+      setP2pState('disconnected');
     };
-  }, [connection, hasP2pTarget, setP2pConnection]);
+  }, [connection, hasP2pTarget, setP2pConnection, setP2pState]);
 
   if (!options) {return null;}
   return connection;
