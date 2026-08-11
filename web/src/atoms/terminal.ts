@@ -116,11 +116,16 @@ export const disconnectAtom = atom(
 
 /** Set a manual P2P address override. Resets forcedRelay so the user
  *  can recover from an all-candidates-failed relay fallback by
- *  explicitly picking a route. */
+ *  explicitly picking a route. Also resets the terminal session state
+ *  machine to 'connecting' so the new socket triggers a fresh
+ *  client.attach cycle. */
 export const switchAddressAtom = atom(
   null,
   (_get, set, url: string | null) => {
     set(manualOverrideAtom, url);
-    if (url !== null) { set(forcedRelayAtom, false); }
+    if (url !== null) {
+      set(forcedRelayAtom, false);
+      set(terminalSessionStateAtom, 'connecting');
+    }
   },
 );
