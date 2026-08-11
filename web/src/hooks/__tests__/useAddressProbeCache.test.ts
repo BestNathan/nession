@@ -82,4 +82,29 @@ describe('useAddressProbeCache', () => {
       );
     }
   });
+
+  it('probes agents that arrive after mount (reactive trigger)', async () => {
+    const { testAddresses } = await import('../../services/addressSelection');
+    const mock = testAddresses as ReturnType<typeof vi.fn>;
+
+    // Start with empty agents (simulates pre-fetch state).
+    const { result, rerender } = renderHook(
+      ({ agents }) => useAddressProbeCache(agents),
+      { initialProps: { agents: [] as Agent[] } },
+    );
+
+    // Flush the initial probe cycle — should probe nothing.
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    const callsBefore = mock.mock.calls.length;
+
+    // Agents arrive later (simulates fetchAgents response).
+    rerender({ agents: [agent('a1', ['ws://x/ws'])] });
+
+    // Flush the reactive probe.
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+
+    // Should have probed the newly-arrived agent.
+    expect(mock.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(result.current.getProbe('a1')?.orderedUrls).toEqual(['ws://x/ws']);
+  });
 });
