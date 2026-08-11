@@ -8,8 +8,11 @@ export function RenderTerminal({
   handleTerminalDisconnect: () => void;
   handleTerminalError: (err: Error) => void;
 }) {
+  // TerminalView now reads session state from the jotai atoms; `attachedSession`
+  // is retained only for Dashboard's route view until Task 8 wires the atoms.
+  void attachedSession;
   return (
-    <TerminalView session={attachedSession}
+    <TerminalView
       onBack={handleBackToDashboard}
       onDisconnect={handleTerminalDisconnect}
       onError={handleTerminalError} />
