@@ -47,6 +47,9 @@ export class ConnectionManager {
   /** True once the initial relay has been established.
    *  Resets on disconnect so reconnection re-sends the attach request. */
   private relayInitiallyAttached = false;
+  /** True once the initial P2P client.attach has been sent.
+   *  Resets on dispose so session switches re-send the attach. */
+  private p2pAttachSent = false;
   /** Manual relay endpoint URL from the attach dialog. */
   private relayUrl: string | null | undefined;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -115,29 +118,43 @@ export class ConnectionManager {
     }
   }
 
+  private async attachP2P(w?: number, h?: number): Promise<void> {
+    const conn = this.p2pConnection!;
+    if (this.p2pAttachSent) {
+      // Re-issue attach on reconnect so tmux redraws — skip the wait.
+      if (w !== undefined && h !== undefined) {
+        conn.sendMessage({
+          msg_type: 'client.attach',
+          id: generateId(),
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: { session_name: this.sessionName, width: w, height: h },
+        });
+      }
+      return;
+    }
+    try { await conn.waitForConnection(); } catch (err) {
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    if (this.disposed) { return; }
+    this.p2pAttachSent = true;
+    conn.sendMessage({
+      msg_type: 'client.attach',
+      id: generateId(),
+      timestamp: Math.floor(Date.now() / 1000),
+      payload: {
+        session_name: this.sessionName,
+        ...(w !== undefined && h !== undefined ? { width: w, height: h } : {}),
+      },
+    });
+  }
+
   async attach(width?: number, height?: number): Promise<void> {
     if (this.disposed) { return; }
-    // Fall back to last known client viewport so tmux isn't re-created at the
-    // default 80×24 on reconnect (P2P) or relay re-establishment.
     const w = width ?? this.lastResize?.cols;
     const h = height ?? this.lastResize?.rows;
     if (this.mode === 'p2p' && this.p2pConnection) {
-      try {
-        await this.p2pConnection.waitForConnection();
-      } catch (err) {
-        this.onError?.(err instanceof Error ? err : new Error(String(err)));
-        return;
-      }
-      if (this.disposed) { return; }
-      this.p2pConnection.sendMessage({
-        msg_type: 'client.attach',
-        id: generateId(),
-        timestamp: Math.floor(Date.now() / 1000),
-        payload: {
-          session_name: this.sessionName,
-          ...(w !== undefined && h !== undefined ? { width: w, height: h } : {}),
-        },
-      });
+      await this.attachP2P(w, h);
     } else if (this.mode === 'relay' && this.serverConnection) {
       // Phase 2 of relay attach: the Terminal is now mounted and subscribed
       // to terminal.output.  Tell the server to enter relay forwarding.
@@ -165,6 +182,7 @@ export class ConnectionManager {
 
   /** Re-issue attach after a reconnect so tmux redraws the full screen. */
   async reattach(): Promise<void> {
+    this.p2pAttachSent = false;
     return this.attach();
   }
 
@@ -220,6 +238,12 @@ export class ConnectionManager {
           break;
       }
     });
+
+    // Trigger attach as soon as the P2P socket is ready — don't wait for the
+    // 50ms deferred timer in TerminalView.  The 50ms window is long enough for
+    // the socket to open and for the user to start typing, which sends
+    // terminal.input before client.attach and gets "not_attached" errors.
+    void this.attach().catch(() => {});
 
     this.pingTimer = setInterval(() => {
       if (this.disposed) { return; }
