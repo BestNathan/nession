@@ -136,10 +136,11 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
   const isP2P = effectiveMode === 'p2p';
 
   // Drive the P2P WebSocket. useP2PConnection writes p2pConnectionAtom +
-  // p2pStateAtom from its ws events, and we read them back below (and in
-  // Terminal, once Task 7 subscribes it directly). The options are derived
-  // purely from atoms: activeUrl (manual override or best candidate) is the
-  // endpoint, forcedRelay flips effectiveMode to relay which nulls activeUrl.
+  // p2pStateAtom from its ws events, and we read them back below (Terminal
+  // subscribes to sessionIdAtom/sessionNameAtom/effectiveModeAtom/
+  // p2pConnectionAtom directly). The options are derived purely from atoms:
+  // activeUrl (manual override or best candidate) is the endpoint, forcedRelay
+  // flips effectiveMode to relay which nulls activeUrl.
   useP2PConnection(
     isP2P && activeUrl && attachInfo
       ? {
@@ -211,10 +212,6 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
   const terminalElement = (
     <Terminal
       ref={terminalRef}
-      sessionId={sessionId}
-      sessionName={sessionName}
-      mode={effectiveMode}
-      p2pConnection={isP2P ? p2pConnection : undefined}
       serverConnection={!isP2P ? wsService : undefined}
       onDisconnect={onDisconnect}
       onError={onError}

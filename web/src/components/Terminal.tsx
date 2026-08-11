@@ -1,8 +1,15 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { useAtom } from 'jotai';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 import { detectWebGLSupport } from '../terminal/Renderer';
 import { useLatest } from '../hooks/useLatest';
+import {
+  sessionIdAtom,
+  sessionNameAtom,
+  effectiveModeAtom,
+  p2pConnectionAtom,
+} from '../atoms/terminal';
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -12,16 +19,18 @@ import { useLatest } from '../hooks/useLatest';
  * and exposes sendText/refit via imperative handle.
  *
  * TerminalView is rebuilt only when session identity or connection mode
- * changes (sessionId, sessionName, mode, p2pConnection, serverConnection).
+ * changes. sessionId, sessionName, mode, and p2pConnection are read from the
+ * jotai atoms (atoms/terminal.ts) — written by attachToSessionAtom /
+ * disconnectAtom / useP2PConnection — so this component subscribes without
+ * prop-drilling from TerminalView. serverConnection and relayUrl still arrive
+ * via props because they are WebSocketService transport concerns, not session
+ * state.
+ *
  * P2P connectionState transitions (connecting → connected → reconnecting)
  * are handled internally by ConnectionManager and do NOT trigger a rebuild.
  */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
-    sessionId,
-    sessionName,
-    mode,
-    p2pConnection,
     serverConnection,
     relayUrl,
     onDisconnect,
@@ -32,6 +41,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   },
   ref,
 ) {
+  // Session state is owned by the atoms in ../atoms/terminal. Reading it here
+  // (instead of receiving it as props) keeps Terminal in sync with the attach
+  // flow and P2P connection without prop-drilling from TerminalView.
+  const [sessionId] = useAtom(sessionIdAtom);
+  const [sessionName] = useAtom(sessionNameAtom);
+  const [mode] = useAtom(effectiveModeAtom);
+  const [p2pConnection] = useAtom(p2pConnectionAtom);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalView | null>(null);
   // Bump this each time viewRef.current is populated or cleared. The
@@ -57,8 +74,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   // Observe P2P transport reconnects. connectionState is a getter (no re-render
   // on change), but this component re-renders whenever the owner does, and the
-  // owner (via useP2PWithFallback) re-renders on every P2P state transition —
-  // so reading it here in an effect keyed on the value tracks it correctly.
+  // owner (TerminalView) re-renders on every P2P state transition via
+  // useP2PConnection's internal state — so reading it here in an effect keyed
+  // on the value tracks it correctly.
   const p2pState = p2pConnection?.connectionState;
   const prevP2pStateRef = useRef(p2pState);
   useEffect(() => {
