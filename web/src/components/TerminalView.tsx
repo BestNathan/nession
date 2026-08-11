@@ -228,6 +228,9 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
         effectiveMode={effectiveMode}
         attachInfo={attachInfo}
         forcedRelay={forcedRelay}
+        latencies={attachInfo?.session_id
+          ? (probeCache?.getProbe(attachInfo.session_id.split(':')[0])?.latencies ?? [])
+          : []}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
