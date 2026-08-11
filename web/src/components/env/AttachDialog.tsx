@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -14,6 +15,7 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { attachInfoAtom } from '../../atoms/terminal';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */
@@ -62,7 +64,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
   const wsService = useWebSocket();
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
-  const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
+  const [attachInfo, setAttachInfo] = useAtom(attachInfoAtom);
   const [selectedUrl, setSelectedUrl] = useState<string>(AUTO_URL);
   const [error, setError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
@@ -88,7 +90,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
       .then((resp) => setEnvFiles(resp.files))
       .catch(() => {});
     setSelectedEnv([]);
-  }, [isOpen, webglSupported, wsService]);
+  }, [isOpen, webglSupported, wsService, setAttachInfo]);
 
   // Manual relay URL override — only relevant in relay mode.
   const relayUrl = useMemo(
@@ -129,7 +131,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     return () => {
       cancelled = true;
     };
-  }, [isOpen, session, wsService, mode, relayUrl]);
+  }, [isOpen, session, wsService, mode, relayUrl, setAttachInfo]);
 
   const cached = agentId ? probeCache.getProbe(agentId) : undefined;
   const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);
