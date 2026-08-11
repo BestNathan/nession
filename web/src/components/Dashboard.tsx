@@ -26,15 +26,15 @@ function resolveRouteView(opts: {
   terminalMatch: ReturnType<typeof useMatch>; envMatch: ReturnType<typeof useMatch>;
   connectionStatus: ConnectionStatus;
   attachedSession: ReturnType<typeof useAttachFlow>['attachedSession'];
-  backToDashboard: () => void; confirmAttach: ReturnType<typeof useAttachFlow>['confirmAttach'];
+  backToDashboard: () => void;
   handleTerminalDisconnect: () => void; handleTerminalError: (err: Error) => void;
   agents: ReturnType<typeof useDashboard>['agents']; navigate: ReturnType<typeof useNavigate>;
 }): ReactNode {
   const { terminalMatch, envMatch, connectionStatus, attachedSession, backToDashboard,
-    confirmAttach, handleTerminalDisconnect, handleTerminalError, agents, navigate } = opts;
+    handleTerminalDisconnect, handleTerminalError, agents, navigate } = opts;
   if (terminalMatch && attachedSession) {
     return (<RenderTerminal key={attachedSession.sessionId} attachedSession={attachedSession}
-      handleBackToDashboard={backToDashboard} handleSwitchSession={confirmAttach}
+      handleBackToDashboard={backToDashboard}
       handleTerminalDisconnect={handleTerminalDisconnect}
       handleTerminalError={handleTerminalError} />);
   }
@@ -91,7 +91,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
 
   const routeView = resolveRouteView({
     terminalMatch, envMatch, connectionStatus, attachedSession,
-    backToDashboard, confirmAttach, handleTerminalDisconnect,
+    backToDashboard, handleTerminalDisconnect,
     handleTerminalError, agents, navigate,
   });
   if (routeView !== null) { return routeView; }

@@ -11,7 +11,6 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useTerminalSessions } from '../hooks/useTerminalSessions';
 import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { SessionDropdown } from './SessionDropdown';
-import type { AttachChoice } from './env/AttachDialog';
 import { TerminalLayout } from './TerminalLayout';
 
 interface TerminalHeaderProps {
@@ -26,8 +25,6 @@ interface TerminalHeaderProps {
   sessionsLoading: boolean;
   sessionsError: string | null;
   onRetrySessions: () => void;
-  currentSessionId: string;
-  onSwitchSession: (session: Session, choice: AttachChoice) => void;
   probeCache: ReturnType<typeof useAddressProbeCache>;
 }
 
@@ -35,7 +32,7 @@ function TerminalHeader({
   onBack, sessionName, effectiveMode,
   attachInfo, forcedRelay, latencies,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-  currentSessionId, onSwitchSession, probeCache,
+  probeCache,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
@@ -47,9 +44,7 @@ function TerminalHeader({
         loading={sessionsLoading}
         error={sessionsError}
         onRetry={onRetrySessions}
-        currentSessionId={currentSessionId}
         currentSessionName={sessionName}
-        onSwitchSession={onSwitchSession}
         probeCache={probeCache}
       />
       <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
@@ -84,12 +79,11 @@ export interface AttachedSession {
 interface TerminalViewProps {
   session: AttachedSession;
   onBack: () => void;
-  onSwitchSession: (session: Session, choice: AttachChoice) => void;
   onDisconnect: () => void;
   onError: (error: Error) => void;
 }
 
-export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, onError }: TerminalViewProps) {
+export function TerminalView({ session, onBack, onDisconnect, onError }: TerminalViewProps) {
   const { attachInfo, sessionId, sessionName, selectedAddress, orderedUrls, latencies, renderer, relayUrl } = session;
   const wsService = useWebSocket();
   // Callback ref backed by state so the parent re-renders when the child
@@ -130,12 +124,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-  const handleSwitchSession = useCallback((s: Session, choice: AttachChoice) => {
-    if (effectiveMode === 'relay' && wsService?.isConnected()) {
-      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
-    }
-    onSwitchSession(s, choice);
-  }, [effectiveMode, wsService, sessionId, onSwitchSession]);
   const sendMessage = p2pConnection?.sendMessage;
   const onMessage = p2pConnection?.onMessage;
   const waitForConnection = p2pConnection?.waitForConnection;
@@ -211,8 +199,6 @@ export function TerminalView({ session, onBack, onSwitchSession, onDisconnect, o
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
         onRetrySessions={refetchSessions}
-        currentSessionId={sessionId}
-        onSwitchSession={handleSwitchSession}
         probeCache={probeCache}
       />
 
