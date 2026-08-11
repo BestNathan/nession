@@ -61,7 +61,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     showCreateModal, sessionToKill, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     isSearchActive, sortField, sortDirection, toggleSort, selectedAgent, setSelectedAgent,
     getHeartbeatHistory, setShowCreateModal, setSessionToKill, handleSessionKilled,
-    handleSessionCreated, fetchSessions, clearError, updateAgent,
+    handleSessionCreated, fetchSessions, clearError, updateAgent, staleAgents,
   } = useDashboard();
 
   const {
@@ -135,6 +135,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           agents={agents}
           filteredSessions={filteredSessions}
           loadingSessions={loadingSessions}
+          staleAgents={staleAgents}
           onCreate={() => setShowCreateModal(true)}
           fetchSessions={fetchSessions}
           onAttach={onAttach}

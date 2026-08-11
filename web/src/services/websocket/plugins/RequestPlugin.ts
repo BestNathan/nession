@@ -84,10 +84,35 @@ export class RequestPlugin implements WebSocketPlugin {
 
   // ── Sessions ──────────────────────────────────────────────────
 
-  async listSessions(agentId?: string): Promise<Session[]> {
+  /**
+   * Fetch sessions and return the full response, including `stale_agents`.
+   *
+   * With `force: true` the server queries every online agent for its live
+   * tmux state before answering, so the list is strongly consistent rather
+   * than whatever the last watcher poll left in the registry. Agents that
+   * fail to answer are named in `stale_agents` — their sessions are still
+   * returned, but may be out of date.
+   */
+  async fetchSessions(
+    opts: { agentId?: string; force?: boolean } = {},
+  ): Promise<SessionsListResponse> {
     this.requireAuth();
-    const payload = agentId ? { agent_id: agentId } : {};
-    const response = await this.core.request<SessionsListResponse>('client.sessions.list', payload);
+    const payload: Record<string, unknown> = {};
+    if (opts.agentId) {
+      payload.agent_id = opts.agentId;
+    }
+    if (opts.force) {
+      payload.force = true;
+    }
+    const response = await this.core.request<SessionsListResponse>(
+      'client.sessions.list',
+      payload,
+    );
+    return { sessions: response.sessions, stale_agents: response.stale_agents ?? [] };
+  }
+
+  async listSessions(agentId?: string): Promise<Session[]> {
+    const response = await this.fetchSessions({ agentId });
     return response.sessions;
   }
 

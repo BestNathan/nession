@@ -143,6 +143,48 @@ describe('RequestPlugin', () => {
     });
   });
 
+  describe('fetchSessions', () => {
+    /** Without `force` in the payload the server answers from its registry, so
+     *  the refresh button would not actually re-query agents. */
+    it('sends force when requested', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ sessions: [] });
+      await plugin.fetchSessions({ force: true });
+      expect(core.request).toHaveBeenCalledWith('client.sessions.list', { force: true });
+    });
+
+    it('omits force by default', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ sessions: [] });
+      await plugin.fetchSessions();
+      expect(core.request).toHaveBeenCalledWith('client.sessions.list', {});
+    });
+
+    it('combines agent_id and force', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ sessions: [] });
+      await plugin.fetchSessions({ agentId: 'a1', force: true });
+      expect(core.request).toHaveBeenCalledWith('client.sessions.list', {
+        agent_id: 'a1',
+        force: true,
+      });
+    });
+
+    it('returns stale_agents from the response', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sessions: [],
+        stale_agents: ['a1'],
+      });
+      const result = await plugin.fetchSessions({ force: true });
+      expect(result.stale_agents).toEqual(['a1']);
+    });
+
+    /** Older servers omit the field entirely; callers should still get a list
+     *  they can safely iterate. */
+    it('defaults stale_agents to an empty array when absent', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ sessions: [] });
+      const result = await plugin.fetchSessions();
+      expect(result.stale_agents).toEqual([]);
+    });
+  });
+
   describe('requestAttach', () => {
     it('sends attach request with default p2p mode', async () => {
       const info = { mode: 'p2p' as const, session_id: 's1', agent_address: 'ws://agent/ws', connection_token: 'tok' };

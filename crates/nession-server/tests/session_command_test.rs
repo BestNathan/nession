@@ -241,13 +241,19 @@ async fn test_session_kill_flow() {
         .await
         .unwrap();
 
-    // Client receives response
-    let client_msg = client_stream.next().await.unwrap().unwrap();
-    let client_text = match client_msg {
-        WsMessage::Text(t) => t,
-        _ => panic!("expected text"),
+    // The broadcast channel may hold stale `sessions.changed` messages.
+    // Skip those to reach the actual kill response.
+    let client_parsed = loop {
+        let client_msg = client_stream.next().await.unwrap().unwrap();
+        let client_text = match client_msg {
+            WsMessage::Text(t) => t,
+            _ => panic!("expected text"),
+        };
+        let v: serde_json::Value = serde_json::from_str(&client_text).unwrap();
+        if v["msg_type"].as_str() == Some("client.session.kill.response") {
+            break v;
+        }
     };
-    let client_parsed: serde_json::Value = serde_json::from_str(&client_text).unwrap();
     assert_eq!(client_parsed["msg_type"], "client.session.kill.response");
     assert_eq!(client_parsed["payload"]["success"], true);
 }

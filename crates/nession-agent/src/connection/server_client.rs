@@ -57,6 +57,10 @@ pub mod msg_types {
     pub const AGENT_SESSION_UPDATE: &str = "agent.session.update";
     pub const SERVER_HEARTBEAT_ACK: &str = "server.heartbeat.ack";
     pub const AGENT_ADDRESS_UPDATE: &str = "agent.address_update";
+    /// Server asks the agent for its live tmux session list. Used by the web
+    /// UI's force-refresh so the server can rebuild its registry from the
+    /// agent's actual state instead of waiting for the next watcher poll.
+    pub const SERVER_SESSIONS_LIST: &str = "server.sessions.list";
 }
 
 /// Payload for session update messages.
@@ -850,6 +854,46 @@ impl ServerClient {
                         "command": "session.kill",
                         "success": success,
                         "error": error,
+                    }
+                });
+                sink.send(WsMessage::Text(response.to_string())).await?;
+            }
+            msg_types::SERVER_SESSIONS_LIST => {
+                let request_id = str_field(&msg.payload, "request_id");
+
+                // An empty list is a legitimate answer ("no sessions here"),
+                // not a failure — `list_sessions` already maps tmux's
+                // "no server running" to an empty Vec. Only report the raw
+                // fields; the server derives status from `attached_clients`
+                // so the rule lives in exactly one place.
+                let sessions = self.tmux.list_sessions().await.unwrap_or_default();
+
+                debug!(
+                    "Server requested session list: returning {} session(s)",
+                    sessions.len()
+                );
+
+                let sessions_json: Vec<serde_json::Value> = sessions
+                    .iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "created_at": s.created_at,
+                            "window_count": s.window_count,
+                            "attached_clients": s.attached_clients,
+                        })
+                    })
+                    .collect();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "sessions.list",
+                        "success": true,
+                        "sessions": sessions_json,
                     }
                 });
                 sink.send(WsMessage::Text(response.to_string())).await?;
@@ -1879,6 +1923,98 @@ mod tests {
         assert_eq!(parsed["payload"]["command"], "env.list");
         assert_eq!(parsed["payload"]["success"], true);
         assert!(parsed["payload"]["files"].is_array());
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// Mock server that sends sessions.list command after registration.
+    async fn start_mock_server_sessions_list(
+        port: u16,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await;
+
+                let cmd = serde_json::json!({
+                    "msg_type": "server.sessions.list",
+                    "id": "cmd-sessions-list",
+                    "timestamp": 1234567891,
+                    "payload": { "request_id": "req-sessions-list-1" }
+                });
+                let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
+
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    /// The agent answers `server.sessions.list` with its live tmux sessions.
+    /// An empty list is a success, not an error — so this test passes whether
+    /// or not tmux is available on the machine running it.
+    #[tokio::test]
+    async fn test_server_sessions_list_command() {
+        let port = 28094;
+        let (server_handle, mut msg_rx) = start_mock_server_sessions_list(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let metadata = AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        };
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{}", port),
+            "test-token",
+            "test-agent-sessions-list",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None, // display_name
+            metadata,
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            None,
+        );
+
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
+            .await
+            .expect("timeout waiting for sessions.list response")
+            .expect("no message received");
+
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.session.command.response");
+        assert_eq!(parsed["payload"]["request_id"], "req-sessions-list-1");
+        assert_eq!(parsed["payload"]["command"], "sessions.list");
+        assert_eq!(parsed["payload"]["success"], true);
+        assert!(parsed["payload"]["sessions"].is_array());
 
         handle.shutdown().await.ok();
         server_handle.abort();

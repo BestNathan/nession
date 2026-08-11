@@ -20,7 +20,8 @@ export interface SearchProps {
 }
 
 export interface HeaderActionsProps {
-  fetchSessions: () => void;
+  /** Triggers a force refresh — the server re-queries every online agent. */
+  fetchSessions: (opts?: { force?: boolean }) => void;
   onOpenEnv: () => void;
   loadingAgents: boolean;
   clearError: () => void;
@@ -152,7 +153,7 @@ export function DashboardHeader({
               <p>Environment Files</p>
             </TooltipContent>
           </Tooltip>
-          <RefreshButton onClick={fetchSessions} loading={loadingAgents} variant="default" />
+          <RefreshButton onClick={() => fetchSessions({ force: true })} loading={loadingAgents} variant="default" />
         </div>
       </header>
       <SearchBar

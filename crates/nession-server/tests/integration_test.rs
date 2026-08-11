@@ -1185,8 +1185,17 @@ async fn test_client_sessions_list_filtered_by_agent() {
     )
     .await;
 
-    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client).await).unwrap();
-    let sessions = resp["payload"]["sessions"].as_array().unwrap();
+    // The broadcast channel (capacity 16) may still hold stale
+    // `sessions.changed` messages from the agent register path.
+    // Skip those so we consume the actual `client.sessions.list.response`.
+    let list_resp = loop {
+        let raw = recv_text(&mut client).await;
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        if v["msg_type"].as_str() == Some("client.sessions.list.response") {
+            break v;
+        }
+    };
+    let sessions = list_resp["payload"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["agent_id"], "agent-x");
 }
@@ -1336,14 +1345,23 @@ async fn test_client_session_attach_p2p_mode() {
     )
     .await;
 
-    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client).await).unwrap();
-    assert_eq!(resp["payload"]["status"], "success");
-    assert_eq!(resp["payload"]["mode"], "p2p");
+    // Skip any broadcast messages that arrive before the attach response.
+    let attach_resp = loop {
+        let raw = recv_text(&mut client).await;
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        if v["msg_type"].as_str() == Some("client.session.attach.response") {
+            break v;
+        }
+    };
+    assert_eq!(attach_resp["payload"]["status"], "success");
+    assert_eq!(attach_resp["payload"]["mode"], "p2p");
     assert_eq!(
-        resp["payload"]["agent_address"],
+        attach_resp["payload"]["agent_address"],
         "ws://agent.example.com/ws"
     );
-    assert!(resp["payload"]["connection_token"].as_str().is_some());
+    assert!(attach_resp["payload"]["connection_token"]
+        .as_str()
+        .is_some());
 }
 
 // ---------------------------------------------------------------------------
