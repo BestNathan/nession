@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getDefaultStore } from 'jotai';
 import { ConnectionManager } from '../ConnectionManager';
+import { terminalSessionStateAtom } from '../../atoms/terminal';
 import type { P2PConnection, P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';
 
@@ -31,10 +33,13 @@ function makeMockWs(): WebSocketService {
 describe('ConnectionManager', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // send() buffers input until the session state machine is 'attached'.
+    getDefaultStore().set(terminalSessionStateAtom, 'attached');
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    getDefaultStore().set(terminalSessionStateAtom, 'idle');
   });
 
   describe('P2P mode', () => {
@@ -50,6 +55,29 @@ describe('ConnectionManager', () => {
           payload: expect.objectContaining({ session_name: 'test', data: expect.any(String) }),
         }),
       );
+      cm.dispose();
+    });
+
+    it('buffers input until attached and flushes on the next send', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+
+      // Not attached yet → input is buffered, nothing is sent (would race
+      // ahead of client.attach).
+      getDefaultStore().set(terminalSessionStateAtom, 'connecting');
+      cm.send('hello');
+      expect(p2p.sendMessage).not.toHaveBeenCalled();
+
+      // Once attached, the next send flushes the buffered input first.
+      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      cm.send('world');
+      expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
+      expect((p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
+        msg_type: 'terminal.input',
+        payload: expect.objectContaining({ session_name: 'test' }),
+      });
       cm.dispose();
     });
 

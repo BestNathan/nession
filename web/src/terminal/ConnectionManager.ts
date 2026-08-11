@@ -1,5 +1,7 @@
 import type { ConnectionState, ConnectionOptions } from './types';
 import type { P2PMessage } from '../hooks/useP2PConnection';
+import { getDefaultStore } from 'jotai';
+import { terminalSessionStateAtom } from '../atoms/terminal';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -41,6 +43,8 @@ export class ConnectionManager {
   private relayUnsubResize: (() => void) | null = null;
   private p2pUnsubMessage: (() => void) | null = null;
   private disposed = false;
+  /** Input typed before client.attach is acked — flushed once attached. */
+  private inputBuffer: string[] = [];
 
   onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
@@ -63,6 +67,24 @@ export class ConnectionManager {
 
   send(data: string): void {
     if (this.disposed) { return; }
+    // Buffer input until the session is attached.  In 'connected' state
+    // client.attach has been sent but not yet acked — sending terminal.input
+    // now would race ahead of the attach, so buffer until the agent acks.
+    const state = getDefaultStore().get(terminalSessionStateAtom);
+    if (state !== 'attached') {
+      this.inputBuffer.push(data);
+      return;
+    }
+    // Flush any previously buffered input (from the pre-attach window).
+    if (this.inputBuffer.length > 0) {
+      const buffered = this.inputBuffer.splice(0);
+      for (const d of buffered) { this.sendRaw(d); }
+    }
+    this.sendRaw(data);
+  }
+
+  /** Send input unconditionally — used by send() once the session is attached. */
+  private sendRaw(data: string): void {
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.p2pConnection.sendMessage({
         msg_type: 'terminal.input',
