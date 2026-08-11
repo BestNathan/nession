@@ -49,9 +49,6 @@ export class TerminalView {
   private mobileInput: MobileInput | null = null;
 
   private isDisposed = false;
-  private attachTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Latest resize dimensions from ResizeObserver — passed to attach(). */
-  private pendingResize: { cols: number; rows: number } | null = null;
 
   onStateChange: ((state: TerminalViewState) => void) | null = null;
   onCtrlD: (() => void) | null = null;
@@ -212,16 +209,6 @@ export class TerminalView {
         this.size.handleResize(this.terminal.cols, this.terminal.rows);
       }
     });
-
-    // Deferred size correction (survives React StrictMode double-mount).
-    // Attach timing is owned by the React layer (terminalSessionStateAtom);
-    // this timer only nudges the PTY to the ResizeObserver-settled size
-    // once the mount is stable.
-    this.attachTimer = setTimeout(() => {
-      if (this.isDisposed) { return; }
-      const r = this.pendingResize;
-      if (r) { this.connection.sendResize(r.cols, r.rows); }
-    }, 50);
   }
 
   sendText(text: string): void {
@@ -247,7 +234,6 @@ export class TerminalView {
     if (this.isDisposed) {
       return;
     }
-    this.pendingResize = { cols, rows };
     // Optimistic local update — xterm re-renders immediately.
     this.size.handleResize(cols, rows);
     // Then tell tmux (agent → tmux resize-window → %window-resize → broadcast).
@@ -297,7 +283,6 @@ export class TerminalView {
 
   dispose(): void {
     this.isDisposed = true;
-    if (this.attachTimer) { clearTimeout(this.attachTimer); this.attachTimer = null; }
     this.mobileInput?.dispose();
     this.mouseIntent.dispose();
     this.input.dispose();
