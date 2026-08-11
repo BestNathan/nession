@@ -153,10 +153,6 @@ function AddressSelectorDesktop({
   isAuto,
   onSelect,
 }: AddressSelectorViewProps) {
-  if (addresses.length <= 1) {
-    return null;
-  }
-
   const value = isAuto ? AUTO_VALUE : (activeUrl ?? AUTO_VALUE);
 
   return (
@@ -215,10 +211,6 @@ function AddressSelectorMobile({
     },
     [onSelect],
   );
-
-  if (addresses.length <= 1) {
-    return null;
-  }
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>

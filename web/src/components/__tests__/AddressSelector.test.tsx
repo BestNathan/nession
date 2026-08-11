@@ -60,10 +60,10 @@ describe('AddressSelector', () => {
   });
 
   describe('shared', () => {
-    it('renders nothing when there is at most one address', () => {
+    it('still shows the selector even with a single address', () => {
       setDesktop(true);
-      const { container } = renderSelector({ addresses: [probed('ws://a/ws', 'LAN')] });
-      expect(container).toBeEmptyDOMElement();
+      renderSelector({ addresses: [probed('ws://a/ws', 'LAN')] });
+      expect(screen.getByText('Route:')).toBeInTheDocument();
     });
   });
 
