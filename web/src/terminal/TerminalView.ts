@@ -213,20 +213,14 @@ export class TerminalView {
       }
     });
 
-    // Deferred attach (survives React StrictMode double-mount).
-    // P2P: the React layer (Terminal.tsx effect) drives client.attach when
-    // the socket reaches 'connected'.  This timer only corrects the PTY
-    // size once the ResizeObserver has settled — sending another
-    // client.attach here would race with the effect.
-    // Relay: attach() sends beginRelay through the main WebSocket.
+    // Deferred size correction (survives React StrictMode double-mount).
+    // Attach timing is owned by the React layer (terminalSessionStateAtom);
+    // this timer only nudges the PTY to the ResizeObserver-settled size
+    // once the mount is stable.
     this.attachTimer = setTimeout(() => {
       if (this.isDisposed) { return; }
       const r = this.pendingResize;
-      if (this.connection.isP2P) {
-        if (r) { this.connection.sendResize(r.cols, r.rows); }
-      } else {
-        this.connection.attach(r?.cols, r?.rows).catch(() => {});
-      }
+      if (r) { this.connection.sendResize(r.cols, r.rows); }
     }, 50);
   }
 
@@ -292,12 +286,13 @@ export class TerminalView {
     });
   }
 
-  /** Re-issue attach (tmux redraw) after a transport reconnect. */
+  /** Re-issue attach (tmux redraw) after a transport reconnect.
+   *  Attach timing is now owned by the React state machine
+   *  (terminalSessionStateAtom) — ConnectionManager is pure transport.
+   *  Kept as a no-op so Terminal.tsx's P2P effect still compiles until the
+   *  state machine effect lands. */
   reattach(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    this.connection.reattach().catch(() => {});
+    // client.attach is driven by the React layer, not ConnectionManager.
   }
 
   dispose(): void {

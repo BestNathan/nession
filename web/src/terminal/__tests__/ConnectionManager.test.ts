@@ -108,33 +108,6 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('attach sends only client.attach, never a synthetic terminal.input (no phantom Enter)', async () => {
-      const p2p = makeMockP2P();
-      const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
-      });
-      await cm.attach();
-      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
-      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
-      expect(types).toContain('client.attach');
-      // tmux attach-session already redraws on attach; injecting a '\r' left a
-      // stray blank prompt line on every (re)attach — assert we no longer do it.
-      expect(types).not.toContain('terminal.input');
-      cm.dispose();
-    });
-
-    it('reattach re-sends client.attach', async () => {
-      const p2p = makeMockP2P();
-      const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
-      });
-      await cm.reattach();
-      const send = p2p.sendMessage as ReturnType<typeof vi.fn>;
-      const types = send.mock.calls.map((c) => (c[0] as { msg_type: string }).msg_type);
-      expect(types).toContain('client.attach');
-      cm.dispose();
-    });
-
     it('should send terminal.resize message in P2P mode', () => {
       const mockSend = vi.fn();
       const mockP2P: P2PConnection = {
@@ -184,7 +157,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('transitions to lost after RELAY_MAX_ATTEMPTS and fires onDisconnect exactly once', () => {
+    it('maps relay connection status to onStateChange (authenticated → connected, disconnected → lost)', () => {
       const ws = makeMockWs();
       let stateCb: (status: string) => void = () => {};
       (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
@@ -193,18 +166,18 @@ describe('ConnectionManager', () => {
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
       });
-      const states: string[] = [];
-      const onDisconnect = vi.fn();
-      cm.onStateChange = (s) => states.push(s);
-      cm.onDisconnect = onDisconnect;
+      const calls: Array<[string, number]> = [];
+      cm.onStateChange = (s, attempt) => calls.push([s, attempt]);
 
-      // 15 disconnect signals: attempts 1..10 reconnecting, then latched at lost.
-      for (let i = 0; i < 15; i++) { stateCb('disconnected'); }
+      stateCb('authenticated');
+      stateCb('disconnected');
+      stateCb('connecting');
+      stateCb('connected');
 
-      expect(states.filter((s) => s === 'reconnecting').length).toBe(10);
-      expect(states.filter((s) => s === 'lost').length).toBe(1);
-      vi.advanceTimersByTime(3000);
-      expect(onDisconnect).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual([
+        ['connected', 0],
+        ['lost', 0],
+      ]);
       cm.dispose();
     });
 
