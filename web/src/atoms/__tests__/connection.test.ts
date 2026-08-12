@@ -4,7 +4,7 @@ import {
   p2pStateAtom, p2pConnectionAtom, terminalSessionStateAtom, lastResizeAtom,
   activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
 } from '../connection';
-import { orderedUrlsAtom, manualOverrideAtom, forcedRelayAtom, attachInfoAtom } from '../session';
+import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom } from '../session';
 
 describe('base atoms', () => {
   it('start with defaults', () => {
@@ -17,17 +17,18 @@ describe('base atoms', () => {
 });
 
 describe('derived atoms', () => {
-  it('activeUrlAtom: override > ordered > null', () => {
+  it('activeUrlAtom: override > probe > null', () => {
     const store = createStore();
-    store.set(orderedUrlsAtom, ['ws://a/ws']);
-    expect(store.get(activeUrlAtom)).toBe('ws://a/ws');
+    // No probe data, no override → null
+    expect(store.get(activeUrlAtom)).toBeNull();
+    // Manual override wins regardless of probe
     store.set(manualOverrideAtom, 'ws://b/ws');
     expect(store.get(activeUrlAtom)).toBe('ws://b/ws');
   });
 
   it('activeUrlAtom: null when forcedRelay', () => {
     const store = createStore();
-    store.set(orderedUrlsAtom, ['ws://a/ws']);
+    store.set(manualOverrideAtom, 'ws://a/ws');
     store.set(forcedRelayAtom, true);
     expect(store.get(activeUrlAtom)).toBeNull();
   });
