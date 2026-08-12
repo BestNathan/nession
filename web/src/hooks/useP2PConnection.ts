@@ -309,25 +309,33 @@ export function useP2PConnection(
     });
   }, []);
 
-  // Build a STABLE connection object. `sendMessage`/`onMessage`/`close`/
+  // Build a connection object whose identity is STABLE across state transitions
+  // but CHANGES when agentUrl changes. `sendMessage`/`onMessage`/`close`/
   // `waitForConnection` are useCallback-stable; `connectionState` and
-  // `reconnectAttempt` are exposed as getters backed by refs so the object
-  // identity never changes across state transitions. This matters because
-  // `Terminal.tsx` rebuilds its xterm view when the `p2pConnection` prop
-  // identity changes — returning a fresh object literal every render (the old
-  // behaviour) made unrelated re-renders (e.g. toggling the bottom-bar tab)
-  // tear down and recreate the terminal. Consumers that need reactivity read
-  // the primitive getter value into an effect dependency (e.g. an effect keyed
-  // on connectionState), which still updates because the owning component
-  // re-renders on setState.
-  const connection = useMemo<P2PConnection>(() => ({
-    sendMessage,
-    onMessage,
-    close,
-    waitForConnection,
-    get connectionState() { return connectionStateRef.current; },
-    get reconnectAttempt() { return reconnectAttemptStateRef.current; },
-  }), [sendMessage, onMessage, close, waitForConnection]);
+  // `reconnectAttempt` are exposed as getters backed by refs, so the object
+  // does NOT change on every render — an unrelated re-render (e.g. toggling the
+  // bottom-bar tab) must not tear down the terminal. `agentUrl` IS in the
+  // dependency list on purpose: switching the P2P route must produce a fresh
+  // object so the p2pConnectionAtom effect re-runs and Terminal.tsx rebuilds
+  // its xterm view against the new socket. Without this, switchAddressAtom's
+  // `set(p2pConnectionAtom, null)` is never undone and the terminal stays
+  // blank after a route switch. Consumers that need reactivity read the
+  // primitive getter value into an effect dependency, which still updates
+  // because the owning component re-renders on setState.
+  const connection = useMemo<P2PConnection>(() => {
+    // Referenced (not read) so the object identity changes with agentUrl — the
+    // URL itself is tracked inside wsRef by connectWs, not carried on the
+    // connection object. See the comment above for why identity must change.
+    void agentUrl;
+    return {
+      sendMessage,
+      onMessage,
+      close,
+      waitForConnection,
+      get connectionState() { return connectionStateRef.current; },
+      get reconnectAttempt() { return reconnectAttemptStateRef.current; },
+    };
+  }, [sendMessage, onMessage, close, waitForConnection, agentUrl]);
 
   // Expose the stable connection object to the global atom so consumers
   // (Terminal, TerminalView) can subscribe without prop drilling. The
