@@ -88,11 +88,6 @@ export const attachToSessionAtom = atom(
     const { session, choice, navigate } = payload;
     set(sessionIdAtom, session.session_id);
     set(sessionNameAtom, session.session_name);
-    console.log('[attachToSessionAtom] attachInfo:', choice.attachInfo ? {
-      mode: choice.attachInfo.mode,
-      addresses: choice.attachInfo.addresses?.length,
-      session_id: choice.attachInfo.session_id,
-    } : null);
     set(attachInfoAtom, choice.attachInfo);
     set(orderedUrlsAtom, choice.orderedUrls);
     set(rendererAtom, choice.renderer);
