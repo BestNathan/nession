@@ -16,8 +16,7 @@ import {
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import type { Session } from '../types';
-import type { useAddressProbeCache } from '../hooks/useAddressProbeCache';
-import { sessionIdAtom, attachToSessionAtom } from '../atoms/session';
+import { sessionIdAtom, attachToSessionAtom, attachDialogSessionAtom } from '../atoms/session';
 
 interface SessionDropdownProps {
   sessions: Session[];
@@ -25,7 +24,6 @@ interface SessionDropdownProps {
   error: string | null;
   onRetry: () => void;
   currentSessionName: string;
-  probeCache: ReturnType<typeof useAddressProbeCache>;
 }
 
 function SessionRow({
@@ -98,11 +96,10 @@ export function SessionDropdown({
   error,
   onRetry,
   currentSessionName,
-  probeCache,
 }: SessionDropdownProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [attachTarget, setAttachTarget] = useState<Session | null>(null);
+  const [attachTarget, setAttachTarget] = useAtom(attachDialogSessionAtom);
   const [killTarget, setKillTarget] = useState<Session | null>(null);
   const [currentSessionId] = useAtom(sessionIdAtom);
   const navigate = useNavigate();
@@ -120,12 +117,12 @@ export function SessionDropdown({
     if (session.session_id === currentSessionId) { return; }
     setOpen(false);
     setAttachTarget(session);
-  }, [currentSessionId]);
+  }, [currentSessionId, setAttachTarget]);
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachTarget(null);
     doAttach({ session, choice, navigate });
-  }, [doAttach, navigate]);
+  }, [doAttach, navigate, setAttachTarget]);
 
   const handleKill = useCallback((session: Session) => {
     setKillTarget(session);
@@ -206,7 +203,6 @@ export function SessionDropdown({
         onClose={() => setAttachTarget(null)}
         session={attachTarget}
         onConfirm={confirmAttach}
-        probeCache={probeCache}
       />
       <KillConfirmDialog
         isOpen={killTarget !== null}

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { Agent } from '../types';
-import { probeResultsAtom } from '../atoms/probe';
+import { probeRefreshRequestAtom, probeResultsAtom } from '../atoms/probe';
 import { testAddresses, orderByLatency } from '../services/addressSelection';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
@@ -65,6 +65,16 @@ export function useProbePolling(agents: Agent[], now: () => number = Date.now) {
       }
     }
   }, [probeAgent]);
+
+  // Consume one-shot forced re-probe requests (AttachDialog "Re-test").
+  const refreshRequest = useAtomValue(probeRefreshRequestAtom);
+  const setRefreshRequest = useSetAtom(probeRefreshRequestAtom);
+  useEffect(() => {
+    if (!refreshRequest) { return; }
+    const a = agentsRef.current.find((x) => x.agent_id === refreshRequest.agentId);
+    if (a) { void probeAgent(a); }
+    setRefreshRequest(null);
+  }, [refreshRequest, probeAgent, setRefreshRequest]);
 
   // Initial probe + 5-minute polling.
   useEffect(() => {
