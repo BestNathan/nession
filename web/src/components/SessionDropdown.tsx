@@ -124,7 +124,7 @@ export function SessionDropdown({
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachTarget(null);
-    doAttach(session, choice, navigate);
+    doAttach({ session, choice, navigate });
   }, [doAttach, navigate]);
 
   const handleKill = useCallback((session: Session) => {

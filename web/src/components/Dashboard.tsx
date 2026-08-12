@@ -85,7 +85,7 @@ function useTerminalAttach(
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachDialogSession(null);
     saveAttachPrefs({ mode: choice.mode, renderer: choice.renderer });
-    doAttach(session, choice, navigate);
+    doAttach({ session, choice, navigate });
   }, [doAttach, navigate]);
 
   // Deep-link restoration: on /terminal/:sessionId, auto-attach the session.
