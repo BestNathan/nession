@@ -96,7 +96,7 @@ export default tseslint.config(
 
   // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/components/FileBrowser.tsx', 'src/components/TerminalView.tsx'],
+    files: ['src/components/FileBrowser.tsx', 'src/components/TerminalView.tsx', 'src/terminal/components/TerminalWorkspace.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },

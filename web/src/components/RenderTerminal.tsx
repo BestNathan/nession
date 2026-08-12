@@ -1,4 +1,4 @@
-import { TerminalView } from './TerminalView';
+import { TerminalWorkspace } from '../terminal/components/TerminalWorkspace';
 
 export function RenderTerminal({
   handleBackToDashboard,
@@ -9,10 +9,11 @@ export function RenderTerminal({
   handleTerminalDisconnect: () => void;
   handleTerminalError: (err: Error) => void;
 }) {
-  // TerminalView reads all session state from the jotai atoms (atoms/session.ts
-  // + atoms/connection.ts), so no session props are needed here.
+  // TerminalWorkspace reads all session state from the jotai atoms
+  // (atoms/session.ts + atoms/connection.ts), so no session props are needed
+  // here.
   return (
-    <TerminalView
+    <TerminalWorkspace
       onBack={handleBackToDashboard}
       onDisconnect={handleTerminalDisconnect}
       onError={handleTerminalError}
