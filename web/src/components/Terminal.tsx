@@ -105,10 +105,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // the old p2pState observer + ConnectionManager attach/reattach methods.
   useEffect(() => {
     const view = viewRef.current;
+    console.log('[StateMachine] state=', terminalState, 'mode=', mode, 'hasConn=', !!p2pConnection);
 
     switch (terminalState) {
       case 'idle':
-        // Nothing to do — waiting for a session to be selected.
         break;
 
       case 'connecting':
@@ -124,6 +124,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         break;
 
       case 'connected': {
+        console.log('[StateMachine] connected — sending client.attach');
         if (mode === 'relay') {
           // Relay: beginRelay is fire-and-forget — once sent, the agent pushes
           // terminal.output through the server.  Session size comes from
@@ -213,7 +214,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const p2pState = p2pConnection?.connectionState;
   useEffect(() => {
     if (mode !== 'p2p') { return; }
+    console.log('[Bridge] p2pState=', p2pState, 'terminalState=', terminalState);
     if (p2pState === 'connected' && (terminalState === 'connecting' || terminalState === 'reconnecting')) {
+      console.log('[Bridge] transitioning to connected');
       setTerminalState('connected');
     } else if ((p2pState === 'reconnecting' || p2pState === 'disconnected') &&
                (terminalState === 'attached' || terminalState === 'connected')) {
