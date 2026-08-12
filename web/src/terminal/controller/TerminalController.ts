@@ -245,9 +245,10 @@ export class TerminalController {
  * session attaches; subsequent fires (window drags) are debounced at 200ms to
  * avoid flooding tmux with intermediate sizes.
  *
- * Internal helper — not part of the public facade.
+ * Exported so consumers can type/instantiate the resize controller when
+ * composing the terminal at the boundary.
  */
-class ResizeController {
+export class ResizeController {
   private controller: TerminalController;
   private observer: ResizeObserver | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
