@@ -2,10 +2,8 @@ import { Wifi, WifiOff, HelpCircle, Loader2 } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ProbedAddress, AddressLatency } from '../types';
-import {
-  manualOverrideAtom, switchAddressAtom,
-  activeUrlAtom, isSwitchingAtom,
-} from '../atoms/terminal';
+import { manualOverrideAtom, switchAddressAtom } from '../atoms/session';
+import { activeUrlAtom, isSwitchingAtom } from '../atoms/connection';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   Select,

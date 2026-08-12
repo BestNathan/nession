@@ -4,12 +4,12 @@ import { toast } from 'sonner';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
 import { useDashboard } from '../hooks/useDashboard';
-import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
+import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
 import {
   hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
-  attachToSessionAtom, disconnectAtom,
-} from '../atoms/terminal';
+  attachToSessionAtom, disconnectAtom, attachDialogSessionAtom,
+} from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
@@ -78,15 +78,18 @@ function useTerminalAttach(
     setSessionIdFromUrl(location.pathname.match(/^\/terminal\/(.+)$/)?.[1] ?? null);
   }, [location.pathname, setSessionIdFromUrl]);
 
-  const [attachDialogSession, setAttachDialogSession] = useState<Session | null>(null);
+  const [attachDialogSession, setAttachDialogSession] = useAtom(attachDialogSessionAtom);
 
-  const onAttach = useCallback((session: Session) => setAttachDialogSession(session), []);
+  const onAttach = useCallback(
+    (session: Session) => setAttachDialogSession(session),
+    [setAttachDialogSession],
+  );
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachDialogSession(null);
     saveAttachPrefs({ mode: choice.mode, renderer: choice.renderer });
     doAttach({ session, choice, navigate });
-  }, [doAttach, navigate]);
+  }, [doAttach, navigate, setAttachDialogSession]);
 
   // Deep-link restoration: on /terminal/:sessionId, auto-attach the session.
   useDeepLinkRestore({
@@ -123,7 +126,8 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
   } = useTerminalAttach(navigate, location, sessions, loadingSessions);
 
-  const probeCache = useAddressProbeCache(agents);
+  // App-level address probing — fire-and-forget, writes probeResultsAtom.
+  useProbePolling(agents);
   const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); doDisconnect(navigate); }, [doDisconnect, navigate]);
   const handleTerminalError = useCallback((err: Error) => { toast.error(`Terminal error: ${err.message}`); }, []);
 
@@ -220,7 +224,6 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         onClose={() => setAttachDialogSession(null)}
         session={attachDialogSession}
         onConfirm={confirmAttach}
-        probeCache={probeCache}
       />
     </div>
   );

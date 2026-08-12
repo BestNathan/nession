@@ -10,22 +10,24 @@ import { createFileOps } from '../services/fileOps';
 import { AddressSelector } from './AddressSelector';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useTerminalSessions } from '../hooks/useTerminalSessions';
-import { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 import { SessionDropdown } from './SessionDropdown';
 import { TerminalLayout } from './TerminalLayout';
 import {
   sessionIdAtom,
   sessionNameAtom,
   attachInfoAtom,
+  manualOverrideAtom,
+  forcedRelayAtom,
+  rendererAtom,
+  envRefsAtom,
+} from '../atoms/session';
+import { currentAgentLatenciesAtom } from '../atoms/probe';
+import {
   activeUrlAtom,
   effectiveModeAtom,
   isSwitchingAtom,
-  manualOverrideAtom,
-  forcedRelayAtom,
   p2pConnectionAtom,
-  rendererAtom,
-  envRefsAtom,
-} from '../atoms/terminal';
+} from '../atoms/connection';
 
 interface TerminalHeaderProps {
   onBack: () => void;
@@ -39,14 +41,12 @@ interface TerminalHeaderProps {
   sessionsLoading: boolean;
   sessionsError: string | null;
   onRetrySessions: () => void;
-  probeCache: ReturnType<typeof useAddressProbeCache>;
 }
 
 function TerminalHeader({
   onBack, sessionName, effectiveMode,
   attachInfo, forcedRelay, latencies,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-  probeCache,
 }: TerminalHeaderProps) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
@@ -59,7 +59,6 @@ function TerminalHeader({
         error={sessionsError}
         onRetry={onRetrySessions}
         currentSessionName={sessionName}
-        probeCache={probeCache}
       />
       <Badge variant={effectiveMode === 'p2p' ? 'default' : 'secondary'} className="text-xs">
         {effectiveMode.toUpperCase()}
@@ -105,11 +104,6 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
   const [attachInfo] = useAtom(attachInfoAtom);
-  console.log('[TerminalView] attachInfo:', attachInfo ? {
-    mode: attachInfo.mode,
-    addresses: attachInfo.addresses?.length,
-    session_id: attachInfo.session_id,
-  } : null);
   const [effectiveMode] = useAtom(effectiveModeAtom);
   const [activeUrl] = useAtom(activeUrlAtom);
   const [forcedRelay] = useAtom(forcedRelayAtom);
@@ -135,7 +129,7 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
     error: sessionsError,
     refetch: refetchSessions,
   } = useTerminalSessions(wsService);
-  const probeCache = useAddressProbeCache([]);
+  const [latencies] = useAtom(currentAgentLatenciesAtom);
 
   const isP2P = effectiveMode === 'p2p';
 
@@ -233,14 +227,11 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
         effectiveMode={effectiveMode}
         attachInfo={attachInfo}
         forcedRelay={forcedRelay}
-        latencies={attachInfo?.session_id
-          ? (probeCache?.getProbe(attachInfo.session_id.split(':')[0])?.latencies ?? [])
-          : []}
+        latencies={latencies}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
         onRetrySessions={refetchSessions}
-        probeCache={probeCache}
       />
 
       <div className="flex-1 min-h-0 flex flex-col relative">

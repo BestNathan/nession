@@ -5,7 +5,6 @@ import { SessionPanel } from '../SessionPanel';
 import { WebSocketContext } from '../../hooks/useWebSocket';
 import type { Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
-import type { useAddressProbeCache } from '../../hooks/useAddressProbeCache';
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -19,12 +18,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     ...overrides,
   };
 }
-
-const mockProbeCache = {
-  get: vi.fn().mockReturnValue(null),
-  put: vi.fn(),
-  clear: vi.fn(),
-} as unknown as ReturnType<typeof useAddressProbeCache>;
 
 function makeWsService() {
   return {
@@ -59,7 +52,6 @@ describe('SessionPanel', () => {
           onRetry={vi.fn()}
           currentSessionId={props.currentSessionId ?? 'agent1:current'}
           onSwitchSession={vi.fn()}
-          probeCache={mockProbeCache}
         />
       </WebSocketContext.Provider>,
     );
@@ -90,7 +82,6 @@ describe('SessionPanel', () => {
           onRetry={onRetry}
           currentSessionId="agent1:current"
           onSwitchSession={vi.fn()}
-          probeCache={mockProbeCache}
         />
       </WebSocketContext.Provider>,
     );

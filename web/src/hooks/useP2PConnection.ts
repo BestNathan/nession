@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useSetAtom } from 'jotai';
-import { p2pStateAtom, p2pConnectionAtom } from '../atoms/terminal';
+import { p2pStateAtom, p2pConnectionAtom } from '../atoms/connection';
 
 export interface P2PMessage {
   msg_type: string;

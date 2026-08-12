@@ -6,8 +6,8 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   forcedRelayAtom,
-  p2pConnectionAtom,
-} from '../../atoms/terminal';
+} from '../../atoms/session';
+import { p2pConnectionAtom } from '../../atoms/connection';
 import type { AttachInfo } from '../../types';
 
 // Track TerminalView construction + disposal so we can assert the view is

@@ -53,8 +53,9 @@ export interface TerminalHandle {
 }
 
 /** Props for the Terminal React component. Session identity, mode, and the P2P
- *  connection are read from jotai atoms (see web/src/atoms/terminal.ts); only
- *  the transport service, relay endpoint, and UI callbacks remain props. */
+ *  connection are read from jotai atoms (see web/src/atoms/session.ts and
+ *  web/src/atoms/connection.ts); only the transport service, relay endpoint,
+ *  and UI callbacks remain props. */
 export interface TerminalProps {
   serverConnection?: WebSocketService;
   relayUrl?: string | null;

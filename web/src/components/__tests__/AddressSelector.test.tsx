@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { AddressSelector } from '../AddressSelector';
-import { manualOverrideAtom } from '../../atoms/terminal';
+import { manualOverrideAtom } from '../../atoms/session';
 import type { ProbedAddress } from '../../types';
 
 function probed(url: string, label: string, status: ProbedAddress['status'] = 'reachable'): ProbedAddress {

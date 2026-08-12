@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Agent, AddressLatency } from '../types';
+// web/src/hooks/useProbePolling.ts
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import type { Agent } from '../types';
+import { probeRefreshRequestAtom, probeResultsAtom } from '../atoms/probe';
 import { testAddresses, orderByLatency } from '../services/addressSelection';
+
+const POLL_INTERVAL_MS = 5 * 60_000;
 
 /** Stable string that changes only when online agents or their addresses differ. */
 function computeFingerprint(agents: Agent[]): string {
@@ -14,41 +19,25 @@ function computeFingerprint(agents: Agent[]): string {
     .join('|');
 }
 
-/** One agent's cached browser-latency probe. */
-export interface AgentProbe {
-  latencies: AddressLatency[];
-  orderedUrls: string[];
-  probedAt: number;
-}
-
-export interface AddressProbeCache {
-  /** Read a fresh (< TTL) probe for an agent, or undefined. */
-  getProbe: (agentId: string) => AgentProbe | undefined;
-  /** Force a re-probe of one agent now. */
-  refreshAgent: (agentId: string) => void;
-}
-
-const POLL_INTERVAL_MS = 5 * 60_000;
-const TTL_MS = 5 * 60_000;
-
 /**
- * App-level per-agent address probe cache (issue #51).
+ * App-level per-agent address probe polling (issue #51).
  *
- * On login and every 5 minutes, latency-probes every online agent's advertised
+ * On mount and every 5 minutes, latency-probes every online agent's advertised
  * addresses directly from the browser (bare WebSocket handshake — no session,
- * no attach). AttachDialog reads this cache so attach never blocks on probing.
- * Probes that fail are not cached (retried next cycle); entries older than the
- * TTL are treated as stale and not returned.
+ * no attach). Results are written to probeResultsAtom; consumers read
+ * currentAgentLatenciesAtom / probeResultsAtom directly instead of a local
+ * cache. Probes that fail are not cached (retried next cycle).
  *
  * `now` is injectable for tests; defaults to Date.now.
  */
-export function useAddressProbeCache(
-  agents: Agent[],
-  now: () => number = Date.now,
-): AddressProbeCache {
-  const [cache, setCache] = useState<Map<string, AgentProbe>>(new Map());
-  const cacheRef = useRef(cache);
-  cacheRef.current = cache;
+export function useProbePolling(agents: Agent[], now: () => number = Date.now) {
+  const setProbe = useSetAtom(probeResultsAtom);
+
+  // Mirror the previous cacheRef: the reactive effect reads the latest map
+  // without being re-created (which would reset the interval timer each render).
+  const probeResults = useAtomValue(probeResultsAtom);
+  const probeResultsRef = useRef(probeResults);
+  probeResultsRef.current = probeResults;
 
   // Keep the latest agents list in a ref so the interval callback reads current
   // data without being re-created (which would reset the timer each render).
@@ -62,12 +51,12 @@ export function useAddressProbeCache(
     const reachable = latencies.some((l) => l.latencyMs !== null);
     if (!reachable) { return; } // failure — don't cache, retry next cycle
     const orderedUrls = orderByLatency(latencies);
-    setCache((prev) => {
+    setProbe((prev) => {
       const next = new Map(prev);
       next.set(a.agent_id, { latencies, orderedUrls, probedAt: now() });
       return next;
     });
-  }, [now]);
+  }, [now, setProbe]);
 
   const probeAll = useCallback(() => {
     for (const a of agentsRef.current) {
@@ -76,6 +65,16 @@ export function useAddressProbeCache(
       }
     }
   }, [probeAgent]);
+
+  // Consume one-shot forced re-probe requests (AttachDialog "Re-test").
+  const refreshRequest = useAtomValue(probeRefreshRequestAtom);
+  const setRefreshRequest = useSetAtom(probeRefreshRequestAtom);
+  useEffect(() => {
+    if (!refreshRequest) { return; }
+    const a = agentsRef.current.find((x) => x.agent_id === refreshRequest.agentId);
+    if (a) { void probeAgent(a); }
+    setRefreshRequest(null);
+  }, [refreshRequest, probeAgent, setRefreshRequest]);
 
   // Initial probe + 5-minute polling.
   useEffect(() => {
@@ -103,29 +102,9 @@ export function useAddressProbeCache(
 
     // Probe agents that aren't already cached (new or changed addresses).
     for (const [id, a] of currentMap) {
-      if (!cacheRef.current.has(id)) {
+      if (!probeResultsRef.current.has(id)) {
         void probeAgent(a);
       }
     }
   }, [fingerprint, agents, probeAgent]);
-
-  const getProbe = useCallback(
-    (agentId: string): AgentProbe | undefined => {
-      const entry = cache.get(agentId);
-      if (!entry) { return undefined; }
-      if (now() - entry.probedAt > TTL_MS) { return undefined; } // stale
-      return entry;
-    },
-    [cache, now],
-  );
-
-  const refreshAgent = useCallback(
-    (agentId: string) => {
-      const a = agentsRef.current.find((x) => x.agent_id === agentId);
-      if (a) { void probeAgent(a); }
-    },
-    [probeAgent],
-  );
-
-  return { getProbe, refreshAgent };
 }

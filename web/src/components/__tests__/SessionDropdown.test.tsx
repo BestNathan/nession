@@ -4,10 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { SessionDropdown } from '../SessionDropdown';
 import { WebSocketContext } from '../../hooks/useWebSocket';
-import { sessionIdAtom } from '../../atoms/terminal';
+import { sessionIdAtom } from '../../atoms/session';
 import type { Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
-import type { useAddressProbeCache } from '../../hooks/useAddressProbeCache';
 
 // SessionDropdown navigates via useNavigate on attach; stub it so the component
 // can render outside a Router and we can assert the target path.
@@ -33,11 +32,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     ...overrides,
   };
 }
-
-const mockProbeCache = {
-  getProbe: vi.fn().mockReturnValue(undefined),
-  refreshAgent: vi.fn(),
-} as unknown as ReturnType<typeof useAddressProbeCache>;
 
 function makeWsService() {
   return {
@@ -75,7 +69,6 @@ describe('SessionDropdown', () => {
               error={props.error ?? null}
               onRetry={vi.fn()}
               currentSessionName={props.currentSessionName ?? 'current'}
-              probeCache={mockProbeCache}
             />
           </WebSocketContext.Provider>
         </Provider>,
@@ -136,7 +129,6 @@ describe('SessionDropdown', () => {
             error="fetch failed"
             onRetry={onRetry}
             currentSessionName="current"
-            probeCache={mockProbeCache}
           />
         </WebSocketContext.Provider>
       </Provider>,
@@ -215,7 +207,6 @@ describe('SessionDropdown', () => {
             error={null}
             onRetry={vi.fn()}
             currentSessionName="current"
-            probeCache={mockProbeCache}
           />
         </WebSocketContext.Provider>
       </Provider>,
@@ -251,7 +242,6 @@ describe('SessionDropdown', () => {
             error={null}
             onRetry={vi.fn()}
             currentSessionName="current"
-            probeCache={mockProbeCache}
           />
         </WebSocketContext.Provider>
       </Provider>,

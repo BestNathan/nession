@@ -10,7 +10,6 @@ import { SidePanel } from './SidePanel';
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import type { Session } from '../types';
-import type { useAddressProbeCache } from '../hooks/useAddressProbeCache';
 
 interface SessionPanelProps {
   sessions: Session[];
@@ -19,7 +18,6 @@ interface SessionPanelProps {
   onRetry: () => void;
   currentSessionId: string;
   onSwitchSession: (session: Session, choice: AttachChoice) => void;
-  probeCache: ReturnType<typeof useAddressProbeCache>;
   defaultOpen?: boolean;
 }
 
@@ -162,7 +160,6 @@ export function SessionPanel({
   onRetry,
   currentSessionId,
   onSwitchSession,
-  probeCache,
   defaultOpen = false,
 }: SessionPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -229,7 +226,6 @@ export function SessionPanel({
           onClose={() => setAttachTarget(null)}
           session={attachTarget}
           onConfirm={confirmAttach}
-          probeCache={probeCache}
         />
         <KillConfirmDialog
           isOpen={killTarget !== null}
