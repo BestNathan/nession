@@ -45,6 +45,32 @@ describe('terminalSessionAtom', () => {
     // Stable across subsequent reads
     expect(store.get(terminalSessionAtom)?.startedAt).toBe(session?.startedAt);
   });
+
+  it('startedAt does not drift across state transitions', () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:sess');
+    store.set(terminalSessionStateAtom, 'idle');
+
+    // Not formally started — pinned atom is still 0, no Date.now() fallback.
+    const initial = store.get(terminalSessionAtom);
+    expect(initial?.startedAt).toBe(0);
+
+    // Transition through states without writing the stamp action.
+    store.set(terminalSessionStateAtom, 'connecting');
+    const connecting = store.get(terminalSessionAtom);
+    store.set(terminalSessionStateAtom, 'connected');
+    const connected = store.get(terminalSessionAtom);
+
+    expect(connecting?.startedAt).toBe(initial?.startedAt);
+    expect(connected?.startedAt).toBe(initial?.startedAt);
+
+    // Once stamped by the write action, it stays pinned across transitions too.
+    store.set(terminalSessionAtom);
+    const stamped = store.get(terminalSessionAtom)?.startedAt;
+    store.set(terminalSessionStateAtom, 'reconnecting');
+    store.set(terminalSessionStateAtom, 'failed');
+    expect(store.get(terminalSessionAtom)?.startedAt).toBe(stamped);
+  });
 });
 
 describe('terminalViewModelAtomFamily', () => {

@@ -40,7 +40,7 @@ export const terminalSessionAtom = atom<TerminalSession | null, [], void>(
       name: get(sessionNameAtom),
       status: get(terminalSessionStateAtom),
       mode: get(effectiveModeAtom),
-      startedAt: get(startedAtAtom) || Date.now(),
+      startedAt: get(startedAtAtom),
     };
   },
   (_get, set) => {
