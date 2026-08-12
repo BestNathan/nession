@@ -105,6 +105,11 @@ export function TerminalView({ onBack, onDisconnect, onError }: TerminalViewProp
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
   const [attachInfo] = useAtom(attachInfoAtom);
+  console.log('[TerminalView] attachInfo:', attachInfo ? {
+    mode: attachInfo.mode,
+    addresses: attachInfo.addresses?.length,
+    session_id: attachInfo.session_id,
+  } : null);
   const [effectiveMode] = useAtom(effectiveModeAtom);
   const [activeUrl] = useAtom(activeUrlAtom);
   const [forcedRelay] = useAtom(forcedRelayAtom);
