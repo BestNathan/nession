@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { useSetAtom } from 'jotai';
-import { p2pStateAtom, p2pConnectionAtom } from '../atoms/connection';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { p2pStateAtom, p2pConnectionAtom, p2pEpochAtom } from '../atoms/connection';
 
 export interface P2PMessage {
   msg_type: string;
@@ -161,6 +161,9 @@ export function useP2PConnection(
 
   const setP2pState = useSetAtom(p2pStateAtom);
   const setP2pConnection = useSetAtom(p2pConnectionAtom);
+  // Bumped by switchAddressAtom on every route switch. Used only to change the
+  // connection object's identity (see the useMemo below), never read directly.
+  const p2pEpoch = useAtomValue(p2pEpochAtom);
   // Boolean flag so the p2pConnectionAtom effect can react to the options
   // null↔object transition without referencing the mutable options object.
   const hasP2pTarget = Boolean(options);
@@ -309,25 +312,34 @@ export function useP2PConnection(
     });
   }, []);
 
-  // Build a STABLE connection object. `sendMessage`/`onMessage`/`close`/
-  // `waitForConnection` are useCallback-stable; `connectionState` and
-  // `reconnectAttempt` are exposed as getters backed by refs so the object
-  // identity never changes across state transitions. This matters because
-  // `Terminal.tsx` rebuilds its xterm view when the `p2pConnection` prop
-  // identity changes — returning a fresh object literal every render (the old
-  // behaviour) made unrelated re-renders (e.g. toggling the bottom-bar tab)
-  // tear down and recreate the terminal. Consumers that need reactivity read
-  // the primitive getter value into an effect dependency (e.g. an effect keyed
-  // on connectionState), which still updates because the owning component
-  // re-renders on setState.
-  const connection = useMemo<P2PConnection>(() => ({
-    sendMessage,
-    onMessage,
-    close,
-    waitForConnection,
-    get connectionState() { return connectionStateRef.current; },
-    get reconnectAttempt() { return reconnectAttemptStateRef.current; },
-  }), [sendMessage, onMessage, close, waitForConnection]);
+  // Build a connection object whose identity is STABLE across state transitions
+  // but CHANGES on every route switch (p2pEpoch bump). `sendMessage`/
+  // `onMessage`/`close`/`waitForConnection` are useCallback-stable;
+  // `connectionState` and `reconnectAttempt` are getters backed by refs, so the
+  // object does NOT change on every render — an unrelated re-render (e.g.
+  // toggling the bottom-bar tab) must not tear down the terminal. `p2pEpoch`
+  // IS in the dependency list on purpose: switchAddressAtom bumps it so a fresh
+  // object is produced and the p2pConnectionAtom effect re-runs, rebuilding
+  // Terminal.tsx's xterm view against the new socket — even when the resolved
+  // activeUrl does not change. Without this, switchAddressAtom's
+  // `set(p2pConnectionAtom, null)` is never undone and the terminal stays
+  // blank after a route switch. Consumers that need reactivity read the
+  // primitive getter value into an effect dependency, which still updates
+  // because the owning component re-renders on setState.
+  const connection = useMemo<P2PConnection>(() => {
+    // Referenced (not read) so the object identity changes with p2pEpoch — the
+    // epoch is a pure "route switched" signal; the actual socket is tracked
+    // inside wsRef by connectWs. See the comment above.
+    void p2pEpoch;
+    return {
+      sendMessage,
+      onMessage,
+      close,
+      waitForConnection,
+      get connectionState() { return connectionStateRef.current; },
+      get reconnectAttempt() { return reconnectAttemptStateRef.current; },
+    };
+  }, [sendMessage, onMessage, close, waitForConnection, p2pEpoch]);
 
   // Expose the stable connection object to the global atom so consumers
   // (Terminal, TerminalView) can subscribe without prop drilling. The

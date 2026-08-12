@@ -2,7 +2,8 @@
 import { atom, getDefaultStore } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom, terminalSessionStateAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from './connection';
+import { terminalSessionStateAtom } from '../terminal/state/session';
 
 // ── Base atoms ──────────────────────────────────────────────────
 
@@ -74,9 +75,14 @@ export const disconnectAtom = atom(
 
 export const switchAddressAtom = atom(
   null,
-  (_get, set, url: string | null) => {
+  (get, set, url: string | null) => {
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
+    // Bump the epoch so useP2PConnection's connection object changes identity
+    // and Terminal.tsx rebuilds its xterm view against the new socket — even
+    // when the resolved activeUrl does not change (e.g. Auto → an explicit
+    // route that Auto already resolved to).
+    set(p2pEpochAtom, get(p2pEpochAtom) + 1);
     // Force full disconnect: clear connection + reset state to idle.
     // The Terminal effect's idle case tears down any pending
     // timeout/subscription.  useP2PConnection will react to activeUrl
@@ -90,8 +96,11 @@ export const switchAddressAtom = atom(
   },
 );
 
-// The import from ./connection creates a circular dependency between
-// session.ts and connection.ts. This is fine because:
-// 1. session.ts imports connection.ts for terminalSessionStateAtom (write-only)
+// The imports below create a circular dependency between session.ts,
+// connection.ts, and terminal/state/session.ts. This is fine because:
+// 1. session.ts imports connection.ts for p2pConnectionAtom/p2pStateAtom (write-only)
 // 2. connection.ts imports session.ts for derived atoms (read-only)
-// 3. Jotai atoms support circular imports — atom definitions don't execute at import time
+// 3. session.ts imports terminal/state/session.ts for terminalSessionStateAtom (write-only)
+// 4. terminal/state/session.ts imports atoms/session.ts (sessionId/sessionName, read-only)
+//    and atoms/connection.ts (effectiveModeAtom, read-only)
+// 5. Jotai atoms support circular imports — atom definitions don't execute at import time

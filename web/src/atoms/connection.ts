@@ -11,11 +11,12 @@ import { probeResultsAtom } from './probe';
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
-export const terminalSessionStateAtom = atom<
-  'idle' | 'connecting' | 'connected' | 'attached' | 'reconnecting' | 'failed'
->('idle');
-
-export const lastResizeAtom = atom<{ cols: number; rows: number } | null>(null);
+/** Monotonic counter bumped by switchAddressAtom on every route switch. Its
+ *  sole purpose is to force useP2PConnection's connection object identity to
+ *  change — which in turn re-runs the p2pConnectionAtom effect and rebuilds
+ *  Terminal.tsx's xterm view — even when the resolved activeUrl does not change
+ *  (e.g. switching Auto → an explicit route that Auto already resolved to). */
+export const p2pEpochAtom = atom(0);
 
 // ── Derived ─────────────────────────────────────────────────────
 
