@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getDefaultStore } from 'jotai';
 import { ConnectionManager } from '../ConnectionManager';
-import { terminalSessionStateAtom } from '../../atoms/terminal';
+import { terminalSessionStateAtom } from '../../atoms/connection';
 import type { P2PConnection, P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';
 

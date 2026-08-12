@@ -15,7 +15,7 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { attachInfoAtom } from '../../atoms/terminal';
+import { attachInfoAtom } from '../../atoms/session';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */

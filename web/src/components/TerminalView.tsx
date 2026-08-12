@@ -17,15 +17,17 @@ import {
   sessionIdAtom,
   sessionNameAtom,
   attachInfoAtom,
+  manualOverrideAtom,
+  forcedRelayAtom,
+  rendererAtom,
+  envRefsAtom,
+} from '../atoms/session';
+import {
   activeUrlAtom,
   effectiveModeAtom,
   isSwitchingAtom,
-  manualOverrideAtom,
-  forcedRelayAtom,
   p2pConnectionAtom,
-  rendererAtom,
-  envRefsAtom,
-} from '../atoms/terminal';
+} from '../atoms/connection';
 
 interface TerminalHeaderProps {
   onBack: () => void;

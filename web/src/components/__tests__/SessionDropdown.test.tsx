@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { SessionDropdown } from '../SessionDropdown';
 import { WebSocketContext } from '../../hooks/useWebSocket';
-import { sessionIdAtom } from '../../atoms/terminal';
+import { sessionIdAtom } from '../../atoms/session';
 import type { Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
 import type { useAddressProbeCache } from '../../hooks/useAddressProbeCache';

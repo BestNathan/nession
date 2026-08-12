@@ -17,7 +17,7 @@ import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import type { Session } from '../types';
 import type { useAddressProbeCache } from '../hooks/useAddressProbeCache';
-import { sessionIdAtom, attachToSessionAtom } from '../atoms/terminal';
+import { sessionIdAtom, attachToSessionAtom } from '../atoms/session';
 
 interface SessionDropdownProps {
   sessions: Session[];

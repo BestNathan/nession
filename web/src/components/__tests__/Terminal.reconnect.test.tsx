@@ -6,9 +6,11 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   forcedRelayAtom,
+} from '../../atoms/session';
+import {
   p2pConnectionAtom,
   terminalSessionStateAtom,
-} from '../../atoms/terminal';
+} from '../../atoms/connection';
 import type { AttachInfo } from '../../types';
 import type { P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';

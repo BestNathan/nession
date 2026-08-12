@@ -9,7 +9,7 @@ import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
 import {
   hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
   attachToSessionAtom, disconnectAtom,
-} from '../atoms/terminal';
+} from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';

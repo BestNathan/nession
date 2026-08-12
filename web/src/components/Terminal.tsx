@@ -4,14 +4,13 @@ import { useAtom, useSetAtom } from 'jotai';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 import { detectWebGLSupport } from '../terminal/Renderer';
 import { useLatest } from '../hooks/useLatest';
+import { sessionIdAtom, sessionNameAtom } from '../atoms/session';
 import {
-  sessionIdAtom,
-  sessionNameAtom,
   effectiveModeAtom,
   p2pConnectionAtom,
   terminalSessionStateAtom,
   lastResizeAtom,
-} from '../atoms/terminal';
+} from '../atoms/connection';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -32,11 +31,11 @@ const ATTACH_TIMEOUT_MS = 10_000;
  *
  * TerminalView is rebuilt only when session identity or connection mode
  * changes. sessionId, sessionName, mode, and p2pConnection are read from the
- * jotai atoms (atoms/terminal.ts) — written by attachToSessionAtom /
- * disconnectAtom / useP2PConnection — so this component subscribes without
- * prop-drilling from TerminalView. serverConnection and relayUrl still arrive
- * via props because they are WebSocketService transport concerns, not session
- * state.
+ * jotai atoms (atoms/session.ts + atoms/connection.ts) — written by
+ * attachToSessionAtom / disconnectAtom / useP2PConnection — so this component
+ * subscribes without prop-drilling from TerminalView. serverConnection and
+ * relayUrl still arrive via props because they are WebSocketService transport
+ * concerns, not session state.
  *
  * P2P connectionState transitions (connecting → connected → reconnecting)
  * are handled internally by ConnectionManager and do NOT trigger a rebuild.
@@ -53,9 +52,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   },
   ref,
 ) {
-  // Session state is owned by the atoms in ../atoms/terminal. Reading it here
-  // (instead of receiving it as props) keeps Terminal in sync with the attach
-  // flow and P2P connection without prop-drilling from TerminalView.
+  // Session state is owned by the atoms in ../atoms/session and ../atoms/connection.
+  // Reading it here (instead of receiving it as props) keeps Terminal in sync
+  // with the attach flow and P2P connection without prop-drilling from TerminalView.
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
   const [mode] = useAtom(effectiveModeAtom);

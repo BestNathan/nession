@@ -2,7 +2,7 @@
 import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { terminalSessionStateAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom, terminalSessionStateAtom } from './connection';
 
 // ── Base atoms ──────────────────────────────────────────────────
 
@@ -30,6 +30,9 @@ export const addressesAtom = atom<ProbedAddress[]>((get) =>
 );
 
 export const hasActiveSessionAtom = atom((get) => get(sessionIdAtom) !== '');
+
+/** Session ID parsed from the URL pathname, for deep-link restore. */
+export const sessionIdFromUrlAtom = atom<string | null>(null);
 
 // ── Action atoms ─────────────────────────────────────────────────
 
@@ -62,6 +65,8 @@ export const disconnectAtom = atom(
     set(forcedRelayAtom, false);
     set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
+    set(p2pConnectionAtom, null);
+    set(p2pStateAtom, 'disconnected');
     set(terminalSessionStateAtom, 'idle');
     navigate('/');
   },
