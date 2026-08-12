@@ -1,5 +1,5 @@
 // web/src/atoms/session.ts
-import { atom } from 'jotai';
+import { atom, getDefaultStore } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
 import { p2pConnectionAtom, p2pStateAtom, terminalSessionStateAtom } from './connection';
@@ -77,7 +77,10 @@ export const switchAddressAtom = atom(
   (_get, set, url: string | null) => {
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
-    set(terminalSessionStateAtom, 'connecting');
+    set(terminalSessionStateAtom, 'idle');
+    setTimeout(() => {
+      getDefaultStore().set(terminalSessionStateAtom, 'connecting');
+    }, 0);
   },
 );
 
