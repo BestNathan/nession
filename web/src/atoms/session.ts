@@ -76,10 +76,8 @@ export const switchAddressAtom = atom(
   null,
   (_get, set, url: string | null) => {
     set(manualOverrideAtom, url);
-    if (url !== null) {
-      set(forcedRelayAtom, false);
-      set(terminalSessionStateAtom, 'connecting');
-    }
+    set(forcedRelayAtom, false);
+    set(terminalSessionStateAtom, 'connecting');
   },
 );
 
