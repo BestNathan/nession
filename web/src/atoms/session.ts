@@ -77,6 +77,12 @@ export const switchAddressAtom = atom(
   (_get, set, url: string | null) => {
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
+    // Force full disconnect: clear connection + reset state to idle.
+    // The Terminal effect's idle case tears down any pending
+    // timeout/subscription.  useP2PConnection will react to activeUrl
+    // change and create a fresh socket, and the bridge picks up
+    // p2pState='connected' from the NEW socket.
+    set(p2pConnectionAtom, null);
     set(terminalSessionStateAtom, 'idle');
     setTimeout(() => {
       getDefaultStore().set(terminalSessionStateAtom, 'connecting');
