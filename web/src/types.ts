@@ -102,6 +102,9 @@ export interface AgentsListResponse {
 
 export interface SessionsListResponse {
   sessions: Session[];
+  /** Agents that did not answer a force refresh, so their sessions above may
+   *  be out of date. Absent on non-force requests. */
+  stale_agents?: string[];
 }
 
 export interface CreateSessionResponse {

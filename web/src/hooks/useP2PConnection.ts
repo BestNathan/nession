@@ -1,4 +1,6 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { p2pStateAtom, p2pConnectionAtom, p2pEpochAtom } from '../atoms/connection';
 
 export interface P2PMessage {
   msg_type: string;
@@ -52,6 +54,7 @@ interface ConnectWsContext {
   generationRef: React.MutableRefObject<number>;
   reconnectAttemptRef: React.MutableRefObject<number>;
   setConnectionState: (s: ConnectionState) => void;
+  setP2pState: (s: ConnectionState) => void;
   setReconnectAttempt: (n: number) => void;
   handlersRef: React.MutableRefObject<Set<MessageHandler>>;
   maxReconnectAttempts: number;
@@ -82,6 +85,7 @@ function connectWs(ctx: ConnectWsContext) {
     ctx.reconnectAttemptRef.current = 0;
     ctx.setReconnectAttempt(0);
     ctx.setConnectionState('connected');
+    ctx.setP2pState('connected');
   };
 
   ws.onmessage = (event) => {
@@ -111,8 +115,10 @@ function connectWs(ctx: ConnectWsContext) {
     if (attempt >= ctx.maxReconnectAttempts) {
       console.log('[P2P] Max reconnect attempts reached');
       ctx.setConnectionState('disconnected');
+      ctx.setP2pState('disconnected');
       return;
     }
+    ctx.setP2pState('reconnecting');
     ctx.setConnectionState('reconnecting');
     ctx.setReconnectAttempt(attempt + 1);
     ctx.reconnectAttemptRef.current = attempt + 1;
@@ -152,6 +158,15 @@ export function useP2PConnection(
     options?.agentUrl ? 'connecting' : 'disconnected',
   );
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+
+  const setP2pState = useSetAtom(p2pStateAtom);
+  const setP2pConnection = useSetAtom(p2pConnectionAtom);
+  // Bumped by switchAddressAtom on every route switch. Used only to change the
+  // connection object's identity (see the useMemo below), never read directly.
+  const p2pEpoch = useAtomValue(p2pEpochAtom);
+  // Boolean flag so the p2pConnectionAtom effect can react to the options
+  // null↔object transition without referencing the mutable options object.
+  const hasP2pTarget = Boolean(options);
 
   const agentUrl = options?.agentUrl;
   const connectionToken = options?.connectionToken;
@@ -220,7 +235,7 @@ export function useP2PConnection(
       generation: myGeneration,
       generationRef,
       reconnectAttemptRef,
-      setConnectionState, setReconnectAttempt, handlersRef,
+      setConnectionState, setP2pState, setReconnectAttempt, handlersRef,
       maxReconnectAttempts, reconnectBaseDelay, onError,
       reconnectTimerRef, wsRef,
       connectSelf: () => connectWs(ctx),
@@ -242,7 +257,7 @@ export function useP2PConnection(
       // persist (ref survives the remount) and are settled by the connectionState
       // effect on (re)connect, or expire via their own timeout on real unmount.
     };
-  }, [agentUrl, connectionToken, onError, maxReconnectAttempts, reconnectBaseDelay]);
+  }, [agentUrl, connectionToken, onError, maxReconnectAttempts, reconnectBaseDelay, setP2pState]);
 
   // Settle any pending waitForConnection() promises whenever the state settles
   // into a terminal-for-waiting value ('connected' → resolve, 'disconnected' →
@@ -273,7 +288,8 @@ export function useP2PConnection(
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
     setConnectionState('disconnected');
-  }, []);
+    setP2pState('disconnected');
+  }, [setP2pState]);
 
   const waitForConnection = useCallback((timeoutMs = 15_000): Promise<void> => {
     const state = connectionStateRef.current;
@@ -296,24 +312,48 @@ export function useP2PConnection(
     });
   }, []);
 
-  // Build a STABLE connection object. `sendMessage`/`onMessage`/`close`/
-  // `waitForConnection` are useCallback-stable; `connectionState` and
-  // `reconnectAttempt` are exposed as getters backed by refs so the object
-  // identity never changes across state transitions. This matters because
-  // `Terminal.tsx` rebuilds its xterm view when the `p2pConnection` prop
-  // identity changes — returning a fresh object literal every render (the old
-  // behaviour) made unrelated re-renders (e.g. toggling the bottom-bar tab)
-  // tear down and recreate the terminal. Consumers that need reactivity read
-  // the primitive getter value into an effect dependency (e.g. useP2PWithFallback),
-  // which still updates because the owning component re-renders on setState.
-  const connection = useMemo<P2PConnection>(() => ({
-    sendMessage,
-    onMessage,
-    close,
-    waitForConnection,
-    get connectionState() { return connectionStateRef.current; },
-    get reconnectAttempt() { return reconnectAttemptStateRef.current; },
-  }), [sendMessage, onMessage, close, waitForConnection]);
+  // Build a connection object whose identity is STABLE across state transitions
+  // but CHANGES on every route switch (p2pEpoch bump). `sendMessage`/
+  // `onMessage`/`close`/`waitForConnection` are useCallback-stable;
+  // `connectionState` and `reconnectAttempt` are getters backed by refs, so the
+  // object does NOT change on every render — an unrelated re-render (e.g.
+  // toggling the bottom-bar tab) must not tear down the terminal. `p2pEpoch`
+  // IS in the dependency list on purpose: switchAddressAtom bumps it so a fresh
+  // object is produced and the p2pConnectionAtom effect re-runs, rebuilding
+  // Terminal.tsx's xterm view against the new socket — even when the resolved
+  // activeUrl does not change. Without this, switchAddressAtom's
+  // `set(p2pConnectionAtom, null)` is never undone and the terminal stays
+  // blank after a route switch. Consumers that need reactivity read the
+  // primitive getter value into an effect dependency, which still updates
+  // because the owning component re-renders on setState.
+  const connection = useMemo<P2PConnection>(() => {
+    // Referenced (not read) so the object identity changes with p2pEpoch — the
+    // epoch is a pure "route switched" signal; the actual socket is tracked
+    // inside wsRef by connectWs. See the comment above.
+    void p2pEpoch;
+    return {
+      sendMessage,
+      onMessage,
+      close,
+      waitForConnection,
+      get connectionState() { return connectionStateRef.current; },
+      get reconnectAttempt() { return reconnectAttemptStateRef.current; },
+    };
+  }, [sendMessage, onMessage, close, waitForConnection, p2pEpoch]);
+
+  // Expose the stable connection object to the global atom so consumers
+  // (Terminal, TerminalView) can subscribe without prop drilling. The
+  // hasP2pTarget boolean flips when options goes null↔object, so the atom is
+  // cleared on unmount and when switching to relay mode.
+  useEffect(() => {
+    if (hasP2pTarget) {
+      setP2pConnection(connection);
+    }
+    return () => {
+      setP2pConnection(null);
+      setP2pState('disconnected');
+    };
+  }, [connection, hasP2pTarget, setP2pConnection, setP2pState]);
 
   if (!options) {return null;}
   return connection;

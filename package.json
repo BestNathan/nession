@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@codemirror/lang-java": "^6.0.2",
+    "@codemirror/lang-less": "^6.0.2",
+    "@codemirror/lang-php": "^6.0.2"
+  }
+}

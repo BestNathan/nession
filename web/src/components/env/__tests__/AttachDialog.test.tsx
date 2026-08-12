@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createStore, Provider } from 'jotai';
 import { AttachDialog } from '../AttachDialog';
 import type { Session, AttachInfo, EnvFileInfo } from '../../../types';
 import type { WebSocketService } from '../../../services/websocket';
 import { WebSocketContext } from '../../../hooks/useWebSocket';
-import type { AddressProbeCache } from '../../../hooks/useAddressProbeCache';
+import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '../../../atoms/probe';
 
 function session(): Session {
   return {
@@ -37,15 +38,6 @@ function mockWs(info: AttachInfo, envFiles: EnvFileInfo[] = []): WebSocketServic
   } as unknown as WebSocketService;
 }
 
-/** A no-op probe cache; override getProbe/refreshAgent per test as needed. */
-function mockProbeCache(overrides: Partial<AddressProbeCache> = {}): AddressProbeCache {
-  return {
-    getProbe: vi.fn().mockReturnValue(undefined),
-    refreshAgent: vi.fn(),
-    ...overrides,
-  };
-}
-
 const OriginalWebSocket = globalThis.WebSocket;
 
 beforeEach(() => {
@@ -69,7 +61,6 @@ describe('AttachDialog', () => {
           onClose={vi.fn()}
           session={session()}
           onConfirm={onConfirm}
-          probeCache={mockProbeCache()}
         />
       </WebSocketContext.Provider>,
     );
@@ -93,7 +84,6 @@ describe('AttachDialog', () => {
           onClose={vi.fn()}
           session={session()}
           onConfirm={vi.fn()}
-          probeCache={mockProbeCache()}
         />
       </WebSocketContext.Provider>,
     );
@@ -110,27 +100,30 @@ describe('AttachDialog', () => {
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const probeCache = mockProbeCache({
-      getProbe: vi.fn().mockReturnValue({
+    const store = createStore();
+    store.set(probeResultsAtom, new Map<string, AgentProbe>([[
+      'agent-1',
+      {
         latencies: [
           { url: 'ws://lan/ws', latencyMs: 10 },
           { url: 'ws://vpn/ws', latencyMs: 20 },
         ],
         orderedUrls: ['ws://lan/ws', 'ws://vpn/ws'],
         probedAt: Date.now(),
-      }),
-    });
+      },
+    ]]));
     const user = userEvent.setup();
     render(
-      <WebSocketContext.Provider value={ws}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={onConfirm}
-          probeCache={probeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <AttachDialog
+            isOpen
+            onClose={vi.fn()}
+            session={session()}
+            onConfirm={onConfirm}
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
     // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
@@ -161,52 +154,55 @@ describe('AttachDialog', () => {
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const probeCache = mockProbeCache({
-      getProbe: vi.fn().mockReturnValue({
+    const store = createStore();
+    store.set(probeResultsAtom, new Map<string, AgentProbe>([[
+      'agent-1',
+      {
         latencies: [{ url: 'ws://lan/ws', latencyMs: 12 }],
         orderedUrls: ['ws://lan/ws'],
         probedAt: Date.now(),
-      }),
-    });
+      },
+    ]]));
     render(
-      <WebSocketContext.Provider value={ws}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={vi.fn()}
-          probeCache={probeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <AttachDialog
+            isOpen
+            onClose={vi.fn()}
+            session={session()}
+            onConfirm={vi.fn()}
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
     expect(await screen.findByText('12ms')).toBeInTheDocument();
     expect(screen.queryByText(/Testing…/)).not.toBeInTheDocument();
   });
 
-  it('re-test button calls refreshAgent with the agent id', async () => {
-    const refreshAgent = vi.fn();
+  it('re-test button requests a fresh probe via probeRefreshRequestAtom', async () => {
     const ws = mockWs(
       attachInfo([
         { url: 'ws://lan/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
         { url: 'ws://vpn/ws', label: 'VPN', network_type: 'vpn', priority: 20, status: 'unreachable' },
       ]),
     );
-    const probeCache = mockProbeCache({ refreshAgent });
+    const store = createStore();
     const user = userEvent.setup();
     render(
-      <WebSocketContext.Provider value={ws}>
-        <AttachDialog
-          isOpen
-          onClose={vi.fn()}
-          session={session()}
-          onConfirm={vi.fn()}
-          probeCache={probeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <AttachDialog
+            isOpen
+            onClose={vi.fn()}
+            session={session()}
+            onConfirm={vi.fn()}
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
     const retest = await screen.findByRole('button', { name: /Re-test/ });
     await user.click(retest);
-    expect(refreshAgent).toHaveBeenCalledWith('agent-1');
+    expect(store.get(probeRefreshRequestAtom)?.agentId).toBe('agent-1');
   });
 
   it('renders a Renderer row with WebGL and Canvas options', () => {
@@ -218,7 +214,6 @@ describe('AttachDialog', () => {
           onClose={vi.fn()}
           session={session()}
           onConfirm={vi.fn()}
-          probeCache={mockProbeCache()}
         />
       </WebSocketContext.Provider>,
     );
@@ -240,7 +235,6 @@ describe('AttachDialog', () => {
           onClose={vi.fn()}
           session={session()}
           onConfirm={onConfirm}
-          probeCache={mockProbeCache()}
         />
       </WebSocketContext.Provider>,
     );

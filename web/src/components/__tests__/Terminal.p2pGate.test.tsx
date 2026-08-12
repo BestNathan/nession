@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
+import { createStore, Provider } from 'jotai';
+import {
+  sessionIdAtom,
+  sessionNameAtom,
+  attachInfoAtom,
+  forcedRelayAtom,
+} from '../../atoms/session';
+import { p2pConnectionAtom } from '../../atoms/connection';
+import type { AttachInfo } from '../../types';
 
 // Track TerminalView construction + disposal so we can assert the view is
 // built exactly once, only after a p2p connection exists.
@@ -45,6 +54,34 @@ function makeP2P(state = 'connected') {
   };
 }
 
+function makeAttachInfo(mode: 'p2p' | 'relay'): AttachInfo {
+  return { mode, session_id: 'a:s', session_name: 's', addresses: [] };
+}
+
+/**
+ * Set the session atoms to a p2p (or relay) session on the given store.
+ * effectiveModeAtom derives 'p2p'/'relay' from attachInfoAtom.mode and
+ * forcedRelayAtom, so this is all Terminal needs to pick its mode.
+ */
+function setupSession(store: ReturnType<typeof createStore>, mode: 'p2p' | 'relay') {
+  store.set(sessionIdAtom, 'a:s');
+  store.set(sessionNameAtom, 's');
+  store.set(attachInfoAtom, makeAttachInfo(mode));
+  store.set(forcedRelayAtom, false);
+}
+
+/** Render Terminal with session atoms isolated per test via a fresh store. */
+function renderTerminal(store = createStore()) {
+  return {
+    store,
+    ...render(
+      <Provider store={store}>
+        <Terminal />
+      </Provider>,
+    ),
+  };
+}
+
 describe('Terminal p2p connection gate (issue #51)', () => {
   beforeEach(() => {
     ctorCalls.length = 0;
@@ -56,14 +93,10 @@ describe('Terminal p2p connection gate (issue #51)', () => {
     // mode is already 'p2p'. Building here (then disposing when the connection
     // arrives one render later) is what left xterm's Viewport setTimeout
     // firing against a disposed RenderService and crashing on `.dimensions`.
-    render(
-      <Terminal
-        sessionId="a:s"
-        sessionName="s"
-        mode="p2p"
-        p2pConnection={null}
-      />,
-    );
+    const store = createStore();
+    setupSession(store, 'p2p');
+    store.set(p2pConnectionAtom, null);
+    renderTerminal(store);
     await new Promise((r) => { setTimeout(r, 60); });
 
     expect(ctorCalls).toHaveLength(0);
@@ -72,19 +105,19 @@ describe('Terminal p2p connection gate (issue #51)', () => {
 
   it('builds the view exactly once — only after the connection resolves', async () => {
     const p2p = makeP2P();
-    const props = {
-      sessionId: 'a:s',
-      sessionName: 's',
-      mode: 'p2p' as const,
-    };
+    const store = createStore();
+    setupSession(store, 'p2p');
 
     // Render 1: connection still null (plan resolving).
-    const { rerender } = render(<Terminal {...props} p2pConnection={null} />);
+    store.set(p2pConnectionAtom, null);
+    renderTerminal(store);
     await new Promise((r) => { setTimeout(r, 60); });
     expect(ctorCalls).toHaveLength(0);
 
     // Render 2: connection object arrives (identity-stable henceforth).
-    rerender(<Terminal {...props} p2pConnection={p2p as never} />);
+    // Writing p2pConnectionAtom notifies Terminal (which subscribes to it), so
+    // the view-build effect re-runs with a live connection.
+    store.set(p2pConnectionAtom, p2p as never);
     await new Promise((r) => { setTimeout(r, 60); });
 
     // Exactly one construction, with a live connection, and no churn.
@@ -93,13 +126,12 @@ describe('Terminal p2p connection gate (issue #51)', () => {
   });
 
   it('relay mode builds immediately (no connection gating)', async () => {
+    const store = createStore();
+    setupSession(store, 'relay');
     render(
-      <Terminal
-        sessionId="a:s"
-        sessionName="s"
-        mode="relay"
-        serverConnection={{ isConnected: () => true } as never}
-      />,
+      <Provider store={store}>
+        <Terminal serverConnection={{ isConnected: () => true } as never} />
+      </Provider>,
     );
     await new Promise((r) => { setTimeout(r, 60); });
 

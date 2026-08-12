@@ -6,15 +6,18 @@ import { SessionList } from './SessionList';
 import type { SortField, SortDirection } from '../hooks/useDashboard';
 
 export function SessionsSection({
-  agents, filteredSessions, loadingSessions,
+  agents, filteredSessions, loadingSessions, staleAgents,
   onCreate, fetchSessions, onAttach, onKill,
   sortField, sortDirection, toggleSort, isSearchActive,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
   loadingSessions: boolean;
+  /** Agents whose data may be out of date after a failed force refresh. */
+  staleAgents?: string[];
   onCreate: () => void;
-  fetchSessions: () => void;
+  /** Triggers a force refresh — the server re-queries every online agent. */
+  fetchSessions: (opts?: { force?: boolean }) => void;
   onAttach: (s: Session) => void;
   onKill: (s: Session) => void;
   sortField: SortField;
@@ -33,7 +36,7 @@ export function SessionsSection({
             <Plus className="w-3.5 h-3.5 mr-1" /> Create
           </Button>
           <RefreshButton
-            onClick={fetchSessions}
+            onClick={() => fetchSessions({ force: true })}
             loading={loadingSessions}
             variant="ghost"
             ariaLabel="Refresh sessions"
@@ -44,6 +47,7 @@ export function SessionsSection({
       <SessionList
         sessions={filteredSessions}
         loading={loadingSessions}
+        staleAgents={staleAgents}
         onAttach={onAttach}
         onKill={onKill}
         sortField={sortField}

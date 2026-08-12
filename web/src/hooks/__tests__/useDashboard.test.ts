@@ -41,6 +41,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 interface MockWsService {
   listAgents: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
+  fetchSessions: ReturnType<typeof vi.fn>;
   onAgentsChanged: ReturnType<typeof vi.fn>;
   onSessionsChanged: ReturnType<typeof vi.fn>;
 }
@@ -49,6 +50,7 @@ function createMockWsService(): MockWsService {
   return {
     listAgents: vi.fn(() => new Promise<Agent[]>(() => {})),
     listSessions: vi.fn(() => new Promise<Session[]>(() => {})),
+    fetchSessions: vi.fn(() => new Promise<{ sessions: Session[] }>(() => {})),
     onAgentsChanged: vi.fn().mockReturnValue(() => {}),
     onSessionsChanged: vi.fn().mockReturnValue(() => {}),
   };
@@ -405,7 +407,7 @@ describe('useDashboard', () => {
       // Keep onAgentsChanged / onSessionsChanged registered
       mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-      mock.listSessions = vi.fn().mockResolvedValue([]);
+      mock.fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
 
       const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
 
@@ -420,10 +422,10 @@ describe('useDashboard', () => {
 
   describe('session lifecycle callbacks', () => {
     it('handleSessionCreated closes modal and refreshes sessions', async () => {
-      const fetchSessions = vi.fn().mockResolvedValue([]);
+      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
       const mock = createMockWsService();
       mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.listSessions = fetchSessions;
+      mock.fetchSessions = fetchSessions;
       mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
 
@@ -441,10 +443,10 @@ describe('useDashboard', () => {
     });
 
     it('handleSessionKilled clears kill target and refreshes', async () => {
-      const fetchSessions = vi.fn().mockResolvedValue([]);
+      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
       const mock = createMockWsService();
       mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.listSessions = fetchSessions;
+      mock.fetchSessions = fetchSessions;
       mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
       mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
 

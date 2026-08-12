@@ -1,11 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createStore, Provider } from 'jotai';
 import { SessionDropdown } from '../SessionDropdown';
 import { WebSocketContext } from '../../hooks/useWebSocket';
+import { sessionIdAtom } from '../../atoms/session';
 import type { Session } from '../../types';
 import type { WebSocketService } from '../../services/websocket';
-import type { useAddressProbeCache } from '../../hooks/useAddressProbeCache';
+
+// SessionDropdown navigates via useNavigate on attach; stub it so the component
+// can render outside a Router and we can assert the target path.
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
+
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -19,11 +32,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     ...overrides,
   };
 }
-
-const mockProbeCache = {
-  getProbe: vi.fn().mockReturnValue(undefined),
-  refreshAgent: vi.fn(),
-} as unknown as ReturnType<typeof useAddressProbeCache>;
 
 function makeWsService() {
   return {
@@ -48,20 +56,24 @@ describe('SessionDropdown', () => {
     currentSessionName: string;
   }> = {}) {
     const ws = makeWsService();
-    return render(
-      <WebSocketContext.Provider value={ws}>
-        <SessionDropdown
-          sessions={props.sessions ?? []}
-          loading={props.loading ?? false}
-          error={props.error ?? null}
-          onRetry={vi.fn()}
-          currentSessionId={props.currentSessionId ?? 'agent1:current'}
-          currentSessionName={props.currentSessionName ?? 'current'}
-          onSwitchSession={vi.fn()}
-          probeCache={mockProbeCache}
-        />
-      </WebSocketContext.Provider>,
-    );
+    const store = createStore();
+    store.set(sessionIdAtom, props.currentSessionId ?? 'agent1:current');
+    return {
+      store,
+      ...render(
+        <Provider store={store}>
+          <WebSocketContext.Provider value={ws}>
+            <SessionDropdown
+              sessions={props.sessions ?? []}
+              loading={props.loading ?? false}
+              error={props.error ?? null}
+              onRetry={vi.fn()}
+              currentSessionName={props.currentSessionName ?? 'current'}
+            />
+          </WebSocketContext.Provider>
+        </Provider>,
+      ),
+    };
   }
 
   it('renders trigger with current session name', () => {
@@ -106,19 +118,20 @@ describe('SessionDropdown', () => {
   it('shows error with retry button', async () => {
     const onRetry = vi.fn();
     const ws = makeWsService();
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent1:current');
     render(
-      <WebSocketContext.Provider value={ws}>
-        <SessionDropdown
-          sessions={[]}
-          loading={false}
-          error="fetch failed"
-          onRetry={onRetry}
-          currentSessionId="agent1:current"
-          currentSessionName="current"
-          onSwitchSession={vi.fn()}
-          probeCache={mockProbeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <SessionDropdown
+            sessions={[]}
+            loading={false}
+            error="fetch failed"
+            onRetry={onRetry}
+            currentSessionName="current"
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
 
     await userEvent.click(screen.getByText('current'));
@@ -179,24 +192,24 @@ describe('SessionDropdown', () => {
   });
 
   it('confirms attach choice through AttachDialog', async () => {
-    const onSwitchSession = vi.fn();
     const ws = makeWsService();
+    const store = createStore();
+    store.set(sessionIdAtom, 'a:current');
     render(
-      <WebSocketContext.Provider value={ws}>
-        <SessionDropdown
-          sessions={[
-            makeSession({ session_id: 'a:current', session_name: 'current' }),
-            makeSession({ session_id: 'b:beta', session_name: 'beta' }),
-          ]}
-          loading={false}
-          error={null}
-          onRetry={vi.fn()}
-          currentSessionId="a:current"
-          currentSessionName="current"
-          onSwitchSession={onSwitchSession}
-          probeCache={mockProbeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <SessionDropdown
+            sessions={[
+              makeSession({ session_id: 'a:current', session_name: 'current' }),
+              makeSession({ session_id: 'b:beta', session_name: 'beta' }),
+            ]}
+            loading={false}
+            error={null}
+            onRetry={vi.fn()}
+            currentSessionName="current"
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
 
     await userEvent.click(screen.getByText('current'));
@@ -208,29 +221,30 @@ describe('SessionDropdown', () => {
     await waitFor(() => expect(attachBtn).not.toBeDisabled());
     await userEvent.click(attachBtn);
 
-    expect(onSwitchSession).toHaveBeenCalledTimes(1);
-    expect(onSwitchSession.mock.calls[0][0]).toMatchObject({ session_id: 'b:beta' });
-    expect(onSwitchSession.mock.calls[0][1]).toMatchObject({ mode: 'auto' });
+    // Confirm now runs attachToSessionAtom: it writes the base atoms and navigates.
+    expect(store.get(sessionIdAtom)).toBe('b:beta');
+    expect(navigateMock).toHaveBeenCalledWith('/terminal/b%3Abeta');
   });
 
   it('Kill button opens KillConfirmDialog without selecting the row', async () => {
     const ws = makeWsService();
+    const store = createStore();
+    store.set(sessionIdAtom, 'a:current');
     render(
-      <WebSocketContext.Provider value={ws}>
-        <SessionDropdown
-          sessions={[
-            makeSession({ session_id: 'a:current', session_name: 'current' }),
-            makeSession({ session_id: 'b:beta', session_name: 'beta' }),
-          ]}
-          loading={false}
-          error={null}
-          onRetry={vi.fn()}
-          currentSessionId="a:current"
-          currentSessionName="current"
-          onSwitchSession={vi.fn()}
-          probeCache={mockProbeCache}
-        />
-      </WebSocketContext.Provider>,
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <SessionDropdown
+            sessions={[
+              makeSession({ session_id: 'a:current', session_name: 'current' }),
+              makeSession({ session_id: 'b:beta', session_name: 'beta' }),
+            ]}
+            loading={false}
+            error={null}
+            onRetry={vi.fn()}
+            currentSessionName="current"
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
     );
 
     await userEvent.click(screen.getByText('current'));

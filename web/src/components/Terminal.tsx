@@ -1,8 +1,28 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { useAtom, useSetAtom } from 'jotai';
 import { TerminalView, detectProfile, type TerminalHandle, type TerminalProps, type ReconnectBanner } from '../terminal';
 import { detectWebGLSupport } from '../terminal/Renderer';
 import { useLatest } from '../hooks/useLatest';
+import { sessionIdAtom, sessionNameAtom } from '../atoms/session';
+import {
+  effectiveModeAtom,
+  p2pConnectionAtom,
+} from '../atoms/connection';
+import {
+  terminalSessionStateAtom,
+  lastResizeAtom,
+} from '../terminal/state';
+
+let _msgCounter = 0;
+function generateId(): string {
+  return `web-${Date.now()}-${++_msgCounter}`;
+}
+
+/** Max reconnect entries before the session is declared failed. */
+const P2P_MAX_RECONNECT = 10;
+/** How long to wait for client.attach ok before backing off into reconnecting. */
+const ATTACH_TIMEOUT_MS = 10_000;
 
 /**
  * Interactive terminal component powered by xterm.js.
@@ -12,16 +32,19 @@ import { useLatest } from '../hooks/useLatest';
  * and exposes sendText/refit via imperative handle.
  *
  * TerminalView is rebuilt only when session identity or connection mode
- * changes (sessionId, sessionName, mode, p2pConnection, serverConnection).
+ * changes. sessionId, sessionName, mode, p2pConnection, terminalSessionState,
+ * and lastResize are read from the jotai atoms (atoms/session.ts +
+ * atoms/connection.ts + terminal/state) — written by attachToSessionAtom /
+ * disconnectAtom / useP2PConnection — so this component
+ * subscribes without prop-drilling from TerminalView. serverConnection and
+ * relayUrl still arrive via props because they are WebSocketService transport
+ * concerns, not session state.
+ *
  * P2P connectionState transitions (connecting → connected → reconnecting)
  * are handled internally by ConnectionManager and do NOT trigger a rebuild.
  */
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
-    sessionId,
-    sessionName,
-    mode,
-    p2pConnection,
     serverConnection,
     relayUrl,
     onDisconnect,
@@ -32,6 +55,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   },
   ref,
 ) {
+  // Session state is owned by the atoms in ../atoms/session, ../atoms/connection,
+  // and ../terminal/state.
+  // Reading it here (instead of receiving it as props) keeps Terminal in sync
+  // with the attach flow and P2P connection without prop-drilling from TerminalView.
+  const [sessionId] = useAtom(sessionIdAtom);
+  const [sessionName] = useAtom(sessionNameAtom);
+  const [mode] = useAtom(effectiveModeAtom);
+  const [p2pConnection] = useAtom(p2pConnectionAtom);
+  const [terminalState, setTerminalState] = useAtom(terminalSessionStateAtom);
+  const [lastResize] = useAtom(lastResizeAtom);
+  const setLastResize = useSetAtom(lastResizeAtom);
+  // Read via ref so ResizeObserver updates don't re-trigger the state machine
+  // effect (which would cancel the attach timeout and restart the cycle).
+  const lastResizeRef = useRef(lastResize);
+  lastResizeRef.current = lastResize;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalView | null>(null);
   // Bump this each time viewRef.current is populated or cleared. The
@@ -55,35 +94,143 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onBannerChangeRef.current?.(banner !== 'none');
   }, [banner, onBannerChangeRef]);
 
-  // Observe P2P transport reconnects. connectionState is a getter (no re-render
-  // on change), but this component re-renders whenever the owner does, and the
-  // owner (via useP2PWithFallback) re-renders on every P2P state transition —
-  // so reading it here in an effect keyed on the value tracks it correctly.
-  const p2pState = p2pConnection?.connectionState;
-  const prevP2pStateRef = useRef(p2pState);
+  // Mirror terminalState for callbacks that run outside the state machine
+  // effect (the view.onStateChange handler in the view-creation effect below)
+  // so they can read the live session state without a stale closure.
+  const terminalStateRef = useRef(terminalState);
+  terminalStateRef.current = terminalState;
+
+  const reconnectCountRef = useRef(0);
+  const attachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Terminal session state machine ─────────────────────────────
+  // Drives every protocol decision for the session: client.attach timing,
+  // relay beginRelay, reconnect banners, and the attach timeout.  Replaces
+  // the old p2pState observer + ConnectionManager attach/reattach methods.
   useEffect(() => {
-    // Advance the tracked previous-state first, before any early return, so a
-    // transient null view (during a rebuild) can't desync reconnect detection.
-    const prev = prevP2pStateRef.current;
-    prevP2pStateRef.current = p2pState;
-
-    if (mode !== 'p2p') { return; }
     const view = viewRef.current;
-    if (!view) { return; }
+    console.log('[StateMachine] state=', terminalState, 'mode=', mode, 'hasConn=', !!p2pConnection);
 
-    if (p2pState === 'reconnecting') {
-      view.setExternalBanner('reconnecting', p2pConnection?.reconnectAttempt ?? 0);
-    } else if (p2pState === 'connected' && prev === 'reconnecting') {
-      // Transport came back after a drop: clear banner and redraw tmux.
-      view.setExternalBanner('none', 0);
-      view.reattach();
-    } else if (p2pState === 'connecting') {
-      // User switched addresses or a fresh connect started — cancel any
-      // stale 'reconnecting' banner from the previous connection attempt.
-      view.setExternalBanner('none', 0);
+    switch (terminalState) {
+      case 'idle':
+        break;
+
+      case 'connecting':
+        // Socket is being created (p2p) or the server ws is authenticating
+        // (relay).  Clear any stale state from a previous session.
+        reconnectCountRef.current = 0;
+        if (mode === 'relay' && serverConnection?.isConnected()) {
+          // The server ws is already authenticated — onConnectionChange only
+          // fires on status CHANGE, so this covers the case where the ws came
+          // up before Terminal mounted.
+          setTerminalState('connected');
+        }
+        break;
+
+      case 'connected': {
+        console.log('[StateMachine] connected — sending client.attach');
+        if (mode === 'relay') {
+          // Relay: beginRelay is fire-and-forget — once sent, the agent pushes
+          // terminal.output through the server.  Session size comes from
+          // lastResizeAtom (written by the ResizeObserver in the view effect).
+          const w = lastResizeRef.current?.cols;
+          const h = lastResizeRef.current?.rows;
+          serverConnection?.beginRelay(sessionId, undefined, w, h);
+          setTerminalState('attached');
+          break;
+        }
+
+        // P2P: send client.attach and wait for the agent's ok before entering
+        // 'attached'.  Input typed before the ok is buffered by
+        // ConnectionManager until the session is attached.
+        const conn = p2pConnection!;
+        const w = lastResizeRef.current?.cols;
+        const h = lastResizeRef.current?.rows;
+        const attachId = generateId();
+
+        conn.sendMessage({
+          msg_type: 'client.attach',
+          id: attachId,
+          timestamp: Math.floor(Date.now() / 1000),
+          payload: {
+            session_name: sessionName,
+            ...(w !== undefined && h !== undefined ? { width: w, height: h } : {}),
+          },
+        });
+
+        // Watch for the attach ok / error response.
+        const unsub = conn.onMessage((msg) => {
+          if (msg.id !== attachId) { return; }
+          if (msg.msg_type === 'ok') {
+            setTerminalState('attached');
+          } else if (msg.msg_type === 'error') {
+            setTerminalState('failed');
+          }
+        });
+
+        // If the agent never acks, back off into reconnecting.
+        attachTimerRef.current = setTimeout(() => {
+          attachTimerRef.current = null;
+          unsub();
+          setTerminalState('reconnecting');
+        }, ATTACH_TIMEOUT_MS);
+
+        return () => {
+          unsub();
+          if (attachTimerRef.current) {
+            clearTimeout(attachTimerRef.current);
+            attachTimerRef.current = null;
+          }
+        };
+      }
+
+      case 'attached':
+        // Terminal I/O is live.  Clear the reconnect counter and banner.
+        reconnectCountRef.current = 0;
+        if (view) {
+          view.setExternalBanner('none', 0);
+          // Flush any input buffered before the agent acked client.attach.
+          view.connection?.flushInputBuffer();
+        }
+        break;
+
+      case 'reconnecting': {
+        const count = reconnectCountRef.current + 1;
+        reconnectCountRef.current = count;
+        if (count > P2P_MAX_RECONNECT) {
+          setTerminalState('failed');
+          break;
+        }
+        if (view) { view.setExternalBanner('reconnecting', count); }
+        // The socket reconnects via useP2PConnection → p2pState → 'connected'
+        // → this effect re-runs and re-attaches.
+        break;
+      }
+
+      case 'failed':
+        if (view) { view.setExternalBanner('failed', 0); }
+        break;
     }
-    // 'disconnected' is handled by useP2PWithFallback (address rotation / relay).
-  }, [mode, p2pState, p2pConnection]);
+  }, [mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection, /* lastResize via ref */ setTerminalState]);
+
+  // Feed P2P transport transitions into the state machine.  connectionState is
+  // a getter (no re-render on change), but this component re-renders whenever
+  // the owner does — the owner (TerminalView) re-renders on every P2P state
+  // transition via useP2PConnection's internal state — so reading it here in an
+  // effect keyed on the value tracks it correctly.  Relay mode is driven by the
+  // state machine directly (serverConnection auth events), not this bridge.
+  const p2pState = p2pConnection?.connectionState;
+  useEffect(() => {
+    if (mode !== 'p2p') { return; }
+    console.log('[Bridge] p2pState=', p2pState, 'terminalState=', terminalState);
+    if (p2pState === 'connected' && (terminalState === 'connecting' || terminalState === 'reconnecting')) {
+      console.log('[Bridge] transitioning to connected');
+      setTerminalState('connected');
+    } else if ((p2pState === 'reconnecting' || p2pState === 'disconnected') &&
+               (terminalState === 'attached' || terminalState === 'connected')) {
+      setTerminalState('reconnecting');
+    }
+  }, [mode, p2pState, terminalState, setTerminalState]);
 
   // Create/dispose TerminalView — only rebuild on session/mode change.
   useEffect(() => {
@@ -92,8 +239,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // Do NOT build the xterm view in p2p mode until the connection object
     // exists. On first render the address plan is still resolving, so
-    // useP2PWithFallback yields p2pConnection=null while effectiveMode is
-    // already 'p2p'. Building here would open() a connectionless terminal,
+    // p2pConnectionAtom is null while effectiveModeAtom is already 'p2p'.
+    // Building here would open() a connectionless terminal,
     // and one render later — when the connection resolves and this prop flips
     // null→object — the effect tears that view down. xterm's Viewport
     // constructor schedules an un-cancellable `setTimeout(syncScrollArea)`
@@ -125,6 +272,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     view.onStateChange = (state) => {
       setBanner(state.banner);
       setReconnectAttempt(state.reconnectAttempt);
+      // Feed relay auth into the state machine.  In relay mode the server ws
+      // usually authenticates before Terminal mounts (onConnectionChange only
+      // fires on change) — the 'connecting' case's isConnected() check handles
+      // that path.  This catches the case where the ws comes up after mount.
+      if (mode === 'relay' && state.isConnected && terminalStateRef.current === 'connecting') {
+        setTerminalState('connected');
+      }
     };
     view.onCtrlD = () => onCtrlDRef.current?.();
     view.onError = (err) => onErrorRef.current?.(err);
@@ -148,6 +302,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         const cols = Math.max(1, Math.floor(width / cell.width));
         const rows = Math.max(1, Math.floor(height / cell.height));
         if (cols < 2 || rows < 2) { continue; }
+
+        // Persist the viewport size so a reconnect can re-attach at the right
+        // dimensions (client.attach carries width/height).
+        setLastResize({ cols, rows });
 
         if (isFirstResize) {
           // First fire — send immediately so tmux is at the right size
@@ -177,7 +335,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // without this, session switch leaves orphaned scroll containers that stack visually.
       container.innerHTML = '';
     };
-  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, relayUrl, renderer, onCtrlDRef, onDisconnectRef, onErrorRef]);
+  }, [sessionId, sessionName, mode, p2pConnection, serverConnection, relayUrl, renderer, onCtrlDRef, onDisconnectRef, onErrorRef, setLastResize, setTerminalState]);
 
   // Imperative handle for parent components. Depends on `viewGeneration` so
   // the handle regenerates when viewRef.current populates (via useEffect) or

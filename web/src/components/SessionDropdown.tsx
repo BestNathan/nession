@@ -1,4 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useAtom, useSetAtom } from 'jotai';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, SearchX, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -14,17 +16,14 @@ import {
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
 import type { Session } from '../types';
-import type { useAddressProbeCache } from '../hooks/useAddressProbeCache';
+import { sessionIdAtom, attachToSessionAtom, attachDialogSessionAtom } from '../atoms/session';
 
 interface SessionDropdownProps {
   sessions: Session[];
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  currentSessionId: string;
   currentSessionName: string;
-  onSwitchSession: (session: Session, choice: AttachChoice) => void;
-  probeCache: ReturnType<typeof useAddressProbeCache>;
 }
 
 function SessionRow({
@@ -96,15 +95,15 @@ export function SessionDropdown({
   loading,
   error,
   onRetry,
-  currentSessionId,
   currentSessionName,
-  onSwitchSession,
-  probeCache,
 }: SessionDropdownProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [attachTarget, setAttachTarget] = useState<Session | null>(null);
+  const [attachTarget, setAttachTarget] = useAtom(attachDialogSessionAtom);
   const [killTarget, setKillTarget] = useState<Session | null>(null);
+  const [currentSessionId] = useAtom(sessionIdAtom);
+  const navigate = useNavigate();
+  const doAttach = useSetAtom(attachToSessionAtom);
 
   const filtered = useMemo(() => {
     if (!searchQuery) { return sessions; }
@@ -118,12 +117,12 @@ export function SessionDropdown({
     if (session.session_id === currentSessionId) { return; }
     setOpen(false);
     setAttachTarget(session);
-  }, [currentSessionId]);
+  }, [currentSessionId, setAttachTarget]);
 
   const confirmAttach = useCallback((session: Session, choice: AttachChoice) => {
     setAttachTarget(null);
-    onSwitchSession(session, choice);
-  }, [onSwitchSession]);
+    doAttach({ session, choice, navigate });
+  }, [doAttach, navigate, setAttachTarget]);
 
   const handleKill = useCallback((session: Session) => {
     setKillTarget(session);
@@ -204,7 +203,6 @@ export function SessionDropdown({
         onClose={() => setAttachTarget(null)}
         session={attachTarget}
         onConfirm={confirmAttach}
-        probeCache={probeCache}
       />
       <KillConfirmDialog
         isOpen={killTarget !== null}

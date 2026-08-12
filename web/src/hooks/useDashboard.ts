@@ -3,7 +3,7 @@ import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/websocket';
 import { useWebSocket } from './useWebSocket';
 import { useAgentData } from './useAgentData';
-import { useSessionData } from './useSessionData';
+import { useSessionData, type FetchSessionsOptions } from './useSessionData';
 import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from './useDashboardFilter';
 import { useDashboardModals } from './useDashboardModals';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
@@ -34,7 +34,9 @@ export interface DashboardState {
   setSessionToKill: (s: Session | null) => void;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
-  fetchSessions: (agentId?: string) => Promise<void>;
+  fetchSessions: (opts?: FetchSessionsOptions) => Promise<void>;
+  /** Agents that failed to answer the last force refresh. */
+  staleAgents: string[];
   getHeartbeatHistory: (agentId: string) => string[];
   updateAgent: (updated: Agent) => void;
   clearError: () => void;
@@ -170,6 +172,7 @@ export function useDashboard(_wsService?: WebSocketService): DashboardState {
     handleSessionKilled,
     handleSessionCreated,
     fetchSessions,
+    staleAgents: sessionData.staleAgents,
     getHeartbeatHistory: agentData.getHeartbeatHistory,
     updateAgent: agentData.updateAgent,
     clearError,

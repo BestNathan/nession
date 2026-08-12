@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -14,6 +15,8 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { attachInfoAtom } from '../../atoms/session';
+import { probeResultsAtom, probeRefreshRequestAtom } from '../../atoms/probe';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */
@@ -41,8 +44,6 @@ interface AttachDialogProps {
   session: Session | null;
   /** Called with the resolved attach choice; the flow shows the terminal. */
   onConfirm: (session: Session, choice: AttachChoice) => void;
-  /** Per-agent latency cache; supplies probe data without live testing. */
-  probeCache: import('../../hooks/useAddressProbeCache').AddressProbeCache;
 }
 
 const MODES: { value: AttachMode; label: string; hint: string }[] = [
@@ -55,14 +56,19 @@ const AUTO_URL = '__auto__';
 
 /**
  * Attach dialog: pick connection mode and (for P2P) a candidate address. Latency
- * is read from the app-level address probe cache — not measured live here — so
- * the dialog never blocks on probing. A "Re-test" control forces a fresh probe.
+ * is read from the app-level probe results atom (written by useProbePolling) —
+ * not measured live here — so the dialog never blocks on probing. A "Re-test"
+ * control requests a fresh probe via probeRefreshRequestAtom.
  */
-export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }: AttachDialogProps) {
+export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDialogProps) {
   const wsService = useWebSocket();
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
-  const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
+  const [attachInfo, setAttachInfo] = useAtom(attachInfoAtom);
+  // Browser-latency probe results for this agent come from the app-level atom
+  // (written by useProbePolling), never probed live here.
+  const probeResults = useAtomValue(probeResultsAtom);
+  const setRefreshRequest = useSetAtom(probeRefreshRequestAtom);
   const [selectedUrl, setSelectedUrl] = useState<string>(AUTO_URL);
   const [error, setError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
@@ -88,7 +94,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
       .then((resp) => setEnvFiles(resp.files))
       .catch(() => {});
     setSelectedEnv([]);
-  }, [isOpen, webglSupported, wsService]);
+  }, [isOpen, webglSupported, wsService, setAttachInfo]);
 
   // Manual relay URL override — only relevant in relay mode.
   const relayUrl = useMemo(
@@ -129,9 +135,9 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
     return () => {
       cancelled = true;
     };
-  }, [isOpen, session, wsService, mode, relayUrl]);
+  }, [isOpen, session, wsService, mode, relayUrl, setAttachInfo]);
 
-  const cached = agentId ? probeCache.getProbe(agentId) : undefined;
+  const cached = agentId ? probeResults.get(agentId) : undefined;
   const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);
   const orderedUrls = useMemo<string[]>(() => cached?.orderedUrls ?? [], [cached]);
   const bestUrl = orderedUrls[0] ?? null;
@@ -175,7 +181,9 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm, probeCache }
               bestUrl={bestUrl}
               selectedUrl={selectedUrl}
               onSelect={setSelectedUrl}
-              onRetest={mode !== 'relay' && agentId ? () => probeCache.refreshAgent(agentId) : undefined}
+              onRetest={mode !== 'relay' && agentId
+                ? () => setRefreshRequest({ agentId, nonce: Date.now() })
+                : undefined}
               isRelay={mode === 'relay'}
             />
           ) : null}

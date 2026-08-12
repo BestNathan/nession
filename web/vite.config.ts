@@ -61,9 +61,7 @@ export default defineConfig({
         'src/App.tsx',
         // Glue / orchestration components (covered by integration)
         'src/components/TerminalView.tsx',
-        // Orchestration hook extracted from TerminalView (P2P address rotation
-        // + relay fallback) — exercised via integration, not unit-tested.
-        'src/hooks/useP2PWithFallback.ts',
+        'src/terminal/components/TerminalWorkspace.tsx',
         // WebGL/Canvas rendering - requires GPU context, hard to unit test
         'src/terminal/Renderer.ts',
         // Complex UI component with WebSocket integration - covered by E2E

@@ -1,6 +1,9 @@
 import { Wifi, WifiOff, HelpCircle, Loader2 } from 'lucide-react';
 import { useState, useCallback } from 'react';
+import { useAtom, useSetAtom } from 'jotai';
 import type { ProbedAddress, AddressLatency } from '../types';
+import { manualOverrideAtom, switchAddressAtom } from '../atoms/session';
+import { activeUrlAtom, isSwitchingAtom } from '../atoms/connection';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   Select,
@@ -25,11 +28,18 @@ const AUTO_VALUE = '__auto__';
 interface AddressSelectorProps {
   addresses: ProbedAddress[];
   latencies: AddressLatency[];
+  effectiveMode: 'p2p' | 'relay';
+}
+
+/**
+ * Internal props for the responsive variants: the atom-derived selection
+ * state, computed once in the exported AddressSelector and threaded down.
+ */
+interface AddressSelectorViewProps extends AddressSelectorProps {
   activeUrl: string | null;
   isAuto: boolean;
-  onSelect: (url: string | null) => void;
   isSwitching: boolean;
-  effectiveMode: 'p2p' | 'relay';
+  onSelect: (url: string | null) => void;
 }
 
 type Reachable = boolean | undefined;
@@ -140,11 +150,7 @@ function AddressSelectorDesktop({
   activeUrl,
   isAuto,
   onSelect,
-}: AddressSelectorProps) {
-  if (addresses.length <= 1) {
-    return null;
-  }
-
+}: AddressSelectorViewProps) {
   const value = isAuto ? AUTO_VALUE : (activeUrl ?? AUTO_VALUE);
 
   return (
@@ -192,7 +198,7 @@ function AddressSelectorMobile({
   isSwitching,
   effectiveMode,
   onSelect,
-}: AddressSelectorProps) {
+}: AddressSelectorViewProps) {
   const [open, setOpen] = useState(false);
   const { icon: Icon, className } = mobileIcon(isSwitching, effectiveMode);
 
@@ -203,10 +209,6 @@ function AddressSelectorMobile({
     },
     [onSelect],
   );
-
-  if (addresses.length <= 1) {
-    return null;
-  }
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -244,9 +246,23 @@ function AddressSelectorMobile({
 
 export function AddressSelector(props: AddressSelectorProps) {
   const isDesktop = useMediaQuery('(min-width: 640px)');
+  const [manualOverride] = useAtom(manualOverrideAtom);
+  const [activeUrl] = useAtom(activeUrlAtom);
+  const [isSwitching] = useAtom(isSwitchingAtom);
+  const setAddress = useSetAtom(switchAddressAtom);
+
+  const isAuto = manualOverride === null;
+
+  const viewProps: AddressSelectorViewProps = {
+    ...props,
+    activeUrl,
+    isAuto,
+    isSwitching,
+    onSelect: setAddress,
+  };
 
   if (isDesktop) {
-    return <AddressSelectorDesktop {...props} />;
+    return <AddressSelectorDesktop {...viewProps} />;
   }
-  return <AddressSelectorMobile {...props} />;
+  return <AddressSelectorMobile {...viewProps} />;
 }
