@@ -2,7 +2,7 @@
 import { atom, getDefaultStore } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, terminalSessionStateAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom, terminalSessionStateAtom } from './connection';
 
 // ── Base atoms ──────────────────────────────────────────────────
 
