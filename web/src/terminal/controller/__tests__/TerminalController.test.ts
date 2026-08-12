@@ -135,6 +135,30 @@ describe('TerminalController', () => {
     expect(transport.send).toHaveBeenCalledWith('hello');
   });
 
+  it('routes xterm keyboard input through the input router to the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.terminal!.input('ls -la');
+
+    expect(transport.send).toHaveBeenCalledWith('ls -la');
+  });
+
+  it('intercepts Ctrl+D from xterm and routes it to onCtrlD', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const onCtrlD = vi.fn();
+    controller.onCtrlD = onCtrlD;
+
+    controller.terminal!.input('\x04');
+
+    expect(onCtrlD).toHaveBeenCalledTimes(1);
+    expect(transport.send).not.toHaveBeenCalled();
+  });
+
   it('write writes to the xterm display', () => {
     const controller = new TerminalController(makeSession(), () => makeTransport());
     controller.attach(host());
@@ -238,6 +262,24 @@ describe('TerminalController', () => {
     transport.onStateChange!('connecting');
 
     expect(statuses).toEqual(['connected', 'failed', 'reconnecting', 'connecting']);
+  });
+
+  it('wires transport onError and onDisconnect to facade callbacks', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const onError = vi.fn();
+    const onDisconnect = vi.fn();
+    controller.onError = onError;
+    controller.onDisconnect = onDisconnect;
+
+    const err = new Error('boom');
+    transport.onError!(err);
+    transport.onDisconnect!();
+
+    expect(onError).toHaveBeenCalledWith(err);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces xterm title changes via onTitleChange', async () => {

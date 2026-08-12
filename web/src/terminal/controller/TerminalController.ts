@@ -1,9 +1,16 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
+import { getDefaultStore } from 'jotai';
 import type { ConnectionState } from '../../hooks/useP2PConnection';
-import type { InputMode } from '../state/input';
+import { inputModeAtomFamily, type InputMode } from '../state/input';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
+import { InputRouter } from '../input/InputRouter';
+import { TerminalInputHandler } from '../input/TerminalInputHandler';
+import { CommandInputHandler } from '../input/CommandInputHandler';
+import { SearchInputHandler } from '../input/SearchInputHandler';
+import { AIInputHandler } from '../input/AIInputHandler';
+import { CustomInputHandler } from '../input/CustomInputHandler';
 
 const DEFAULT_FONT =
   "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
@@ -51,16 +58,36 @@ export class TerminalController {
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
-  private inputMode: InputMode = { type: 'terminal' };
+  private inputRouter: InputRouter | null = null;
   private attached = false;
 
   /** Callbacks → Jotai */
   onStateChange: ((status: TerminalStatus) => void) | null = null;
   onTitleChange: ((title: string) => void) | null = null;
+  onCtrlD: (() => void) | null = null;
+  onError: ((err: Error) => void) | null = null;
+  onDisconnect: (() => void) | null = null;
 
   constructor(session: TerminalSession, transportFactory: () => TerminalTransport) {
     this.session = session;
     this.transportFactory = transportFactory;
+    this.initInputRouter();
+  }
+
+  /**
+   * Create the input router and register the mode handlers that don't need an
+   * xterm instance yet. The terminal handler is registered in attach() once the
+   * xterm instance exists. Returns the router so re-attach can rebuild it after
+   * detach() clears the reference.
+   */
+  private initInputRouter(): InputRouter {
+    const router = new InputRouter();
+    router.register(new CommandInputHandler());
+    router.register(new SearchInputHandler());
+    router.register(new AIInputHandler());
+    router.register(new CustomInputHandler());
+    this.inputRouter = router;
+    return router;
   }
 
   /** xterm instance while attached; null after detach(). */
@@ -101,8 +128,25 @@ export class TerminalController {
     transport.onStateChange = (state: ConnectionState) => {
       this.onStateChange?.(mapConnectionState(state));
     };
+    // Transport failure / disconnect → facade callbacks.
+    transport.onError = (err: Error) => { this.onError?.(err); };
+    transport.onDisconnect = () => { this.onDisconnect?.(); };
 
     terminal.onTitleChange((title: string) => { this.onTitleChange?.(title); });
+
+    // Input routing: terminal mode is the default, so register + activate the
+    // terminal handler now. Keyboard input flows xterm → handler → transport.
+    const router = this.inputRouter ?? this.initInputRouter();
+    const terminalHandler = new TerminalInputHandler(
+      transport,
+      (cb) => {
+        const disposable = terminal.onData(cb);
+        return () => disposable.dispose();
+      },
+    );
+    terminalHandler.onCtrlD = () => this.onCtrlD?.();
+    router.register(terminalHandler);
+    terminalHandler.activate();
 
     // Observe the container after first render so it has laid out.
     this.resizeController = new ResizeController(this);
@@ -129,6 +173,11 @@ export class TerminalController {
       this.transport.onError = null;
       this.transport.onDisconnect = null;
     }
+
+    // Deactivate the active input handler (unsubscribes xterm onData) and drop
+    // the router so the terminal handler's closures are released before dispose.
+    this.inputRouter?.setMode({ type: 'terminal' });
+    this.inputRouter = null;
 
     this._terminal?.dispose();
     this._terminal = null;
@@ -169,14 +218,16 @@ export class TerminalController {
     this._terminal?.paste(text);
   }
 
-  // ── Input mode (full wiring in Task 6) ──────────────────────────────────
+  // ── Input mode ───────────────────────────────────────────────────────────
 
   setInputMode(mode: InputMode): void {
-    this.inputMode = mode;
+    this.inputRouter?.setMode(mode);
+    // Sync to Jotai so React components react to the mode change.
+    getDefaultStore().set(inputModeAtomFamily(this.sessionId), mode);
   }
 
   getInputMode(): InputMode {
-    return this.inputMode;
+    return this.inputRouter?.getMode() ?? { type: 'terminal' };
   }
 
   /** Current cell pixel dimensions; 8×16 fallback (14px monospace defaults). */
