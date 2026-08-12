@@ -67,20 +67,24 @@ export class ConnectionManager {
 
   send(data: string): void {
     if (this.disposed) { return; }
-    // Buffer input until the session is attached.  In 'connected' state
-    // client.attach has been sent but not yet acked — sending terminal.input
-    // now would race ahead of the attach, so buffer until the agent acks.
     const state = getDefaultStore().get(terminalSessionStateAtom);
     if (state !== 'attached') {
       this.inputBuffer.push(data);
       return;
     }
-    // Flush any previously buffered input (from the pre-attach window).
-    if (this.inputBuffer.length > 0) {
-      const buffered = this.inputBuffer.splice(0);
-      for (const d of buffered) { this.sendRaw(d); }
-    }
+    this.flushInputBuffer();
     this.sendRaw(data);
+  }
+
+  /**
+   * Flush any input buffered before the session was attached.  Called by the
+   * state machine effect (Terminal.tsx) when entering 'attached' so queued
+   * keystrokes don't sit in the buffer until the next user action.
+   */
+  flushInputBuffer(): void {
+    if (this.disposed || this.inputBuffer.length === 0) { return; }
+    const buffered = this.inputBuffer.splice(0);
+    for (const d of buffered) { this.sendRaw(d); }
   }
 
   /** Send input unconditionally — used by send() once the session is attached. */
