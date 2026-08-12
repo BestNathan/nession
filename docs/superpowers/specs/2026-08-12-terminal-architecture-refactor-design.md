@@ -5,6 +5,12 @@
 **Scope:** Restructure terminal subsystem — Jotai state domains, Controller extraction, Input system, React component tree, directory layout  
 **Motivation:** Clean up existing complexity; lay groundwork for future features (command palette, AI input, search, multi-tab)
 
+**Naming note:** The current codebase has two things named `TerminalView`:
+- `terminal/TerminalView.ts` — the imperative class that creates xterm and wires managers
+- `components/TerminalView.tsx` — the React layout shell with header, P2P driver, and toolbar
+
+After refactoring: the class delegates to `TerminalController`; the React component becomes `TerminalWorkspace`. No more name collision.
+
 ---
 
 ## 1. Design Principles
