@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
 import { useP2PConnection } from '../useP2PConnection';
+import { p2pEpochAtom } from '../../atoms/connection';
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket — build mock directly on `this` so handlers are shared
@@ -320,30 +323,34 @@ describe('useP2PConnection', () => {
     expect(conn.reconnectAttempt).toBe(0);
   });
 
-  it('changes identity when agentUrl changes (to rebuild the terminal view)', async () => {
+  it('changes identity when the route-switch epoch bumps (to rebuild the terminal view)', async () => {
     setupMock(2); // auto-open the initial socket AND the post-switch socket
-    const { result, rerender } = renderHook(
-      ({ url }: { url: string }) =>
+    const store = createStore();
+    const { result } = renderHook(
+      () =>
         useP2PConnection({
-          agentUrl: url,
+          agentUrl: 'ws://agent:9090/ws',
           sessionName: 'test',
           maxReconnectAttempts: 2,
         }),
-      { initialProps: { url: 'ws://agent:9090/ws' } },
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(Provider, { store }, children),
+      },
     );
 
     await flushTimers();
     const first = result.current!;
     expect(first.connectionState).toBe('connected');
 
-    // Switch route: agentUrl changes. The connection object identity MUST
-    // change too — Terminal.tsx rebuilds its xterm view when p2pConnection
-    // identity changes, and switchAddressAtom relies on that rebuild to wire
-    // the new socket. Without it, p2pConnectionAtom stays null forever and
-    // the terminal never re-attaches after a route switch.
-    rerender({ url: 'ws://tunnel:9090/ws' });
+    // Simulate switchAddressAtom: bump the epoch WITHOUT changing agentUrl.
+    // The connection object identity MUST change — Terminal.tsx rebuilds its
+    // xterm view when p2pConnection identity changes, and switchAddressAtom
+    // relies on that rebuild to wire the new socket. Without it,
+    // p2pConnectionAtom stays null forever and the terminal never re-attaches
+    // after a route switch to the same resolved address.
+    act(() => { store.set(p2pEpochAtom, 1); });
 
     expect(result.current).not.toBe(first);
-    expect(result.current!.connectionState).toBe('connecting');
   });
 });

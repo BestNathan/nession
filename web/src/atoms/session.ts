@@ -2,7 +2,7 @@
 import { atom, getDefaultStore } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from './connection';
 import { terminalSessionStateAtom } from '../terminal/state/session';
 
 // ── Base atoms ──────────────────────────────────────────────────
@@ -75,9 +75,14 @@ export const disconnectAtom = atom(
 
 export const switchAddressAtom = atom(
   null,
-  (_get, set, url: string | null) => {
+  (get, set, url: string | null) => {
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
+    // Bump the epoch so useP2PConnection's connection object changes identity
+    // and Terminal.tsx rebuilds its xterm view against the new socket — even
+    // when the resolved activeUrl does not change (e.g. Auto → an explicit
+    // route that Auto already resolved to).
+    set(p2pEpochAtom, get(p2pEpochAtom) + 1);
     // Force full disconnect: clear connection + reset state to idle.
     // The Terminal effect's idle case tears down any pending
     // timeout/subscription.  useP2PConnection will react to activeUrl
