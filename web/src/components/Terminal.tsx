@@ -63,6 +63,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [terminalState, setTerminalState] = useAtom(terminalSessionStateAtom);
   const [lastResize] = useAtom(lastResizeAtom);
   const setLastResize = useSetAtom(lastResizeAtom);
+  // Read via ref so ResizeObserver updates don't re-trigger the state machine
+  // effect (which would cancel the attach timeout and restart the cycle).
+  const lastResizeRef = useRef(lastResize);
+  lastResizeRef.current = lastResize;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalView | null>(null);
@@ -125,8 +129,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Relay: beginRelay is fire-and-forget — once sent, the agent pushes
           // terminal.output through the server.  Session size comes from
           // lastResizeAtom (written by the ResizeObserver in the view effect).
-          const w = lastResize?.cols;
-          const h = lastResize?.rows;
+          const w = lastResizeRef.current?.cols;
+          const h = lastResizeRef.current?.rows;
           serverConnection?.beginRelay(sessionId, undefined, w, h);
           setTerminalState('attached');
           break;
@@ -136,8 +140,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // 'attached'.  Input typed before the ok is buffered by
         // ConnectionManager until the session is attached.
         const conn = p2pConnection!;
-        const w = lastResize?.cols;
-        const h = lastResize?.rows;
+        const w = lastResizeRef.current?.cols;
+        const h = lastResizeRef.current?.rows;
         const attachId = generateId();
 
         conn.sendMessage({
@@ -199,7 +203,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (view) { view.setExternalBanner('failed', 0); }
         break;
     }
-  }, [mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection, lastResize, setTerminalState]);
+  }, [mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection, /* lastResize via ref */ setTerminalState]);
 
   // Feed P2P transport transitions into the state machine.  connectionState is
   // a getter (no re-render on change), but this component re-renders whenever
