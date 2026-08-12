@@ -2,7 +2,7 @@
 import { atom } from 'jotai';
 import type { P2PConnection, ConnectionState } from '../hooks/useP2PConnection';
 import {
-  manualOverrideAtom, orderedUrlsAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom,
+  manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom,
 } from './session';
 import { probeResultsAtom } from './probe';
 
