@@ -186,7 +186,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (view) {
           view.setExternalBanner('none', 0);
           // Flush any input buffered before the agent acked client.attach.
-          view.connection.flushInputBuffer();
+          view.connection?.flushInputBuffer();
         }
         break;
 
