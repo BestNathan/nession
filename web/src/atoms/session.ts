@@ -91,8 +91,11 @@ export const switchAddressAtom = atom(
   },
 );
 
-// The import from ./connection creates a circular dependency between
-// session.ts and connection.ts. This is fine because:
+// The imports below create a circular dependency between session.ts,
+// connection.ts, and terminal/state/session.ts. This is fine because:
 // 1. session.ts imports connection.ts for p2pConnectionAtom/p2pStateAtom (write-only)
 // 2. connection.ts imports session.ts for derived atoms (read-only)
-// 3. Jotai atoms support circular imports — atom definitions don't execute at import time
+// 3. session.ts imports terminal/state/session.ts for terminalSessionStateAtom (write-only)
+// 4. terminal/state/session.ts imports atoms/session.ts (sessionId/sessionName, read-only)
+//    and atoms/connection.ts (effectiveModeAtom, read-only)
+// 5. Jotai atoms support circular imports — atom definitions don't execute at import time
