@@ -1,0 +1,308 @@
+// web/src/terminal/controller/__tests__/TerminalController.test.ts
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { TerminalController } from '../TerminalController';
+import type { TerminalSession, TerminalStatus } from '../../state/session';
+import type { TerminalTransport } from '../../transport/TerminalTransport';
+
+// xterm.open() requires window.matchMedia in jsdom (same stub as TerminalView.test.ts).
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: () => ({
+    matches: false,
+    media: '',
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+});
+
+interface MockTransport extends TerminalTransport {
+  send: ReturnType<typeof vi.fn<(data: string) => void>>;
+  sendResize: ReturnType<typeof vi.fn<(cols: number, rows: number) => void>>;
+  dispose: ReturnType<typeof vi.fn<() => void>>;
+}
+
+function makeTransport(): MockTransport {
+  return {
+    mode: 'p2p',
+    send: vi.fn<(data: string) => void>(),
+    sendResize: vi.fn<(cols: number, rows: number) => void>(),
+    onOutput: null,
+    onResize: null,
+    onStateChange: null,
+    onError: null,
+    onDisconnect: null,
+    dispose: vi.fn<() => void>(),
+  };
+}
+
+function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
+  return {
+    id: 'agent1:sess',
+    name: 'sess',
+    status: 'connected',
+    mode: 'p2p',
+    startedAt: 1,
+    ...overrides,
+  };
+}
+
+/** Let attach()'s requestAnimationFrame fire and xterm's async write flush. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, 50); });
+}
+
+// ── ResizeObserver capture ──────────────────────────────────────────────────
+
+let capturedCallback: ResizeObserverCallback | null = null;
+let capturedObserver: ResizeObserver | null = null;
+let observedElement: Element | null = null;
+
+class CapturingResizeObserver {
+  callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    capturedCallback = callback;
+    capturedObserver = this as unknown as ResizeObserver;
+  }
+  observe(target: Element): void {
+    observedElement = target;
+  }
+  unobserve(_target: Element): void {
+    void _target;
+  }
+  disconnect(): void {}
+}
+
+function installCapturingResizeObserver(): () => void {
+  const original = globalThis.ResizeObserver;
+  capturedCallback = null;
+  capturedObserver = null;
+  observedElement = null;
+  globalThis.ResizeObserver = CapturingResizeObserver;
+  return () => {
+    globalThis.ResizeObserver = original;
+  };
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe('TerminalController', () => {
+  const hosts: HTMLDivElement[] = [];
+
+  afterEach(() => {
+    for (const el of hosts) {
+      document.body.removeChild(el);
+    }
+    hosts.length = 0;
+  });
+
+  function host(): HTMLDivElement {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    hosts.push(el);
+    return el;
+  }
+
+  it('stores the session and exposes its id', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    expect(controller.sessionId).toBe('agent1:sess');
+    expect(controller.session.name).toBe('sess');
+    expect(controller.session.mode).toBe('p2p');
+  });
+
+  it('defaults to terminal input mode', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    expect(controller.getInputMode()).toEqual({ type: 'terminal' });
+  });
+
+  it('setInputMode/getInputMode round-trip', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.setInputMode({ type: 'search' });
+    expect(controller.getInputMode()).toEqual({ type: 'search' });
+  });
+
+  it('send delegates to the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.send('hello');
+
+    expect(transport.send).toHaveBeenCalledWith('hello');
+  });
+
+  it('write writes to the xterm display', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.attach(host());
+
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    controller.write('abc');
+    expect(writeSpy).toHaveBeenCalledWith('abc');
+  });
+
+  it('paste delegates to xterm.paste', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.attach(host());
+
+    const pasteSpy = vi.spyOn(controller.terminal!, 'paste');
+    controller.paste('pasted');
+    expect(pasteSpy).toHaveBeenCalledWith('pasted');
+  });
+
+  it('clear delegates to xterm.clear', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.attach(host());
+
+    const clearSpy = vi.spyOn(controller.terminal!, 'clear');
+    controller.clear();
+    expect(clearSpy).toHaveBeenCalled();
+  });
+
+  it('focus delegates to xterm.focus', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.attach(host());
+
+    const focusSpy = vi.spyOn(controller.terminal!, 'focus');
+    controller.focus();
+    expect(focusSpy).toHaveBeenCalled();
+  });
+
+  it('attach creates xterm, mounts it, and wires transport.onOutput', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    const el = host();
+
+    controller.attach(el);
+
+    expect(controller.terminal).not.toBeNull();
+    expect(controller.terminal!.element).toBeDefined();
+    expect(el.contains(controller.terminal!.element!)).toBe(true);
+
+    // Output from the transport lands in the xterm display.
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    transport.onOutput!(new Uint8Array([104, 105]));
+    expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]));
+  });
+
+  it('detach disposes xterm, transport, and resize observer', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.detach();
+
+    expect(transport.dispose).toHaveBeenCalled();
+    expect(transport.onOutput).toBeNull();
+    expect(transport.onStateChange).toBeNull();
+    expect(controller.terminal).toBeNull();
+  });
+
+  it('resize updates xterm and notifies the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.resize(120, 40);
+
+    expect(transport.sendResize).toHaveBeenCalledWith(120, 40);
+    expect(controller.terminal!.cols).toBe(120);
+    expect(controller.terminal!.rows).toBe(40);
+  });
+
+  it('maps transport remote resize to the xterm grid', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    transport.onResize!(200, 50);
+
+    expect(controller.terminal!.cols).toBe(200);
+    expect(controller.terminal!.rows).toBe(50);
+  });
+
+  it('maps transport connection state to terminal status', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const statuses: TerminalStatus[] = [];
+    controller.onStateChange = (s) => { statuses.push(s); };
+
+    transport.onStateChange!('connected');
+    transport.onStateChange!('disconnected');
+    transport.onStateChange!('reconnecting');
+    transport.onStateChange!('connecting');
+
+    expect(statuses).toEqual(['connected', 'failed', 'reconnecting', 'connecting']);
+  });
+
+  it('surfaces xterm title changes via onTitleChange', async () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport());
+    controller.attach(host());
+
+    const titles: string[] = [];
+    controller.onTitleChange = (t) => { titles.push(t); };
+
+    controller.terminal!.write('\x1b]0;My Title\x07');
+    await flush();
+
+    expect(titles).toContain('My Title');
+  });
+
+  it('resizes immediately on the first ResizeObserver fire', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      const el = host();
+
+      controller.attach(el);
+      await flush(); // RAF fires → observe() captures the callback
+
+      expect(capturedCallback).not.toBeNull();
+      expect(observedElement).toBe(el);
+
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      // 1024/8=128, 600/16=37 (8×16 fallback cell size in jsdom).
+      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+    } finally {
+      restore();
+    }
+  });
+
+  it('debounces subsequent ResizeObserver fires at 200ms', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+
+      await flush(); // RAF fires → observe() captures the callback
+
+      const entryA = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entryA], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+
+      vi.useFakeTimers();
+      const entryB = { contentRect: { width: 800, height: 400 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entryB], capturedObserver!);
+      capturedCallback!([entryB], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(200);
+      expect(transport.sendResize).toHaveBeenCalledTimes(2);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(100, 25);
+
+      vi.useRealTimers();
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+});
