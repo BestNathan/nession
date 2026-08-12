@@ -79,11 +79,13 @@ export const sessionIdFromUrlAtom = atom<string | null>(null);
 
 // ── Action atoms ─────────────────────────────────────────────────
 
-/** Attach to a session: write all base atoms + navigate to terminal route. */
+/** Attach to a session: write all base atoms + navigate to terminal route.
+ *  Takes a single payload object because Jotai's useSetAtom only passes
+ *  one argument to the write function. */
 export const attachToSessionAtom = atom(
   null,
-  (_get, set, ...args: [Session, AttachChoice, (path: string) => void]) => {
-    const [session, choice, navigate] = args;
+  (_get, set, payload: { session: Session; choice: AttachChoice; navigate: (path: string) => void }) => {
+    const { session, choice, navigate } = payload;
     set(sessionIdAtom, session.session_id);
     set(sessionNameAtom, session.session_name);
     console.log('[attachToSessionAtom] attachInfo:', choice.attachInfo ? {

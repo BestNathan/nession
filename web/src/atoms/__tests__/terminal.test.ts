@@ -152,7 +152,7 @@ describe('action atoms', () => {
       envRefs: [{ source: 'server', name: '.env' }],
     });
 
-    store.set(attachToSessionAtom, session, choice, navigate);
+    store.set(attachToSessionAtom, { session, choice, navigate });
 
     expect(store.get(sessionIdAtom)).toBe('agent:sess');
     expect(store.get(sessionNameAtom)).toBe('sess');
