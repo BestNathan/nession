@@ -183,7 +183,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       case 'attached':
         // Terminal I/O is live.  Clear the reconnect counter and banner.
         reconnectCountRef.current = 0;
-        if (view) { view.setExternalBanner('none', 0); }
+        if (view) {
+          view.setExternalBanner('none', 0);
+          // Flush any input buffered before the agent acked client.attach.
+          view.connection.flushInputBuffer();
+        }
         break;
 
       case 'reconnecting': {

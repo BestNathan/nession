@@ -42,7 +42,8 @@ export class TerminalView {
   private size: TerminalSizeManager;
   private fontSize: FontSizeManager;
   private input: InputManager;
-  private connection: ConnectionManager;
+  /** Public so the React state machine can flush buffered input on attach. */
+  readonly connection: ConnectionManager;
   /** Resolves click vs drag intent so TUI apps receive mouse events. */
   private mouseIntent: MouseIntentResolver;
   /** On touch devices: a visible textarea that replaces xterm's hidden one. */
