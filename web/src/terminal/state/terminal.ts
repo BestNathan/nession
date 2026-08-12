@@ -8,6 +8,12 @@ export interface TerminalSize {
   rows: number;
 }
 
+/**
+ * Last observed viewport size, written by Terminal's ResizeObserver and read
+ * on (re)attach so client.attach carries the correct width/height.
+ */
+export const lastResizeAtom = atom<TerminalSize | null>(null);
+
 export const terminalSizeAtomFamily = atomFamily((_sessionId: string) => {
   void _sessionId;
   return atom<TerminalSize>({ cols: 80, rows: 24 });

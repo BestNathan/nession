@@ -7,10 +7,8 @@ import {
   attachInfoAtom,
   forcedRelayAtom,
 } from '../../atoms/session';
-import {
-  p2pConnectionAtom,
-  terminalSessionStateAtom,
-} from '../../atoms/connection';
+import { p2pConnectionAtom } from '../../atoms/connection';
+import { terminalSessionStateAtom } from '../../terminal/state';
 import type { AttachInfo } from '../../types';
 import type { P2PMessage } from '../../hooks/useP2PConnection';
 import type { WebSocketService } from '../../services/websocket';

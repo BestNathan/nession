@@ -1,7 +1,7 @@
 // web/src/terminal/state/session.ts
 import { atom } from 'jotai';
 import { sessionIdAtom, sessionNameAtom } from '../../atoms/session';
-import { terminalSessionStateAtom, effectiveModeAtom } from '../../atoms/connection';
+import { effectiveModeAtom } from '../../atoms/connection';
 
 export type TerminalStatus =
   | 'idle'
@@ -26,6 +26,12 @@ export interface TerminalSession {
 
 /** Private: pinned by terminalSessionAtom's write so startedAt stays stable. */
 const startedAtAtom = atom<number>(0);
+
+/**
+ * Current terminal connection status — driven by the attach/disconnect/switch
+ * action atoms and the state machine effect in Terminal.tsx.
+ */
+export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
 
 /**
  * Terminal session derived from the global atoms. Writable with no arguments

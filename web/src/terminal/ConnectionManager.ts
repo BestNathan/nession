@@ -1,7 +1,7 @@
 import type { ConnectionState, ConnectionOptions } from './types';
 import type { P2PMessage } from '../hooks/useP2PConnection';
 import { getDefaultStore } from 'jotai';
-import { terminalSessionStateAtom } from '../atoms/connection';
+import { terminalSessionStateAtom } from './state/session';
 
 let _msgCounter = 0;
 function generateId(): string {

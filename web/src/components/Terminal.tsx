@@ -8,9 +8,11 @@ import { sessionIdAtom, sessionNameAtom } from '../atoms/session';
 import {
   effectiveModeAtom,
   p2pConnectionAtom,
+} from '../atoms/connection';
+import {
   terminalSessionStateAtom,
   lastResizeAtom,
-} from '../atoms/connection';
+} from '../terminal/state';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -30,9 +32,10 @@ const ATTACH_TIMEOUT_MS = 10_000;
  * and exposes sendText/refit via imperative handle.
  *
  * TerminalView is rebuilt only when session identity or connection mode
- * changes. sessionId, sessionName, mode, and p2pConnection are read from the
- * jotai atoms (atoms/session.ts + atoms/connection.ts) — written by
- * attachToSessionAtom / disconnectAtom / useP2PConnection — so this component
+ * changes. sessionId, sessionName, mode, p2pConnection, terminalSessionState,
+ * and lastResize are read from the jotai atoms (atoms/session.ts +
+ * atoms/connection.ts + terminal/state) — written by attachToSessionAtom /
+ * disconnectAtom / useP2PConnection — so this component
  * subscribes without prop-drilling from TerminalView. serverConnection and
  * relayUrl still arrive via props because they are WebSocketService transport
  * concerns, not session state.
@@ -52,7 +55,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   },
   ref,
 ) {
-  // Session state is owned by the atoms in ../atoms/session and ../atoms/connection.
+  // Session state is owned by the atoms in ../atoms/session, ../atoms/connection,
+  // and ../terminal/state.
   // Reading it here (instead of receiving it as props) keeps Terminal in sync
   // with the attach flow and P2P connection without prop-drilling from TerminalView.
   const [sessionId] = useAtom(sessionIdAtom);

@@ -11,12 +11,6 @@ import { probeResultsAtom } from './probe';
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
-export const terminalSessionStateAtom = atom<
-  'idle' | 'connecting' | 'connected' | 'attached' | 'reconnecting' | 'failed'
->('idle');
-
-export const lastResizeAtom = atom<{ cols: number; rows: number } | null>(null);
-
 // ── Derived ─────────────────────────────────────────────────────
 
 /** Fastest reachable URL from the probe cache for the current agent. */

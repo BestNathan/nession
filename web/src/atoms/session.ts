@@ -2,7 +2,8 @@
 import { atom, getDefaultStore } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom, terminalSessionStateAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom } from './connection';
+import { terminalSessionStateAtom } from '../terminal/state/session';
 
 // ── Base atoms ──────────────────────────────────────────────────
 
@@ -92,6 +93,6 @@ export const switchAddressAtom = atom(
 
 // The import from ./connection creates a circular dependency between
 // session.ts and connection.ts. This is fine because:
-// 1. session.ts imports connection.ts for terminalSessionStateAtom (write-only)
+// 1. session.ts imports connection.ts for p2pConnectionAtom/p2pStateAtom (write-only)
 // 2. connection.ts imports session.ts for derived atoms (read-only)
 // 3. Jotai atoms support circular imports — atom definitions don't execute at import time

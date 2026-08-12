@@ -2,8 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import { sessionIdAtom, sessionNameAtom, attachInfoAtom } from '../../../atoms/session';
-import { terminalSessionStateAtom } from '../../../atoms/connection';
-import { terminalSessionAtom } from '../session';
+import { terminalSessionAtom, terminalSessionStateAtom } from '../session';
 import { terminalViewModelAtomFamily } from '../index';
 
 describe('terminalSessionAtom', () => {

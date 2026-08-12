@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import {
-  p2pStateAtom, p2pConnectionAtom, terminalSessionStateAtom, lastResizeAtom,
+  p2pStateAtom, p2pConnectionAtom,
   activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
 } from '../connection';
+import { terminalSessionStateAtom } from '../../terminal/state/session';
+import { lastResizeAtom } from '../../terminal/state/terminal';
 import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom } from '../session';
 
 describe('base atoms', () => {
