@@ -1,6 +1,6 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "PostToolUse": [
       {
         "matcher": "mcp__playwright__browser_take_screenshot",
         "hooks": [
