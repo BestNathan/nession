@@ -310,7 +310,14 @@ cd web && npm run dev                 # :13000
 #    - Save screenshots to a temp location for PR attachment
 ```
 
-Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Save screenshots to `.playwright-mcp/screenshots/` (gitignored, never committed). Reference them in the PR body under the **核心功能截图** section using repo-relative paths.
+Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Reference them in the PR body under the **核心功能截图** section using repo-relative paths.
+
+**⚠ `browser_take_screenshot` 的 `filename` 必须带 `.playwright-mcp/screenshots/` 前缀** —— 裸文件名会相对于 cwd（仓库根目录）解析，把截图泄漏到工作区。`.playwright-mcp/` 目录只承接 snapshot/console 等自动产物（由 `--output-dir` 控制），不影响显式传入的 `filename`：
+
+- ✅ `filename: ".playwright-mcp/screenshots/terminal-after.png"`
+- ❌ `filename: "terminal-after.png"` → 落到仓库根目录
+
+漏网的根目录截图会被 pre-commit 的 `scripts/move-screenshots.sh` 兜底移走，但不要依赖兜底。
 
 ### Release Flow
 
