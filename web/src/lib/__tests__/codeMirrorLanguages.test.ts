@@ -102,18 +102,21 @@ describe('ensureLanguage', () => {
     expect(await ensureLanguage('unknown_lang')).toBeUndefined();
   });
 
-  it('resolves a legacy language after its async load (ruby proxies shell)', async () => {
-    // ruby shares the exact same loadLegacyMode + ensureLanguage path as
-    // shell. Using it keeps the 'shell is undefined before preload' assertion
-    // in getLanguage() hermetic (module-level loaded map is shared per file).
-    expect(getLanguage('ruby')).toBeUndefined();
-    const exts = await ensureLanguage('ruby');
-    expect(exts).toBeDefined();
-    expect(exts!.length).toBeGreaterThan(0);
-    expect(getLanguage('ruby')).toBeDefined();
+  it('resolves every legacy language after its async load', async () => {
+    // Each legacy loader uses a literal import specifier (not a template
+    // literal) so the bundler can code-split it; this test exercises all ten,
+    // catching any typo in the import path or exported symbol name.
+    const legacyLangs = ['shell', 'ruby', 'swift', 'haskell', 'clojure', 'r', 'julia', 'lua', 'perl', 'groovy'];
+    for (const lang of legacyLangs) {
+      expect(getLanguage(lang), `${lang} starts unloaded`).toBeUndefined();
+      const exts = await ensureLanguage(lang);
+      expect(exts, `${lang} resolves`).toBeDefined();
+      expect(exts!.length, `${lang} returns extensions`).toBeGreaterThan(0);
+      expect(getLanguage(lang), `${lang} is cached after load`).toBeDefined();
+    }
 
     // A second call resolves through the already-loaded fast path.
-    const again = await ensureLanguage('ruby');
+    const again = await ensureLanguage('shell');
     expect(again).toBeDefined();
     expect(again!.length).toBeGreaterThan(0);
   });

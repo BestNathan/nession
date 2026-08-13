@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { StreamLanguage, LanguageSupport } from '@codemirror/language';
+import { StreamLanguage, LanguageSupport, type StreamParser } from '@codemirror/language';
 
 // Static imports for bundled languages (already in the project)
 import { javascript } from '@codemirror/lang-javascript';
@@ -35,17 +35,33 @@ const LAZY_LOADERS: Record<string, LangLoader> = {
   php:      () => import('@codemirror/lang-php').then(m => m.php()),
 };
 
-/** Languages that use @codemirror/legacy-modes instead of official packages. */
-const LEGACY_LANGS = new Set([
-  'shell', 'ruby', 'swift', 'haskell', 'clojure',
-  'r', 'julia', 'lua', 'perl', 'groovy',
-]);
-
-/** Load a legacy mode from @codemirror/legacy-modes/mode/<name> and wrap with StreamLanguage. */
-function loadLegacyMode(langKey: string): Promise<LanguageSupport> {
-  return import(`@codemirror/legacy-modes/mode/${langKey}`)
-    .then((mod) => new LanguageSupport(StreamLanguage.define(mod[langKey]), []));
+/** Wrap a legacy StreamParser into a LanguageSupport. */
+function streamLang(parser: StreamParser<unknown>): LanguageSupport {
+  return new LanguageSupport(StreamLanguage.define(parser), []);
 }
+
+/**
+ * Loaders for @codemirror/legacy-modes languages. Each uses a LITERAL import
+ * specifier — a template-literal dynamic import (`import(\`.../${langKey}\`)`)
+ * is not statically analyzable by the bundler, so it survives into the build
+ * as a bare specifier and fails at runtime in production
+ * ("Failed to resolve module specifier").
+ */
+const LEGACY_LOADERS: Record<string, LangLoader> = {
+  shell:   () => import('@codemirror/legacy-modes/mode/shell').then((m) => streamLang(m.shell)),
+  ruby:    () => import('@codemirror/legacy-modes/mode/ruby').then((m) => streamLang(m.ruby)),
+  swift:   () => import('@codemirror/legacy-modes/mode/swift').then((m) => streamLang(m.swift)),
+  haskell: () => import('@codemirror/legacy-modes/mode/haskell').then((m) => streamLang(m.haskell)),
+  clojure: () => import('@codemirror/legacy-modes/mode/clojure').then((m) => streamLang(m.clojure)),
+  r:       () => import('@codemirror/legacy-modes/mode/r').then((m) => streamLang(m.r)),
+  julia:   () => import('@codemirror/legacy-modes/mode/julia').then((m) => streamLang(m.julia)),
+  lua:     () => import('@codemirror/legacy-modes/mode/lua').then((m) => streamLang(m.lua)),
+  perl:    () => import('@codemirror/legacy-modes/mode/perl').then((m) => streamLang(m.perl)),
+  groovy:  () => import('@codemirror/legacy-modes/mode/groovy').then((m) => streamLang(m.groovy)),
+};
+
+/** Languages that use @codemirror/legacy-modes instead of official packages. */
+const LEGACY_LANGS = new Set(Object.keys(LEGACY_LOADERS));
 
 const loaded = new Map<string, LanguageSupport>();
 const failed = new Set<string>();
@@ -98,7 +114,7 @@ export function detectLanguage(filename: string): string {
 /** Resolve a single language key to its LanguageSupport, recording the result. */
 function loadLanguage(langKey: string): Promise<void> {
   const load: Promise<LanguageSupport> = LEGACY_LANGS.has(langKey)
-    ? loadLegacyMode(langKey)
+    ? LEGACY_LOADERS[langKey]()
     : (LAZY_LOADERS[langKey] as LangLoader)();
 
   return load
