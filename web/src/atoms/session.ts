@@ -49,6 +49,13 @@ export const attachToSessionAtom = atom(
     set(envRefsAtom, choice.envRefs ?? []);
     set(manualOverrideAtom, choice.selectedUrl ?? null);
     set(forcedRelayAtom, false);
+    // Clear the previous P2P connection so the terminal's view-creation gate
+    // (Terminal.tsx: `mode === 'p2p' && !p2pConnection`) doesn't build a view
+    // against the old socket on a session switch. Without this, the old
+    // connection stays in the atom until the old hook's unmount cleanup runs —
+    // which is too late — and the throwaway view's xterm Viewport crashes with
+    // "Cannot read properties of undefined (reading 'dimensions')" (issue #51).
+    set(p2pConnectionAtom, null);
     set(attachDialogSessionAtom, null);
     set(terminalSessionStateAtom, 'connecting');
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);

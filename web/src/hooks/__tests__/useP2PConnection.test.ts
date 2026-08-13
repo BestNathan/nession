@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { render, renderHook, act } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useP2PConnection } from '../useP2PConnection';
@@ -352,5 +352,42 @@ describe('useP2PConnection', () => {
     act(() => { store.set(p2pEpochAtom, 1); });
 
     expect(result.current).not.toBe(first);
+  });
+
+  it('resets to connecting during render when the connection token changes (session switch)', async () => {
+    setupMock(1); // only the first socket auto-opens — the post-switch socket stays CONNECTING
+    const seen: string[] = [];
+
+    const Child = ({
+      conn,
+      record,
+    }: {
+      conn: ReturnType<typeof useP2PConnection>;
+      record: (s: string) => void;
+    }) => {
+      record(conn?.connectionState ?? 'null');
+      return null;
+    };
+    const Parent = ({ token }: { token: string }) => {
+      const conn = useP2PConnection({
+        agentUrl: 'ws://agent:9090/ws',
+        connectionToken: token,
+        sessionName: 'test',
+      });
+      return createElement(Child, { conn, record: (s: string) => seen.push(s) });
+    };
+
+    const { rerender } = render(createElement(Parent, { token: 'token-a' }));
+    await flushTimers();
+    expect(seen[seen.length - 1]).toBe('connected');
+
+    const before = seen.length;
+    rerender(createElement(Parent, { token: 'token-b' }));
+
+    // The stale 'connected' must not surface in any child render after the token
+    // switch — the first post-switch render must already be 'connecting', else the
+    // terminal state machine sends client.attach against the old socket (dropped)
+    // and the attach stalls ~10s.
+    expect(seen.slice(before)).not.toContain('connected');
   });
 });
