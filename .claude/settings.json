@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__playwright__browser_take_screenshot",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/ensure-screenshot-dir.js"
+          }
+        ]
+      }
+    ]
+  }
+}
