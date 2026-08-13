@@ -66,7 +66,7 @@ Usage:
 
 Flow:
   1. Watch CI workflow (key phases only)
-  2. Extract built image tag (short SHA)
+  2. Extract built image tag (SHA for staging, version for prod)
   3. Poll k8s pods until they match the expected image tag
   4. On success: show running pods. On timeout: show mismatch.
 
@@ -80,7 +80,7 @@ EOF
 
 # ── Color ───────────────────────────────────────────────────────────────
 # All status/diagnostic output goes to stderr so that functions returning a
-# value on stdout (watch_ci's SHA) aren't polluted by progress messages.
+# value on stdout (watch_ci's tag) aren't polluted by progress messages.
 red()    { echo -e "\033[31m$*\033[0m" >&2; }
 green()  { echo -e "\033[32m$*\033[0m" >&2; }
 yellow() { echo -e "\033[33m$*\033[0m" >&2; }
@@ -93,7 +93,8 @@ step() { bold "▶ $*"; }
 note() { dim "  $*"; }
 
 # ── CI Monitoring ───────────────────────────────────────────────────────
-# Returns: the short SHA (7-char git hash) via stdout
+# Returns the expected image tag (7-char SHA for staging, X.Y.Z version for
+# production) via stdout.
 watch_ci() {
   local branch="$1" workflow="$2" label="$3"
 
@@ -178,35 +179,57 @@ watch_ci() {
     exit 1
   fi
 
-  # ── Extract built image tag (short SHA) from versions job ──
-  local versions_job="versions"
-  [[ "$label" == "production" ]] && versions_job="version-check"
+  # ── Extract the expected image tag from the version job ──
+  # Staging deploys SHA tags (ui-71b5afa); prod deploys VERSION tags (ui-0.25.6).
+  local version_job="versions"
+  [[ "$label" == "production" ]] && version_job="version-check"
 
   # `gh run view --job` takes a numeric job ID, not a name — resolve it first.
-  local versions_job_id
-  versions_job_id=$(gh run view "$run_id" --repo "$REPO" --json jobs \
-    --jq ".jobs[] | select(.name == \"$versions_job\") | .databaseId" 2>/dev/null)
+  local version_job_id
+  version_job_id=$(gh run view "$run_id" --repo "$REPO" --json jobs \
+    --jq ".jobs[] | select(.name == \"$version_job\") | .databaseId" 2>/dev/null)
 
-  local sha=""
-  if [[ -n "$versions_job_id" ]]; then
-    sha=$(gh run view "$run_id" --repo "$REPO" --log --job "$versions_job_id" 2>/dev/null \
-      | grep -oE 'SHA: [a-f0-9]{7}' | head -1 | awk '{print $2}')
+  local tag=""
+  if [[ -n "$version_job_id" ]]; then
+    local job_log
+    job_log=$(gh run view "$run_id" --repo "$REPO" --log --job "$version_job_id" 2>/dev/null || true)
+
+    if [[ "$label" == "production" ]]; then
+      # version-check logs the new version as "Release tag vX.Y.Z" (first run)
+      # or "Version changed (... -> X.Y.Z)" (retry). Anchor on the surrounding
+      # text — the checkout's `git fetch` step lists every historical tag
+      # (v0.3.8 … v0.25.5), so a bare `vX.Y.Z` match would pick an old tag.
+      tag=$(echo "$job_log" | grep -oE 'Release tag v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+      if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        tag=$(echo "$job_log" | grep -oE '-> [0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
+      fi
+    else
+      # versions job logs "SHA: <7-char hash>".
+      tag=$(echo "$job_log" | grep -oE 'SHA: [a-f0-9]{7}' | head -1 | awk '{print $2}')
+    fi
   fi
 
-  # Validate — must be exactly 7 hex chars
-  if [[ ! "$sha" =~ ^[a-f0-9]{7}$ ]]; then
-    sha=$(git rev-parse --short=7 HEAD)
-    yellow "  ⚠ Could not extract SHA from CI log — using local HEAD: $sha"
+  # Validate, falling back to the local checkout when extraction fails.
+  if [[ "$label" == "production" ]]; then
+    if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      tag=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+      yellow "  ⚠ Could not extract version from CI log — using local Cargo.toml: $tag"
+    fi
+  else
+    if [[ ! "$tag" =~ ^[a-f0-9]{7}$ ]]; then
+      tag=$(git rev-parse --short=7 HEAD)
+      yellow "  ⚠ Could not extract SHA from CI log — using local HEAD: $tag"
+    fi
   fi
 
-  info "CI passed — built image tag: $sha"
-  echo "$sha"
+  info "CI passed — built image tag: $tag"
+  echo "$tag"
 }
 
 # ── K8s Monitoring ──────────────────────────────────────────────────────
-# Args: label, sha, "deploy1 component1" "deploy2 component2" ...
+# Args: label, tag, "deploy1 component1" "deploy2 component2" ...
 watch_k8s() {
-  local label="$1" sha="$2"; shift 2
+  local label="$1" tag="$2"; shift 2
   local -a pairs=("$@")
 
   # Verify kubectl connectivity
@@ -217,8 +240,8 @@ watch_k8s() {
     die "kubectl not connected to the Nession cluster"
   fi
 
-  local normalized_sha="${sha:0:7}"
-  step "K8s ($label) — waiting for pods to run image tag '$normalized_sha'..."
+  local normalized_tag="${tag:0:7}"
+  step "K8s ($label) — waiting for pods to run image tag '$normalized_tag'..."
 
   local -i elapsed=0
   local -A deploy_done
@@ -237,9 +260,9 @@ watch_k8s() {
 
       [[ -z "$current_tag" ]] && continue  # No pods yet
 
-      local current_hash="${current_tag##*-}"  # "server-fb7d3e3" → "fb7d3e3"
+      local current_hash="${current_tag##*-}"  # "server-fb7d3e3"→"fb7d3e3" / "server-0.25.6"→"0.25.6"
 
-      if [[ "$current_hash" == "$normalized_sha" ]]; then
+      if [[ "$current_hash" == "$normalized_tag" ]]; then
         deploy_done["$deploy"]=1
         note "  $deploy → ${current_tag} ✓"
       fi
@@ -254,7 +277,7 @@ watch_k8s() {
 
     if [[ $done_count -eq ${#pairs[@]} ]]; then
       echo ""
-      info "All $label pods running expected image '$normalized_sha'"
+      info "All $label pods running expected image '$normalized_tag'"
       kubectl get pods -n "$K8S_NS" -o wide
       return 0
     fi
@@ -271,7 +294,7 @@ watch_k8s() {
   echo ""
   red "━━━ K8s TIMEOUT — pods not running expected image after ${K8S_TIMEOUT}s ━━━"
   echo ""
-  bold "Expected image tag: $normalized_sha"
+  bold "Expected image tag: $normalized_tag"
   bold "Currently deployed:"
   echo ""
   for pair in "${pairs[@]}"; do
@@ -284,10 +307,10 @@ watch_k8s() {
       -l "component=$component,env=$label" \
       -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "N/A")
     local deployed_hash="${deployed_tag##*-}"
-    if [[ "$deployed_hash" == "$normalized_sha" ]]; then
+    if [[ "$deployed_hash" == "$normalized_tag" ]]; then
       info "  $deploy: $deployed_tag ($status)"
     else
-      red "  $deploy: $deployed_tag ($status) — expected *-${normalized_sha}"
+      red "  $deploy: $deployed_tag ($status) — expected *-${normalized_tag}"
     fi
   done
   echo ""
@@ -306,13 +329,13 @@ case "$ENV" in
   staging)
     BRANCH=$(git branch --show-current)
     [[ "$BRANCH" =~ ^(feat|fix)/ ]] || die "Expected feat/* or fix/* branch. Current: $BRANCH"
-    SHA=$(watch_ci "$BRANCH" "$STAGING_WORKFLOW" "staging")
-    watch_k8s "staging" "$SHA" "${STAGING_DEPLOYS[@]}"
+    TAG=$(watch_ci "$BRANCH" "$STAGING_WORKFLOW" "staging")
+    watch_k8s "staging" "$TAG" "${STAGING_DEPLOYS[@]}"
     ;;
 
   prod)
-    SHA=$(watch_ci "main" "$PROD_WORKFLOW" "production")
-    watch_k8s "production" "$SHA" "${PROD_DEPLOYS[@]}"
+    TAG=$(watch_ci "main" "$PROD_WORKFLOW" "production")
+    watch_k8s "production" "$TAG" "${PROD_DEPLOYS[@]}"
     ;;
 
   *) die "Unknown environment: $ENV. Expected: staging | prod" ;;
@@ -320,5 +343,5 @@ esac
 
 echo ""
 green "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-green "  Deploy complete — $ENV running image $SHA"
+green "  Deploy complete — $ENV running image $TAG"
 green "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
