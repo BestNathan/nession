@@ -39,23 +39,21 @@ if [ -n "$STAGED_TSX" ]; then
   fi
 fi
 
-# ── Root PNG check ───────────────────────────────────────────────────────────
-ROOT_PNGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.png$' || true)
+# ── Relocate stray root PNG screenshots ───────────────────────────────────────
+# Playwright MCP saves a screenshot to the CWD when given a bare filename, so
+# screenshots can land in the repo root. Move them into the gitignored
+# .playwright-mcp/screenshots/ and unstage any that were accidentally staged —
+# friendlier than blocking the commit.
+STAGED_ROOT_PNGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.png$' || true)
 
-if [ -n "$ROOT_PNGS" ]; then
-  echo -e "${RED}✗ PNG files found in project root — not allowed${NC}"
-  echo ""
-  echo "  Staged PNGs at root:"
-  for f in $ROOT_PNGS; do
-    echo -e "    ${YELLOW}• $f${NC}"
-  done
-  echo ""
-  echo "  Screenshots & temp images → .playwright-mcp/ (gitignored, auto-cleaned)"
-  echo "  Project assets           → docs/screenshots/ or web/src/assets/"
-  echo ""
-  echo "  Remove from commit:  git reset HEAD $ROOT_PNGS"
-  echo "  Or move & re-stage:  mv <file> <proper-dir>/ && git add ..."
-  HAS_ERROR=1
+if compgen -G "*.png" > /dev/null 2>&1; then
+  echo -e "${YELLOW}→ relocating stray root PNG screenshots${NC}"
+  ./scripts/move-screenshots.sh
+fi
+
+if [ -n "$STAGED_ROOT_PNGS" ]; then
+  git reset -q HEAD -- $STAGED_ROOT_PNGS 2>/dev/null || true
+  echo -e "${YELLOW}→ unstaged root PNGs (moved to .playwright-mcp/screenshots/)${NC}"
 fi
 
 # ── Result ──────────────────────────────────────────────────────────────────
