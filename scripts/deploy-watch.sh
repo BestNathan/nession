@@ -79,11 +79,13 @@ EOF
 }
 
 # ── Color ───────────────────────────────────────────────────────────────
-red()    { echo -e "\033[31m$*\033[0m"; }
-green()  { echo -e "\033[32m$*\033[0m"; }
-yellow() { echo -e "\033[33m$*\033[0m"; }
-bold()   { echo -e "\033[1m$*\033[0m"; }
-dim()    { echo -e "\033[2m$*\033[0m"; }
+# All status/diagnostic output goes to stderr so that functions returning a
+# value on stdout (watch_ci's SHA) aren't polluted by progress messages.
+red()    { echo -e "\033[31m$*\033[0m" >&2; }
+green()  { echo -e "\033[32m$*\033[0m" >&2; }
+yellow() { echo -e "\033[33m$*\033[0m" >&2; }
+bold()   { echo -e "\033[1m$*\033[0m" >&2; }
+dim()    { echo -e "\033[2m$*\033[0m" >&2; }
 
 die() { red "✖ $*"; exit 1; }
 info() { green "✔ $*"; }
@@ -180,9 +182,16 @@ watch_ci() {
   local versions_job="versions"
   [[ "$label" == "production" ]] && versions_job="version-check"
 
-  local sha
-  sha=$(gh run view "$run_id" --repo "$REPO" --log --job "$versions_job" 2>/dev/null \
-    | grep -oE 'SHA: [a-f0-9]{7}' | head -1 | awk '{print $2}')
+  # `gh run view --job` takes a numeric job ID, not a name — resolve it first.
+  local versions_job_id
+  versions_job_id=$(gh run view "$run_id" --repo "$REPO" --json jobs \
+    --jq ".jobs[] | select(.name == \"$versions_job\") | .databaseId" 2>/dev/null)
+
+  local sha=""
+  if [[ -n "$versions_job_id" ]]; then
+    sha=$(gh run view "$run_id" --repo "$REPO" --log --job "$versions_job_id" 2>/dev/null \
+      | grep -oE 'SHA: [a-f0-9]{7}' | head -1 | awk '{print $2}')
+  fi
 
   # Validate — must be exactly 7 hex chars
   if [[ ! "$sha" =~ ^[a-f0-9]{7}$ ]]; then
@@ -222,7 +231,7 @@ watch_k8s() {
       # Get the image tag from pods matching this component label
       local current_tag
       current_tag=$(kubectl get pods -n "$K8S_NS" \
-        -l "component=$component" \
+        -l "component=$component,env=$label" \
         -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null \
         | rev | cut -d: -f1 | rev)
 
@@ -269,10 +278,10 @@ watch_k8s() {
     read -r deploy component <<<"$pair"
     local deployed_tag status
     deployed_tag=$(kubectl get pods -n "$K8S_NS" \
-      -l "component=$component" \
+      -l "component=$component,env=$label" \
       -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null || echo "N/A")
     status=$(kubectl get pods -n "$K8S_NS" \
-      -l "component=$component" \
+      -l "component=$component,env=$label" \
       -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "N/A")
     local deployed_hash="${deployed_tag##*-}"
     if [[ "$deployed_hash" == "$normalized_sha" ]]; then
