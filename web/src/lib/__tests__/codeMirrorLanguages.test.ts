@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectLanguage, preload, getLanguage } from '../codeMirrorLanguages';
+import { detectLanguage, preload, getLanguage, ensureLanguage } from '../codeMirrorLanguages';
 
 describe('detectLanguage', () => {
   it('returns "javascript" for .js', () => {
@@ -87,5 +87,34 @@ describe('preload', () => {
   it('skips extensions that are static languages', () => {
     // js is a static language — preload should be a no-op for it
     expect(() => preload(['js', 'py', 'json'])).not.toThrow();
+  });
+});
+
+describe('ensureLanguage', () => {
+  it('resolves static languages immediately', async () => {
+    const exts = await ensureLanguage('javascript');
+    expect(exts).toBeDefined();
+    expect(exts!.length).toBeGreaterThan(0);
+  });
+
+  it('resolves undefined for text and unknown keys', async () => {
+    expect(await ensureLanguage('text')).toBeUndefined();
+    expect(await ensureLanguage('unknown_lang')).toBeUndefined();
+  });
+
+  it('resolves a legacy language after its async load (ruby proxies shell)', async () => {
+    // ruby shares the exact same loadLegacyMode + ensureLanguage path as
+    // shell. Using it keeps the 'shell is undefined before preload' assertion
+    // in getLanguage() hermetic (module-level loaded map is shared per file).
+    expect(getLanguage('ruby')).toBeUndefined();
+    const exts = await ensureLanguage('ruby');
+    expect(exts).toBeDefined();
+    expect(exts!.length).toBeGreaterThan(0);
+    expect(getLanguage('ruby')).toBeDefined();
+
+    // A second call resolves through the already-loaded fast path.
+    const again = await ensureLanguage('ruby');
+    expect(again).toBeDefined();
+    expect(again!.length).toBeGreaterThan(0);
   });
 });

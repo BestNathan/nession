@@ -95,6 +95,29 @@ export function detectLanguage(filename: string): string {
   return EXT_LANG_MAP[ext] || 'text';
 }
 
+/** Resolve a single language key to its LanguageSupport, recording the result. */
+function loadLanguage(langKey: string): Promise<void> {
+  const load: Promise<LanguageSupport> = LEGACY_LANGS.has(langKey)
+    ? loadLegacyMode(langKey)
+    : (LAZY_LOADERS[langKey] as LangLoader)();
+
+  return load
+    .then((lang) => {
+      loaded.set(langKey, lang);
+      pending.delete(langKey);
+    })
+    .catch(() => {
+      failed.add(langKey);
+      pending.delete(langKey);
+    });
+}
+
+/** Kick off a language load, deduplicated via the `pending` map. */
+function kickOff(langKey: string): void {
+  if (loaded.has(langKey) || failed.has(langKey) || pending.has(langKey)) { return; }
+  pending.set(langKey, loadLanguage(langKey));
+}
+
 /**
  * Preload language packages for the given extensions.
  * Fire-and-forget — call when a directory listing arrives.
@@ -104,39 +127,35 @@ export function preload(exts: string[]): void {
   for (const ext of exts) {
     const langKey = EXT_LANG_MAP[ext];
     if (langKey === undefined) { continue; }
-    if (loaded.has(langKey) || failed.has(langKey) || pending.has(langKey)) { continue; }
-
-    if (LEGACY_LANGS.has(langKey)) {
-      const promise = loadLegacyMode(langKey)
-        .then((lang) => {
-          loaded.set(langKey, lang);
-          pending.delete(langKey);
-          return lang;
-        })
-        .catch(() => {
-          failed.add(langKey);
-          pending.delete(langKey);
-        });
-      pending.set(langKey, promise);
-      continue;
-    }
-
-    const loader = LAZY_LOADERS[langKey];
-    if (loader === undefined) { continue; } // static language, no lazy load needed
-
-    const promise = loader()
-      .then((lang) => {
-        loaded.set(langKey, lang);
-        pending.delete(langKey);
-        return lang;
-      })
-      .catch(() => {
-        failed.add(langKey);
-        pending.delete(langKey);
-      });
-
-    pending.set(langKey, promise);
+    if (!LEGACY_LANGS.has(langKey) && LAZY_LOADERS[langKey] === undefined) { continue; }
+    kickOff(langKey);
   }
+}
+
+/**
+ * Ensure a language is loaded, resolving with its extensions once available.
+ * Resolves immediately for static and already-loaded languages, triggers a
+ * load for lazy/legacy languages and resolves when it finishes, and resolves
+ * `undefined` for 'text', unknown keys, or a failed load. Used by the
+ * CodeMirror editor to apply a language that finished loading asynchronously.
+ */
+export function ensureLanguage(langKey: string): Promise<Extension[] | undefined> {
+  if (langKey === 'text') { return Promise.resolve(undefined); }
+  if (langKey in STATIC_EXTS) { return Promise.resolve(STATIC_EXTS[langKey]); }
+
+  const loadedLang = loaded.get(langKey);
+  if (loadedLang !== undefined) { return Promise.resolve([loadedLang]); }
+  if (failed.has(langKey)) { return Promise.resolve(undefined); }
+
+  if (!LEGACY_LANGS.has(langKey) && LAZY_LOADERS[langKey] === undefined) {
+    return Promise.resolve(undefined);
+  }
+
+  kickOff(langKey);
+  return pending.get(langKey)!.then(() => {
+    const lang = loaded.get(langKey);
+    return lang !== undefined ? [lang] : undefined;
+  });
 }
 
 /**
