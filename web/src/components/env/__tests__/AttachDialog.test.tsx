@@ -7,6 +7,7 @@ import type { Session, AttachInfo, EnvFileInfo } from '../../../types';
 import type { WebSocketService } from '../../../services/websocket';
 import { WebSocketContext } from '../../../hooks/useWebSocket';
 import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '../../../atoms/probe';
+import { attachInfoAtom } from '../../../atoms/session';
 
 function session(): Session {
   return {
@@ -248,5 +249,42 @@ describe('AttachDialog', () => {
       expect.anything(),
       expect.objectContaining({ envRefs: [{ name: 'prod.env', source: 'server' }] }),
     );
+  });
+
+  it('does not clear the active session attachInfoAtom when opened for preview', async () => {
+    const ws = mockWs(attachInfo());
+    const store = createStore();
+    // The currently-attached session's descriptor — a DIFFERENT session than
+    // the one being previewed in the dialog. Opening the preview dialog must
+    // not clobber this shared atom (it drives the live terminal).
+    const activeInfo: AttachInfo = {
+      mode: 'p2p',
+      session_id: 'agent-2:prod',
+      session_name: 'prod',
+      agent_address: 'ws://other/ws',
+      connection_token: 'active-token',
+      addresses: [],
+    };
+    store.set(attachInfoAtom, activeInfo);
+
+    render(
+      <Provider store={store}>
+        <WebSocketContext.Provider value={ws}>
+          <AttachDialog
+            isOpen
+            onClose={vi.fn()}
+            session={session()}
+            onConfirm={vi.fn()}
+          />
+        </WebSocketContext.Provider>
+      </Provider>,
+    );
+
+    // Let the dialog's own attach-info fetch fully settle.
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+
+    // The live session's descriptor must be untouched.
+    expect(store.get(attachInfoAtom)).toEqual(activeInfo);
   });
 });

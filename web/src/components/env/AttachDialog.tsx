@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -15,7 +15,6 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { attachInfoAtom } from '../../atoms/session';
 import { probeResultsAtom, probeRefreshRequestAtom } from '../../atoms/probe';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
@@ -64,7 +63,11 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
   const wsService = useWebSocket();
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
-  const [attachInfo, setAttachInfo] = useAtom(attachInfoAtom);
+  // Local state (not attachInfoAtom): this is dialog scratch space for the
+  // session being PREVIEWED. attachInfoAtom holds the currently-ATTACHED
+  // session and is only written by attachToSessionAtom on confirm. Writing it
+  // here would tear down the live terminal the moment the dialog opens.
+  const [attachInfo, setAttachInfo] = useState<AttachInfo | null>(null);
   // Browser-latency probe results for this agent come from the app-level atom
   // (written by useProbePolling), never probed live here.
   const probeResults = useAtomValue(probeResultsAtom);
