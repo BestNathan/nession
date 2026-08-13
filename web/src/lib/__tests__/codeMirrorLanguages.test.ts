@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectLanguage, preload, getLanguage } from '../codeMirrorLanguages';
+import { detectLanguage, preload, getLanguage, ensureLanguage } from '../codeMirrorLanguages';
 
 describe('detectLanguage', () => {
   it('returns "javascript" for .js', () => {
@@ -87,5 +87,37 @@ describe('preload', () => {
   it('skips extensions that are static languages', () => {
     // js is a static language — preload should be a no-op for it
     expect(() => preload(['js', 'py', 'json'])).not.toThrow();
+  });
+});
+
+describe('ensureLanguage', () => {
+  it('resolves static languages immediately', async () => {
+    const exts = await ensureLanguage('javascript');
+    expect(exts).toBeDefined();
+    expect(exts!.length).toBeGreaterThan(0);
+  });
+
+  it('resolves undefined for text and unknown keys', async () => {
+    expect(await ensureLanguage('text')).toBeUndefined();
+    expect(await ensureLanguage('unknown_lang')).toBeUndefined();
+  });
+
+  it('resolves every legacy language after its async load', async () => {
+    // Each legacy loader uses a literal import specifier (not a template
+    // literal) so the bundler can code-split it; this test exercises all ten,
+    // catching any typo in the import path or exported symbol name.
+    const legacyLangs = ['shell', 'ruby', 'swift', 'haskell', 'clojure', 'r', 'julia', 'lua', 'perl', 'groovy'];
+    for (const lang of legacyLangs) {
+      expect(getLanguage(lang), `${lang} starts unloaded`).toBeUndefined();
+      const exts = await ensureLanguage(lang);
+      expect(exts, `${lang} resolves`).toBeDefined();
+      expect(exts!.length, `${lang} returns extensions`).toBeGreaterThan(0);
+      expect(getLanguage(lang), `${lang} is cached after load`).toBeDefined();
+    }
+
+    // A second call resolves through the already-loaded fast path.
+    const again = await ensureLanguage('shell');
+    expect(again).toBeDefined();
+    expect(again!.length).toBeGreaterThan(0);
   });
 });

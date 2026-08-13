@@ -3,7 +3,8 @@ import { EditorState, Compartment, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { detectLanguage, getLanguage } from '../lib/codeMirrorLanguages';
+import { detectLanguage } from '../lib/codeMirrorLanguages';
+import { useLanguageExtensions } from '../hooks/useLanguageExtensions';
 
 export interface CodeMirrorEditorProps {
   value: string;
@@ -11,14 +12,6 @@ export interface CodeMirrorEditorProps {
   readOnly?: boolean;
   language?: string;
   filename?: string;
-}
-
-function getLanguageExtensions(language: string): Extension[] {
-  if (language === 'text') {
-    return [];
-  }
-  const loaded = getLanguage(language);
-  return loaded ?? [];
 }
 
 export function CodeMirrorEditor({
@@ -33,6 +26,7 @@ export function CodeMirrorEditor({
   const onChangeRef = useRef(onChange);
   const readOnlyCompartment = useRef(new Compartment());
   const editableCompartment = useRef(new Compartment());
+  const languageCompartment = useRef(new Compartment());
 
   // Keep onChange ref current without recreating the editor
   useEffect(() => {
@@ -41,10 +35,13 @@ export function CodeMirrorEditor({
 
   // Detect language from filename if language prop is not provided
   const resolvedLanguage = language || (filename ? detectLanguage(filename) : 'text');
+  const languageExts = useLanguageExtensions(resolvedLanguage);
+  const languageExtsRef = useRef(languageExts);
+  languageExtsRef.current = languageExts;
 
   // Build the initial extensions list
   const buildExtensions = useCallback(
-    (isReadOnly: boolean, lang: string): Extension[] => [
+    (isReadOnly: boolean, langExts: Extension[]): Extension[] => [
       keymap.of(defaultKeymap),
       oneDark,
       EditorView.updateListener.of((update) => {
@@ -55,7 +52,7 @@ export function CodeMirrorEditor({
       }),
       readOnlyCompartment.current.of(EditorState.readOnly.of(isReadOnly)),
       editableCompartment.current.of(EditorView.editable.of(!isReadOnly)),
-      ...getLanguageExtensions(lang),
+      languageCompartment.current.of(langExts),
     ],
     [],
   );
@@ -64,14 +61,13 @@ export function CodeMirrorEditor({
   // Store initial values in refs to avoid dependency issues
   const initialValueRef = useRef(value);
   const initialReadOnlyRef = useRef(readOnly);
-  const initialLanguageRef = useRef(resolvedLanguage);
 
   useEffect(() => {
     if (!containerRef.current) {return;}
 
     const state = EditorState.create({
       doc: initialValueRef.current,
-      extensions: buildExtensions(initialReadOnlyRef.current, initialLanguageRef.current),
+      extensions: buildExtensions(initialReadOnlyRef.current, languageExtsRef.current),
     });
 
     const view = new EditorView({
@@ -111,33 +107,15 @@ export function CodeMirrorEditor({
     });
   }, [readOnly]);
 
-  // Update language when it changes (requires full recreate since language
-  // extensions can't simply be swapped via compartment in all cases)
-  const prevLanguageRef = useRef(resolvedLanguage);
+  // Apply language extensions when they change — either the filename-driven
+  // language key switches, or a lazily-loaded language finishes its async
+  // load. The language lives in a Compartment so it can be swapped in place
+  // without recreating the editor (and losing scroll/cursor state).
   useEffect(() => {
-    if (prevLanguageRef.current === resolvedLanguage) {return;}
-    prevLanguageRef.current = resolvedLanguage;
-
     const view = viewRef.current;
     if (!view) {return;}
-
-    const currentValue = view.state.doc.toString();
-    view.destroy();
-
-    if (!containerRef.current) {return;}
-
-    const state = EditorState.create({
-      doc: currentValue,
-      extensions: buildExtensions(readOnly, resolvedLanguage),
-    });
-
-    const newView = new EditorView({
-      state,
-      parent: containerRef.current,
-    });
-
-    viewRef.current = newView;
-  }, [resolvedLanguage, readOnly, buildExtensions]);
+    view.dispatch({ effects: languageCompartment.current.reconfigure(languageExts) });
+  }, [languageExts]);
 
   return (
     <div
