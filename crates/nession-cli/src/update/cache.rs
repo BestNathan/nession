@@ -55,6 +55,21 @@ pub fn is_cache_fresh(checked_at: &DateTime<Utc>) -> bool {
 mod tests {
     use super::*;
     use chrono::Duration;
+    use std::sync::Mutex;
+
+    /// Serialize cache-file tests and isolate them behind a temp `NESSIONS_HOME`.
+    /// `cache_path()` resolves to `~/.nession/update-check.json` (a fixed global
+    /// path), so `roundtrip_write_read` and `read_cache_file_not_exists` race and
+    /// pollute the real cache file when run in parallel. `set_var`/`remove_var`
+    /// are process-global, hence the mutex.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn isolated_home() -> std::path::PathBuf {
+        let tmp = std::env::temp_dir().join(format!("nession-cache-test-{}", std::process::id()));
+        std::env::set_var("NESSION_HOME", tmp.to_string_lossy().as_ref());
+        std::fs::create_dir_all(&tmp).ok();
+        tmp
+    }
 
     #[test]
     fn fresh_within_ttl() {
@@ -82,6 +97,8 @@ mod tests {
 
     #[test]
     fn roundtrip_write_read() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = isolated_home();
         let cache = UpdateCache {
             checked_at: Utc::now(),
             latest_version: "0.5.0".into(),
@@ -93,14 +110,18 @@ mod tests {
         assert_eq!(read.latest_version, "0.5.0");
         assert_eq!(read.current_version, "0.4.2");
         assert!(read.update_available);
-        // Clean up to avoid interference with other tests.
-        let _ = std::fs::remove_file(cache_path().unwrap());
+        std::env::remove_var("NESSION_HOME");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn read_cache_file_not_exists() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let tmp = isolated_home();
         let path = cache_path().unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(read_cache().is_none());
+        std::env::remove_var("NESSION_HOME");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
