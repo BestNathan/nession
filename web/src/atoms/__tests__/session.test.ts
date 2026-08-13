@@ -3,7 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '../../types';
 import type { AttachChoice } from '../../components/env/AttachDialog';
-import { p2pStateAtom } from '../connection';
+import { p2pConnectionAtom, p2pStateAtom } from '../connection';
+import type { P2PConnection } from '../../hooks/useP2PConnection';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
   manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
@@ -81,6 +82,13 @@ describe('action atoms', () => {
     expect(store.get(rendererAtom)).toBe('webgl');
     expect(store.get(envRefsAtom)).toEqual([]);
     expect(store.get(attachDialogSessionAtom)).toBeNull();
+  });
+
+  it('attachToSessionAtom clears the previous P2P connection (session switch)', () => {
+    const store = createStore();
+    store.set(p2pConnectionAtom, {} as P2PConnection);
+    store.set(attachToSessionAtom, { session: makeSession(), choice: makeChoice(makeSession()), navigate });
+    expect(store.get(p2pConnectionAtom)).toBeNull();
   });
 
   it('disconnectAtom clears all atoms', () => {

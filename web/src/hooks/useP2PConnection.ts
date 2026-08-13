@@ -134,6 +134,44 @@ function connectWs(ctx: ConnectWsContext) {
 }
 
 /**
+ * Resets connectionState when the P2P transport identity changes between
+ * renders, using React's "adjust state during render" pattern so the committed
+ * render — and therefore child effects like Terminal's Bridge — already see the
+ * fresh state (an effect would run too late).
+ *
+ * - agentUrl appears or changes → 'connecting'
+ * - agentUrl clears (relay fallback / plan re-resolve) → 'disconnected'
+ * - connectionToken changes (session switch on the same agent) → 'connecting'
+ *   (otherwise the stale 'connected' sends client.attach before the new socket
+ *   opens, the message is dropped, and the attach stalls ~10s)
+ */
+function useTransportReset(
+  agentUrl: string | undefined,
+  connectionToken: string | undefined,
+  connectionState: ConnectionState,
+  setConnectionState: (s: ConnectionState) => void,
+): void {
+  const prevAgentUrlRef = useRef<string | undefined>(undefined);
+  if (agentUrl && agentUrl !== prevAgentUrlRef.current) {
+    setConnectionState('connecting');
+  }
+  if (!agentUrl && prevAgentUrlRef.current && connectionState !== 'disconnected') {
+    setConnectionState('disconnected');
+  }
+  prevAgentUrlRef.current = agentUrl;
+
+  const prevConnectionTokenRef = useRef<string | undefined>(undefined);
+  if (
+    connectionToken &&
+    connectionToken !== prevConnectionTokenRef.current &&
+    prevConnectionTokenRef.current !== undefined
+  ) {
+    setConnectionState('connecting');
+  }
+  prevConnectionTokenRef.current = connectionToken;
+}
+
+/**
  * Manages a P2P WebSocket connection to an agent for both terminal I/O
  * and file operations. Returns null if options is null (relay mode).
  *
@@ -192,19 +230,7 @@ export function useP2PConnection(
   // effects run first). The prev-url guard ensures a genuine terminal
   // 'disconnected' (max reconnects hit, same url) is NOT flipped back —
   // agentUrl hasn't changed, so the guard won't match.
-  const prevAgentUrlRef = useRef<string | undefined>(undefined);
-  if (agentUrl && agentUrl !== prevAgentUrlRef.current) {
-    setConnectionState('connecting');
-  }
-  // When agentUrl goes from a value to null (session switch while plan
-  // re-resolves, or forced relay fallback), reset to 'disconnected' so
-  // that waitForConnection() doesn't falsely resolve while there is no
-  // WebSocket. Without this the stale 'connected' from the previous agent
-  // makes callers think the transport is ready when it isn't.
-  if (!agentUrl && prevAgentUrlRef.current && connectionState !== 'disconnected') {
-    setConnectionState('disconnected');
-  }
-  prevAgentUrlRef.current = agentUrl;
+  useTransportReset(agentUrl, connectionToken, connectionState, setConnectionState);
 
   // Mirror connectionState into a ref so waitForConnection can read live state
   // without being re-created (and without stale closures) on every transition.
