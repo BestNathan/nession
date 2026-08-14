@@ -48,13 +48,6 @@ export class TerminalView {
   private mouseIntent: MouseIntentResolver;
   /** On touch devices: a visible textarea that replaces xterm's hidden one. */
   private mobileInput: MobileInput | null = null;
-  /**
-   * Outer scroll container (overflow:auto) that pans the fixed-size grid.
-   * In the fixed-size terminal design the grid (e.g. 200×60) is larger than
-   * the mobile viewport, so "scroll to bottom" must also pan this container
-   * to reveal the newest output — xterm's own scrollback scroll is separate.
-   */
-  private scrollContainer: HTMLElement;
 
   private isDisposed = false;
 
@@ -91,7 +84,6 @@ export class TerminalView {
 
     scrollContainer.appendChild(mountElement);
     container.appendChild(scrollContainer);
-    this.scrollContainer = scrollContainer;
 
     const initialFontSize = options.deviceProfile?.fontSize ?? DEFAULT_FONT_SIZE;
 
@@ -246,12 +238,6 @@ export class TerminalView {
   scrollToBottom(): void {
     if (this.isDisposed) { return; }
     this.terminal.scrollToBottom();
-    // Fixed-size terminal: the grid may be larger than the viewport, so the
-    // newest output lives at the bottom-right of the outer scroll container.
-    // Pan it too, otherwise "scroll to bottom" leaves the user looking at a
-    // stale region while xterm's scrollback has already jumped to the bottom.
-    this.scrollContainer.scrollTop = this.scrollContainer.scrollHeight;
-    this.scrollContainer.scrollLeft = this.scrollContainer.scrollWidth;
   }
 
   /** Focus the active input element (mobile: our textarea; desktop: xterm). */
