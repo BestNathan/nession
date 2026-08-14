@@ -19,7 +19,7 @@
 - Focus stealing: every overlay button calls `e.preventDefault()` on `onPointerDown` so tapping never moves focus and the `MobileInput` textarea keeps it (on-screen keyboard stays open).
 - Native touch scroll: the overlay is a sibling of the terminal element (NOT inside `TerminalView`'s internal `scrollContainer`), so its taps never reach the scrollContainer's tap-to-focus listeners and don't conflict with xterm's viewport touch scrolling.
 
-**Coverage notes:** `web/src/terminal/TerminalView.ts`, `web/src/components/Terminal.tsx`, `web/src/components/TerminalLayout.tsx`, and `web/src/terminal/components/TerminalWorkspace.tsx` are all excluded from vitest coverage (see `web/vitest.config.ts`) as browser-only glue — Tasks 1 and 3's glue changes are verified by `tsc`/`lint`/Playwright instead of unit tests. The new `TerminalScrollOverlay.tsx` and the new lines in `MobileTerminalLayout.tsx` ARE covered, so Task 2 and Task 3 include real unit tests.
+**Coverage notes:** `web/src/terminal/TerminalView.ts`, `web/src/components/Terminal.tsx`, `web/src/components/TerminalLayout.tsx`, and `web/src/terminal/components/TerminalWorkspace.tsx` are all excluded from vitest coverage (see `web/vite.config.ts` `test.coverage` block) as browser-only glue — Tasks 1 and 3's glue changes are verified by `tsc`/`lint`/Playwright instead of unit tests. The new `TerminalScrollOverlay.tsx` and the new lines in `MobileTerminalLayout.tsx` ARE covered, so Task 2 and Task 3 include real unit tests.
 
 **Execution context:** Run inside a worktree created via `EnterWorktree name: "feat/mobile-scroll-buttons"` (branch must keep the `feat/` prefix so CI triggers). Copy this plan file into the worktree and commit it with Task 1.
 
