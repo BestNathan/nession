@@ -338,6 +338,8 @@ impl ServerClient {
         let mut reconnect_delay = INITIAL_RECONNECT_DELAY;
         let mut reported_interval = false;
 
+        let this = Arc::new(self);
+
         loop {
             // Bail out immediately if shutdown was requested between attempts.
             if shutdown_rx.try_recv().is_ok() {
@@ -345,7 +347,7 @@ impl ServerClient {
                 return;
             }
 
-            match self.connect_once().await {
+            match this.connect_once().await {
                 Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
                     reconnect_delay = INITIAL_RECONNECT_DELAY;
@@ -363,7 +365,8 @@ impl ServerClient {
                     }
 
                     // Service the live connection until it drops or shutdown.
-                    let outcome = self
+                    let outcome = this
+                        .clone()
                         .run_connection(sink, stream, &mut outbox_rx, &mut shutdown_rx)
                         .await;
                     // Connection dropped — mark as disconnected so the
@@ -478,15 +481,19 @@ impl ServerClient {
     /// incoming server messages, respond to pings, and watch for shutdown.
     /// Returns whether the loop ended due to shutdown or a dropped connection.
     async fn run_connection(
-        &self,
+        self: Arc<Self>,
         mut sink: WsSink,
         mut stream: WsStreamHalf,
         outbox_rx: &mut mpsc::UnboundedReceiver<WsMessage>,
         shutdown_rx: &mut mpsc::Receiver<()>,
     ) -> ConnectionOutcome {
+        // Handler tasks write their responses here; this loop drains the channel
+        // onto the socket. Unbounded so a handler never blocks on a full queue.
+        let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<WsMessage>();
+
         loop {
             tokio::select! {
-                // Outgoing: drain the outbox onto the live socket.
+                // Outgoing: drain the outbox (heartbeats, session updates).
                 outgoing = outbox_rx.recv() => {
                     match outgoing {
                         Some(msg) => {
@@ -501,13 +508,35 @@ impl ServerClient {
                         }
                     }
                 }
+                // Command responses from handler tasks.
+                response = resp_rx.recv() => {
+                    match response {
+                        Some(msg) => {
+                            if let Err(e) = sink.send(msg).await {
+                                warn!("Failed to send to server: {:#}", e);
+                                return ConnectionOutcome::Disconnected;
+                            }
+                        }
+                        None => {
+                            // Unreachable while this loop holds a `resp_tx` clone;
+                            // kept as a defensive disconnect.
+                            return ConnectionOutcome::Disconnected;
+                        }
+                    }
+                }
                 // Incoming: server messages, pings, close.
                 incoming = stream.next() => {
                     match incoming {
                         Some(Ok(WsMessage::Text(text))) => {
-                            if let Err(e) = self.handle_server_message(&text, &mut sink).await {
-                                warn!("Error handling server message: {:#}", e);
-                            }
+                            // Handle off the loop so a slow command can't block
+                            // heartbeats or subsequent reads.
+                            let this = self.clone();
+                            let tx = resp_tx.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = this.handle_server_message(&text, &tx).await {
+                                    warn!("Error handling server message: {:#}", e);
+                                }
+                            });
                         }
                         Some(Ok(WsMessage::Ping(data))) => {
                             let _ = sink.send(WsMessage::Pong(data)).await;
@@ -537,9 +566,13 @@ impl ServerClient {
         }
     }
 
-    /// Handle a message received from the server, writing any response directly
-    /// to the connection's sink.
-    async fn handle_server_message(&self, text: &str, sink: &mut WsSink) -> Result<()> {
+    /// Handle a message received from the server, writing any response to the
+    /// `responses` channel (drained onto the socket by `run_connection`).
+    async fn handle_server_message(
+        &self,
+        text: &str,
+        responses: &mpsc::UnboundedSender<WsMessage>,
+    ) -> Result<()> {
         let msg: ProtocolMessage<serde_json::Value> =
             serde_json::from_str(text).context("failed to parse server message")?;
 
@@ -573,7 +606,7 @@ impl ServerClient {
                             "result": payload_value,
                         }
                     });
-                    sink.send(WsMessage::Text(response.to_string())).await?;
+                    responses.send(WsMessage::Text(response.to_string()))?;
                     return Ok(());
                 }
             }
@@ -634,7 +667,7 @@ impl ServerClient {
                         "session_name": session_name,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.env.list" => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -654,7 +687,7 @@ impl ServerClient {
                         "files": files,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.env.get" => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -675,7 +708,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.env.write" => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -706,7 +739,7 @@ impl ServerClient {
                         "warnings": warnings,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.env.delete" => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -726,7 +759,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.session.env.apply" => {
                 let payload: ServerSessionEnvApplyPayload =
@@ -773,7 +806,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.session.env.unset" => {
                 let payload: ServerSessionEnvUnsetPayload =
@@ -806,7 +839,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.env.query" => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -822,7 +855,7 @@ impl ServerClient {
                         "sourced_files": sourced_files,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             "server.session.kill" => {
                 let request_id = msg
@@ -856,7 +889,7 @@ impl ServerClient {
                         "error": error,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             msg_types::SERVER_SESSIONS_LIST => {
                 let request_id = str_field(&msg.payload, "request_id");
@@ -866,7 +899,13 @@ impl ServerClient {
                 // "no server running" to an empty Vec. Only report the raw
                 // fields; the server derives status from `attached_clients`
                 // so the rule lives in exactly one place.
-                let sessions = self.tmux.list_sessions().await.unwrap_or_default();
+                let sessions = match self.tmux.list_sessions().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!("tmux list-sessions failed: {:#}", e);
+                        vec![]
+                    }
+                };
 
                 debug!(
                     "Server requested session list: returning {} session(s)",
@@ -896,7 +935,7 @@ impl ServerClient {
                         "sessions": sessions_json,
                     }
                 });
-                sink.send(WsMessage::Text(response.to_string())).await?;
+                responses.send(WsMessage::Text(response.to_string()))?;
             }
             _ => {
                 debug!(
@@ -2286,5 +2325,243 @@ mod tests {
         assert_eq!(json["status"], "active");
         assert_eq!(json["window_count"], 3);
         assert_eq!(json["attached_clients"], 1);
+    }
+
+    /// Write an executable `tmux` shim script that dispatches on `$1`.
+    #[cfg(unix)]
+    fn write_fake_tmux(dir: &std::path::Path, script: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("tmux");
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Shared AgentMetadata for the new tests.
+    fn metadata_for_tests() -> AgentMetadata {
+        AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        }
+    }
+
+    /// Mock server that sends `server.session.create` immediately followed by
+    /// `server.sessions.list`, then forwards all client responses.
+    async fn start_mock_server_create_then_list(
+        port: u16,
+        session_name: String,
+    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+        let (msg_tx, msg_rx) = mpsc::channel(100);
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+            .await
+            .expect("failed to bind mock server");
+
+        let handle = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = accept_async(stream).await.expect("failed to accept ws");
+                let (mut sink, mut stream) = ws.split();
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.register.response",
+                    "id": "test-id",
+                    "timestamp": 1234567890,
+                    "payload": { "status": "accepted", "message": "ok" }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                let _ = stream.next().await; // skip registration
+
+                let create_cmd = serde_json::json!({
+                    "msg_type": "server.session.create",
+                    "id": "cmd-create",
+                    "timestamp": 1234567891,
+                    "payload": {
+                        "request_id": "req-create",
+                        "name": session_name,
+                        "width": 100,
+                        "height": 30
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(create_cmd.to_string())).await;
+
+                let list_cmd = serde_json::json!({
+                    "msg_type": "server.sessions.list",
+                    "id": "cmd-list",
+                    "timestamp": 1234567892,
+                    "payload": { "request_id": "req-list" }
+                });
+                let _ = sink.send(WsMessage::Text(list_cmd.to_string())).await;
+
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = msg_tx.send(text.clone()).await;
+                    }
+                }
+            }
+        });
+
+        (handle, msg_rx)
+    }
+
+    /// A hung `list-sessions` (30s timeout, 5s actual hang) must not block a
+    /// heartbeat from reaching the server.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn heartbeat_flows_while_tmux_command_hangs() {
+        let port = 28095;
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("list-started");
+        let shim = write_fake_tmux(
+            dir.path(),
+            &format!(
+                "case \"$1\" in list-sessions) touch {}; sleep 5;; *) exit 0;; esac",
+                marker.display()
+            ),
+        );
+
+        let tmux = {
+            let mut m = SessionManager::new();
+            m.with_tmux_bin(shim).with_timeouts(
+                Duration::from_secs(30),
+                Duration::from_secs(5),
+                Duration::from_secs(10),
+            );
+            Arc::new(m)
+        };
+
+        let (server_handle, mut msg_rx) = start_mock_server_sessions_list(port).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{port}"),
+            "test-token",
+            "test-agent-hang",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            tmux,
+            "/tmp".to_string(),
+            None,
+        );
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // Wait until the agent has actually started the hung list-sessions call.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(marker.exists(), "agent never started the hung tmux command");
+
+        // Send a heartbeat while list-sessions is still sleeping.
+        handle
+            .send_heartbeat(AgentStatus::Online, 1, 0, 0, [0.0, 0.0, 0.0])
+            .await
+            .unwrap();
+
+        // The heartbeat must arrive promptly (well before the 5s hang ends).
+        let delivered = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let msg = msg_rx.recv().await.expect("server closed");
+                let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+                if parsed.get("msg_type").and_then(|v| v.as_str()) == Some("agent.heartbeat") {
+                    return;
+                }
+            }
+        })
+        .await;
+        assert!(
+            delivered.is_ok(),
+            "heartbeat was blocked by the hung tmux command"
+        );
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
+    }
+
+    /// `server.sessions.list` must answer within the refresh window even while a
+    /// slow-but-not-timed-out `server.session.create` is still in flight.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sessions_list_responds_while_create_is_slow() {
+        let port = 28096;
+        let dir = tempfile::tempdir().unwrap();
+        // new-session is slow (2s, under the 10s create timeout); list is fast.
+        let shim = write_fake_tmux(
+            dir.path(),
+            "case \"$1\" in new-session) sleep 2;; *) exit 0;; esac",
+        );
+
+        let tmux = {
+            let mut m = SessionManager::new();
+            m.with_tmux_bin(shim).with_timeouts(
+                Duration::from_secs(30),
+                Duration::from_secs(5),
+                Duration::from_secs(10),
+            );
+            Arc::new(m)
+        };
+
+        let (server_handle, mut msg_rx) =
+            start_mock_server_create_then_list(port, "slow-create-test".to_string()).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let client = ServerClient::new(
+            format!("ws://127.0.0.1:{port}"),
+            "test-token",
+            "test-agent-slow-create",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            tmux,
+            "/tmp".to_string(),
+            None,
+        );
+        let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
+
+        // The sessions.list response must arrive before the 2s create finishes.
+        let list_answered = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let msg = msg_rx.recv().await.expect("server closed");
+                let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+                if parsed
+                    .get("payload")
+                    .and_then(|p| p.get("command"))
+                    .and_then(|v| v.as_str())
+                    == Some("sessions.list")
+                {
+                    return parsed;
+                }
+            }
+        })
+        .await;
+        let parsed = list_answered.expect("sessions.list was blocked by the slow create");
+        assert_eq!(
+            parsed
+                .get("payload")
+                .and_then(|p| p.get("request_id"))
+                .and_then(|v| v.as_str()),
+            Some("req-list")
+        );
+        assert_eq!(
+            parsed
+                .get("payload")
+                .and_then(|p| p.get("success"))
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+
+        handle.shutdown().await.ok();
+        server_handle.abort();
     }
 }
