@@ -96,33 +96,28 @@ gh pr create --title "chore: ..." --body "..."
 gh pr merge <N> --squash
 ```
 
-**Auto-merge for feature branches:**
+**Merging feature branches (no auto-merge):**
 
-For `feat/**` and `fix/**` branches, use auto-merge to automatically merge the PR once all CI checks pass:
+For `feat/**` and `fix/**` branches, the flow is **push → CI → staging → confirm → merge to main**. Do **NOT** auto-merge — staging is the gate before production.
 
 ```bash
-# Enable auto-merge (squash merge when checks pass)
-gh pr merge <PR-NUMBER> --auto --squash
+# 1. Push → CI (cicd.yml) runs → staging rollout
+git push origin <branch-name>
 
-# Check status
-gh pr view <PR-NUMBER> --json autoMergeRequest,state,statusCheckRollup
+# 2. Watch CI + staging rollout to success
+./scripts/deploy-watch.sh staging
 
-# Cancel auto-merge if needed
-gh pr merge <PR-NUMBER> --disable-auto
+# 3. Offer the user two options, then act (no auto-merge):
+#    Option 1 — Merge to main (deploy to prod)
+#    Option 2 — Hold in staging (keep PR open)
 ```
 
-**When to use auto-merge:**
-- Branch is `feat/**` or `fix/**` (triggers CI workflow)
-- Development is complete (all features implemented)
-- All tests pass locally
-- PR is ready for review
+| Option | Action | When |
+|--------|--------|------|
+| **Merge to main** | `gh pr merge <PR-NUMBER> --squash` | staging verified, ready to release |
+| **Hold in staging** | leave the PR open (no action) | needs more review / verification |
 
-**Benefits:**
-- PR merges automatically when CI passes (rust-check, web-check, builds)
-- No need to manually monitor CI status or click merge
-- Reduces wait time between approval and merge
-
-**⚠ Auto-merge cancels automatically if any check fails.** Fix the issue and push — auto-merge re-enables.
+**Why not auto-merge:** auto-merge pushes a branch to main the moment CI turns green, without any verification against the staging deployment. Staging is the last human gate before production — the branch must be confirmed there first.
 
 **Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
 
