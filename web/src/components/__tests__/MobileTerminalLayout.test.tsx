@@ -8,12 +8,12 @@ vi.mock('../env/EnvPanel', () => ({ EnvPanel: () => <div data-testid="env-panel"
 vi.mock('../FileBrowser', () => ({ FileBrowser: () => <div data-testid="file-browser" /> }));
 vi.mock('../FileViewer', () => ({ FileViewer: () => <div data-testid="file-viewer" /> }));
 
-function setup() {
+function setup(terminalElement: React.ReactNode = <div data-testid="terminal" />) {
   const onScrollPages = vi.fn();
   const onScrollToBottom = vi.fn();
   render(
     <MobileTerminalLayout
-      terminalElement={<div data-testid="terminal" />}
+      terminalElement={terminalElement}
       sessionId="session-1"
       sendText={vi.fn()}
       toolbarDisabled={false}
@@ -39,5 +39,12 @@ describe('MobileTerminalLayout', () => {
     expect(onScrollPages).toHaveBeenCalledWith(-1);
     fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }));
     expect(onScrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render the overlay when terminalElement is null (desktop path)', () => {
+    setup(null);
+    expect(screen.queryByRole('button', { name: 'Scroll up one page' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Scroll down one page' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument();
   });
 });
