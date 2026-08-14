@@ -265,7 +265,7 @@ export function TerminalScrollOverlay({
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd web && npx vitest run src/components/__tests__/TerminalScrollOverlay.test.tsx`
-Expected: 6 passed.
+Expected: 5 passed.
 
 - [ ] **Step 5: Commit**
 

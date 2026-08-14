@@ -73,7 +73,7 @@ export function TerminalScrollOverlay({
               className="h-9 w-9"
               aria-label="Scroll to bottom"
               onPointerDown={(e) => e.preventDefault()}
-              onClick={onScrollToBottom}
+              onClick={() => onScrollToBottom()}
             >
               <ArrowDownToLine className="size-4" data-icon />
             </Button>
