@@ -245,6 +245,8 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
           sessionId={sessionId}
           sessionName={sessionName}
           sendText={(text) => terminalHandle?.sendText(text)}
+          onScrollPages={(pages) => terminalHandle?.scrollPages(pages)}
+          onScrollToBottom={() => terminalHandle?.scrollToBottom()}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
           onTerminalReveal={() => terminalHandle?.refit()}

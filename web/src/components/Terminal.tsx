@@ -356,6 +356,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         sendResize: (cols: number, rows: number) => {
           viewRef.current?.sendResize(cols, rows);
         },
+        scrollPages: (pages: number) => { viewRef.current?.scrollPages(pages); },
+        scrollLines: (lines: number) => { viewRef.current?.scrollLines(lines); },
+        scrollToBottom: () => { viewRef.current?.scrollToBottom(); },
         fontSizeManager: viewRef.current?.fontSizeManager ?? null,
         focusTerminal: () => viewRef.current?.focus(),
       };

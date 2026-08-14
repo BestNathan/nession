@@ -47,6 +47,12 @@ export interface TerminalHandle {
   sendText: (text: string) => void;
   refit: () => void;
   sendResize: (cols: number, rows: number) => void;
+  /** Scroll scrollback by pages (negative = towards history). */
+  scrollPages: (pages: number) => void;
+  /** Scroll scrollback by lines (negative = towards history). */
+  scrollLines: (lines: number) => void;
+  /** Jump the viewport to the bottom of the scrollback. */
+  scrollToBottom: () => void;
   fontSizeManager: import('./FontSizeManager').FontSizeManager | null;
   /** Re-focus the xterm textarea (e.g. after tapping toolbar buttons). */
   focusTerminal: () => void;

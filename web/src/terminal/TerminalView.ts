@@ -222,6 +222,24 @@ export class TerminalView {
     this.connection.send(text);
   }
 
+  /** Scroll the scrollback buffer by whole pages (negative = towards history). */
+  scrollPages(pages: number): void {
+    if (this.isDisposed) { return; }
+    this.terminal.scrollPages(pages);
+  }
+
+  /** Scroll the scrollback buffer by lines (negative = towards history). */
+  scrollLines(lines: number): void {
+    if (this.isDisposed) { return; }
+    this.terminal.scrollLines(lines);
+  }
+
+  /** Jump the viewport to the newest output (bottom of the scrollback). */
+  scrollToBottom(): void {
+    if (this.isDisposed) { return; }
+    this.terminal.scrollToBottom();
+  }
+
   /** Focus the active input element (mobile: our textarea; desktop: xterm). */
   focus(): void {
     if (this.mobileInput) { this.mobileInput.focus(); }
