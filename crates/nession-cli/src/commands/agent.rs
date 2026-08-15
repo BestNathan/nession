@@ -318,6 +318,10 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     } else {
         config.agent_id.clone()
     };
+    // Resize forwarding channel: the P2P AgentServer publishes tmux
+    // `%window-resize` events here, and the forwarder spawned below drains
+    // them into the central server once a live ServerClientHandle exists.
+    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -325,6 +329,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         config.default_working_dir.clone(),
         file_root,
         config.attach_mode.clone(),
+        resize_tx,
     )
     .context("failed to create agent server")?;
     let (server_handle, listen_addr) = agent_server
@@ -390,6 +395,20 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
             (None, config.heartbeat_interval_secs)
         }
     };
+
+    // Forward tmux resize events from the P2P server to the central server so
+    // relay clients receive size updates. Events arriving while disconnected
+    // are dropped — the next attach re-syncs the pane size.
+    if let Some(ref handle) = client_handle {
+        let handle = handle.clone();
+        tokio::spawn(async move {
+            while let Some((session_id, cols, rows)) = resize_rx.recv().await {
+                if handle.is_connected() {
+                    let _ = handle.send_terminal_resize(&session_id, cols, rows).await;
+                }
+            }
+        });
+    }
 
     // Start HeartbeatLoop
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
