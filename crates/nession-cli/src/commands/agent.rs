@@ -408,6 +408,11 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
                 }
             }
         });
+    } else {
+        // No central-server connection: drop the receiver so the channel
+        // closes and `resize_tx.send(...)` becomes an ignored `Err`, instead
+        // of accumulating unbounded resize events in a channel with no reader.
+        drop(resize_rx);
     }
 
     // Start HeartbeatLoop

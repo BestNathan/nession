@@ -191,6 +191,11 @@ async fn main() -> Result<()> {
                 }
             }
         });
+    } else {
+        // No central-server connection: drop the receiver so the channel
+        // closes and `resize_tx.send(...)` becomes an ignored `Err`, instead
+        // of accumulating unbounded resize events in a channel with no reader.
+        drop(resize_rx);
     }
 
     // 6. Start HeartbeatLoop
