@@ -7,6 +7,7 @@ function makeTransport() {
     mode: 'p2p' as const,
     send: vi.fn<(data: string) => void>(),
     sendResize: vi.fn<(cols: number, rows: number) => void>(),
+    flushInputBuffer: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
     onStateChange: null,

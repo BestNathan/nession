@@ -299,6 +299,16 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     controller.onDisconnect = onDisconnect;
   }, [controller, onBack, onError, onDisconnect]);
 
+  // Flush keystrokes typed during the connect window once the session attaches.
+  // The transport exists by the time 'attached' fires (TerminalViewport's mount
+  // effect creates it — child effects run before this parent effect), so this
+  // delivers buffered input without waiting for the next user action.
+  useEffect(() => {
+    if (terminalState === 'attached') {
+      controller?.flushInputBuffer();
+    }
+  }, [terminalState, controller]);
+
   const terminalElement = modeGateOk ? (
     <TerminalPane sessionId={sessionId} controller={controller} reconnectAttempt={reconnectCount} />
   ) : (

@@ -22,6 +22,7 @@ Object.defineProperty(window, 'matchMedia', {
 interface MockTransport extends TerminalTransport {
   send: ReturnType<typeof vi.fn<(data: string) => void>>;
   sendResize: ReturnType<typeof vi.fn<(cols: number, rows: number) => void>>;
+  flushInputBuffer: ReturnType<typeof vi.fn<() => void>>;
   dispose: ReturnType<typeof vi.fn<() => void>>;
 }
 
@@ -30,6 +31,7 @@ function makeTransport(): MockTransport {
     mode: 'p2p',
     send: vi.fn<(data: string) => void>(),
     sendResize: vi.fn<(cols: number, rows: number) => void>(),
+    flushInputBuffer: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
     onStateChange: null,
@@ -157,6 +159,30 @@ describe('TerminalController', () => {
 
     expect(onCtrlD).toHaveBeenCalledTimes(1);
     expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it('routes toolbar Ctrl+D input (send("\x04")) to onCtrlD', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const onCtrlD = vi.fn();
+    controller.onCtrlD = onCtrlD;
+
+    controller.send('\x04');
+
+    expect(onCtrlD).toHaveBeenCalledTimes(1);
+    expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it('flushInputBuffer delegates to the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.flushInputBuffer();
+
+    expect(transport.flushInputBuffer).toHaveBeenCalledTimes(1);
   });
 
   it('write writes to the xterm display', () => {

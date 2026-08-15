@@ -193,7 +193,15 @@ export class TerminalController {
 
   /** Send user input to the transport (→ PTY). */
   send(data: string): void {
+    // Toolbar quick-command Ctrl+D ("\x04") routes to the disconnect flow, the
+    // same as keyboard Ctrl+D (handled by TerminalInputHandler → onCtrlD).
+    if (data === '\x04') { this.onCtrlD?.(); return; }
     this.transport?.send(data);
+  }
+
+  /** Flush any input buffered before the transport was attached. */
+  flushInputBuffer(): void {
+    this.transport?.flushInputBuffer();
   }
 
   // ── Terminal actions ────────────────────────────────────────────────────

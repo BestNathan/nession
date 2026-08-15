@@ -57,8 +57,6 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
   // Drives every protocol decision for the session: client.attach timing,
   // relay beginRelay, reconnect banners, and the attach timeout.
   useEffect(() => {
-    console.log('[StateMachine] state=', terminalState, 'mode=', mode, 'hasConn=', !!p2pConnection);
-
     switch (terminalState) {
       case 'idle':
         break;
@@ -77,7 +75,6 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
         break;
 
       case 'connected': {
-        console.log('[StateMachine] connected — sending client.attach');
         if (mode === 'relay') {
           // Relay: beginRelay is fire-and-forget — once sent, the agent pushes
           // terminal.output through the server.  Session size comes from
@@ -166,7 +163,6 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
   const p2pState = p2pConnection?.connectionState;
   useEffect(() => {
     if (mode !== 'p2p') { return; }
-    console.log('[Bridge] p2pState=', p2pState, 'terminalState=', terminalState);
     if (p2pState === 'connected' && (terminalState === 'connecting' || terminalState === 'reconnecting')) {
       console.log('[Bridge] transitioning to connected');
       setTerminalState('connected');
