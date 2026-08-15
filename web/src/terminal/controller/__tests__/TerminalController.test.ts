@@ -212,6 +212,24 @@ describe('TerminalController', () => {
     expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]));
   });
 
+  it('writes transport output to the terminal in arrival order', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // Capture writes by spying on the terminal (the agent sends captured
+    // scrollback as the FIRST output, so arrival order must be preserved).
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]));
+
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]));
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]));
+    writeSpy.mockRestore();
+    controller.detach();
+  });
+
   it('detach disposes xterm, transport, and resize observer', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
@@ -379,6 +397,42 @@ describe('TerminalController', () => {
       // proving remeasure read the live cell size, not the stale 8×16 stash.
       expect(resizeSpy).toHaveBeenCalledTimes(1);
       expect(resizeSpy).toHaveBeenCalledWith(102, 30);
+    } finally {
+      restore();
+    }
+  });
+
+  it('fontSize zoom triggers a resize recompute through onCellSizeChange', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      const el = host();
+
+      controller.attach(el);
+      await flush(); // RAF fires → observe() captures the ResizeObserver callback
+
+      // Fire the observer once so ResizeController.lastContainer is live.
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // Clear so the assertions below only see the zoom-triggered resize.
+      transport.sendResize.mockClear();
+
+      const resizeSpy = vi.spyOn(controller, 'resize');
+
+      // zoomIn() → FontSizeManager.setSize → term.refresh + onCellSizeChange
+      // → resizeController.remeasure() → controller.resize() → sendResize().
+      controller.fontSizeManager!.zoomIn();
+
+      expect(resizeSpy).toHaveBeenCalledTimes(1);
+      const [cols, rows] = resizeSpy.mock.calls[0] as [number, number];
+      expect(cols).toBeGreaterThan(0);
+      expect(rows).toBeGreaterThan(0);
+      // The recomputed size propagates to the transport (full wiring).
+      expect(transport.sendResize).toHaveBeenCalledWith(cols, rows);
+      resizeSpy.mockRestore();
     } finally {
       restore();
     }
