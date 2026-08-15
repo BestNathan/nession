@@ -1,4 +1,5 @@
 import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { Renderer } from '../Renderer';
 import { ThemeManager } from '../ThemeManager';
 import { FontSizeManager } from '../FontSizeManager';
