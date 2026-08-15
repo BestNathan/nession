@@ -30,6 +30,7 @@ import {
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
 import { ConnectionManager } from '../ConnectionManager';
+import { detectProfile } from '../DeviceProfile';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { TerminalPane } from './TerminalPane';
 import { terminalSessionStateAtom } from '../state/session';
@@ -238,12 +239,20 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   // One controller per session/mode — stable across terminalState transitions
   // so the xterm view isn't torn down on every re-render.
+  // Device profile (font size / scrollback) is computed once at mount, matching
+  // the legacy Terminal.tsx behaviour of sizing the terminal from the viewport
+  // at attach time. Keeping it in state (not recomputed per render) prevents a
+  // breakpoint-crossing resize from tearing down and rebuilding xterm.
+  const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
+
   const controller = useTerminal({
     sessionId,
     sessionName,
     mode: effectiveMode,
     transportFactory,
     rendererType: renderer,
+    fontSize: deviceProfile.fontSize,
+    scrollback: deviceProfile.scrollback,
   });
 
   // Issue #51: never mount xterm in P2P mode before the socket exists —
