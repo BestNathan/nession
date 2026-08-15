@@ -1,27 +1,24 @@
 // Legacy manager classes (kept for backward compatibility)
-export { TerminalView } from './TerminalView';
 export { AddonManager } from './AddonManager';
 export { Renderer } from './Renderer';
 export { ThemeManager } from './ThemeManager';
-export { InputManager } from './InputManager';
 export { ConnectionManager } from './ConnectionManager';
 export { MouseIntentResolver } from './MouseIntentResolver';
-export { TerminalSizeManager } from './TerminalSizeManager';
 export { FontSizeManager } from './FontSizeManager';
 export { PROFILES, detectProfile } from './DeviceProfile';
 export type {
   DeviceProfile,
-  TerminalViewState,
-  TerminalViewOptions,
   ConnectionOptions,
   ConnectionState,
   ReconnectBanner,
-  TerminalHandle,
-  TerminalProps,
 } from './types';
 
 // New architecture: controller
 export { TerminalController, ResizeController } from './controller/TerminalController';
+
+// New architecture: runtime
+export { TerminalRuntime } from './runtime/TerminalRuntime';
+export type { TerminalRuntimeOptions } from './runtime/TerminalRuntime';
 
 // New architecture: input
 export { InputRouter } from './input/InputRouter';
