@@ -356,7 +356,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
           onScrollToBottom={() => controller?.scrollToBottom()}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
-          onTerminalReveal={() => controller?.focus()}
+          onTerminalReveal={() => {}}
           fontSizeManager={controller?.fontSizeManager ?? null}
           onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
         />
