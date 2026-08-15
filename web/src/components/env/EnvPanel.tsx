@@ -312,7 +312,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
     setLoading(true);
     wsService
       .listEnvFiles()
-      .then((resp) => setFiles(resp.files))
+      .then((resp) => setFiles(resp.files ?? []))
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to list env files'))
       .finally(() => setLoading(false));
   }, [wsService]);
@@ -369,7 +369,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
     refresh,
   });
 
-  const sourcedFiles = files.filter((f) => sourced.has(refKey(f)));
+  const sourcedFiles = (files ?? []).filter((f) => sourced.has(refKey(f)));
 
   return (
     <div className="flex flex-col h-full">
