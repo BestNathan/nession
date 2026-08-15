@@ -11,22 +11,13 @@ import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
+import { TerminalRuntime } from '../runtime/TerminalRuntime';
+import type { FontSizeManager } from '../FontSizeManager';
 
-const DEFAULT_FONT =
-  "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
-const DEFAULT_FONT_SIZE = 14;
-
-/** Shape of xterm.js's undocumented internal state that exposes cell size. */
-interface XtermInternals {
-  _core?: {
-    _renderService?: {
-      dimensions?: {
-        css?: {
-          cell?: { width: number; height: number };
-        };
-      };
-    };
-  };
+export interface TerminalControllerOptions {
+  rendererType: 'webgl' | 'canvas';
+  fontSize?: number;
+  scrollback?: number;
 }
 
 /** Map a transport ConnectionState onto the domain TerminalStatus. */
@@ -55,6 +46,7 @@ export class TerminalController {
   readonly session: TerminalSession;
 
   private _terminal: Terminal | null = null;
+  private runtime: TerminalRuntime | null = null;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
@@ -68,7 +60,11 @@ export class TerminalController {
   onError: ((err: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
 
-  constructor(session: TerminalSession, transportFactory: () => TerminalTransport) {
+  constructor(
+    session: TerminalSession,
+    transportFactory: () => TerminalTransport,
+    private options: TerminalControllerOptions = { rendererType: 'canvas' },
+  ) {
     this.session = session;
     this.transportFactory = transportFactory;
     this.initInputRouter();
@@ -106,19 +102,19 @@ export class TerminalController {
     if (this.attached) { return; }
 
     const transport = this.transportFactory();
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: DEFAULT_FONT_SIZE,
-      fontFamily: DEFAULT_FONT,
-      allowProposedApi: true,
-      scrollback: 10000,
-    });
+    const runtime = new TerminalRuntime(this.options);
+    runtime.onCellSizeChange = () => {
+      this.resizeController?.remeasure();
+    };
+    const terminal = runtime.terminal;
 
     this.transport = transport;
+    this.runtime = runtime;
     this._terminal = terminal;
     this.attached = true;
 
-    terminal.open(element);
+    runtime.open(element);
+    runtime.installMobileInput(element, (text) => { this.transport?.send(text); });
 
     // Transport → xterm: display output as it arrives.
     transport.onOutput = (data: Uint8Array) => { terminal.write(data); };
@@ -152,7 +148,7 @@ export class TerminalController {
     this.resizeController = new ResizeController(this);
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
-      const dims = this.getCellDimensions();
+      const dims = this.cellDimensions;
       this.resizeController?.observe(element, dims.width, dims.height);
     });
   }
@@ -179,7 +175,8 @@ export class TerminalController {
     this.inputRouter?.setMode({ type: 'terminal' });
     this.inputRouter = null;
 
-    this._terminal?.dispose();
+    this.runtime?.dispose();
+    this.runtime = null;
     this._terminal = null;
 
     this.transport?.dispose();
@@ -218,6 +215,25 @@ export class TerminalController {
     this._terminal?.paste(text);
   }
 
+  // ── Scroll / font-size / cell dimensions ─────────────────────────────────
+
+  /** Scroll the xterm viewport to the bottom. */
+  scrollToBottom(): void { this.runtime?.scrollToBottom(); }
+  /** Scroll the xterm viewport by whole pages (negative = up). */
+  scrollPages(pages: number): void { this.runtime?.scrollPages(pages); }
+  /** Scroll the xterm viewport by lines (negative = up). */
+  scrollLines(lines: number): void { this.runtime?.scrollLines(lines); }
+
+  /** Font-size manager while attached; null after detach(). */
+  get fontSizeManager(): FontSizeManager | null {
+    return this.runtime?.fontSizeManager ?? null;
+  }
+
+  /** Current cell pixel dimensions; 8×16 fallback. */
+  get cellDimensions(): { width: number; height: number } {
+    return this.runtime?.cellDimensions ?? { width: 8, height: 16 };
+  }
+
   // ── Input mode ───────────────────────────────────────────────────────────
 
   setInputMode(mode: InputMode): void {
@@ -230,13 +246,6 @@ export class TerminalController {
     return this.inputRouter?.getMode() ?? { type: 'terminal' };
   }
 
-  /** Current cell pixel dimensions; 8×16 fallback (14px monospace defaults). */
-  private getCellDimensions(): { width: number; height: number } {
-    const renderService = (this._terminal as unknown as XtermInternals | null)?._core?._renderService;
-    const width = renderService?.dimensions?.css?.cell?.width || 8;
-    const height = renderService?.dimensions?.css?.cell?.height || 16;
-    return { width, height };
-  }
 }
 
 /**
@@ -253,6 +262,8 @@ export class ResizeController {
   private observer: ResizeObserver | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isFirstFire = true;
+  private lastContainer = { width: 0, height: 0 };
+  private lastCell = { width: 8, height: 16 };
 
   constructor(controller: TerminalController) {
     this.controller = controller;
@@ -262,10 +273,13 @@ export class ResizeController {
     if (cellWidth <= 0 || cellHeight <= 0) { return; }
     this.dispose();
     this.isFirstFire = true;
+    this.lastCell = { width: cellWidth, height: cellHeight };
+    this.lastContainer = { width: 0, height: 0 };
 
     this.observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
+        this.lastContainer = { width, height };
         const cols = Math.max(1, Math.floor(width / cellWidth));
         const rows = Math.max(1, Math.floor(height / cellHeight));
         if (cols < 2 || rows < 2) { continue; }
@@ -283,6 +297,17 @@ export class ResizeController {
       }
     });
     this.observer.observe(container);
+  }
+
+  /** Recompute cols/rows from the last observed size + current cell size
+   *  (used after font-size changes, when the container hasn't resized). */
+  remeasure(): void {
+    const { width, height } = this.lastContainer;
+    if (width <= 0 || height <= 0) { return; }
+    const cols = Math.max(1, Math.floor(width / this.lastCell.width));
+    const rows = Math.max(1, Math.floor(height / this.lastCell.height));
+    if (cols < 2 || rows < 2) { return; }
+    this.controller.resize(cols, rows);
   }
 
   dispose(): void {

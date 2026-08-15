@@ -81,9 +81,11 @@ export class TerminalRuntime {
   /** Cell pixel size, falling back to 8×16 (14px monospace defaults). */
   get cellDimensions(): { width: number; height: number } {
     const rs = (this.terminal as unknown as XtermInternals)._core?._renderService;
+    // Falsy (`||`) fallback: xterm reports 0×0 before the render service has
+    // measured real cells (e.g. pre-layout / jsdom), which is not a usable size.
     return {
-      width: rs?.dimensions?.css?.cell?.width ?? 8,
-      height: rs?.dimensions?.css?.cell?.height ?? 16,
+      width: rs?.dimensions?.css?.cell?.width || 8,
+      height: rs?.dimensions?.css?.cell?.height || 16,
     };
   }
 
