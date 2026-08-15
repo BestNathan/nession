@@ -347,4 +347,40 @@ describe('TerminalController', () => {
       restore();
     }
   });
+
+  it('remeasure recomputes cols/rows from the live cell size after a font-size zoom', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+
+      await flush(); // RAF fires → observe() captures the callback with 8×16 cells
+
+      // Pre-change: container 1024×600 with 8×16 cells → 128×37.
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // Simulate a font-size zoom: the render service now reports larger cells.
+      const cell = (controller.terminal! as unknown as {
+        _core: { _renderService: { dimensions: { css: { cell: { width: number; height: number } } } } };
+      })._core._renderService.dimensions.css.cell;
+      cell.width = 10;
+      cell.height = 20;
+
+      const resizeSpy = vi.spyOn(controller, 'resize');
+
+      // Trigger the post-zoom remeasure — the same path onCellSizeChange wires.
+      const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
+      rc.remeasure();
+
+      // 1024/10=102, 600/20=30 — strictly smaller than the pre-zoom 128×37,
+      // proving remeasure read the live cell size, not the stale 8×16 stash.
+      expect(resizeSpy).toHaveBeenCalledTimes(1);
+      expect(resizeSpy).toHaveBeenCalledWith(102, 30);
+    } finally {
+      restore();
+    }
+  });
 });

@@ -280,8 +280,11 @@ export class ResizeController {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         this.lastContainer = { width, height };
-        const cols = Math.max(1, Math.floor(width / cellWidth));
-        const rows = Math.max(1, Math.floor(height / cellHeight));
+        // Use the live cell size (refreshed by remeasure() on font-size zoom),
+        // not the stale observe()-time closure params.
+        const cell = this.lastCell;
+        const cols = Math.max(1, Math.floor(width / cell.width));
+        const rows = Math.max(1, Math.floor(height / cell.height));
         if (cols < 2 || rows < 2) { continue; }
 
         if (this.isFirstFire) {
@@ -299,13 +302,18 @@ export class ResizeController {
     this.observer.observe(container);
   }
 
-  /** Recompute cols/rows from the last observed size + current cell size
-   *  (used after font-size changes, when the container hasn't resized). */
+  /** Recompute cols/rows from the last observed container size and the LIVE
+   *  cell size (used after font-size changes, when the container hasn't
+   *  resized). Refreshes the stashed cell size so later observer fires also
+   *  use it. */
   remeasure(): void {
     const { width, height } = this.lastContainer;
     if (width <= 0 || height <= 0) { return; }
-    const cols = Math.max(1, Math.floor(width / this.lastCell.width));
-    const rows = Math.max(1, Math.floor(height / this.lastCell.height));
+    const cell = this.controller.cellDimensions;
+    if (cell.width <= 0 || cell.height <= 0) { return; }
+    this.lastCell = cell;
+    const cols = Math.max(1, Math.floor(width / cell.width));
+    const rows = Math.max(1, Math.floor(height / cell.height));
     if (cols < 2 || rows < 2) { return; }
     this.controller.resize(cols, rows);
   }
