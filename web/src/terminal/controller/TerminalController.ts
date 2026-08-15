@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { getDefaultStore } from 'jotai';
 import type { ConnectionState } from '../../hooks/useP2PConnection';
 import { inputModeAtomFamily, type InputMode } from '../state/input';
+import { lastResizeAtom } from '../state/terminal';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
@@ -287,6 +288,11 @@ export class ResizeController {
         const rows = Math.max(1, Math.floor(height / cell.height));
         if (cols < 2 || rows < 2) { continue; }
 
+        // Publish to the atom the state machine reads on (re)attach so
+        // client.attach / beginRelay carry the current viewport size. Covers
+        // both the immediate first fire and the debounced subsequent fires.
+        getDefaultStore().set(lastResizeAtom, { cols, rows });
+
         if (this.isFirstFire) {
           this.isFirstFire = false;
           this.controller.resize(cols, rows);
@@ -315,6 +321,9 @@ export class ResizeController {
     const cols = Math.max(1, Math.floor(width / cell.width));
     const rows = Math.max(1, Math.floor(height / cell.height));
     if (cols < 2 || rows < 2) { return; }
+    // Keep the atom fresh after a font-size zoom so a (re)attach uses the
+    // recomputed cell count, not the stale pre-zoom size.
+    getDefaultStore().set(lastResizeAtom, { cols, rows });
     this.controller.resize(cols, rows);
   }
 
