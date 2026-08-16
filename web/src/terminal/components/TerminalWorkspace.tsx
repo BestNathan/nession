@@ -30,7 +30,7 @@ import {
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
 import { ConnectionManager } from '../ConnectionManager';
-import { detectProfile } from '../DeviceProfile';
+import { detectProfile, PROFILES } from '../DeviceProfile';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { TerminalPane } from './TerminalPane';
 import { terminalSessionStateAtom } from '../state/session';
@@ -251,8 +251,8 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     mode: effectiveMode,
     transportFactory,
     rendererType: renderer,
-    fontSize: deviceProfile.fontSize,
-    scrollback: deviceProfile.scrollback,
+    fontSize: PROFILES[deviceProfile].fontSize,
+    scrollback: PROFILES[deviceProfile].scrollback,
   });
 
   // Issue #51: never mount xterm in P2P mode before the socket exists —

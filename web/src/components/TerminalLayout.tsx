@@ -48,7 +48,7 @@ export function TerminalLayout({
   fontSizeManager,
   onGetTerminalPwd,
 }: TerminalLayoutProps) {
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -56,7 +56,7 @@ export function TerminalLayout({
   const inputPanel = <InputPanel sendText={sendText} disabled={toolbarDisabled} />;
   const commandsPanel = <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />;
 
-  // ── Desktop path (≥1024px) ──────────────────────────────────────────
+  // ── Desktop path (≥768px) ──────────────────────────────────────────
   const desktopContent = fileOps ? (
     <FileTabs
       fileOps={fileOps}

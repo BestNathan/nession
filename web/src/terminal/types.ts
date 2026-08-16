@@ -18,8 +18,11 @@ export interface ConnectionOptions {
   relayUrl?: string | null;
 }
 
-/** Device class presets for responsive rendering. */
-export interface DeviceProfile {
+/** Device class for responsive rendering. */
+export type DeviceProfile = 'mobile' | 'desktop';
+
+/** Device profile configuration. */
+export interface DeviceProfileConfig {
   fontSize: number;
   lineHeight: number;
   scrollback: number;
