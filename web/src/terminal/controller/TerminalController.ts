@@ -208,7 +208,25 @@ export class TerminalController {
 
   /** Resize the local xterm grid optimistically and notify the transport. */
   resize(cols: number, rows: number): void {
+    this.resizeLocal(cols, rows);
+    this.sendResize(cols, rows);
+  }
+
+  /**
+   * Resize only the local xterm grid, without touching the transport.
+   *
+   * Split out from resize() because the two halves want opposite timing: the
+   * local grid must follow a container size change in the SAME frame (otherwise
+   * xterm keeps painting at the old pixel size and the mismatch is visible as a
+   * flicker), while the PTY notification must be debounced so a drag doesn't
+   * flood tmux. See ResizeController.
+   */
+  resizeLocal(cols: number, rows: number): void {
     this._terminal?.resize(cols, rows);
+  }
+
+  /** Notify the transport (→ PTY) of a new size, without touching xterm. */
+  sendResize(cols: number, rows: number): void {
     this.transport?.sendResize(cols, rows);
   }
 
@@ -259,9 +277,17 @@ export class TerminalController {
 
 /**
  * ResizeObserver wrapper: container size → cols/rows → controller.resize().
- * The first fire is sent immediately so tmux is at the right size before the
- * session attaches; subsequent fires (window drags) are debounced at 200ms to
- * avoid flooding tmux with intermediate sizes.
+ *
+ * The local xterm grid is applied on EVERY fire, synchronously. It has to be:
+ * xterm paints at cols*cellW × rows*cellH, so any delay leaves it painting at
+ * the previous container's pixel size — visible as a flicker (bare container
+ * background where the terminal hasn't grown yet, or overflow where it hasn't
+ * shrunk). The mobile input panel opens with no animation, which exposes that
+ * gap as a hard flash rather than hiding it behind a transition.
+ *
+ * Only the PTY notification is debounced (200ms), so dragging a window doesn't
+ * flood tmux with intermediate sizes. The first fire skips the debounce so tmux
+ * is at the right size before the session attaches.
  *
  * Exported so consumers can type/instantiate the resize controller when
  * composing the terminal at the boundary.
@@ -307,9 +333,14 @@ export class ResizeController {
           continue;
         }
 
+        // Local grid now — the container has already changed size, so xterm
+        // must repaint at the new size in this same frame.
+        this.controller.resizeLocal(cols, rows);
+
+        // PTY notification debounced, so a drag sends one final size.
         if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
         this.debounceTimer = setTimeout(() => {
-          this.controller.resize(cols, rows);
+          this.controller.sendResize(cols, rows);
         }, 200);
       }
     });

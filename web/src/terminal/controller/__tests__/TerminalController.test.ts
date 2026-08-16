@@ -281,6 +281,31 @@ describe('TerminalController', () => {
     expect(controller.terminal!.rows).toBe(40);
   });
 
+  it('resizeLocal updates xterm without notifying the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.resizeLocal(120, 40);
+
+    expect(controller.terminal!.cols).toBe(120);
+    expect(controller.terminal!.rows).toBe(40);
+    expect(transport.sendResize).not.toHaveBeenCalled();
+  });
+
+  it('sendResize notifies the transport without touching the xterm grid', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    const before = { cols: controller.terminal!.cols, rows: controller.terminal!.rows };
+
+    controller.sendResize(120, 40);
+
+    expect(transport.sendResize).toHaveBeenCalledWith(120, 40);
+    expect(controller.terminal!.cols).toBe(before.cols);
+    expect(controller.terminal!.rows).toBe(before.rows);
+  });
+
   it('maps transport remote resize to the xterm grid', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
@@ -385,6 +410,44 @@ describe('TerminalController', () => {
       expect(transport.sendResize).toHaveBeenCalledTimes(2);
       expect(transport.sendResize).toHaveBeenLastCalledWith(100, 25);
 
+      vi.useRealTimers();
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+
+  it('applies the local xterm grid synchronously on a debounced resize', async () => {
+    // Regression: the debounce used to hold BOTH halves of the resize, so for
+    // 200ms xterm kept painting at the previous container's pixel size. On
+    // mobile the input panel opens with no animation, so that gap showed up as
+    // a flash of bare container background (grow) or clipped overflow (shrink).
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+
+      await flush(); // RAF fires → observe() captures the callback
+
+      // First fire is immediate on both halves (8×16 fallback cells in jsdom).
+      const entryA = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entryA], capturedObserver!);
+      expect(controller.terminal!.cols).toBe(128);
+      expect(controller.terminal!.rows).toBe(37);
+
+      vi.useFakeTimers();
+      // Container shrinks (input panel opened). xterm must follow in the same
+      // tick — no timer advance — or the two disagree on screen.
+      const entryB = { contentRect: { width: 800, height: 400 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entryB], capturedObserver!);
+      expect(controller.terminal!.cols).toBe(100);
+      expect(controller.terminal!.rows).toBe(25);
+      // ...while tmux is still waiting on the debounce.
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(200);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(100, 25);
       vi.useRealTimers();
     } finally {
       vi.useRealTimers();
