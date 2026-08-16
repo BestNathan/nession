@@ -32,6 +32,7 @@ fn unique_session_name(prefix: &str) -> String {
 /// address + handle.
 async fn start_server(_port: u16) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+    let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
     let server = AgentServer::new(
         "127.0.0.1:0",
         "test-agent",
@@ -39,6 +40,7 @@ async fn start_server(_port: u16) -> (SocketAddr, nession_agent::server::ServerH
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
+        _resize_tx,
     )
     .expect("server creation should succeed");
     let (handle, addr) = server.start().await.expect("start should succeed");

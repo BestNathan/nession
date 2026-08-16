@@ -6,6 +6,8 @@ export interface TerminalTransport {
 
   send(data: string): void;
   sendResize(cols: number, rows: number): void;
+  /** Flush any input buffered before the session was attached. */
+  flushInputBuffer(): void;
 
   onOutput: ((data: Uint8Array) => void) | null;
   onResize: ((cols: number, rows: number) => void) | null;

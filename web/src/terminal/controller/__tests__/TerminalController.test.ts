@@ -22,6 +22,7 @@ Object.defineProperty(window, 'matchMedia', {
 interface MockTransport extends TerminalTransport {
   send: ReturnType<typeof vi.fn<(data: string) => void>>;
   sendResize: ReturnType<typeof vi.fn<(cols: number, rows: number) => void>>;
+  flushInputBuffer: ReturnType<typeof vi.fn<() => void>>;
   dispose: ReturnType<typeof vi.fn<() => void>>;
 }
 
@@ -30,6 +31,7 @@ function makeTransport(): MockTransport {
     mode: 'p2p',
     send: vi.fn<(data: string) => void>(),
     sendResize: vi.fn<(cols: number, rows: number) => void>(),
+    flushInputBuffer: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
     onStateChange: null,
@@ -159,6 +161,30 @@ describe('TerminalController', () => {
     expect(transport.send).not.toHaveBeenCalled();
   });
 
+  it('routes toolbar Ctrl+D input (send("\x04")) to onCtrlD', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const onCtrlD = vi.fn();
+    controller.onCtrlD = onCtrlD;
+
+    controller.send('\x04');
+
+    expect(onCtrlD).toHaveBeenCalledTimes(1);
+    expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it('flushInputBuffer delegates to the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.flushInputBuffer();
+
+    expect(transport.flushInputBuffer).toHaveBeenCalledTimes(1);
+  });
+
   it('write writes to the xterm display', () => {
     const controller = new TerminalController(makeSession(), () => makeTransport());
     controller.attach(host());
@@ -210,6 +236,24 @@ describe('TerminalController', () => {
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     transport.onOutput!(new Uint8Array([104, 105]));
     expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]));
+  });
+
+  it('writes transport output to the terminal in arrival order', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // Capture writes by spying on the terminal (the agent sends captured
+    // scrollback as the FIRST output, so arrival order must be preserved).
+    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]));
+
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]));
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]));
+    writeSpy.mockRestore();
+    controller.detach();
   });
 
   it('detach disposes xterm, transport, and resize observer', () => {
@@ -344,6 +388,78 @@ describe('TerminalController', () => {
       vi.useRealTimers();
     } finally {
       vi.useRealTimers();
+      restore();
+    }
+  });
+
+  it('remeasure recomputes cols/rows from the live cell size after a font-size zoom', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+
+      await flush(); // RAF fires → observe() captures the callback with 8×16 cells
+
+      // Pre-change: container 1024×600 with 8×16 cells → 128×37.
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // Simulate a font-size zoom: the render service now reports larger cells.
+      const cell = (controller.terminal! as unknown as {
+        _core: { _renderService: { dimensions: { css: { cell: { width: number; height: number } } } } };
+      })._core._renderService.dimensions.css.cell;
+      cell.width = 10;
+      cell.height = 20;
+
+      const resizeSpy = vi.spyOn(controller, 'resize');
+
+      // Trigger the post-zoom remeasure — the same path onCellSizeChange wires.
+      const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
+      rc.remeasure();
+
+      // 1024/10=102, 600/20=30 — strictly smaller than the pre-zoom 128×37,
+      // proving remeasure read the live cell size, not the stale 8×16 stash.
+      expect(resizeSpy).toHaveBeenCalledTimes(1);
+      expect(resizeSpy).toHaveBeenCalledWith(102, 30);
+    } finally {
+      restore();
+    }
+  });
+
+  it('fontSize zoom triggers a resize recompute through onCellSizeChange', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      const el = host();
+
+      controller.attach(el);
+      await flush(); // RAF fires → observe() captures the ResizeObserver callback
+
+      // Fire the observer once so ResizeController.lastContainer is live.
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // Clear so the assertions below only see the zoom-triggered resize.
+      transport.sendResize.mockClear();
+
+      const resizeSpy = vi.spyOn(controller, 'resize');
+
+      // zoomIn() → FontSizeManager.setSize → term.refresh + onCellSizeChange
+      // → resizeController.remeasure() → controller.resize() → sendResize().
+      controller.fontSizeManager!.zoomIn();
+
+      expect(resizeSpy).toHaveBeenCalledTimes(1);
+      const [cols, rows] = resizeSpy.mock.calls[0] as [number, number];
+      expect(cols).toBeGreaterThan(0);
+      expect(rows).toBeGreaterThan(0);
+      // The recomputed size propagates to the transport (full wiring).
+      expect(transport.sendResize).toHaveBeenCalledWith(cols, rows);
+      resizeSpy.mockRestore();
+    } finally {
       restore();
     }
   });

@@ -55,7 +55,6 @@ export default defineConfig({
         'src/components/ui/**',
         'src/test/**',
         // Require browser-only APIs (xterm.js canvas/WebGL, full DOM integration)
-        'src/components/Terminal.tsx',
         'src/components/Dashboard.tsx',
         'src/components/FileBrowser.tsx',
         'src/components/FileTabs.tsx',
@@ -71,7 +70,6 @@ export default defineConfig({
         // Deep link restoration - requires react-router integration testing
         'src/hooks/useDeepLinkRestore.ts',
         // ── Browser-only terminal internals (xterm lifecycle, touch/IME, mouse) ──
-        'src/terminal/TerminalView.ts',
         'src/terminal/MobileInput.ts',
         'src/terminal/MouseIntentResolver.ts',
         'src/terminal/hooks/useTerminalStateMachine.ts',

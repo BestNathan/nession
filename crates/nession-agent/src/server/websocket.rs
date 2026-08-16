@@ -563,6 +563,9 @@ pub struct AgentServer {
     default_working_dir: String,
     /// How the agent attaches to tmux sessions (plain PTY or control mode).
     attach_mode: AttachMode,
+    /// Sink for forwarding tmux resize events to the central server (relay).
+    /// Carries the FULL session id (`agent:name`), cols, rows.
+    resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
 }
 
 /// Apply env snapshots to a tmux session via `set-environment`.
@@ -617,6 +620,7 @@ impl AgentServer {
     /// `default_working_dir` is the working directory for new tmux sessions.
     /// `file_root` is the sandbox root for file operations.
     /// `attach_mode` controls whether to use plain PTY or control-mode tmux attach.
+    /// `resize_tx` forwards `%window-resize` events to the central server (relay).
     pub fn new(
         listen_address: impl Into<String>,
         agent_id: impl Into<String>,
@@ -627,6 +631,7 @@ impl AgentServer {
         default_working_dir: String,
         file_root: &str,
         attach_mode: AttachMode,
+        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
     ) -> Result<Self> {
         let tls_acceptor = match tls {
             Some((certs, key)) => {
@@ -655,6 +660,7 @@ impl AgentServer {
             agent_id: agent_id.into(),
             default_working_dir,
             attach_mode,
+            resize_tx,
         })
     }
 
@@ -687,6 +693,7 @@ impl AgentServer {
         let listen_address = self.listen_address.clone();
         let agent_id = self.agent_id.clone();
         let attach_mode = self.attach_mode.clone();
+        let resize_tx = self.resize_tx.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -708,9 +715,10 @@ impl AgentServer {
                                 let la = listen_address.clone();
                                 let aid = agent_id.clone();
                                 let am = attach_mode.clone();
+                                let rtx = resize_tx.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am).await
+                                        Self::handle_connection(stream, addr, tmux, tls, wd, fops, &la, &aid, am, rtx).await
                                     {
                                         // Downgraded from warn: random non-WebSocket clients
                                         // (health checks, scanners) hitting the P2P port are
@@ -749,6 +757,7 @@ impl AgentServer {
         listen_address: &str,
         agent_id: &str,
         attach_mode: AttachMode,
+        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -792,6 +801,7 @@ impl AgentServer {
             listen_address,
             agent_id,
             attach_mode,
+            resize_tx,
         )
         .await
     }
@@ -810,6 +820,7 @@ impl AgentServer {
         listen_address: &str,
         agent_id: &str,
         attach_mode: AttachMode,
+        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
     ) -> Result<()> {
         while let Some(msg) = ws_stream.next().await {
             let msg = match msg {
@@ -833,6 +844,7 @@ impl AgentServer {
                         listen_address,
                         agent_id,
                         attach_mode.clone(),
+                        resize_tx.clone(),
                     )
                     .await;
                     let mut s = sink.lock().await;
@@ -889,6 +901,7 @@ impl AgentServer {
         listen_address: &str,
         agent_id: &str,
         attach_mode: AttachMode,
+        resize_tx: mpsc::UnboundedSender<(String, u16, u16)>,
     ) -> String {
         // Try to extract msg_type and id without fully deserialising the
         // payload — we need those even if the payload type is unknown.
@@ -1188,15 +1201,17 @@ impl AgentServer {
                             // in) and then forwards ongoing `%window-resize`
                             // events on the same message type.
                             //
-                            // TODO(follow-up): also forward these events upstream
-                            // to the central server via
-                            // `sync::terminal::send_terminal_resize` so relay
-                            // clients (browser → server → agent) see the same
-                            // size updates. That requires threading a
-                            // `TransportSink` through here and is intentionally
-                            // deferred to keep this diff focused on the P2P path.
+                            // Each resize is ALSO forwarded upstream to the
+                            // central server via `resize_tx` so relay clients
+                            // (browser → server → agent) receive the same size
+                            // updates through the server's `agent.terminal.resize`
+                            // broadcast. The upstream message carries the FULL
+                            // session id (`agent:name`); the P2P sink message
+                            // keeps the bare session name.
                             let sink_resize = Arc::clone(&sink);
                             let session_name_resize = session_name.clone();
+                            let resize_tx_resize = resize_tx.clone();
+                            let agent_id_resize = agent_id.to_string();
                             tokio::spawn(async move {
                                 // Initial resize: query tmux for the pane's
                                 // current size and forward it as one message.
@@ -1218,6 +1233,9 @@ impl AgentServer {
                                     ),
                                 }
                                 while let Some((cols, rows)) = resize_rx.recv().await {
+                                    let full_id =
+                                        format!("{agent_id_resize}:{session_name_resize}");
+                                    let _ = resize_tx_resize.send((full_id, cols, rows));
                                     if !send_terminal_resize_msg(
                                         &sink_resize,
                                         &session_name_resize,
@@ -1707,6 +1725,7 @@ mod tests {
     #[allow(dead_code)]
     async fn start_test_server() -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
+        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -1714,6 +1733,7 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
+            _resize_tx,
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -1726,6 +1746,7 @@ mod tests {
     /// address and a shutdown handle.
     async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {
         let tmp = tempfile::tempdir().expect("tempdir");
+        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -1733,6 +1754,7 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
+            _resize_tx,
         )
         .expect("server creation should succeed");
         // Leak the TempDir so the sandbox root persists for the server lifetime.
@@ -1808,6 +1830,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_creation_and_shutdown() {
         let tmp = tempfile::tempdir().expect("tempdir");
+        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -1815,6 +1838,7 @@ mod tests {
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
+            _resize_tx,
         )
         .unwrap();
         let (handle, _addr) = server.start().await.unwrap();

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
-import { Terminal, type TerminalHandle } from '../../components/Terminal';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useP2PConnection } from '../../hooks/useP2PConnection';
@@ -28,6 +27,14 @@ import {
   isSwitchingAtom,
   p2pConnectionAtom,
 } from '../../atoms/connection';
+import { useTerminal } from '../hooks/useTerminal';
+import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
+import { ConnectionManager } from '../ConnectionManager';
+import { detectProfile } from '../DeviceProfile';
+import type { TerminalTransport } from '../transport/TerminalTransport';
+import { TerminalPane } from './TerminalPane';
+import { terminalSessionStateAtom } from '../state/session';
+import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '../state/ui';
 
 interface TerminalHeaderProps {
   onBack: () => void;
@@ -114,15 +121,9 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const [p2pConnection] = useAtom(p2pConnectionAtom);
 
   const wsService = useWebSocket();
-  // Callback ref backed by state so the parent re-renders when the child
-  // populates the imperative handle. Without this, `fontSizeManager` on
-  // the handle would stay null on first render and the zoom controls
-  // would never mount. See docs/.../fixed-size-terminal spec.
-  const [terminalHandle, setTerminalHandle] = useState<TerminalHandle | null>(null);
-  const terminalRef = useCallback((handle: TerminalHandle | null) => {
-    setTerminalHandle(handle);
-  }, []);
-  const [toolbarDisabled, setToolbarDisabled] = useState(false);
+  const setTerminalState = useSetAtom(terminalSessionStateAtom);
+  const setBanner = useSetAtom(bannerAtomFamily(sessionId));
+  const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
   const {
     sessions,
     loading: sessionsLoading,
@@ -134,11 +135,10 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const isP2P = effectiveMode === 'p2p';
 
   // Drive the P2P WebSocket. useP2PConnection writes p2pConnectionAtom +
-  // p2pStateAtom from its ws events, and we read them back below (Terminal
-  // subscribes to sessionIdAtom/sessionNameAtom/effectiveModeAtom/
-  // p2pConnectionAtom directly). The options are derived purely from atoms:
-  // activeUrl (manual override or best candidate) is the endpoint, forcedRelay
-  // flips effectiveMode to relay which nulls activeUrl.
+  // p2pStateAtom from its ws events, and we read them back below. The options
+  // are derived purely from atoms: activeUrl (manual override or best candidate)
+  // is the endpoint, forcedRelay flips effectiveMode to relay which nulls
+  // activeUrl.
   useP2PConnection(
     isP2P && activeUrl && attachInfo
       ? {
@@ -152,6 +152,14 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
         }
       : null,
   );
+
+  // Terminal session state machine: drives client.attach (P2P) / beginRelay
+  // (relay), the attach timeout, and the reconnect budget. Returns the live
+  // terminalState + reconnectCount so we can drive banner rendering without
+  // touching the protocol code.
+  const { terminalState, reconnectCount } = useTerminalStateMachine({
+    serverConnection: !isP2P ? wsService : undefined,
+  });
 
   // End relay synchronously before navigating away, so that the
   // server's relay loop exits and subsequent messages (e.g. sessions.list)
@@ -207,16 +215,113 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     return (await fileOps.getCwd(sessionId)).path;
   }, [fileOps, sessionId]);
 
-  const terminalElement = (
-    <Terminal
-      ref={terminalRef}
-      serverConnection={!isP2P ? wsService : undefined}
-      onDisconnect={onDisconnect}
-      onError={onError}
-      onBannerChange={setToolbarDisabled}
-      onCtrlD={onBack}
-      renderer={renderer}
-    />
+  // ── Terminal transport boundary ─────────────────────────────────────
+  // Wrap ConnectionManager into the TerminalTransport shape the controller
+  // expects. The factory must close over LIVE values (p2pConnection /
+  // wsService / sessionName change without recreating the controller), so we
+  // reassign it every render but expose a stable useCallback wrapper — the
+  // controller, and therefore the xterm view, never rebuilds from a changing
+  // factory identity.
+  const transportFactoryRef = useRef<() => TerminalTransport>(
+    () => new ConnectionManager({
+      mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
+    }) as unknown as TerminalTransport,
+  );
+  transportFactoryRef.current = () =>
+    new ConnectionManager({
+      mode: effectiveMode,
+      sessionName,
+      sessionId,
+      p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
+      serverConnection: effectiveMode === 'relay' ? wsService : undefined,
+    }) as unknown as TerminalTransport;
+  const transportFactory = useCallback(() => transportFactoryRef.current(), []);
+
+  // One controller per session/mode — stable across terminalState transitions
+  // so the xterm view isn't torn down on every re-render.
+  // Device profile (font size / scrollback) is computed once at mount, matching
+  // the legacy Terminal.tsx behaviour of sizing the terminal from the viewport
+  // at attach time. Keeping it in state (not recomputed per render) prevents a
+  // breakpoint-crossing resize from tearing down and rebuilding xterm.
+  const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
+
+  const controller = useTerminal({
+    sessionId,
+    sessionName,
+    mode: effectiveMode,
+    transportFactory,
+    rendererType: renderer,
+    fontSize: deviceProfile.fontSize,
+    scrollback: deviceProfile.scrollback,
+  });
+
+  // Issue #51: never mount xterm in P2P mode before the socket exists —
+  // xterm's Viewport crashes on an unattached container, and a ConnectionManager
+  // created without a live p2pConnection would be inert forever (the transport
+  // is built once at attach). Relay mode is always safe to mount.
+  const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
+
+  // ── Relay-mode server-ws lifecycle ───────────────────────────────────
+  // The state machine's P2P bridge covers socket drops only; in relay mode the
+  // server WebSocket dropping must mirror the legacy view.onStateChange path:
+  // show the "Connection lost" banner once the server ws exhausts its reconnect
+  // budget, clear it (and let the state machine re-beginRelay) on re-auth.
+  const [relayLost, setRelayLost] = useState(false);
+  useEffect(() => {
+    if (effectiveMode !== 'relay' || !wsService) { return; }
+    return wsService.onConnectionChange((status) => {
+      if (status === 'authenticated') {
+        setRelayLost(false);
+        // Server ws authenticated after TerminalWorkspace mounted (rare — the
+        // state machine's 'connecting' branch handles the already-authed case
+        // via isConnected()). Hand off so beginRelay is actually sent.
+        setTerminalState((prev) => (prev === 'connecting' ? 'connected' : prev));
+      } else if (status === 'disconnected') {
+        setRelayLost(true);
+      }
+    });
+  }, [effectiveMode, wsService, setTerminalState]);
+
+  // ── Banner ───────────────────────────────────────────────────────────
+  // Map the (P2P-driven) state machine + relay-lost flag onto the banner atoms
+  // TerminalPane's TerminalBanner consumes.
+  const banner: ReconnectBanner =
+    terminalState === 'reconnecting'
+      ? 'reconnecting'
+      : terminalState === 'failed' || relayLost
+        ? 'failed'
+        : 'none';
+  useEffect(() => {
+    setBanner(banner);
+    setBannerAttempt(reconnectCount);
+  }, [banner, reconnectCount, setBanner, setBannerAttempt]);
+
+  // Keep toolbarDisabled in sync so Input/QuickCommands disable while the
+  // terminal is unavailable (mirrors the legacy onBannerChange effect).
+  const toolbarDisabled = banner !== 'none';
+
+  // Wire imperative callbacks the old shell surfaced via <Terminal> props.
+  useEffect(() => {
+    if (!controller) { return; }
+    controller.onCtrlD = onBack;
+    controller.onError = onError;
+    controller.onDisconnect = onDisconnect;
+  }, [controller, onBack, onError, onDisconnect]);
+
+  // Flush keystrokes typed during the connect window once the session attaches.
+  // The transport exists by the time 'attached' fires (TerminalViewport's mount
+  // effect creates it — child effects run before this parent effect), so this
+  // delivers buffered input without waiting for the next user action.
+  useEffect(() => {
+    if (terminalState === 'attached') {
+      controller?.flushInputBuffer();
+    }
+  }, [terminalState, controller]);
+
+  const terminalElement = modeGateOk ? (
+    <TerminalPane sessionId={sessionId} controller={controller} reconnectAttempt={reconnectCount} />
+  ) : (
+    <div className="flex-1 min-h-0" />
   );
 
   return (
@@ -244,13 +349,15 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
           terminalElement={terminalElement}
           sessionId={sessionId}
           sessionName={sessionName}
-          sendText={(text) => terminalHandle?.sendText(text)}
-          onScrollPages={(pages) => terminalHandle?.scrollPages(pages)}
-          onScrollToBottom={() => terminalHandle?.scrollToBottom()}
+          sendText={(text) => {
+            if (banner === 'none') { controller?.send(text); }
+          }}
+          onScrollPages={(pages) => controller?.scrollPages(pages)}
+          onScrollToBottom={() => controller?.scrollToBottom()}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
-          onTerminalReveal={() => terminalHandle?.refit()}
-          fontSizeManager={terminalHandle?.fontSizeManager ?? null}
+          onTerminalReveal={() => {}}
+          fontSizeManager={controller?.fontSizeManager ?? null}
           onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
         />
       </div>

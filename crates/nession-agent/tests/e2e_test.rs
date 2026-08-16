@@ -99,6 +99,7 @@ async fn cleanup_db(db_path: &str) {
 /// Start a real agent WebSocket server on an OS-assigned port.
 async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+    let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
     let server = AgentServer::new(
         "127.0.0.1:0",
         "test-agent",
@@ -106,6 +107,7 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
+        _resize_tx,
     )
     .expect("server creation should succeed");
     let (handle, addr) = server.start().await.expect("start should succeed");
