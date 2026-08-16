@@ -261,25 +261,27 @@ git checkout -b feat/<slug>
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
-# 3. PUBLISH — push and create PR (include Closes #<ISSUE> in body)
+# 3. PUBLISH — push and create PR targeting **staging** (include Closes #<ISSUE> in body)
 git push -u origin feat/<slug>
-gh pr create --title "feat: <description>" --body "..."
+gh pr create --base staging --title "feat: <description>" --body "..."
 
-# 4. STAGING — CI deploys the branch to staging automatically; verify it there
-./scripts/deploy-watch.sh staging
+# 4. MERGE to staging — quality gate (rust-check + web-check) must pass.
+#    Use auto-merge for feat/fix PRs to staging:
+gh pr merge <PR-NUMBER> --auto --squash
 
-# 5. MERGE — only after staging is verified. Do NOT auto-merge: staging is the
-#    last human gate before prod, and --auto merges the moment CI turns green,
-#    skipping it entirely. Ask the user to confirm, then:
-gh pr merge <PR-NUMBER> --squash
+# 5. STAGING VALIDATION — CI builds and deploys to staging automatically after merge.
+#    Verify on staging with ./scripts/deploy-watch.sh staging
 
-# 6. VERSION BUMP — create a separate branch from main for version bump
+# 6. VERSION BUMP + RELEASE — after staging validation, bump version and merge staging to main
 git checkout main && git pull
 git checkout -b chore/bump-version
 # Edit Cargo.toml and web/package.json to bump version
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push origin chore/bump-version
 gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
+# Merge staging into main (brings all validated features)
+git merge staging
+git push
 # chore/** branches don't trigger CI, so merge directly
 gh pr merge <PR-NUMBER> --squash
 
@@ -328,12 +330,17 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 1. Develop on feature branch (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI changes
-4. Push, create PR (include `Closes #<ISSUE>` in body, screenshots in PR body) → CI runs docker-publish
-5. CI deploys the branch to staging — verify it there with `./scripts/deploy-watch.sh staging`
-6. Merge to main → auto-closes issue + CI publishes `main`-tagged images
-   - **Never auto-merge.** Staging is the last human gate before prod; `--auto`
-     merges as soon as CI turns green and skips it. Confirm staging first, then:
+4. Push, create PR targeting **staging** (include `Closes #<ISSUE>` in body, screenshots in PR body) → quality gate runs
+5. Merge to staging → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
+6. After staging validation, merge staging to main (with version bump) → auto-closes issue + release workflow publishes versioned images
+   - Create version bump branch from main, merge staging into it, PR to main:
      ```bash
+     git checkout main && git pull
+     git checkout -b chore/bump-version
+     # Bump version in Cargo.toml + web/package.json
+     git add -A && git commit -m "chore: bump version to X.Y.Z"
+     git merge staging && git push
+     gh pr create --title "chore: bump version to X.Y.Z" --body "..."
      gh pr merge <PR-NUMBER> --squash
      ```
 7. Update image tags in k8s manifests: `k8s/kustomization.yaml`
@@ -365,6 +372,6 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 
 - **`.githooks/pre-commit`** 是唯一 hooks 入口（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这个文件。
 - **Pre-commit 全部 blocking**：`cargo fmt` → `cargo clippy` → `cargo test --no-run` → `cargo test` → coverage（仅变更 crate）→ `eslint` → `tsc --noEmit` → `vitest run` → `vitest coverage`
-- **CI 触发**：push `feat/**` / `fix/**`。`rust-check`（fmt + clippy + test）+ `web-check`（lint + tsc + test）。与 pre-commit 必须一致。
+- **CI 触发**：三个 workflow 分工。`quality.yml`（PR -> staging：rust-check + web-check）；`staging.yml`（push to staging：完整 build + deploy）；`release.yml`（push to main：release）。与 pre-commit 必须一致。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试，覆盖率不够补测试，lint 报错修 lint——不准绕。pre-push hook 跑太久就等着，或者拆分 commit。
 - **覆盖率阈值**：`nession-common` 90%，其余 Rust crate 80%，web 80%。
