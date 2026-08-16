@@ -265,21 +265,25 @@ cd web && npm run build && npm run lint && cd ..
 git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
 
-# 4. MERGE — after review, merge to main (CI auto-publishes images)
-#    For feat/** branches, use auto-merge to merge automatically when CI checks pass:
-gh pr merge <PR-NUMBER> --auto --squash
+# 4. STAGING — CI deploys the branch to staging automatically; verify it there
+./scripts/deploy-watch.sh staging
 
-# 5. VERSION BUMP — create a separate branch from main for version bump
+# 5. MERGE — only after staging is verified. Do NOT auto-merge: staging is the
+#    last human gate before prod, and --auto merges the moment CI turns green,
+#    skipping it entirely. Ask the user to confirm, then:
+gh pr merge <PR-NUMBER> --squash
+
+# 6. VERSION BUMP — create a separate branch from main for version bump
 git checkout main && git pull
 git checkout -b chore/bump-version
 # Edit Cargo.toml and web/package.json to bump version
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push origin chore/bump-version
 gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
-# chore/** branches don't trigger CI, so merge directly (no --auto needed)
+# chore/** branches don't trigger CI, so merge directly
 gh pr merge <PR-NUMBER> --squash
 
-# 6. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
+# 7. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
 git checkout main
 git pull
 ```
@@ -325,14 +329,15 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI changes
 4. Push, create PR (include `Closes #<ISSUE>` in body, screenshots in PR body) → CI runs docker-publish
-5. Merge to main → auto-closes issue + CI publishes `main`-tagged images
-   - Use auto-merge when development is complete and version is bumped:
+5. CI deploys the branch to staging — verify it there with `./scripts/deploy-watch.sh staging`
+6. Merge to main → auto-closes issue + CI publishes `main`-tagged images
+   - **Never auto-merge.** Staging is the last human gate before prod; `--auto`
+     merges as soon as CI turns green and skips it. Confirm staging first, then:
      ```bash
-     gh pr merge <PR-NUMBER> --auto --squash
+     gh pr merge <PR-NUMBER> --squash
      ```
-   - CI will automatically merge the PR once all checks pass
-6. Update image tags in k8s manifests: `k8s/kustomization.yaml`
-7. `kubectl apply -k k8s/`
+7. Update image tags in k8s manifests: `k8s/kustomization.yaml`
+8. `kubectl apply -k k8s/`
 
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
