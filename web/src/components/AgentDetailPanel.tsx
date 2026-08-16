@@ -15,6 +15,7 @@ import { Card, CardContent } from './ui/card';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
 import { cn } from '../lib/utils';
+import { copyToClipboard } from '../lib/clipboard';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { ClaudeCodeSection } from '../extensions/claude-code/components/ClaudeCodeSection';
 
@@ -44,28 +45,6 @@ function getHealthStatus(heartbeatHistory: string[]): { label: string; color: st
 }
 
 // ── Copy helpers ────────────────────────────────────────────────────────────
-
-function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  return new Promise((resolve, reject) => {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      if (document.execCommand('copy')) { resolve(); }
-      else { reject(new Error('execCommand returned false')); }
-    } catch (e) {
-      reject(e);
-    } finally {
-      document.body.removeChild(ta);
-    }
-  });
-}
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);

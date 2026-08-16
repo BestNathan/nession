@@ -14,6 +14,8 @@ const MAX_READ_SIZE: u64 = 10 * 1024 * 1024;
 pub struct FileEntry {
     pub name: String,
     pub path: String,
+    /// Absolute path on the filesystem, for actions like "copy full path".
+    pub full_path: String,
     pub is_dir: bool,
     pub size: u64,
     pub modified: u64,
@@ -79,6 +81,7 @@ impl FileOps {
                 result.push(FileEntry {
                     name,
                     path: relative_path,
+                    full_path: entry_path.to_string_lossy().to_string(),
                     is_dir: metadata.is_dir(),
                     size: metadata.len(),
                     modified: metadata
@@ -308,6 +311,24 @@ mod tests {
         // Paths must be relative to sandbox root, not absolute OS paths.
         assert_eq!(subdir.path, "subdir");
         assert_eq!(file.path, "a.txt");
+
+        // full_path carries the canonical absolute path for "copy full path".
+        assert_eq!(
+            file.full_path,
+            dir.path()
+                .join("a.txt")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        );
+        assert_eq!(
+            subdir.full_path,
+            dir.path()
+                .join("subdir")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        );
 
         // Verify round-trip: pass a path from list_dir back to read_file.
         let content = ops.read_file(&file.path).await.unwrap();

@@ -36,6 +36,7 @@ import {
   AlertDialogCancel,
 } from './ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { copyToClipboard } from '@/lib/clipboard';
 import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
 import { toastError } from '@/lib/errorHelpers';
 import { useNewEntryForm } from '../hooks/useNewEntryForm';
@@ -197,10 +198,10 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     renameState.cancelRename();
   };
 
-  const handleCopyPath = (entry: FileEntry) => {
-    navigator.clipboard.writeText(entry.path).then(
-      () => { toast.success('Path copied'); },
-      () => { toast.error('Failed to copy path'); },
+  const handleCopyPath = (text: string, label: string) => {
+    copyToClipboard(text).then(
+      () => { toast.success(`${label} copied`); },
+      () => { toast.error(`Failed to copy ${label.toLowerCase()}`); },
     );
   };
 
@@ -360,8 +361,11 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
                   <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-36">
-                  <ContextMenuItem onClick={() => handleCopyPath(entry)}>
+                  <ContextMenuItem onClick={() => handleCopyPath(entry.path, 'Path')}>
                     <Copy /> Copy path
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleCopyPath(entry.full_path, 'Full path')}>
+                    <Copy /> Copy full path
                   </ContextMenuItem>
                   <ContextMenuItem onClick={() => handleRenameStart(entry)}>
                     <Pencil /> Rename

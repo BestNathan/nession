@@ -19,7 +19,7 @@ function makeFileOps(entries: FileEntry[]): FileOps {
   } as unknown as FileOps;
 }
 
-const FILE: FileEntry = { name: 'f.txt', path: 'f.txt', is_dir: false, size: 5, modified: 0 };
+const FILE: FileEntry = { name: 'f.txt', path: 'f.txt', full_path: '/root/f.txt', is_dir: false, size: 5, modified: 0 };
 
 function mockMatchMedia(matches: boolean) {
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({

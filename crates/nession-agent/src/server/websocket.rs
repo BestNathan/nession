@@ -2172,6 +2172,20 @@ mod tests {
         // Path must be relative, not absolute.
         assert_eq!(entry_path, "rt/from_list.txt");
 
+        // full_path carries the absolute on-disk path for "copy full path".
+        let full_path = entries[0]
+            .get("full_path")
+            .and_then(|v| v.as_str())
+            .expect("entry should have a full_path");
+        assert!(
+            full_path.starts_with('/'),
+            "full_path must be absolute: {full_path}"
+        );
+        assert!(
+            full_path.ends_with("/rt/from_list.txt"),
+            "full_path must reference the entry: {full_path}"
+        );
+
         // 3. Read the file using the path returned by list_dir.
         let read_req = new_message(
             msg_types::FILE_READ,
