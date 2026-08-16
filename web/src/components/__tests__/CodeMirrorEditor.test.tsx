@@ -166,4 +166,30 @@ describe('CodeMirrorEditor', () => {
     const updatedContent = document.querySelector('.cm-content');
     expect(updatedContent?.textContent).toContain('updated');
   });
+
+  it('indents on Tab instead of letting the browser move focus', () => {
+    // indentWithTab is NOT part of defaultKeymap. Without it CodeMirror leaves
+    // Tab unhandled and the browser steals it for focus navigation, so typing
+    // in the editor cannot indent at all.
+    const onChange = vi.fn();
+    renderEditor({ value: 'abc', onChange });
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    expect(content).toBeTruthy();
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      code: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    });
+    content.dispatchEvent(event);
+
+    // The keybinding claimed the event (so the browser never sees it) and the
+    // document gained leading indentation.
+    expect(event.defaultPrevented).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as string;
+    expect(next).not.toBe('abc');
+    expect(next).toMatch(/^\s+abc$/);
+  });
 });
