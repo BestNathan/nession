@@ -2,8 +2,8 @@
 # deploy-watch — Monitor Nession CI/CD deployment progress
 #
 # Usage:
-#   ./scripts/deploy-watch.sh staging    Feature branch CI → staging rollout
-#   ./scripts/deploy-watch.sh prod       Main release CI → prod rollout
+#   ./scripts/deploy-watch.sh staging    After merging PR to staging — watch staging rollout
+#   ./scripts/deploy-watch.sh prod       After merging to main — watch release + prod rollout
 #   ./scripts/deploy-watch.sh --help
 #
 # Prerequisites: gh, kubectl, jq
@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────
 REPO="BestNathan/nession"
-STAGING_WORKFLOW="cicd.yml"
+STAGING_WORKFLOW="staging.yml"
 PROD_WORKFLOW="release.yml"
 K8S_NS="nession"
 # Deployment name → pod component label (component is stable across envs)
@@ -61,8 +61,8 @@ usage() {
 deploy-watch — Monitor Nession CI/CD deployment from commit to rollout.
 
 Usage:
-  ./scripts/deploy-watch.sh staging     Feature branch → staging
-  ./scripts/deploy-watch.sh prod        Main branch → production
+  ./scripts/deploy-watch.sh staging     After merging PR to staging
+  ./scripts/deploy-watch.sh prod        After merging to main
 
 Flow:
   1. Watch CI workflow (key phases only)
@@ -327,8 +327,7 @@ ENV="$1"
 
 case "$ENV" in
   staging)
-    BRANCH=$(git branch --show-current)
-    [[ "$BRANCH" =~ ^(feat|fix)/ ]] || die "Expected feat/* or fix/* branch. Current: $BRANCH"
+    BRANCH="staging"
     TAG=$(watch_ci "$BRANCH" "$STAGING_WORKFLOW" "staging")
     watch_k8s "staging" "$TAG" "${STAGING_DEPLOYS[@]}"
     ;;
