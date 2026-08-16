@@ -2,8 +2,8 @@
 # deploy-watch — Monitor Nession CI/CD deployment progress
 #
 # Usage:
-#   ./scripts/deploy-watch.sh staging    Feature branch CI → staging rollout
-#   ./scripts/deploy-watch.sh prod       Main release CI → prod rollout
+#   ./scripts/deploy-watch.sh staging    After merging PR to staging — watch staging rollout
+#   ./scripts/deploy-watch.sh prod       After merging to main — watch release + prod rollout
 #   ./scripts/deploy-watch.sh --help
 #
 # Prerequisites: gh, kubectl, jq
@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────
 REPO="BestNathan/nession"
-STAGING_WORKFLOW="cicd.yml"
+STAGING_WORKFLOW="staging.yml"
 PROD_WORKFLOW="release.yml"
 K8S_NS="nession"
 # Deployment name → pod component label (component is stable across envs)
@@ -61,8 +61,8 @@ usage() {
 deploy-watch — Monitor Nession CI/CD deployment from commit to rollout.
 
 Usage:
-  ./scripts/deploy-watch.sh staging     Feature branch → staging
-  ./scripts/deploy-watch.sh prod        Main branch → production
+  ./scripts/deploy-watch.sh staging     After merging PR to staging
+  ./scripts/deploy-watch.sh prod        After merging to main
 
 Flow:
   1. Watch CI workflow (key phases only)
@@ -252,19 +252,42 @@ watch_k8s() {
       [[ -n "${deploy_done[$deploy]:-}" ]] && continue
 
       # Get the image tag from pods matching this component label
+      # Check ALL pods, not just the first one - during rolling update there may be both old and new pods
       local current_tag
       current_tag=$(kubectl get pods -n "$K8S_NS" \
         -l "component=$component,env=$label" \
-        -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null \
-        | rev | cut -d: -f1 | rev)
+        -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}' 2>/dev/null \
+        | rev | cut -d: -f1 | rev | sort -u)
 
       [[ -z "$current_tag" ]] && continue  # No pods yet
 
-      local current_hash="${current_tag##*-}"  # "server-fb7d3e3"→"fb7d3e3" / "server-0.25.6"→"0.25.6"
+      # Check if ANY pod has the expected image (during rolling update)
+      local found_match=false
+      while IFS= read -r tag_line; do
+        [[ -z "$tag_line" ]] && continue
+        local current_hash="${tag_line##*-}"  # "server-fb7d3e3"→"fb7d3e3" / "server-0.25.6"→"0.25.6"
+        if [[ "$current_hash" == "$normalized_tag" ]]; then
+          found_match=true
+          break
+        fi
+      done <<< "$current_tag"
 
-      if [[ "$current_hash" == "$normalized_tag" ]]; then
-        deploy_done["$deploy"]=1
-        note "  $deploy → ${current_tag} ✓"
+      if $found_match; then
+        # Verify the deployment has fully rolled out (all replicas updated)
+        local deploy_status
+        deploy_status=$(kubectl get deploy "$deploy" -n "$K8S_NS" \
+          -o jsonpath='{.status.updatedReplicas}/{.status.replicas}' 2>/dev/null)
+
+        if [[ -n "$deploy_status" && "$deploy_status" != "0/0" ]]; then
+          local updated="${deploy_status%%/*}"
+          local total="${deploy_status##*/}"
+          if [[ "$updated" == "$total" ]]; then
+            deploy_done["$deploy"]=1
+            note "  $deploy → $normalized_tag ✓ ($updated/$total replicas)"
+          else
+            note "  $deploy rolling update: $updated/$total replicas updated"
+          fi
+        fi
       fi
     done
 
@@ -327,8 +350,7 @@ ENV="$1"
 
 case "$ENV" in
   staging)
-    BRANCH=$(git branch --show-current)
-    [[ "$BRANCH" =~ ^(feat|fix)/ ]] || die "Expected feat/* or fix/* branch. Current: $BRANCH"
+    BRANCH="staging"
     TAG=$(watch_ci "$BRANCH" "$STAGING_WORKFLOW" "staging")
     watch_k8s "staging" "$TAG" "${STAGING_DEPLOYS[@]}"
     ;;
