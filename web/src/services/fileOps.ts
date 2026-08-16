@@ -16,6 +16,8 @@ export type FileTransport = Pick<
 export interface FileEntry {
   name: string;
   path: string;
+  /** Absolute path on the filesystem, for "copy full path". */
+  full_path: string;
   is_dir: boolean;
   size: number;
   modified: number;

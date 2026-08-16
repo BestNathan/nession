@@ -78,8 +78,8 @@ export class ConnectionManager {
 
   /**
    * Flush any input buffered before the session was attached.  Called by the
-   * state machine effect (Terminal.tsx) when entering 'attached' so queued
-   * keystrokes don't sit in the buffer until the next user action.
+   * TerminalWorkspace effect when entering 'attached' so queued keystrokes
+   * don't sit in the buffer until the next user action.
    */
   flushInputBuffer(): void {
     if (this.disposed || this.inputBuffer.length === 0) { return; }

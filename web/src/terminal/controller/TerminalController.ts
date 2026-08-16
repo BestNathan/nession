@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { getDefaultStore } from 'jotai';
 import type { ConnectionState } from '../../hooks/useP2PConnection';
 import { inputModeAtomFamily, type InputMode } from '../state/input';
+import { lastResizeAtom } from '../state/terminal';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
@@ -11,22 +12,13 @@ import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
+import { TerminalRuntime } from '../runtime/TerminalRuntime';
+import type { FontSizeManager } from '../FontSizeManager';
 
-const DEFAULT_FONT =
-  "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
-const DEFAULT_FONT_SIZE = 14;
-
-/** Shape of xterm.js's undocumented internal state that exposes cell size. */
-interface XtermInternals {
-  _core?: {
-    _renderService?: {
-      dimensions?: {
-        css?: {
-          cell?: { width: number; height: number };
-        };
-      };
-    };
-  };
+export interface TerminalControllerOptions {
+  rendererType: 'webgl' | 'canvas';
+  fontSize?: number;
+  scrollback?: number;
 }
 
 /** Map a transport ConnectionState onto the domain TerminalStatus. */
@@ -55,6 +47,7 @@ export class TerminalController {
   readonly session: TerminalSession;
 
   private _terminal: Terminal | null = null;
+  private runtime: TerminalRuntime | null = null;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
@@ -68,7 +61,11 @@ export class TerminalController {
   onError: ((err: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
 
-  constructor(session: TerminalSession, transportFactory: () => TerminalTransport) {
+  constructor(
+    session: TerminalSession,
+    transportFactory: () => TerminalTransport,
+    private options: TerminalControllerOptions = { rendererType: 'canvas' },
+  ) {
     this.session = session;
     this.transportFactory = transportFactory;
     this.initInputRouter();
@@ -106,19 +103,19 @@ export class TerminalController {
     if (this.attached) { return; }
 
     const transport = this.transportFactory();
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: DEFAULT_FONT_SIZE,
-      fontFamily: DEFAULT_FONT,
-      allowProposedApi: true,
-      scrollback: 10000,
-    });
+    const runtime = new TerminalRuntime(this.options);
+    runtime.onCellSizeChange = () => {
+      this.resizeController?.remeasure();
+    };
+    const terminal = runtime.terminal;
 
     this.transport = transport;
+    this.runtime = runtime;
     this._terminal = terminal;
     this.attached = true;
 
-    terminal.open(element);
+    runtime.open(element);
+    runtime.installMobileInput(element, (text) => { this.transport?.send(text); });
 
     // Transport → xterm: display output as it arrives.
     transport.onOutput = (data: Uint8Array) => { terminal.write(data); };
@@ -152,7 +149,7 @@ export class TerminalController {
     this.resizeController = new ResizeController(this);
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
-      const dims = this.getCellDimensions();
+      const dims = this.cellDimensions;
       this.resizeController?.observe(element, dims.width, dims.height);
     });
   }
@@ -179,7 +176,8 @@ export class TerminalController {
     this.inputRouter?.setMode({ type: 'terminal' });
     this.inputRouter = null;
 
-    this._terminal?.dispose();
+    this.runtime?.dispose();
+    this.runtime = null;
     this._terminal = null;
 
     this.transport?.dispose();
@@ -195,14 +193,40 @@ export class TerminalController {
 
   /** Send user input to the transport (→ PTY). */
   send(data: string): void {
+    // Toolbar quick-command Ctrl+D ("\x04") routes to the disconnect flow, the
+    // same as keyboard Ctrl+D (handled by TerminalInputHandler → onCtrlD).
+    if (data === '\x04') { this.onCtrlD?.(); return; }
     this.transport?.send(data);
+  }
+
+  /** Flush any input buffered before the transport was attached. */
+  flushInputBuffer(): void {
+    this.transport?.flushInputBuffer();
   }
 
   // ── Terminal actions ────────────────────────────────────────────────────
 
   /** Resize the local xterm grid optimistically and notify the transport. */
   resize(cols: number, rows: number): void {
+    this.resizeLocal(cols, rows);
+    this.sendResize(cols, rows);
+  }
+
+  /**
+   * Resize only the local xterm grid, without touching the transport.
+   *
+   * Split out from resize() because the two halves want opposite timing: the
+   * local grid must follow a container size change in the SAME frame (otherwise
+   * xterm keeps painting at the old pixel size and the mismatch is visible as a
+   * flicker), while the PTY notification must be debounced so a drag doesn't
+   * flood tmux. See ResizeController.
+   */
+  resizeLocal(cols: number, rows: number): void {
     this._terminal?.resize(cols, rows);
+  }
+
+  /** Notify the transport (→ PTY) of a new size, without touching xterm. */
+  sendResize(cols: number, rows: number): void {
     this.transport?.sendResize(cols, rows);
   }
 
@@ -218,6 +242,25 @@ export class TerminalController {
     this._terminal?.paste(text);
   }
 
+  // ── Scroll / font-size / cell dimensions ─────────────────────────────────
+
+  /** Scroll the xterm viewport to the bottom. */
+  scrollToBottom(): void { this.runtime?.scrollToBottom(); }
+  /** Scroll the xterm viewport by whole pages (negative = up). */
+  scrollPages(pages: number): void { this.runtime?.scrollPages(pages); }
+  /** Scroll the xterm viewport by lines (negative = up). */
+  scrollLines(lines: number): void { this.runtime?.scrollLines(lines); }
+
+  /** Font-size manager while attached; null after detach(). */
+  get fontSizeManager(): FontSizeManager | null {
+    return this.runtime?.fontSizeManager ?? null;
+  }
+
+  /** Current cell pixel dimensions; 8×16 fallback. */
+  get cellDimensions(): { width: number; height: number } {
+    return this.runtime?.cellDimensions ?? { width: 8, height: 16 };
+  }
+
   // ── Input mode ───────────────────────────────────────────────────────────
 
   setInputMode(mode: InputMode): void {
@@ -230,20 +273,21 @@ export class TerminalController {
     return this.inputRouter?.getMode() ?? { type: 'terminal' };
   }
 
-  /** Current cell pixel dimensions; 8×16 fallback (14px monospace defaults). */
-  private getCellDimensions(): { width: number; height: number } {
-    const renderService = (this._terminal as unknown as XtermInternals | null)?._core?._renderService;
-    const width = renderService?.dimensions?.css?.cell?.width || 8;
-    const height = renderService?.dimensions?.css?.cell?.height || 16;
-    return { width, height };
-  }
 }
 
 /**
  * ResizeObserver wrapper: container size → cols/rows → controller.resize().
- * The first fire is sent immediately so tmux is at the right size before the
- * session attaches; subsequent fires (window drags) are debounced at 200ms to
- * avoid flooding tmux with intermediate sizes.
+ *
+ * The local xterm grid is applied on EVERY fire, synchronously. It has to be:
+ * xterm paints at cols*cellW × rows*cellH, so any delay leaves it painting at
+ * the previous container's pixel size — visible as a flicker (bare container
+ * background where the terminal hasn't grown yet, or overflow where it hasn't
+ * shrunk). The mobile input panel opens with no animation, which exposes that
+ * gap as a hard flash rather than hiding it behind a transition.
+ *
+ * Only the PTY notification is debounced (200ms), so dragging a window doesn't
+ * flood tmux with intermediate sizes. The first fire skips the debounce so tmux
+ * is at the right size before the session attaches.
  *
  * Exported so consumers can type/instantiate the resize controller when
  * composing the terminal at the boundary.
@@ -253,6 +297,8 @@ export class ResizeController {
   private observer: ResizeObserver | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isFirstFire = true;
+  private lastContainer = { width: 0, height: 0 };
+  private lastCell = { width: 8, height: 16 };
 
   constructor(controller: TerminalController) {
     this.controller = controller;
@@ -262,13 +308,24 @@ export class ResizeController {
     if (cellWidth <= 0 || cellHeight <= 0) { return; }
     this.dispose();
     this.isFirstFire = true;
+    this.lastCell = { width: cellWidth, height: cellHeight };
+    this.lastContainer = { width: 0, height: 0 };
 
     this.observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        const cols = Math.max(1, Math.floor(width / cellWidth));
-        const rows = Math.max(1, Math.floor(height / cellHeight));
+        this.lastContainer = { width, height };
+        // Use the live cell size (refreshed by remeasure() on font-size zoom),
+        // not the stale observe()-time closure params.
+        const cell = this.lastCell;
+        const cols = Math.max(1, Math.floor(width / cell.width));
+        const rows = Math.max(1, Math.floor(height / cell.height));
         if (cols < 2 || rows < 2) { continue; }
+
+        // Publish to the atom the state machine reads on (re)attach so
+        // client.attach / beginRelay carry the current viewport size. Covers
+        // both the immediate first fire and the debounced subsequent fires.
+        getDefaultStore().set(lastResizeAtom, { cols, rows });
 
         if (this.isFirstFire) {
           this.isFirstFire = false;
@@ -276,13 +333,37 @@ export class ResizeController {
           continue;
         }
 
+        // Local grid now — the container has already changed size, so xterm
+        // must repaint at the new size in this same frame.
+        this.controller.resizeLocal(cols, rows);
+
+        // PTY notification debounced, so a drag sends one final size.
         if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
         this.debounceTimer = setTimeout(() => {
-          this.controller.resize(cols, rows);
+          this.controller.sendResize(cols, rows);
         }, 200);
       }
     });
     this.observer.observe(container);
+  }
+
+  /** Recompute cols/rows from the last observed container size and the LIVE
+   *  cell size (used after font-size changes, when the container hasn't
+   *  resized). Refreshes the stashed cell size so later observer fires also
+   *  use it. */
+  remeasure(): void {
+    const { width, height } = this.lastContainer;
+    if (width <= 0 || height <= 0) { return; }
+    const cell = this.controller.cellDimensions;
+    if (cell.width <= 0 || cell.height <= 0) { return; }
+    this.lastCell = cell;
+    const cols = Math.max(1, Math.floor(width / cell.width));
+    const rows = Math.max(1, Math.floor(height / cell.height));
+    if (cols < 2 || rows < 2) { return; }
+    // Keep the atom fresh after a font-size zoom so a (re)attach uses the
+    // recomputed cell count, not the stale pre-zoom size.
+    getDefaultStore().set(lastResizeAtom, { cols, rows });
+    this.controller.resize(cols, rows);
   }
 
   dispose(): void {

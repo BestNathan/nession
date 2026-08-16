@@ -15,9 +15,9 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::protocol::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
-    AgentRegisterPayload, AgentStatus, EnvFileRef, EnvSnapshot, HeartbeatMetadata, Message,
-    ProtocolMessage, ServerSessionCreatePayload, ServerSessionEnvApplyPayload,
-    ServerSessionEnvUnsetPayload,
+    AgentRegisterPayload, AgentStatus, AgentTerminalResizePayload, EnvFileRef, EnvSnapshot,
+    HeartbeatMetadata, Message, ProtocolMessage, ServerSessionCreatePayload,
+    ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -214,6 +214,22 @@ impl ServerClientHandle {
             addresses,
         };
         let msg = new_message(msg_types::AGENT_ADDRESS_UPDATE, payload);
+        self.enqueue(&msg)
+    }
+
+    /// Queue a terminal resize event for delivery to the central server, which
+    /// broadcasts it to relay clients attached to the session.
+    ///
+    /// `session_id` is the FULL `agent:name` id — the server's
+    /// `handle_agent_terminal_resize` looks up relay clients by `payload.session_id`
+    /// (not the bare session name).
+    pub async fn send_terminal_resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<()> {
+        let payload = AgentTerminalResizePayload {
+            session_id: session_id.to_string(),
+            cols,
+            rows,
+        };
+        let msg = new_message("agent.terminal.resize", payload);
         self.enqueue(&msg)
     }
 
@@ -1878,6 +1894,40 @@ mod tests {
         let msg = new_message("test", serde_json::json!({}));
         let result = handle.enqueue(&msg);
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn server_client_handle_send_terminal_resize() {
+        let (outbox_tx, mut outbox_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        let handle = ServerClientHandle {
+            outbox: outbox_tx,
+            shutdown_tx,
+            agent_id: "test".to_string(),
+            metadata: AgentMetadata {
+                tmux_version: String::new(),
+                os_version: String::new(),
+                nession_version: String::new(),
+                image_tag: String::new(),
+            },
+            sync_needed: Arc::new(AtomicBool::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
+        };
+
+        handle
+            .send_terminal_resize("agent-1:sess-1", 120, 40)
+            .await
+            .unwrap();
+
+        let msg = outbox_rx.recv().await.expect("no message in outbox");
+        let WsMessage::Text(text) = msg else {
+            panic!("expected WsMessage::Text, got {msg:?}");
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.terminal.resize");
+        assert_eq!(parsed["payload"]["session_id"], "agent-1:sess-1");
+        assert_eq!(parsed["payload"]["cols"], 120);
+        assert_eq!(parsed["payload"]["rows"], 40);
     }
 
     /// Mock server that sends env.list command after registration.

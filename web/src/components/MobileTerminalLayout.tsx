@@ -55,11 +55,14 @@ function TerminalInputBar({
 }: TerminalInputBarProps) {
   const [activeTab, setActiveTab] = useState('input');
 
+  // The Collapsible has no CSS animation, so the panel appears/disappears in
+  // one frame and the terminal container resizes with it — nothing to wait for.
+  // (ResizeController applies the new xterm grid synchronously on that frame.)
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open !== !collapsed) {
         onToggle();
-        setTimeout(() => onReveal?.(), 250);
+        onReveal?.();
       }
     },
     [collapsed, onToggle, onReveal],
