@@ -442,15 +442,31 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create a branch for the kustomize update
+          BRANCH_NAME="chore/update-staging-kustomize-${{ needs.versions.outputs.short_sha }}"
+          git checkout -b "$BRANCH_NAME"
+
           git add k8s/overlays/staging/kustomization.yaml
           if git diff --staged --quiet; then
             echo "No change to staging overlay — skipping."
           else
             git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin main && git push && break || sleep 2
-            done
+            git push -u origin "$BRANCH_NAME"
+
+            # Create PR with auto-merge
+            gh pr create \
+              --title "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }})" \
+              --body "Automated staging kustomize update from CI workflow." \
+              --base main \
+              --head "$BRANCH_NAME"
+
+            # Enable auto-merge
+            PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq .number)
+            gh pr merge "$PR_NUMBER" --auto --squash
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   cleanup-ghcr:
     needs: merge
