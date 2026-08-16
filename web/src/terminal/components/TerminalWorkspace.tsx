@@ -359,6 +359,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
           onTerminalReveal={() => {}}
           fontSizeManager={controller?.fontSizeManager ?? null}
           onGetTerminalPwd={fileOps ? handleGetTerminalPwd : undefined}
+          controller={controller}
         />
       </div>
     </div>

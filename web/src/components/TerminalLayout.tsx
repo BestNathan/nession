@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileTabs } from './FileTabs';
 import { EnvPanel } from './env/EnvPanel';
 import { InputPanel } from './InputPanel';
@@ -9,6 +9,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
+import type { TerminalController } from '@/terminal/controller/TerminalController';
 
 interface TerminalLayoutProps {
   terminalElement: React.ReactNode;
@@ -24,6 +25,7 @@ interface TerminalLayoutProps {
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
+  controller?: TerminalController | null;
 }
 
 /**
@@ -47,10 +49,38 @@ export function TerminalLayout({
   onTerminalReveal,
   fontSizeManager,
   onGetTerminalPwd,
+  controller,
 }: TerminalLayoutProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Desktop keyboard input handling
+  useEffect(() => {
+    if (!isDesktop || !controller) {
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if target is an input/textarea (let native handling work)
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      // Ignore modifier-only keys
+      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
+        return;
+      }
+
+      // Let xterm handle the keyboard input via its own event system
+      // This useEffect is just to ensure the desktop layout is properly separated
+      // The actual keyboard handling happens in xterm's TerminalInputHandler
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDesktop, controller]);
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const inputPanel = <InputPanel sendText={sendText} disabled={toolbarDisabled} />;
