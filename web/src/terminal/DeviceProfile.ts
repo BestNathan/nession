@@ -1,7 +1,7 @@
 import type { DeviceProfile, DeviceProfileConfig } from './types';
 
 export const PROFILES: Record<DeviceProfile, DeviceProfileConfig> = {
-  mobile:  { fontSize: 12, lineHeight: 1.2, scrollback: 10000 },
+  mobile:  { fontSize: 10, lineHeight: 1.2, scrollback: 10000 },
   desktop: { fontSize: 14, lineHeight: 1.2, scrollback: 50000 },
 };
 
