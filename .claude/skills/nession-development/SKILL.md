@@ -375,32 +375,32 @@ git push origin <branch-name>
 gh pr create --title "feat: description" --body "..."
 ```
 
-**When development is complete**, use auto-merge to merge the feature branch automatically once all CI checks pass:
+**When development is complete and CI has passed + deployed to staging**, do **NOT** auto-merge the branch to main. Offer the user two options and let them confirm before merging.
+
+The workflow:
 
 ```bash
-# Enable auto-merge for feat/** branches — PR will merge automatically when checks pass
-gh pr merge <PR-NUMBER> --auto --squash
+# 1. Push the feat/fix branch → CI (cicd.yml) runs → deploys to staging
+git push origin <branch-name>
 
-# Check auto-merge status
-gh pr view <PR-NUMBER> --json autoMergeRequest
+# 2. Watch CI + staging rollout until it succeeds
+./scripts/deploy-watch.sh staging
 
-# Cancel auto-merge if needed
-gh pr merge <PR-NUMBER> --disable-auto
+# 3. Offer the user two options and act on their choice (do NOT auto-merge):
+#    Option 1 — Merge to main (deploy to prod): staging is verified, proceed.
+#    Option 2 — Hold in staging: keep the PR open for further review.
 ```
 
-**Auto-merge prerequisites:**
-- Branch is `feat/**` or `fix/**` (triggers CI workflow)
-- All CI checks are expected to pass (rust-check, web-check, builds)
-- PR is ready for review (no draft)
+Use `AskUserQuestion` to present these two options after staging succeeds:
 
-**Benefits:**
-- No need to manually monitor CI status
-- PR merges immediately when checks pass
-- Reduces waiting time between approval and merge
+| Option | Action | When |
+|--------|--------|------|
+| **Merge to main** | `gh pr merge <PR-NUMBER> --squash` | staging verified, ready to release |
+| **Hold in staging** | leave the PR open (no action) | needs more review / verification |
 
-**⚠ Auto-merge will be cancelled if any check fails.** Fix the issue and push again — auto-merge will re-enable automatically.
+**Why not auto-merge:** staging is the gate. A feature must be verified against the staging deployment before it reaches main/prod — auto-merge skips that human confirmation and pushes unreviewed staging state straight to production.
 
-**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly without `--auto`:
+**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
 
 ```bash
 # After merging feature branch to main
