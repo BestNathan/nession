@@ -540,11 +540,32 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create a branch for the kustomize update
+          RUST_VER="${{ needs.version-check.outputs.rust_version }}"
+          BRANCH_NAME="chore/update-prod-kustomize-v${RUST_VER}"
+          git checkout -b "$BRANCH_NAME"
+
           git add k8s/overlays/production/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore: update prod image tags to v${{ needs.version-check.outputs.rust_version }} [skip ci]"
-          for i in 1 2 3; do
-            git pull --rebase origin main && git push && break || sleep 2
-          done
+          if git diff --staged --quiet; then
+            echo "No change to production overlay — skipping."
+          else
+            git commit -m "chore: update prod image tags to v${RUST_VER} [skip ci]"
+            git push -u origin "$BRANCH_NAME"
+
+            # Create PR with auto-merge
+            gh pr create \
+              --title "chore: update prod image tags to v${RUST_VER}" \
+              --body "Automated production kustomize update from release workflow." \
+              --base main \
+              --head "$BRANCH_NAME"
+
+            # Enable auto-merge
+            PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq .number)
+            gh pr merge "$PR_NUMBER" --auto --squash
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ═══════════════════════════════════════════════════════════════════
   # Native binaries — macOS (arm64 native + amd64 cross-compile)
