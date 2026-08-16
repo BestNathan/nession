@@ -24,3 +24,10 @@ export interface DeviceProfile {
   lineHeight: number;
   scrollback: number;
 }
+
+/** Options passed to TerminalInstance constructor. */
+export interface TerminalInstanceOptions {
+  rendererType: 'webgl' | 'canvas';
+  fontSize?: number;
+  scrollback?: number;
+}
