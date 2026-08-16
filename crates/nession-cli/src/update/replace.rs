@@ -184,12 +184,13 @@ mod tests {
     }
 
     #[test]
-    fn is_process_running_self() {
-        let pid = is_process_running("nession-agent");
-        assert!(
-            pid.is_none(),
-            "nession-agent should not be running during tests"
-        );
+    fn is_process_running_absent_process_returns_none() {
+        // Must be a name that cannot plausibly be running. The previous version
+        // of this test probed "nession-agent", which fails for any developer
+        // who happens to have a local agent up — including anyone verifying a
+        // change against a local stack — and blocks the pre-push hook.
+        let pid = is_process_running("nession-no-such-process-b7f3a1c9");
+        assert!(pid.is_none(), "an absent process must report no pid");
     }
 
     #[test]
