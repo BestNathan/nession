@@ -7,6 +7,7 @@ import { lastResizeAtom } from '../state/terminal';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
+import { InputSourceManager } from '../input/InputSourceManager';
 import { TerminalInputHandler } from '../input/TerminalInputHandler';
 import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
@@ -52,6 +53,7 @@ export class TerminalController {
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
   private inputRouter: InputRouter | null = null;
+  private inputSourceManager: InputSourceManager;
   private attached = false;
 
   /** Callbacks → Jotai */
@@ -70,6 +72,7 @@ export class TerminalController {
     this.transportFactory = transportFactory;
     this.instance = new TerminalInstance(options);
     this._terminal = this.instance.terminal;
+    this.inputSourceManager = new InputSourceManager();
     this.initInputRouter();
   }
 
@@ -189,12 +192,38 @@ export class TerminalController {
     this._terminal?.write(data);
   }
 
+  /**
+   * Unified input entry point for all input sources.
+   * Layer 1: Update active source via InputSourceManager
+   * Layer 2: Route to current mode handler via InputRouter
+   */
+  handleInput(event: import('../types').InputEvent): void {
+    // Layer 1: Update active source
+    this.inputSourceManager.setActiveSource(event.source);
+
+    // Layer 2: Route to current mode handler
+    this.inputRouter?.route(event.data);
+  }
+
   /** Send user input to the transport (→ PTY). */
-  send(data: string): void {
+  send(data: string, source: import('../types').InputSource = 'component-input'): void {
     // Toolbar quick-command Ctrl+D ("\x04") routes to the disconnect flow, the
     // same as keyboard Ctrl+D (handled by TerminalInputHandler → onCtrlD).
     if (data === '\x04') { this.onCtrlD?.(); return; }
-    this.transport?.send(data);
+    this.handleInput({ source, data, timestamp: Date.now() });
+  }
+
+  /** Get the currently active input source. */
+  getActiveInputSource(): import('../types').InputSource | null {
+    return this.inputSourceManager.getActiveSource();
+  }
+
+  /**
+   * Register a callback for input source changes.
+   * Returns an unsubscribe function.
+   */
+  onInputSourceChange(callback: (source: import('../types').InputSource) => void): () => void {
+    return this.inputSourceManager.onSourceChange(callback);
   }
 
   /** Flush any input buffered before the transport was attached. */

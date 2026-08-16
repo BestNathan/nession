@@ -22,8 +22,10 @@ export type { TerminalInstanceOptions } from './types';
 
 // New architecture: input
 export { InputRouter } from './input/InputRouter';
+export { InputSourceManager } from './input/InputSourceManager';
 export { TerminalInputHandler } from './input/TerminalInputHandler';
 export type { InputHandler } from './input/InputHandler';
+export type { InputSource, InputEvent } from './types';
 
 // New architecture: transport
 export type { TerminalTransport } from './transport/TerminalTransport';

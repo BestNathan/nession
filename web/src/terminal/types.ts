@@ -34,3 +34,19 @@ export interface TerminalInstanceOptions {
   fontSize?: number;
   scrollback?: number;
 }
+
+/** Input source types for the two-layer input system. */
+export type InputSource =
+  | 'keyboard'           // Physical keyboard (Desktop)
+  | 'touch'              // Touch screen (Mobile)
+  | 'mouse'              // Mouse (selection/click)
+  | 'component-input'    // InputPanel component
+  | 'component-quickcmd' // QuickCommandsPanel component
+  | string;              // Extensible for future sources
+
+/** Input event passed through the two-layer input system. */
+export interface InputEvent {
+  source: InputSource;
+  data: string;
+  timestamp: number;
+}
