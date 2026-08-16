@@ -1,8 +1,8 @@
-name: CI/CD
+name: Staging
 
 on:
   push:
-    branches: ['feat/**', 'fix/**']
+    branches: ['staging']
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════

@@ -7,13 +7,17 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 
 ## Overview
 
-**CI builds images. You don't.** Development happens locally. CI triggers on merge to main. ArgoCD deploys to k8s.
+**CI builds images. You don't.** Development happens locally. Three workflows handle deployment:
+- **Quality Gate** (`quality.yml`): PR to staging triggers rust-check + web-check
+- **Staging** (`staging.yml`): merge to staging triggers full build + deploy to staging
+- **Release** (`release.yml`): merge to main triggers release build + deploy to production
 
 ```
-Local dev → cargo run / npm run dev → verify locally
-  → version bump (minor 0.x.0 or patch 0.x.y)
-  → push branch → create PR → merge to main
-  → CI builds multi-arch images → ArgoCD syncs to k8s
+Local dev → verify locally
+  → push branch → PR to staging → quality gate passes → merge to staging
+  → staging builds + deploys to staging environment → validate on staging
+  → version bump (minor 0.x.0 or patch 0.x.y) → merge staging to main
+  → release builds multi-arch images → ArgoCD syncs to production
 ```
 
 ## Deployment Monitoring
@@ -21,7 +25,7 @@ Local dev → cargo run / npm run dev → verify locally
 Use `scripts/deploy-watch.sh` to monitor deployments end-to-end:
 
 ```bash
-# After pushing a feat/fix branch — watch CI + staging rollout
+# After merging PR to staging — watch staging build + rollout
 ./scripts/deploy-watch.sh staging
 
 # After merging to main + version bump — watch release + prod rollout
@@ -29,7 +33,7 @@ Use `scripts/deploy-watch.sh` to monitor deployments end-to-end:
 ```
 
 **What it does:**
-- Watches the appropriate GitHub Actions workflow (cicd.yml for staging, release.yml for prod)
+- Watches the appropriate GitHub Actions workflow (staging.yml for staging, release.yml for prod)
 - Shows only key phases (Check → Versions → Build → Docker → Merge → Kustomize)
 - On CI failure: shows the failed job's log tail and suggests fixes based on error patterns
 - On CI success: monitors k8s rollout status for all 3 deployments with pod health checks
@@ -80,10 +84,10 @@ git checkout -b feat/description
 git add -A
 git commit -m "feat: description"
 git push origin feat/description
-gh pr create --title "feat: description" --body "..."
+gh pr create --base staging --title "feat: description" --body "..."
 ```
 
-**Do NOT push directly to main.** All changes go through PRs.
+**Do NOT push directly to main or staging.** All changes go through PRs targeting `staging`.
 
 **Exception — `.github/workflows/*` changes:** GitHub Actions workflows only take effect from the default branch (main). Workflow changes on feature branches are ignored by GitHub. When modifying `.github/workflows/*`, the workflow commit MUST be cherry-picked to a separate branch off `main`, fast-tracked as its own PR, and merged to main immediately — otherwise the change has no effect until the feature PR merges (which may be days or never).
 
@@ -96,38 +100,38 @@ gh pr create --title "chore: ..." --body "..."
 gh pr merge <N> --squash
 ```
 
-**Merging feature branches (no auto-merge):**
+**Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **push → CI → staging → confirm → merge to main**. Do **NOT** auto-merge — staging is the gate before production.
+For `feat/**` and `fix/**` branches, the flow is **push → PR to staging → quality gate → merge to staging → staging deploy → validate → merge staging to main**.
 
 ```bash
-# 1. Push → CI (cicd.yml) runs → staging rollout
+# 1. Push → create PR targeting staging
 git push origin <branch-name>
+gh pr create --base staging --title "feat: ..." --body "..."
 
-# 2. Watch CI + staging rollout to success
+# 2. Auto-merge to staging when quality gate passes
+gh pr merge <PR-NUMBER> --auto --squash
+
+# 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
 
-# 3. Offer the user two options, then act (no auto-merge):
-#    Option 1 — Merge to main (deploy to prod)
-#    Option 2 — Hold in staging (keep PR open)
+# 4. After staging validation, merge staging to main (with version bump)
+#    See version bump section below
 ```
 
-| Option | Action | When |
-|--------|--------|------|
-| **Merge to main** | `gh pr merge <PR-NUMBER> --squash` | staging verified, ready to release |
-| **Hold in staging** | leave the PR open (no action) | needs more review / verification |
-
-**Why not auto-merge:** auto-merge pushes a branch to main the moment CI turns green, without any verification against the staging deployment. Staging is the last human gate before production — the branch must be confirmed there first.
+**Auto-merge to staging is safe** because staging is the integration environment — not production. The quality gate (rust-check + web-check) ensures code correctness. Human validation happens on staging before the staging → main merge.
 
 **Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
 
 ```bash
-# After merging feature branch to main
+# After staging validation passes
 git checkout main && git pull
 git checkout -b chore/bump-version
 # Bump version in Cargo.toml and web/package.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
-git push origin chore/bump-version
+# Merge staging into main (brings all validated features)
+git merge staging
+git push
 gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
 gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
 ```
@@ -143,16 +147,21 @@ gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
 
 **⚠ 已合并的 PR 不能 `gh pr edit` 追加 commit。** 合并后分支即死，如需继续修改，必须从最新 main 创建新分支和新 PR。
 
-### 4. Merge triggers CI
+### 4. Merge to staging triggers build + deploy
 
-When the PR is merged to main, GitHub Actions automatically:
+When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 1. Reads versions from `Cargo.toml` + `package.json` and computes the short git hash
 2. Builds web UI (`npm ci && npm run build`)
 3. Builds Rust binaries natively for amd64 AND arm64
 4. Creates multi-arch Docker images tagged with **hash** (`server-{sha}`, `agent-{sha}`, `ui-{sha}`)
-5. If version changed, also creates **version alias** tags (`server-{version}`, `agent-{version}`, `ui-{version}`)
-6. Updates `k8s/kustomization.yaml` with hash-based image tags
-7. ArgoCD detects the kustomize change and syncs to k8s
+5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
+6. ArgoCD detects the kustomize change and syncs to staging k8s
+
+**After staging validation**, create a version bump branch from main, merge staging into it, and PR to main. The `release.yml` workflow then:
+1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
+2. Creates GitHub Release with native binaries
+3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags
+4. ArgoCD syncs to production k8s
 
 **No manual steps after merge.** CI → ArgoCD is fully automatic.
 
@@ -166,9 +175,8 @@ When the PR is merged to main, GitHub Actions automatically:
 | agent | `agent-{sha}` | `agent-{version}` | Git hash / `Cargo.toml` |
 | ui | `ui-{sha}` | `ui-{version}` | Git hash / `web/package.json` |
 
-**Every push to main builds images with hash tags.** Version tags are additional aliases
-pointing to the same image, created only when `Cargo.toml` or `package.json` version changes.
-**K8s always deploys hash-based tags** for immutable, traceable deployments.
+**Staging uses hash tags** (`server-{sha}`). **Release uses version tags** (`server-{version}`).
+**K8s always deploys immutable tags** for traceable deployments.
 
 ### Key Files
 
@@ -176,8 +184,11 @@ pointing to the same image, created only when `Cargo.toml` or `package.json` ver
 |------|---------|
 | `Cargo.toml` | Workspace version (Rust binaries) |
 | `web/package.json` | Web UI version |
-| `.github/workflows/docker-publish.yml` | CI pipeline |
-| `k8s/kustomization.yaml` | Image tag mapping (auto-updated by CI) |
+| `.github/workflows/quality.yml` | PR quality gate (rust-check + web-check) |
+| `.github/workflows/staging.yml` | Staging build + deploy (push to staging) |
+| `.github/workflows/release.yml` | Release build + deploy (push to main) |
+| `k8s/overlays/staging/kustomization.yaml` | Staging image tags (auto-updated by staging.yml) |
+| `k8s/overlays/production/kustomization.yaml` | Production image tags (auto-updated by release.yml) |
 
 ### Observing Deployments
 
@@ -198,17 +209,28 @@ kubectl rollout restart deployment -n nession
 ## CI Pipeline Architecture
 
 ```
-git push to main
+PR to staging:
+  → quality.yml: rust-check + web-check (gate for merge)
+
+Merge to staging:
+  → staging.yml:
   → versions job: read Cargo.toml + package.json + short SHA
   → build-web: npm ci && npm run build (arch-independent, always)
-  → build-amd64 + build-arm64 (parallel): cargo build --release, Docker build
-      → Push hash tag (always): server-{sha}-{arch}
-      → Push version tag (if version changed): server-{version}-{arch}
+  → build-amd64 + build-arm64 (parallel): cargo zigbuild --release
+  → docker: build + push hash-tagged images (server-{sha}-{arch}, etc.)
   → merge: docker buildx imagetools create (multi-arch manifests)
-      → Create hash manifest (always): server-{sha}
-      → Create version alias (if version changed): server-{version}
-  → update-kustomize: kustomize edit set image → commit (hash-based tags)
-  → ArgoCD: auto-sync to k8s
+  → update-staging-kustomize: commit hash-based tags to main (with [skip ci])
+  → ArgoCD: auto-sync to staging k8s
+
+Merge to main (after staging validation + version bump):
+  → release.yml:
+  → version-check: only runs if version changed in Cargo.toml/package.json
+  → build + docker: version-tagged images (server-{version}-{arch}, etc.)
+  → merge: multi-arch version manifests
+  → build-macos: native macOS binaries
+  → create-release: GitHub Release with all binaries
+  → update-prod-kustomize: commit version-based tags to main
+  → ArgoCD: auto-sync to production k8s
 ```
 
 ## Common Mistakes

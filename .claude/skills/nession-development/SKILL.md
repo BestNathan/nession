@@ -32,7 +32,7 @@ Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm 
 EnterWorktree 的 name 参数必须使用完整前缀。
 ```
 
-**CI 触发规则：** `.github/workflows/cicd.yml` 只触发 `feat/**` 和 `fix/**` 分支。
+**CI 触发规则：** `.github/workflows/quality.yml` 在 PR 目标为 `staging` 时触发；`.github/workflows/staging.yml` 在 push 到 `staging` 分支时触发。feat/fix 分支的 PR 必须目标为 `staging`。
 
 | ✅ 正确 | ❌ 错误 | 后果 |
 |---------|---------|------|
@@ -280,7 +280,7 @@ On merge to main, CI reads the version from these files and creates version-tagg
 
 ## 5. Development Cycle
 
-**main 只读 → 创建 worktree → 开发 → PR → 合并 → 清理 worktree → 旧 worktree 已死 → 重复**
+**main 只读 → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
 
 ```bash
 # STEP 1: 从 main 创建隔离 worktree（不要在 main 目录里开发）
@@ -304,11 +304,11 @@ cd web && npm run build && npm run lint && cd ..
 # to functionally verify the change in a real browser.
 # See "Playwright Functional Verification" section above.
 
-# STEP 4: Push and create PR
+# STEP 4: Push and create PR targeting staging
 git push -u origin feat/<slug>
-gh pr create --title "feat: <description>" --body "..."
+gh pr create --base staging --title "feat: <description>" --body "..."
 
-# STEP 5: After merge — cleanup. OLD WORKTREE IS DEAD.
+# STEP 5: After merge to staging — cleanup. OLD WORKTREE IS DEAD.
 # 返回 main 仓库目录，清理 worktree
 git checkout main
 git pull
@@ -372,43 +372,29 @@ gh pr edit <PR-NUMBER> --title "..." --body "..."
 
 ```bash
 git push origin <branch-name>
-gh pr create --title "feat: description" --body "..."
+gh pr create --base staging --title "feat: description" --body "..."
 ```
 
-**When development is complete and CI has passed + deployed to staging**, do **NOT** auto-merge the branch to main. Offer the user two options and let them confirm before merging.
-
-The workflow:
+**When development is complete**, use auto-merge to merge the feature branch to staging automatically once the quality gate passes:
 
 ```bash
-# 1. Push the feat/fix branch → CI (cicd.yml) runs → deploys to staging
-git push origin <branch-name>
-
-# 2. Watch CI + staging rollout until it succeeds
-./scripts/deploy-watch.sh staging
-
-# 3. Offer the user two options and act on their choice (do NOT auto-merge):
-#    Option 1 — Merge to main (deploy to prod): staging is verified, proceed.
-#    Option 2 — Hold in staging: keep the PR open for further review.
+# Enable auto-merge for feat/fix PRs targeting staging
+gh pr merge <PR-NUMBER> --auto --squash
 ```
 
-Use `AskUserQuestion` to present these two options after staging succeeds:
+**Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-| Option | Action | When |
-|--------|--------|------|
-| **Merge to main** | `gh pr merge <PR-NUMBER> --squash` | staging verified, ready to release |
-| **Hold in staging** | leave the PR open (no action) | needs more review / verification |
-
-**Why not auto-merge:** staging is the gate. A feature must be verified against the staging deployment before it reaches main/prod — auto-merge skips that human confirmation and pushes unreviewed staging state straight to production.
-
-**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
+**After staging validation**, merge staging to main with a version bump:
 
 ```bash
-# After merging feature branch to main
+# After staging validation passes
 git checkout main && git pull
 git checkout -b chore/bump-version
 # Bump version in Cargo.toml and web/package.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
-git push origin chore/bump-version
+# Merge staging into main (brings all validated features)
+git merge staging
+git push
 gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
 gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
 ```
@@ -437,9 +423,9 @@ Every PR must include these three sections:
 <!-- 命令：mcp__playwright__browser_navigate → browser_snapshot → browser_take_screenshot -->
 ```
 
-CI triggers on merge to main — builds multi-arch Docker images, pushes tags, updates k8s manifests. No manual steps after merge.
+Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize. After staging validation and merge to main (with version bump), release workflow builds version-tagged images and updates production kustomize.
 
-**Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after pushing a branch, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
+**Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after merging PR to staging, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
 
 ### Playwright Functional Verification
 
@@ -547,6 +533,7 @@ Save to `.playwright-mcp/screenshots/` (gitignored). Reference in PR body under 
 | Mistake | Reality |
 |---------|---------|
 | **Committing on `main` directly** | **FORBIDDEN.** main 是只读的。所有开发必须在 worktree 中进行。 |
+| **feat/fix PR 直接提交到 main** | **FORBIDDEN.** feat/fix PR 必须提交到 staging。只有 staging → main 的发布 PR 才直接提交到 main。 |
 | **在 main 目录中切分支开发** | **FORBIDDEN.** 不要在 main 的 git 目录里 checkout 分支。使用 `EnterWorktree` 或 `git worktree add` 创建隔离的工作目录。 |
 | **PR 合并后继续往旧分支推 commit** | **FORBIDDEN.** PR 合并 = worktree/分支已死。任何后续修改都必须从最新 main 创建新 worktree。 |
 | **PR 已合并还用 `gh pr edit` 更新** | **FORBIDDEN.** 已合并的 PR 不能追加 commit。必须新建分支 + 新 PR。 |
