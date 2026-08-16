@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collap
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
+import type { TerminalController } from '@/terminal/controller/TerminalController';
 import { cn } from '@/lib/utils';
 
 interface MobileTerminalLayoutProps {
@@ -29,14 +30,15 @@ interface MobileTerminalLayoutProps {
   onTerminalReveal?: () => void;
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
+  controller?: TerminalController | null;
 }
 
 interface TerminalInputBarProps {
-  sendText: (text: string) => void;
   disabled: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onReveal?: () => void;
+  controller?: TerminalController | null;
 }
 
 /**
@@ -47,11 +49,11 @@ interface TerminalInputBarProps {
  * - Both tab panels share a fixed 30vh container — no height jumping
  */
 function TerminalInputBar({
-  sendText,
   disabled,
   collapsed,
   onToggle,
   onReveal,
+  controller,
 }: TerminalInputBarProps) {
   const [activeTab, setActiveTab] = useState('input');
 
@@ -67,6 +69,15 @@ function TerminalInputBar({
     },
     [collapsed, onToggle, onReveal],
   );
+
+  const handleQuickCommand = (text: string) => {
+    if (disabled) {return;}
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  };
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-shrink-0 border-t bg-background">
@@ -102,11 +113,11 @@ function TerminalInputBar({
               <div className="flex-1" />
 
               {/* Quick-action buttons — 5 equal-size touch targets */}
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => sendText('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
             </>
           ) : (
             <>
@@ -138,10 +149,24 @@ function TerminalInputBar({
           <Separator />
           <div className="h-[30vh] overflow-hidden">
             <TabsContent value="input" className="mt-0 h-full">
-              <InputPanel sendText={sendText} disabled={disabled} />
+              <InputPanel sendText={(text) => {
+                if (disabled) {return;}
+                controller?.handleInput({
+                  source: 'component-input',
+                  data: text,
+                  timestamp: Date.now(),
+                });
+              }} disabled={disabled} />
             </TabsContent>
             <TabsContent value="commands" className="mt-0 h-full">
-              <QuickCommandsPanel sendText={sendText} disabled={disabled} />
+              <QuickCommandsPanel sendText={(text) => {
+                if (disabled) {return;}
+                controller?.handleInput({
+                  source: 'component-quickcmd',
+                  data: text,
+                  timestamp: Date.now(),
+                });
+              }} disabled={disabled} />
             </TabsContent>
           </div>
         </CollapsibleContent>
@@ -329,13 +354,13 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
 export function MobileTerminalLayout({
   terminalElement,
   sessionId,
-  sendText,
   onScrollPages,
   onScrollToBottom,
   toolbarDisabled,
   fileOps,
   onTerminalReveal,
   onGetTerminalPwd,
+  controller,
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
@@ -355,11 +380,11 @@ export function MobileTerminalLayout({
         <div className="flex-1 min-h-0" />
       )}
       <TerminalInputBar
-        sendText={sendText}
         disabled={toolbarDisabled}
         collapsed={inputCollapsed}
         onToggle={() => setInputCollapsed((prev) => !prev)}
         onReveal={onTerminalReveal}
+        controller={controller}
       />
     </div>,
 

@@ -83,8 +83,22 @@ export function TerminalLayout({
   }, [isDesktop, controller]);
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
-  const inputPanel = <InputPanel sendText={sendText} disabled={toolbarDisabled} />;
-  const commandsPanel = <QuickCommandsPanel sendText={sendText} disabled={toolbarDisabled} />;
+  const inputPanel = <InputPanel sendText={(text) => {
+    if (toolbarDisabled) {return;}
+    controller?.handleInput({
+      source: 'component-input',
+      data: text,
+      timestamp: Date.now(),
+    });
+  }} disabled={toolbarDisabled} />;
+  const commandsPanel = <QuickCommandsPanel sendText={(text) => {
+    if (toolbarDisabled) {return;}
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  }} disabled={toolbarDisabled} />;
 
   // ── Desktop path (≥768px) ──────────────────────────────────────────
   const desktopContent = fileOps ? (
@@ -145,6 +159,7 @@ export function TerminalLayout({
           onTerminalReveal={onTerminalReveal}
           fontSizeManager={fontSizeManager}
           onGetTerminalPwd={onGetTerminalPwd}
+          controller={controller}
         />
       </div>
 
