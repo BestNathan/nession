@@ -257,6 +257,8 @@ describe('SessionDropdown', () => {
     // stopPropagation on the Kill button must prevent the row select / AttachDialog.
     expect(screen.queryByText('Attach: beta')).toBeNull();
 
+    // Killing is gated behind typing the session name.
+    await userEvent.type(screen.getByRole('textbox'), 'beta');
     await userEvent.click(confirmBtn);
 
     expect(ws.killSession).toHaveBeenCalledWith('b:beta');
