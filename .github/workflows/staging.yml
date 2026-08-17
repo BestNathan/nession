@@ -3,16 +3,29 @@ name: Staging
 on:
   push:
     branches: ['staging']
-    # Docs and agent-instruction files produce identical images, so building
-    # them wastes a full 12-job multi-arch run AND writes a kustomize commit
-    # to main, leaving main permanently ahead of staging. A push mixing docs
-    # with code still runs — paths-ignore only skips docs-only pushes.
+    # None of these reach a staging image: staging builds only the .prebuilt
+    # Dockerfiles, which copy deploy/*, the zigbuild binary and web/dist.
+    #
+    # k8s/** matters most. update-staging-kustomize writes a kustomize commit
+    # to main after every build; syncing that commit back into staging would
+    # trigger another build, which writes another commit — a self-sustaining
+    # loop that also kept main permanently ahead of staging.
+    #
+    # A push mixing these with code still builds — paths-ignore only skips a
+    # push whose entire file set is ignored.
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.claude/**'
       - '.githooks/**'
+      - 'k8s/**'
+      - '.github/**'
       - 'LICENSE'
+  # Escape hatch for the case paths-ignore skipped a build you actually want
+  # (e.g. a workflow fix that needs to take effect on staging). release.yml
+  # deliberately has no dispatch: without github.event.before, version-check
+  # treats the version as changed and would force a full production release.
+  workflow_dispatch:
 
 # Serialize staging runs. update-staging-kustomize rebase-merges a PR into
 # main; two concurrent runs would race there. Do not cancel in progress —
@@ -133,7 +146,8 @@ jobs:
       - name: cargo zigbuild (release)
         env:
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
-          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
+          # head_commit is absent on workflow_dispatch — fall back to run start.
+          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.pushed_at }}
         run: |
           cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
           mkdir -p /tmp/server-bin /tmp/agent-bin
@@ -186,7 +200,8 @@ jobs:
       - name: cargo zigbuild (release)
         env:
           IMAGE_TAG: ${{ needs.versions.outputs.short_sha }}
-          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
+          # head_commit is absent on workflow_dispatch — fall back to run start.
+          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.pushed_at }}
         run: |
           cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
           mkdir -p /tmp/server-bin /tmp/agent-bin
