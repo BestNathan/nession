@@ -46,6 +46,12 @@ export class MobileImeInput {
 
   private disposed = false;
   private isComposing = false;
+  /**
+   * Text just delivered by `compositionend`. Some browsers follow the commit
+   * with a redundant `insertText` input event carrying the same string; this
+   * marker lets the input handler drop that duplicate.
+   */
+  private justCommitted: string | null = null;
   private tapStart = { x: 0, y: 0 };
   private cleanups: Array<() => void> = [];
 
@@ -106,15 +112,7 @@ export class MobileImeInput {
   private bindInputEvents(): void {
     const ta = this.element;
 
-    this.on(ta, 'input', (ev) => {
-      const ie = ev as InputEvent;
-      // Composition commits arrive via compositionend → a following input
-      // event with isComposing already false, so guard on both.
-      if (ie.inputType === 'insertText' && ie.data && !ie.isComposing) {
-        this.callbacks.onSend(ie.data);
-        ta.value = '';
-      }
-    });
+    this.on(ta, 'input', (ev) => this.handleInputEvent(ev as InputEvent));
 
     this.on(ta, 'keydown', (ev) => {
       const ke = ev as KeyboardEvent;
@@ -129,11 +127,8 @@ export class MobileImeInput {
     });
 
     this.on(ta, 'compositionstart', () => { this.isComposing = true; });
-    this.on(ta, 'compositionend', () => {
-      this.isComposing = false;
-      // Clear after the browser has dispatched the trailing input event that
-      // carries the committed text, otherwise that text is lost.
-      setTimeout(() => { if (!this.disposed) { ta.value = ''; } }, 0);
+    this.on(ta, 'compositionend', (ev) => {
+      this.handleCompositionEnd(ev as CompositionEvent);
     });
 
     this.on(ta, 'paste', (ev) => {
@@ -146,6 +141,51 @@ export class MobileImeInput {
 
     this.on(ta, 'focus', () => this.callbacks.onFocusChange?.(true));
     this.on(ta, 'blur', () => this.callbacks.onFocusChange?.(false));
+  }
+
+  /**
+   * Ordinary (non-composed) typing. IME commits are NOT handled here: the only
+   * input events a composition produces are `insertCompositionText` with
+   * `isComposing === true`, and no trailing `insertText` follows the commit —
+   * so composed text would be dropped. See {@link handleCompositionEnd}.
+   */
+  private handleInputEvent(ev: InputEvent): void {
+    if (ev.isComposing || this.isComposing) { return; }
+    if (ev.inputType !== 'insertText' || !ev.data) { return; }
+
+    // A browser that re-delivers the just-committed composition as insertText
+    // must not send it twice.
+    if (this.justCommitted === ev.data) {
+      this.justCommitted = null;
+      this.element.value = '';
+      return;
+    }
+
+    this.callbacks.onSend(ev.data);
+    this.element.value = '';
+  }
+
+  /**
+   * The commit point for IME input: `event.data` holds the finished string
+   * (e.g. '你好'). Sending here is what makes Chinese/Japanese/Korean input
+   * work at all — the composition's own input events are all pre-edit updates.
+   */
+  private handleCompositionEnd(ev: CompositionEvent): void {
+    this.isComposing = false;
+
+    if (ev.data) {
+      this.callbacks.onSend(ev.data);
+      this.justCommitted = ev.data;
+    }
+
+    // Deferred so a trailing duplicate input event (dispatched in this same
+    // task) still sees justCommitted, and so the textarea is emptied only
+    // after the browser has finished with it.
+    setTimeout(() => {
+      if (this.disposed) { return; }
+      this.justCommitted = null;
+      this.element.value = '';
+    }, 0);
   }
 
   /** Follow the caret so the IME candidate window renders at the right cell. */

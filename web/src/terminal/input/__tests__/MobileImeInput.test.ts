@@ -113,12 +113,109 @@ describe('MobileImeInput', () => {
   it('ignores input events fired mid-composition', () => {
     const { ime } = mount();
     const ev = new Event('input') as InputEvent;
-    Object.defineProperty(ev, 'inputType', { value: 'insertText' });
+    Object.defineProperty(ev, 'inputType', { value: 'insertCompositionText' });
     Object.defineProperty(ev, 'data', { value: '你' });
     Object.defineProperty(ev, 'isComposing', { value: true });
     ime.element.dispatchEvent(ev);
 
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  describe('IME composition', () => {
+    /**
+     * Real Chromium sequence captured from an IME commit:
+     *   compositionstart → compositionupdate → input(insertCompositionText,
+     *   isComposing=true) → … → compositionend(data='你好')
+     * Crucially there is NO trailing input(insertText), so compositionend is
+     * the only place the committed text can be picked up.
+     */
+    function composeAndCommit(ime: MobileImeInput, preedit: string, committed: string) {
+      ime.element.dispatchEvent(new Event('compositionstart'));
+
+      const update = new Event('input') as InputEvent;
+      Object.defineProperty(update, 'inputType', { value: 'insertCompositionText' });
+      Object.defineProperty(update, 'data', { value: preedit });
+      Object.defineProperty(update, 'isComposing', { value: true });
+      ime.element.value = preedit;
+      ime.element.dispatchEvent(update);
+
+      ime.element.value = committed;
+      ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: committed }));
+    }
+
+    it('sends the committed text on compositionend', () => {
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith('你好');
+    });
+
+    it('does not send the pre-edit text', () => {
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+      expect(onSend).not.toHaveBeenCalledWith('nihao');
+    });
+
+    it('clears the textarea after the commit', () => {
+      vi.useFakeTimers();
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+
+      // Not cleared synchronously — the browser may still be using the value.
+      expect(ime.element.value).toBe('你好');
+      vi.runAllTimers();
+      expect(ime.element.value).toBe('');
+    });
+
+    it('sends nothing when the composition is cancelled', () => {
+      const { ime } = mount();
+      ime.element.dispatchEvent(new Event('compositionstart'));
+      ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
+
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('drops a duplicate insertText that repeats the commit', () => {
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+
+      // Some browsers re-deliver the commit as a plain insertText.
+      const dup = new Event('input') as InputEvent;
+      Object.defineProperty(dup, 'inputType', { value: 'insertText' });
+      Object.defineProperty(dup, 'data', { value: '你好' });
+      Object.defineProperty(dup, 'isComposing', { value: false });
+      ime.element.dispatchEvent(dup);
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('still accepts normal typing after a commit', () => {
+      vi.useFakeTimers();
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+      vi.runAllTimers();
+
+      const ev = new Event('input') as InputEvent;
+      Object.defineProperty(ev, 'inputType', { value: 'insertText' });
+      Object.defineProperty(ev, 'data', { value: 'x' });
+      Object.defineProperty(ev, 'isComposing', { value: false });
+      ime.element.dispatchEvent(ev);
+
+      expect(onSend).toHaveBeenNthCalledWith(1, '你好');
+      expect(onSend).toHaveBeenNthCalledWith(2, 'x');
+    });
+
+    it('allows sending the same text twice when genuinely retyped', () => {
+      vi.useFakeTimers();
+      const { ime } = mount();
+      composeAndCommit(ime, 'nihao', '你好');
+      // Marker expires once the task queue drains, so a real retype gets through.
+      vi.runAllTimers();
+      composeAndCommit(ime, 'nihao', '你好');
+
+      expect(onSend).toHaveBeenCalledTimes(2);
+    });
   });
 
   it.each([
@@ -149,7 +246,7 @@ describe('MobileImeInput', () => {
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
     expect(onSend).not.toHaveBeenCalled();
 
-    ime.element.dispatchEvent(new Event('compositionend'));
+    ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
     ime.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'keyCode229', keyCode: 229, cancelable: true }));
     expect(onSend).not.toHaveBeenCalled();
   });
@@ -158,7 +255,7 @@ describe('MobileImeInput', () => {
     vi.useFakeTimers();
     const { ime } = mount();
     ime.element.value = '你好';
-    ime.element.dispatchEvent(new Event('compositionend'));
+    ime.element.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
 
     // Not cleared synchronously — the trailing input event still needs the text.
     expect(ime.element.value).toBe('你好');
