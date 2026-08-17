@@ -16,7 +16,7 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 Local dev → verify locally
   → push branch → PR to staging → quality gate passes → rebase-merge to staging
   → staging builds + deploys to staging environment → validate on staging
-  → version bump (minor 0.x.0 or patch 0.x.y) → rebase staging onto bump branch → PR to main
+  → version bump (minor 0.x.0 or patch 0.x.y) → bump branch off origin/staging → PR to main
   → release builds multi-arch images → ArgoCD syncs to production
 ```
 
@@ -103,7 +103,7 @@ gh pr merge <N> --rebase
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **branch off origin/staging → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
+For `feat/**` and `fix/**` branches, the flow is **branch off origin/staging → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → bump branch off origin/staging → PR to main**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -119,7 +119,7 @@ gh pr merge <PR-NUMBER> --auto --squash
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
 
-# 4. After staging validation, rebase staging onto a bump branch and PR to main
+# 4. After staging validation, cut a bump branch off origin/staging and PR to main
 #    See version bump section below
 ```
 
@@ -130,15 +130,9 @@ gh pr merge <PR-NUMBER> --auto --squash
 **Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
 
 ```bash
-# After staging validation passes
-git fetch origin                  # local `staging` is frequently stale
-git checkout main && git pull
-git checkout -b chore/bump-version-X.Y.Z
-# Rebase staging in FIRST — before the bump commit, or the bump gets buried
-# mid-history. Use origin/staging, never the local ref: a stale local `staging`
-# releases the wrong tree and invents conflicts that don't exist.
-# Already-released commits are skipped via patch-id matching.
-git rebase origin/staging
+# After staging validation passes. Bump branch comes off origin/staging.
+git fetch origin
+git checkout -b chore/bump-version-X.Y.Z origin/staging
 # Bump version in all four files: Cargo.toml, Cargo.lock,
 # web/package.json, web/package-lock.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
@@ -146,6 +140,32 @@ git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
 gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
 ```
+
+**No rebase step, and the branch must not come off `main`.** `main` continuously accumulates `chore: update staging image tags` commits that never flow back to `staging`, so `staging` is permanently ~15 commits behind. Cutting the bump branch from `main` and running `git rebase origin/staging` therefore replays *`main`'s own* kustomize commits onto an older base, where they conflict with each other. Measured: that path conflicts on `k8s/overlays/staging/kustomization.yaml` while applying `4e39257`.
+
+Branching from `origin/staging` avoids it entirely. `main` already contains all of `staging`'s history, so `main..branch` is exactly the new features plus the bump commit, and the rebase-merge applies only those. `main`'s newer kustomize tags and workflow files are untouched — rebase-merge adds the branch's commits to `main`, it does not revert `main`'s files.
+
+### Direct-to-main path
+
+Work that touches **no build input** skips `staging`:
+
+```bash
+git fetch origin
+git checkout -b docs/<slug> main      # or chore/<slug>
+git add -A && git commit -m "docs: ..."
+git push -u origin docs/<slug>
+gh pr create --base main --title "docs: ..." --body "..."
+gh pr merge <PR-NUMBER> --rebase      # no --auto: no checks to wait on
+```
+
+Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, and `k8s/**` manifests.
+
+**Hard boundary: anything under `crates/` or `web/src/` must go through `staging`.** `quality.yml` only runs on PRs targeting `staging`, so a PR to `main` has no CI gate at all — the only protection is the local pre-commit hook. Routing code changes straight to `main` would ship them with no independent verification and no staging soak.
+
+Two consequences to accept:
+
+- Direct-to-main changes never pass through `staging`, so `staging` drifts further behind. That is tolerated; re-sync `staging` in one pass when convenient rather than after every merge.
+- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `staging` is re-synced.
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
@@ -156,11 +176,9 @@ gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait o
 | Step | Method | Effect |
 |------|--------|--------|
 | `feature → staging` | `--squash` | One commit per feature. Harmless to de-duplication — that single commit is what gets rebased onto `main` later, patch intact. Also the only way `Closes #N` reaches `main` (see below). |
-| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so the next `git rebase origin/staging` skips already-released commits automatically. Preserves commit messages. |
+| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so already-released commits are never replayed onto `main` again. Preserves commit messages. |
 
 Squashing at `staging → main` is what breaks it: N commits collapse into one whose combined patch-id matches nothing, so the next release replays all N and conflicts the moment `main` has touched the same files. Measured: release PR #268 was squash-merged, and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
-
-Verified behaviour of `git rebase origin/staging` on a bump branch: already-released commits are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
 
 ### Branch base
 
@@ -218,7 +236,7 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
 6. ArgoCD detects the kustomize change and syncs to staging k8s
 
-**After staging validation**, create a version bump branch from main, `git rebase staging` into it, bump the version, and PR to main. The `release.yml` workflow then:
+**After staging validation**, cut a version bump branch off `origin/staging`, bump the version, and PR to main. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
 3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags

@@ -387,17 +387,12 @@ gh pr merge <PR-NUMBER> --auto --squash
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, release to main by rebasing staging onto a bump branch:
+**After staging validation**, release to main from a bump branch cut off `origin/staging`:
 
 ```bash
 # After staging validation passes
-git fetch origin                  # local `staging` is frequently stale
-git checkout main && git pull
-git checkout -b chore/bump-version-X.Y.Z
-# Rebase staging in FIRST, before the bump commit. Use origin/staging, never the
-# local ref. Already-released commits are dropped automatically
-# ("skipped previously applied commit").
-git rebase origin/staging
+git fetch origin
+git checkout -b chore/bump-version-X.Y.Z origin/staging
 # Bump version in all four files (see "Version Bumping" above)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
@@ -405,7 +400,9 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
 ```
 
-**`--rebase` for the bump PR into main; `--squash` for feature PRs into staging.** Squashing at the `staging → main` step is what breaks things: it destroys the 1:1 commit mapping that lets `git rebase origin/staging` skip already-released work, so every later release replays the full delta and conflicts as soon as `main` has touched the same files (measured: release PR #268 was squashed, and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). Squashing `feature → staging` is fine — that single commit is what gets rebased onto `main`, patch intact — and it is what lets `Closes #N` reach `main`.
+**Do not cut the bump branch from `main`, and do not rebase onto `origin/staging`.** `main` keeps accumulating staging-image-tag commits that never reach `staging`, so that path replays `main`'s own commits onto an older base and conflicts. See `nession-cicd` for the measurement.
+
+**`--rebase` for the bump PR into main; `--squash` for feature PRs into staging.** Squashing at the `staging → main` step destroys the 1:1 patch-id mapping between `staging` and `main`, so already-released work gets replayed on later releases and conflicts as soon as `main` has touched the same files (measured: release PR #268 was squashed, and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). Squashing `feature → staging` is fine — that single commit is what gets rebased onto `main`, patch intact — and it is what lets `Closes #N` reach `main`.
 
 ### PR Body Template
 
