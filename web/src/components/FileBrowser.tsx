@@ -215,16 +215,14 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     dialogs.setDeleteTarget(null);
 
     try {
-      await fileOps.deleteFile(entry.path);
+      // Directories are deleted with their contents: a non-empty folder is the
+      // normal case, and the confirm dialog already says so.
+      await fileOps.deleteFile(entry.path, entry.is_dir);
       toast.success(`Deleted ${entry.name}`);
       onFileDeleted?.(entry.path);
       loadDir(currentPath);
     } catch (err) {
-      if (err instanceof Error && err.message.toLowerCase().includes('not empty')) {
-        toast.error('Cannot delete non-empty directory');
-      } else {
-        toastError(err, 'Failed to delete');
-      }
+      toastError(err, 'Failed to delete');
     }
   };
 
@@ -407,7 +405,9 @@ function FileBrowserDialogs({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {deleteTarget?.is_dir ? 'directory' : 'file'}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Delete {deleteTarget?.is_dir ? `directory "${deleteTarget?.name}"` : `"${deleteTarget?.name}"`}? This action cannot be undone.
+            {deleteTarget?.is_dir
+              ? `Delete directory "${deleteTarget?.name}" and everything inside it? This action cannot be undone.`
+              : `Delete "${deleteTarget?.name}"? This action cannot be undone.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
