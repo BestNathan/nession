@@ -561,9 +561,15 @@ jobs:
               --base main \
               --head "$BRANCH_NAME"
 
-            # Enable auto-merge
+            # Merge directly. These chore/** PRs trigger no CI, so GitHub
+            # reports them CLEAN immediately and REJECTS auto-merge with
+            # "Pull request is in clean status (enablePullRequestAutoMerge)".
+            # Whether --auto happens to succeed is a race against GitHub
+            # computing mergeStateStatus, so never rely on it here.
+            # --rebase, not --squash: preserves the [skip ci] commit message
+            # verbatim so this merge cannot re-trigger the workflow.
             PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq .number)
-            gh pr merge "$PR_NUMBER" --auto --squash
+            gh pr merge "$PR_NUMBER" --rebase
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
