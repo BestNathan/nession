@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai';
 import { TerminalController } from '../controller/TerminalController';
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
+import type { DeviceProfile } from '../types';
 import { p2pEpochAtom } from '../../atoms/connection';
 
 export interface UseTerminalOptions {
@@ -14,6 +15,8 @@ export interface UseTerminalOptions {
   rendererType?: 'webgl' | 'canvas';
   fontSize?: number;
   scrollback?: number;
+  /** Device class — 'mobile' enables the IME-friendly input textarea. */
+  deviceProfile?: DeviceProfile;
 }
 
 /**
@@ -39,6 +42,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     rendererType,
     fontSize,
     scrollback,
+    deviceProfile,
   } = options;
 
   // p2pEpoch bumps when the user switches addresses — the transport factory
@@ -64,7 +68,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     return new TerminalController(
       session,
       transportFactory,
-      { rendererType: rendererType ?? 'canvas', fontSize, scrollback },
+      { rendererType: rendererType ?? 'canvas', fontSize, scrollback, deviceProfile },
     );
-  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, p2pEpoch]);
+  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, p2pEpoch]);
 }

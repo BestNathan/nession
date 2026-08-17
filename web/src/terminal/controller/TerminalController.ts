@@ -14,12 +14,30 @@ import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { TerminalInstance } from '../instance/TerminalInstance';
+import { MobileImeInput } from '../input/MobileImeInput';
 import type { FontSizeManager } from '../FontSizeManager';
+import type { DeviceProfile } from '../types';
 
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
   scrollback?: number;
+  /**
+   * Device class this terminal was built for. 'mobile' swaps xterm's hidden
+   * helper textarea for {@link MobileImeInput} so soft keyboards and IMEs have
+   * a real, cursor-anchored element to attach to.
+   */
+  deviceProfile?: DeviceProfile;
+}
+
+/**
+ * Mobile IME handling needs both a mobile-sized viewport and actual touch
+ * input. A touch-capable laptop stays on the desktop path: MobileImeInput
+ * deliberately does not translate Ctrl/Alt chords, which a physical keyboard
+ * needs and xterm already handles.
+ */
+function shouldUseMobileIme(profile: DeviceProfile | undefined): boolean {
+  return profile === 'mobile' && typeof window !== 'undefined' && 'ontouchstart' in window;
 }
 
 /** Map a transport ConnectionState onto the domain TerminalStatus. */
@@ -54,6 +72,8 @@ export class TerminalController {
   private resizeController: ResizeController | null = null;
   private inputRouter: InputRouter | null = null;
   private inputSourceManager: InputSourceManager;
+  private mobileIme: MobileImeInput | null = null;
+  private useMobileIme: boolean;
   private attached = false;
 
   /** Callbacks → Jotai */
@@ -73,6 +93,7 @@ export class TerminalController {
     this.instance = new TerminalInstance(options);
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
+    this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
     this.initInputRouter();
   }
 
@@ -147,6 +168,16 @@ export class TerminalController {
     router.register(terminalHandler);
     terminalHandler.activate();
 
+    // Mobile: give the soft keyboard / IME a real cursor-anchored textarea.
+    // Must come after instance.attach() — it reaches into terminal.element.
+    if (this.useMobileIme && terminal.element) {
+      this.mobileIme = new MobileImeInput(terminal, terminal.element, {
+        onSend: (text) => {
+          this.handleInput({ source: 'touch', data: text, timestamp: Date.now() });
+        },
+      });
+    }
+
     // Observe the container after first render so it has laid out.
     this.resizeController = new ResizeController(this);
     requestAnimationFrame(() => {
@@ -163,6 +194,9 @@ export class TerminalController {
 
     this.resizeController?.dispose();
     this.resizeController = null;
+
+    this.mobileIme?.dispose();
+    this.mobileIme = null;
 
     // Break transport→terminal closures before disposing either side.
     if (this.transport) {
@@ -258,6 +292,12 @@ export class TerminalController {
   }
 
   focus(): void {
+    // On mobile the IME textarea is the real input target; focusing xterm would
+    // only bounce through the helper-textarea redirect.
+    if (this.mobileIme) {
+      this.mobileIme.focus();
+      return;
+    }
     this._terminal?.focus();
   }
 

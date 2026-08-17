@@ -51,8 +51,21 @@ impl FileOps {
     pub async fn list_dir(&self, path: &str) -> Result<Vec<FileEntry>> {
         let resolved = self.sandbox.resolve(path)?;
 
-        if !resolved.is_dir() {
-            anyhow::bail!("not_a_directory: {path}");
+        // Deliberately not Path::is_dir(): it returns false for *any* metadata
+        // failure, so a missing path or an unreadable parent were all reported
+        // as "not_a_directory" — which sent debugging in the wrong direction.
+        // Stat explicitly so each condition gets its own message.
+        match fs::metadata(&resolved) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => anyhow::bail!("not_a_directory: {path}"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!("not_found: {path} (resolved to {})", resolved.display())
+            }
+            Err(e) => {
+                return Err(anyhow::Error::from(e)).with_context(|| {
+                    format!("failed to stat {path} (resolved to {})", resolved.display())
+                })
+            }
         }
 
         let root = self.sandbox.root().to_path_buf();
@@ -195,13 +208,31 @@ impl FileOps {
         Ok(len)
     }
 
-    /// Delete a file or an empty directory.
-    pub async fn delete(&self, path: &str) -> Result<()> {
-        let resolved = self.sandbox.resolve(path)?;
+    /// Delete a file, or a directory.
+    ///
+    /// `recursive` controls directory handling: with `false` only an empty
+    /// directory is removed (`ENOTEMPTY` otherwise), with `true` the whole
+    /// subtree is removed. Callers that mean "delete this folder" — the file
+    /// browser's delete action — must pass `true`, since a non-empty folder is
+    /// the normal case.
+    pub async fn delete(&self, path: &str, recursive: bool) -> Result<()> {
+        // resolve_no_follow, not resolve: a symlink must be unlinked, never
+        // followed — otherwise a recursive delete would wipe its target tree.
+        let resolved = self.sandbox.resolve_no_follow(path)?;
 
         task::spawn_blocking(move || -> Result<()> {
-            if resolved.is_dir() {
-                fs::remove_dir(&resolved).with_context(|| {
+            // symlink_metadata for the same reason: a symlink pointing at a
+            // directory must be treated as a link, not as a directory.
+            let meta = fs::symlink_metadata(&resolved)
+                .with_context(|| format!("failed to stat: {}", resolved.display()))?;
+
+            if meta.is_dir() {
+                let result = if recursive {
+                    fs::remove_dir_all(&resolved)
+                } else {
+                    fs::remove_dir(&resolved)
+                };
+                result.with_context(|| {
                     format!("failed to remove directory: {}", resolved.display())
                 })?;
             } else {
@@ -394,18 +425,176 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_list_dir_on_file_reports_not_a_directory() {
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("plain.txt"), b"x").unwrap();
+
+        let err = ops.list_dir("plain.txt").await.unwrap_err();
+
+        assert!(err.to_string().contains("not_a_directory"), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_missing_path_reports_not_found() {
+        // Regression: a missing path used to report "not_a_directory" because
+        // Path::is_dir() swallows the NotFound error.
+        let (_dir, ops) = setup();
+
+        let err = ops.list_dir("no/such/dir").await.unwrap_err();
+        let msg = format!("{err:#}");
+
+        assert!(msg.contains("not_found"), "got: {msg}");
+        assert!(!msg.contains("not_a_directory"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_reports_stat_failure_distinctly() {
+        // A component that is a file makes stat fail with ENOTDIR rather than
+        // NotFound; that must not be reported as a plain "not a directory".
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("afile"), b"x").unwrap();
+
+        let err = ops.list_dir("afile/below").await.unwrap_err();
+        let msg = format!("{err:#}");
+
+        // Either resolution or the stat rejects it, but the path is named and
+        // it is never silently mislabelled as an existing non-directory.
+        assert!(msg.contains("afile"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_enters_subdir_named_like_root() {
+        // The sandbox root's basename is the temp dir's name; a subdirectory
+        // that happens to share a name with the root must still be listable.
+        let dir = tempfile::tempdir().unwrap();
+        let root_name = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let nested = dir.path().join(&root_name);
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("inner.txt"), b"x").unwrap();
+        let ops = FileOps::new(PathSandbox::new(dir.path()).unwrap());
+
+        let entries = ops.list_dir(&root_name).await.unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries.first().map(|e| e.name.as_str()),
+            Some("inner.txt"),
+            "expected to enter the subdir, got {entries:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_dir_in_git_submodule() {
+        // A submodule is an ordinary directory whose `.git` is a FILE, not a
+        // directory. Listing it must work and mark `.git` as a non-directory.
+        let (dir, ops) = setup();
+        let sub = dir.path().join("mysub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join(".git"), b"gitdir: ../.git/modules/mysub\n").unwrap();
+        fs::write(sub.join("file.txt"), b"hello").unwrap();
+
+        let entries = ops.list_dir("mysub").await.unwrap();
+
+        let git = entries
+            .iter()
+            .find(|e| e.name == ".git")
+            .expect(".git listed");
+        assert!(!git.is_dir, "submodule .git is a file");
+        assert!(entries.iter().any(|e| e.name == "file.txt"));
+    }
+
+    #[tokio::test]
     async fn test_delete_file() {
         let (dir, ops) = setup();
         fs::write(dir.path().join("del.txt"), b"delete me").unwrap();
-        ops.delete("del.txt").await.unwrap();
+        ops.delete("del.txt", false).await.unwrap();
         assert!(!dir.path().join("del.txt").exists());
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_fails() {
         let (_dir, ops) = setup();
-        let result = ops.delete("nope.txt").await;
+        let result = ops.delete("nope.txt", false).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_empty_dir_non_recursive() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("empty")).unwrap();
+        ops.delete("empty", false).await.unwrap();
+        assert!(!dir.path().join("empty").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_non_empty_dir_non_recursive_fails() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("full")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+
+        let result = ops.delete("full", false).await;
+
+        assert!(result.is_err());
+        assert!(dir.path().join("full").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_non_empty_dir_recursive() {
+        let (dir, ops) = setup();
+        fs::create_dir_all(dir.path().join("full/nested")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+        fs::write(dir.path().join("full/nested/b.txt"), b"b").unwrap();
+
+        ops.delete("full", true).await.unwrap();
+
+        assert!(!dir.path().join("full").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_recursive_on_plain_file() {
+        // The flag is about directories; a file must still just be unlinked.
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("solo.txt"), b"x").unwrap();
+        ops.delete("solo.txt", true).await.unwrap();
+        assert!(!dir.path().join("solo.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_delete_symlink_to_dir_does_not_touch_target() {
+        // symlink_metadata keeps a recursive delete from walking through a
+        // symlink and wiping the directory it points at.
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("target")).unwrap();
+        fs::write(dir.path().join("target/keep.txt"), b"keep").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("target"), dir.path().join("link")).unwrap();
+
+        ops.delete("link", true).await.unwrap();
+
+        assert!(!dir.path().join("link").exists());
+        assert!(dir.path().join("target/keep.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_error_reports_os_reason() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("full")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+
+        let err = ops.delete("full", false).await.unwrap_err();
+        let chain: Vec<String> = std::iter::once(err.to_string())
+            .chain(err.chain().skip(1).map(ToString::to_string))
+            .collect();
+
+        // The path context is kept and the OS cause is reachable in the chain.
+        let top = chain.first().expect("error chain is never empty");
+        assert!(top.contains("failed to remove directory"));
+        assert!(chain.len() > 1, "expected an OS cause, got {chain:?}");
     }
 
     #[tokio::test]
