@@ -40,6 +40,17 @@ function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketServ
   } as unknown as WebSocketService;
 }
 
+/**
+ * Killing is gated behind typing the session name, so every test that expects
+ * the action to fire has to satisfy the guard first.
+ */
+async function typeSessionName(
+  user: ReturnType<typeof userEvent.setup>,
+  name = 'my-session',
+) {
+  await user.type(screen.getByRole('textbox'), name);
+}
+
 describe('KillConfirmDialog', () => {
   it('renders dialog when open', async () => {
     const { KillConfirmDialog } = KillConfirmDialogModule;
@@ -56,7 +67,8 @@ describe('KillConfirmDialog', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Kill Session' })).toBeInTheDocument();
-      expect(screen.getByText(/my-session/)).toBeInTheDocument();
+      // Shown twice: in the warning text and in the "type this to confirm" label.
+      expect(screen.getAllByText(/my-session/).length).toBeGreaterThan(0);
     });
   });
 
@@ -155,6 +167,7 @@ describe('KillConfirmDialog', () => {
       expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
     });
 
+    await typeSessionName(user);
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
     expect(wsService.killSession).toHaveBeenCalledWith('agent-1:my-session');
   });
@@ -183,6 +196,7 @@ describe('KillConfirmDialog', () => {
       expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
     });
 
+    await typeSessionName(user);
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
 
     await waitFor(() => {
@@ -213,6 +227,7 @@ describe('KillConfirmDialog', () => {
       expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
     });
 
+    await typeSessionName(user);
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
 
     await waitFor(() => {
@@ -241,6 +256,7 @@ describe('KillConfirmDialog', () => {
       expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
     });
 
+    await typeSessionName(user);
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
 
     await waitFor(() => {
@@ -270,6 +286,7 @@ describe('KillConfirmDialog', () => {
       expect(screen.getByRole('button', { name: 'Kill Session' })).toBeInTheDocument();
     });
 
+    await typeSessionName(userEvent.setup());
     // Use fireEvent for synchronous click — userEvent awaits the handler promise
     fireEvent.click(screen.getByRole('button', { name: 'Kill Session' }));
 
@@ -303,6 +320,7 @@ describe('KillConfirmDialog', () => {
     });
 
     // Trigger error
+    await typeSessionName(user);
     await user.click(screen.getByRole('button', { name: 'Kill Session' }));
     await waitFor(() => {
       expect(screen.getByText('fail')).toBeInTheDocument();
@@ -332,6 +350,123 @@ describe('KillConfirmDialog', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('fail')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('name confirmation guard', () => {
+    function renderDialog(wsService: WebSocketService) {
+      return render(
+        <WebSocketContext.Provider value={wsService}>
+          <KillConfirmDialogModule.KillConfirmDialog
+            isOpen={true}
+            onClose={vi.fn()}
+            session={makeSession()}
+            onKilled={vi.fn()}
+          />
+        </WebSocketContext.Provider>,
+      );
+    }
+
+    it('disables the kill button until a name is typed', async () => {
+      renderDialog(makeWsService());
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Kill Session' })).toBeDisabled();
+      });
+    });
+
+    it('keeps the kill button disabled for a mismatched name', async () => {
+      const user = userEvent.setup();
+      renderDialog(makeWsService());
+
+      await typeSessionName(user, 'my-sessio');
+
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeDisabled();
+      expect(screen.getByText(/doesn't match yet/i)).toBeInTheDocument();
+    });
+
+    it('enables the kill button once the name matches exactly', async () => {
+      const user = userEvent.setup();
+      renderDialog(makeWsService());
+
+      await typeSessionName(user);
+
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeEnabled();
+      expect(screen.queryByText(/doesn't match yet/i)).not.toBeInTheDocument();
+    });
+
+    it('does not call killSession while the name is wrong', async () => {
+      const user = userEvent.setup();
+      const wsService = makeWsService();
+      renderDialog(wsService);
+
+      await typeSessionName(user, 'wrong-name');
+      await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+      expect(wsService.killSession).not.toHaveBeenCalled();
+    });
+
+    it('tolerates surrounding whitespace when matching', async () => {
+      const user = userEvent.setup();
+      const wsService = makeWsService();
+      renderDialog(wsService);
+
+      await typeSessionName(user, '  my-session  ');
+      await user.click(screen.getByRole('button', { name: 'Kill Session' }));
+
+      expect(wsService.killSession).toHaveBeenCalledWith('agent-1:my-session');
+    });
+
+    it('submits on Enter when the name matches', async () => {
+      const user = userEvent.setup();
+      const wsService = makeWsService();
+      renderDialog(wsService);
+
+      await typeSessionName(user);
+      await user.keyboard('{Enter}');
+
+      expect(wsService.killSession).toHaveBeenCalledWith('agent-1:my-session');
+    });
+
+    it('ignores Enter when the name does not match', async () => {
+      const user = userEvent.setup();
+      const wsService = makeWsService();
+      renderDialog(wsService);
+
+      await typeSessionName(user, 'nope');
+      await user.keyboard('{Enter}');
+
+      expect(wsService.killSession).not.toHaveBeenCalled();
+    });
+
+    it('clears the typed name when the dialog is reopened', async () => {
+      const user = userEvent.setup();
+      const wsService = makeWsService();
+      const session = makeSession();
+      const { rerender } = render(
+        <WebSocketContext.Provider value={wsService}>
+          <KillConfirmDialogModule.KillConfirmDialog
+            isOpen={true} onClose={vi.fn()} session={session} onKilled={vi.fn()} />
+        </WebSocketContext.Provider>,
+      );
+
+      await typeSessionName(user);
+      expect(screen.getByRole('button', { name: 'Kill Session' })).toBeEnabled();
+
+      for (const isOpen of [false, true]) {
+        rerender(
+          <WebSocketContext.Provider value={wsService}>
+            <KillConfirmDialogModule.KillConfirmDialog
+              isOpen={isOpen} onClose={vi.fn()} session={session} onKilled={vi.fn()} />
+          </WebSocketContext.Provider>,
+        );
+      }
+
+      // Re-armed: the guard must not carry over from the previous open.
+      await waitFor(() => {
+        expect(screen.getByRole('textbox')).toHaveValue('');
+        expect(screen.getByRole('button', { name: 'Kill Session' })).toBeDisabled();
+      });
     });
   });
 });
