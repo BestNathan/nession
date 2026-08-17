@@ -40,20 +40,38 @@ impl PathSandbox {
             return Self::resolve_absolute(path);
         }
 
-        // Relative path: normalize and join with sandbox root.
-        let relative = if let Some(root_name) = self.root.file_name() {
-            Path::new(path)
-                .strip_prefix(root_name)
-                .map(|p| p.as_os_str().to_string_lossy().into_owned())
-                .unwrap_or_else(|_| path.to_string())
-        } else {
-            path.to_string()
-        };
-        let combined = self.root.join(&relative);
+        // Relative path: join with the sandbox root, preferring the literal
+        // reading. Some clients send "<root-name>/rest" meaning "<root>/rest",
+        // so a duplicated leading component is stripped — but only as a
+        // fallback. Stripping unconditionally made a real subdirectory whose
+        // name matches the root's own name unreachable: browsing into
+        // "<root>/<root-name>" silently re-listed the root.
+        let combined = self.root.join(path);
+        if combined.exists() {
+            return Self::resolve_existing_or_ancestor(&combined);
+        }
+
+        if let Some(stripped) = self.strip_duplicated_root_name(path) {
+            // Accept the stripped reading when it exists, or when its parent
+            // does — the latter keeps "create a new file" working.
+            let parent_exists = stripped.parent().is_some_and(Path::exists);
+            if stripped.exists() || parent_exists {
+                return Self::resolve_existing_or_ancestor(&stripped);
+            }
+        }
 
         // Canonicalize. For non-existent paths (create_dir, write_file),
         // walk up the ancestor chain and append the suffix.
         Self::resolve_existing_or_ancestor(&combined)
+    }
+
+    /// If `path` starts with the sandbox root's own directory name, return the
+    /// root joined with the remainder. Returns `None` when there is nothing to
+    /// strip.
+    fn strip_duplicated_root_name(&self, path: &str) -> Option<PathBuf> {
+        let root_name = self.root.file_name()?;
+        let rest = Path::new(path).strip_prefix(root_name).ok()?;
+        Some(self.root.join(rest))
     }
 
     /// Walk up from `base` until an existing ancestor is found, then join
@@ -99,6 +117,25 @@ impl PathSandbox {
     fn resolve_absolute(path: &str) -> Result<PathBuf> {
         let p = Path::new(path);
         Self::resolve_existing_or_ancestor(p)
+    }
+
+    /// Resolve a path without following a symlink in its final component.
+    ///
+    /// The parent chain is canonicalized exactly as [`resolve`] does, but the
+    /// last component is appended verbatim. Deletion needs this: `resolve`
+    /// canonicalizes the whole path, so deleting a symlink would operate on its
+    /// target instead — and with a recursive directory delete that would wipe
+    /// the tree the link points at rather than just unlinking it.
+    pub fn resolve_no_follow(&self, path: &str) -> Result<PathBuf> {
+        let p = Path::new(path);
+        // "/", "." and ".." have no final component worth preserving; nothing
+        // can be a symlink there, so fall back to the normal resolution.
+        let Some(name) = p.file_name() else {
+            return self.resolve(path);
+        };
+        let parent = p.parent().unwrap_or_else(|| Path::new(""));
+        let resolved_parent = self.resolve(&parent.to_string_lossy())?;
+        Ok(resolved_parent.join(name))
     }
 
     /// Return the sandbox root path.
@@ -221,6 +258,92 @@ mod tests {
 
         let resolved = sandbox.resolve("link.txt").unwrap();
         assert_eq!(resolved, target.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_resolve_no_follow_keeps_symlink_final_component() {
+        let (dir, sandbox) = setup_sandbox();
+        let target = dir.path().join("target.txt");
+        fs::write(&target, b"target").unwrap();
+        let link_path = dir.path().join("link.txt");
+        symlink(&target, &link_path).unwrap();
+
+        // resolve() follows the link; resolve_no_follow() must not, so that a
+        // delete unlinks the link instead of destroying its target.
+        assert_eq!(
+            sandbox.resolve("link.txt").unwrap(),
+            target.canonicalize().unwrap()
+        );
+        assert_eq!(
+            sandbox.resolve_no_follow("link.txt").unwrap(),
+            dir.path().canonicalize().unwrap().join("link.txt")
+        );
+    }
+
+    #[test]
+    fn test_resolve_no_follow_still_canonicalizes_parents() {
+        let (dir, sandbox) = setup_sandbox();
+        let real_dir = dir.path().join("real");
+        fs::create_dir(&real_dir).unwrap();
+        fs::write(real_dir.join("f.txt"), b"x").unwrap();
+        symlink(&real_dir, dir.path().join("aliased")).unwrap();
+
+        // The parent symlink resolves, the final component stays literal.
+        let resolved = sandbox.resolve_no_follow("aliased/f.txt").unwrap();
+        assert_eq!(resolved, real_dir.canonicalize().unwrap().join("f.txt"));
+    }
+
+    #[test]
+    fn test_resolve_no_follow_nonexistent_path() {
+        let (dir, sandbox) = setup_sandbox();
+        let resolved = sandbox.resolve_no_follow("nope.txt").unwrap();
+        assert_eq!(
+            resolved,
+            dir.path().canonicalize().unwrap().join("nope.txt")
+        );
+    }
+
+    /// A real subdirectory whose name matches the sandbox root's own name must
+    /// stay reachable. The duplicated-root-name strip is only a fallback, so
+    /// the literal reading wins whenever it actually exists.
+    #[test]
+    fn test_resolve_prefers_real_subdir_over_root_name_strip() {
+        let parent = tempfile::tempdir().unwrap();
+        let root_path = parent.path().join("proj");
+        fs::create_dir(&root_path).unwrap();
+        let sandbox = PathSandbox::new(&root_path).unwrap();
+
+        // <root>/proj/inside/x.txt — "proj" here is a genuine subdirectory.
+        let nested = root_path.join("proj/inside");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("x.txt"), b"x").unwrap();
+
+        assert_eq!(
+            sandbox.resolve("proj").unwrap(),
+            root_path.join("proj").canonicalize().unwrap()
+        );
+        assert_eq!(
+            sandbox.resolve("proj/inside").unwrap(),
+            nested.canonicalize().unwrap()
+        );
+        assert_eq!(
+            sandbox.resolve("proj/inside/x.txt").unwrap(),
+            nested.join("x.txt").canonicalize().unwrap()
+        );
+    }
+
+    /// With no real `<root>/<root-name>` directory, a client sending
+    /// "<root-name>/rest" still means "<root>/rest".
+    #[test]
+    fn test_resolve_strips_root_name_for_new_file() {
+        let parent = tempfile::tempdir().unwrap();
+        let root_path = parent.path().join("proj");
+        fs::create_dir(&root_path).unwrap();
+        let sandbox = PathSandbox::new(&root_path).unwrap();
+
+        // Nothing exists yet, so the stripped reading wins on parent existence.
+        let resolved = sandbox.resolve("proj/new.txt").unwrap();
+        assert_eq!(resolved, root_path.canonicalize().unwrap().join("new.txt"));
     }
 
     #[test]
