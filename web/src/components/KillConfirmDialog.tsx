@@ -9,6 +9,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 import type { Session } from '../types';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDialogReset } from '../hooks/useDialogReset';
@@ -29,16 +31,25 @@ export function KillConfirmDialog({
   const wsService = useWebSocket();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmName, setConfirmName] = useState('');
 
   const resetState = useCallback(() => {
     setLoading(false);
     setError(null);
+    setConfirmName('');
   }, []);
   useDialogReset(isOpen, resetState);
 
   if (!session) {return null;}
 
+  // Killing a session is irreversible, so the name must be typed out in full
+  // before the action unlocks. Trimmed so trailing whitespace (easy to pick up
+  // when copying the name) isn't a silent mismatch.
+  const nameMatches = confirmName.trim() === session.session_name;
+  const canConfirm = nameMatches && !loading;
+
   const handleConfirm = async () => {
+    if (!canConfirm) {return;}
     setLoading(true);
     setError(null);
     try {
@@ -62,17 +73,53 @@ export function KillConfirmDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Kill Session</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to kill session{' '}
-            <strong>{session.session_name}</strong> on agent{' '}
-            <strong>{session.agent_id}</strong>?
+            This will terminate session{' '}
+            <strong className="text-foreground">{session.session_name}</strong> on agent{' '}
+            <strong className="text-foreground">{session.agent_id}</strong> and cannot be
+            undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        <div className="space-y-2">
+          <Label htmlFor="kill-confirm-name" className="text-sm font-normal">
+            Type{' '}
+            <span className="font-mono font-medium text-foreground select-all">
+              {session.session_name}
+            </span>{' '}
+            to confirm
+          </Label>
+          <Input
+            id="kill-confirm-name"
+            value={confirmName}
+            onChange={(e) => setConfirmName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleConfirm();
+              }
+            }}
+            placeholder={session.session_name}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            disabled={loading}
+            aria-invalid={confirmName.length > 0 && !nameMatches}
+          />
+          {confirmName.length > 0 && !nameMatches && (
+            <p className="text-xs text-muted-foreground">
+              Name doesn&apos;t match yet.
+            </p>
+          )}
+        </div>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
+
         <AlertDialogFooter>
           <AlertDialogCancel disabled={loading}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
-            disabled={loading}
+            disabled={!canConfirm}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {loading ? 'Killing...' : 'Kill Session'}
