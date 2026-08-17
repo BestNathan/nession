@@ -14,9 +14,9 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 
 ```
 Local dev → verify locally
-  → push branch → PR to staging → quality gate passes → merge to staging
+  → push branch → PR to staging → quality gate passes → rebase-merge to staging
   → staging builds + deploys to staging environment → validate on staging
-  → version bump (minor 0.x.0 or patch 0.x.y) → merge staging to main
+  → version bump (minor 0.x.0 or patch 0.x.y) → rebase staging onto bump branch → PR to main
   → release builds multi-arch images → ArgoCD syncs to production
 ```
 
@@ -97,12 +97,12 @@ git checkout -b chore/workflow-fix origin/main
 git cherry-pick <workflow-commit-hash>
 git push -u origin chore/workflow-fix
 gh pr create --title "chore: ..." --body "..."
-gh pr merge <N> --squash
+gh pr merge <N> --rebase
 ```
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **push → PR to staging → quality gate → merge to staging → staging deploy → validate → merge staging to main**.
+For `feat/**` and `fix/**` branches, the flow is **push → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -110,31 +110,42 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-gh pr merge <PR-NUMBER> --auto --squash
+#    --rebase, never --squash. Squashing breaks patch-id de-duplication and
+#    makes every later release replay the whole delta.
+gh pr merge <PR-NUMBER> --auto --rebase
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
 
-# 4. After staging validation, merge staging to main (with version bump)
+# 4. After staging validation, rebase staging onto a bump branch and PR to main
 #    See version bump section below
 ```
 
 **Auto-merge to staging is safe** because staging is the integration environment — not production. The quality gate (rust-check + web-check) ensures code correctness. Human validation happens on staging before the staging → main merge.
 
+**`--auto` only works when the PR has a check to wait on.** Feature PRs to staging trigger the quality gate, so `--auto` is fine. `chore/**` PRs trigger no CI, so GitHub immediately reports `CLEAN` and rejects auto-merge with `GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)`. Merge those directly, without `--auto`.
+
 **Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
 
 ```bash
 # After staging validation passes
+git fetch origin                  # local `staging` is frequently stale
 git checkout main && git pull
-git checkout -b chore/bump-version
-# Bump version in Cargo.toml and web/package.json
+git checkout -b chore/bump-version-X.Y.Z
+# Rebase staging in FIRST — before the bump commit, or the bump gets buried
+# mid-history. Use origin/staging, never the local ref: a stale local `staging`
+# releases the wrong tree and invents conflicts that don't exist.
+# Already-released commits are skipped via patch-id matching.
+git rebase origin/staging
+# Bump version in all four files: Cargo.toml, Cargo.lock,
+# web/package.json, web/package-lock.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
-# Merge staging into main (brings all validated features)
-git merge staging
-git push
-gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
+git push -u origin chore/bump-version-X.Y.Z
+gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
+gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
 ```
+
+**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i staging`.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
@@ -157,7 +168,7 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
 6. ArgoCD detects the kustomize change and syncs to staging k8s
 
-**After staging validation**, create a version bump branch from main, merge staging into it, and PR to main. The `release.yml` workflow then:
+**After staging validation**, create a version bump branch from main, `git rebase staging` into it, bump the version, and PR to main. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
 3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags
