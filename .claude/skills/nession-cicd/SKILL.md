@@ -187,6 +187,19 @@ gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait o
 
 Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
 
+**But "none" means the release never reaches production.** 15 of `release.yml`'s 18 jobs carry `if: needs.version-check.outputs.version_changed == 'true'`; the two cleanup jobs have no `if:` but depend on gated jobs, so they skip too. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no `k8s/overlays/production` update, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
+
+So the rule is:
+
+| Release contains | Bump |
+|---|---|
+| runtime changes under `crates/` or `web/src/` | **mandatory** — skip it and production silently stays on the old images |
+| tests, docs, CI config only | optional |
+
+One escape hatch exists: if the git tag `v<version>` does not resolve, `version-check` sets `version_changed=true` regardless, so a failed release can be retried at the same version without bumping (issue #71).
+
+**All four files must land on the same version.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json` but gates both on one `version_changed`. Bumping only `web/package.json` would re-push `server-<old>` / `agent-<old>` over already-released tags and then try to create a Release at the existing `v<old>` tag. `version-check` now hard-fails on a mismatch rather than letting that through.
+
 ### Direct-to-main path
 
 Work that touches **no build input** skips `staging`:
@@ -207,13 +220,17 @@ Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`,
 Two consequences to accept:
 
 - Direct-to-main changes never pass through `staging`, so `staging` falls behind until the next sync. Sync it with `git push origin origin/main:refs/heads/staging` — a fast-forward, no PR needed.
-- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `staging` is re-synced.
+- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `staging` is re-synced — a workflow fix merged to `main` does not change staging builds until step 7 runs.
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
 ### Why the merge method differs per step
 
-`main` accumulates commits `staging` never sees (the automated `chore: update staging image tags` PRs), so the two branches diverge between releases. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
+`staging.yml` writes `chore: update staging image tags` commits to **`main`**, not to `staging` (it checks out `ref: main` while running on a push to `staging`). So `main` gains a commit `staging` lacks after every staging build, and the two diverge between releases. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
+
+Those kustomize commits touch only `k8s/overlays/staging/kustomization.yaml`, while a release PR carries feature files — different paths, so the 3-way merge does not conflict. Measured across three release cycles with a kustomize commit landing on `main` before each release: zero conflicts under `--merge`. (Earlier revisions of this doc claimed the staging overlay blob was a guaranteed conflict source. That was true only while `staging` was never synced back from `main`; step 7 of the flow removes it.)
+
+Note the steady state: because every push to `staging` — including a `main → staging` sync — triggers `staging.yml`, which then writes a kustomize commit to `main`, `main` normally sits exactly 1 commit ahead of `staging`. That is expected and harmless. `paths-ignore` keeps docs-only syncs from triggering a build at all.
 
 | Step | Method | Effect |
 |------|--------|--------|
@@ -313,6 +330,22 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 | `.github/workflows/release.yml` | Release build + deploy (push to main) |
 | `k8s/overlays/staging/kustomization.yaml` | Staging image tags (auto-updated by staging.yml) |
 | `k8s/overlays/production/kustomization.yaml` | Production image tags (auto-updated by release.yml) |
+
+### Cleanup jobs are deliberately inert
+
+`staging.yml` and `release.yml` each end with a `cleanup-ghcr` job, and `release.yml` also has `cleanup-releases`. **None of them has ever deleted anything**, and two of them must stay that way until someone makes an explicit decision.
+
+The reason they no-op: `gh api /users/<owner>/packages/...` needs a token with `read:packages`, and the default `GITHUB_TOKEN` cannot read user-scoped packages. The calls fail. They used to fail into `2>/dev/null || true` and still print "Cleanup complete"; they now emit `::warning::` and exit 0 honestly.
+
+Before "fixing" any of them by adding a PAT, know what would happen on the next run:
+
+| Job | Effect once a token is added |
+|-----|------------------------------|
+| `staging.yml` → `cleanup-ghcr` | Deletes hash-tagged GHCR versions beyond the newest 5 logical versions. Reasonable — this is the intended behaviour. |
+| `release.yml` → `cleanup-ghcr` | Same, now correctly scoped to hash tags. **Before this was fixed it had no tag filter at all** and would have deleted `server-<version>` / `agent-<version>` / `ui-<version>` — the live production images and every rollback target — because staging pushes 9 hash-tagged versions per build and always owns the 5 newest slots. |
+| `release.yml` → `cleanup-releases` | **Would delete 48 of the 53 existing GitHub Releases and their git tags** (`--cleanup-tag`). Irreversible. Deleting a tag also flips `version-check`'s `version_changed` back to `true` for that version. Intentionally left unwired; decide the retention policy first. |
+
+If you add a PAT, add it to one job at a time and check the run log before the next release.
 
 ### Observing Deployments
 

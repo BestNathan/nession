@@ -4,7 +4,7 @@
 
 ```
 nession/
-├── crates/                   # Rust workspace (4 crates)
+├── crates/                   # Rust workspace (5 crates)
 │   ├── nession-common/       # Shared types, protocol, config, error definitions
 │   │   └── src/
 │   │       ├── protocol.rs   # WebSocket message types & serialization
@@ -27,12 +27,18 @@ nession/
 │   │       ├── connection/   # Server connection & reconnection logic
 │   │       ├── sync/         # Session state sync with server
 │   │       └── tmux/         # tmux process management
-│   └── nession-cli/          # CLI client for terminal attach
+│   ├── nession-cli/          # CLI client for terminal attach
+│   │   └── src/
+│   │       ├── main.rs
+│   │       ├── commands/     # Subcommands (attach, list, etc.)
+│   │       ├── client/       # WebSocket client logic
+│   │       └── terminal/     # Raw terminal I/O
+│   └── nession-claude-code/  # Claude Code config browser extension
 │       └── src/
-│           ├── main.rs
-│           ├── commands/     # Subcommands (attach, list, etc.)
-│           ├── client/       # WebSocket client logic
-│           └── terminal/     # Raw terminal I/O
+│           ├── agent.rs      # Agent-side handler for claude_code.list/read
+│           ├── scanner.rs    # Walks ~/.claude/ and collects exposable files
+│           ├── security.rs   # Extension allowlist, size caps, path denylist
+│           └── server.rs     # Server-side relay hook (currently generic)
 │
 ├── web/                      # React frontend (Vite + TypeScript)
 │   └── src/
@@ -73,7 +79,7 @@ nession/
 ├── Dockerfile.ui.prebuilt    # nginx serving pre-built web/dist/
 ├── Dockerfile.{server,agent}.prebuilt  # Pre-built binary + UI variants
 │
-├── Cargo.toml                # Workspace root (4 crates, shared dependencies)
+├── Cargo.toml                # Workspace root (5 crates, shared dependencies)
 ├── agent-config.toml         # Default agent config
 ├── web/package.json          # React deps: shadcn/ui, xterm 5.5, sonner, lucide-react
 └── docs/
@@ -309,6 +315,10 @@ gh pr merge <PR-NUMBER> --rebase   # no --auto
 
 **⚠ Step 7 is not optional.** Branching from `main` (step 1) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new branches then lack code they need to build on.
 
+**⚠ Step 8 is mandatory when the release contains runtime changes.** 15 of `release.yml`'s 18 jobs are gated on `version_changed` and the rest skip by dependency, so a release merge that carries no version bump builds nothing — no images, no GitHub Release, no production overlay update. "No bump" means "merged to `main`, not released to production". Test-only or docs-only releases can skip it; anything touching `crates/` or `web/src/` runtime code cannot.
+
+**⚠ All four version files move together.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json`; `version-check` now fails the run if the two disagree.
+
 **⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch — its squash commit is not in the branch's ancestry, so a second PR re-carries every old commit and conflicts. Follow-up work starts from a new branch:
 
 ```bash
@@ -422,8 +432,19 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 
 ## 3. Quality Gates
 
-- **`.githooks/pre-commit`** 是唯一 hooks 入口（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这个文件。
-- **Pre-commit 全部 blocking**：`cargo fmt` → `cargo clippy` → `cargo test --no-run` → `cargo test` → coverage（仅变更 crate）→ `eslint` → `tsc --noEmit` → `vitest run` → `vitest coverage`
-- **CI 触发**：三个 workflow 分工。`quality.yml`（PR -> staging：rust-check + web-check）；`staging.yml`（push to staging：完整 build + deploy）；`release.yml`（push to main：release）。与 pre-commit 必须一致。
-- **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试，覆盖率不够补测试，lint 报错修 lint——不准绕。pre-push hook 跑太久就等着，或者拆分 commit。
-- **覆盖率阈值**：`nession-common` 90%，其余 Rust crate 80%，web 80%。
+- **两个 hook,都在 `.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
+- **`pre-commit` 只跑快检查**：`just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
+- **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
+- **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
+- **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
+- **覆盖率阈值**（`scripts/check-coverage.sh` 是唯一来源,每次遍历全部登记的 crate,不按改动收窄）：
+
+  | 目标 | 阈值 |
+  |------|------|
+  | `nession-common` / `nession-server` | 80% line |
+  | `nession-agent` | 80% line（macOS 上 79%，control-mode 测试在 macOS 被跳过） |
+  | `nession-cli` | 40% line（不可测的命令已排除） |
+  | `nession-claude-code` | **未登记 → 不检查** |
+  | web（`web/vite.config.ts`） | lines / functions / statements 80%，**branches 65%** |
+
+- **CI 的 web-check 不跑 `just web-coverage`**。web 覆盖率阈值只由本地 pre-push 把关,PR 上没有独立验证。改动 web 代码时不要指望 CI 拦住覆盖率回退。
