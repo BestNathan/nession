@@ -380,8 +380,10 @@ gh pr create --base staging --title "feat: description" --body "..."
 
 ```bash
 # Enable auto-merge for feat/fix PRs targeting staging
-gh pr merge <PR-NUMBER> --auto --rebase
+gh pr merge <PR-NUMBER> --auto --squash
 ```
+
+**⚠ `Closes #N` must live in a commit message, not just the PR body.** This repo sets `squash_merge_commit_message: COMMIT_MESSAGES`, so the squash body is built from commit messages and the PR description is thrown away. Closing keywords also only fire on the default branch (`main`), never on a merge into `staging`. Put it in the commit and it flows: commit → squash body on staging → rebase-merge to main preserves it → issue closes at release. Auto-close has never worked in this repo because the keyword only ever lived in PR bodies.
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
@@ -403,7 +405,7 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
 ```
 
-**Always `--rebase`, never `--squash`** — for feature PRs into staging and for the bump PR into main alike. Squashing destroys the 1:1 commit mapping that lets `git rebase staging` skip already-released work, so every later release replays the full delta and conflicts as soon as `main` has touched the same files.
+**`--rebase` for the bump PR into main; `--squash` for feature PRs into staging.** Squashing at the `staging → main` step is what breaks things: it destroys the 1:1 commit mapping that lets `git rebase origin/staging` skip already-released work, so every later release replays the full delta and conflicts as soon as `main` has touched the same files (measured: release PR #268 was squashed, and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). Squashing `feature → staging` is fine — that single commit is what gets rebased onto `main`, patch intact — and it is what lets `Closes #N` reach `main`.
 
 ### PR Body Template
 
