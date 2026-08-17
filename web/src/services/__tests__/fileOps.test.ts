@@ -131,6 +131,32 @@ describe('fileOps', () => {
       const result = await promise;
       expect(result.success).toBe(true);
     });
+
+    it('defaults recursive to false', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+
+      const promise = ops.deleteFile('/tmp/old.txt');
+      await flush();
+      const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(sendCall.payload).toEqual({ path: '/tmp/old.txt', recursive: false });
+
+      p2p._respond(sendCall.id, 'ok', { path: '/tmp/old.txt', success: true });
+      await promise;
+    });
+
+    it('forwards recursive for directories', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+
+      const promise = ops.deleteFile('/tmp/folder', true);
+      await flush();
+      const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(sendCall.payload).toEqual({ path: '/tmp/folder', recursive: true });
+
+      p2p._respond(sendCall.id, 'ok', { path: '/tmp/folder', success: true });
+      await promise;
+    });
   });
 
   describe('createDir', () => {

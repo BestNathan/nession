@@ -69,8 +69,7 @@ export default defineConfig({
         'src/components/env/EnvPanel.tsx',
         // Deep link restoration - requires react-router integration testing
         'src/hooks/useDeepLinkRestore.ts',
-        // ── Browser-only terminal internals (xterm lifecycle, touch/IME, mouse) ──
-        'src/terminal/MobileInput.ts',
+        // ── Browser-only terminal internals (xterm lifecycle, mouse) ──
         'src/terminal/MouseIntentResolver.ts',
         'src/terminal/hooks/useTerminalStateMachine.ts',
         'src/hooks/useSwipeGesture.ts',
