@@ -103,7 +103,7 @@ gh pr merge <N> --rebase
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **push → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
+For `feat/**` and `fix/**` branches, the flow is **branch off origin/staging → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -111,9 +111,10 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-#    --rebase, never --squash. Squashing breaks patch-id de-duplication and
-#    makes every later release replay the whole delta.
-gh pr merge <PR-NUMBER> --auto --rebase
+#    --squash here: one commit per feature on staging. This does NOT hurt
+#    patch-id de-duplication — that single commit is what gets rebased onto
+#    main later, patch intact. Only staging -> main must avoid --squash.
+gh pr merge <PR-NUMBER> --auto --squash
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
@@ -146,7 +147,55 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
 ```
 
-**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i staging`.
+**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
+
+### Why the merge method differs per step
+
+`main` accumulates commits `staging` never sees (the automated `chore: update staging image tags` PRs), so the two branches permanently diverge and every release must reconcile them. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
+
+| Step | Method | Effect |
+|------|--------|--------|
+| `feature → staging` | `--squash` | One commit per feature. Harmless to de-duplication — that single commit is what gets rebased onto `main` later, patch intact. Also the only way `Closes #N` reaches `main` (see below). |
+| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so the next `git rebase origin/staging` skips already-released commits automatically. Preserves commit messages. |
+
+Squashing at `staging → main` is what breaks it: N commits collapse into one whose combined patch-id matches nothing, so the next release replays all N and conflicts the moment `main` has touched the same files. Measured: release PR #268 was squash-merged, and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
+
+Verified behaviour of `git rebase origin/staging` on a bump branch: already-released commits are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
+
+### Branch base
+
+A PR's diff is computed against `merge-base(base, head)`. So a branch cut from `main` but targeting `staging` silently carries every commit `main` has that `staging` lacks, and the merge drags all of it into `staging` — bundled into the squash commit, or replayed as rewritten duplicates under rebase. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`.
+
+Always branch feature work from `origin/staging`. `EnterWorktree` bases on `origin/main` (`worktree.baseRef` accepts only `fresh` | `head`, so it cannot be pointed at another ref) — run `git fetch origin && git reset --hard origin/staging` right after entering a feature worktree.
+
+### Issue auto-close
+
+Put `Closes #N` in the **PR body**. Nothing else is needed.
+
+The repo is configured with:
+
+```
+squash_merge_commit_title   = PR_TITLE
+squash_merge_commit_message = PR_BODY
+```
+
+so a squash commit's subject is the PR title and its body is the PR description. The chain is:
+
+```
+PR body (Closes #N)
+  → squash into staging: body becomes the commit message
+  → staging → main via --rebase: message preserved verbatim
+  → commit lands on main (default branch) → GitHub closes the issue
+```
+
+Two constraints follow from GitHub's rules, both verified:
+
+1. **Closing keywords are ignored outside the default branch.** The docs are explicit: keywords are interpreted "only when the pull request targets the repository's *default* branch", otherwise "these keywords are ignored, no links are created". Measured: PR #257 had a correctly formatted `Closes #256` on its own line, base `staging`, and `closingIssuesReferences` was **0** — not even a UI link. This is why auto-close never worked here before; issues #240, #239 and #177 were all closed by hand.
+2. **The issue sidebar will not show a linked PR.** The keyword arrives via a commit message, and GitHub notes that in that case "the pull request that contains the commit will not be listed as a linked pull request". The issue still closes. Link it manually via the Development sidebar if the association matters.
+
+`PR_BODY` also forces `squash_merge_commit_title = PR_TITLE`; GitHub rejects `COMMIT_OR_PR_TITLE` + `PR_BODY` as an invalid combination. So squash subjects are always the PR title now, never a single commit's own subject.
+
+**Because the body becomes permanent history**, keep it a change record: 变更内容 + 测试报告 + `Closes #N`. Screenshots go in a PR comment (`gh pr comment`), never the body.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
