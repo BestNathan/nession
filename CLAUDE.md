@@ -264,7 +264,7 @@ git checkout -b feat/<slug> origin/staging
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
-# 3. PUBLISH — PR targets staging; `Closes #<ISSUE>` goes in a commit message
+# 3. PUBLISH — PR targets staging; `Closes #<ISSUE>` goes in the PR body
 git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
@@ -314,15 +314,14 @@ Branch from the ref you target. Never branch from `main` for a staging-targeted 
 
 Mechanics and rationale: `nession-cicd` skill.
 
-### Closing issues
+### PR body is the commit message
 
-`Closes #<ISSUE>` goes in a **commit message**. In the PR body alone it does nothing.
+Squash merges take the commit message from the **PR body**. So the body must read like a change record, not like scratch notes.
 
-```bash
-git commit -m "fix: stop terminal remounting on address switch
-
-Closes #263"
-```
+- `Closes #<ISSUE>` goes in the **PR body**. Nothing else is needed — it rides the body into `staging`, then to `main` at release, and closes there.
+- **变更内容** and **测试报告** go in the body.
+- **Screenshots go in a PR comment, never the body** — image markdown in the body would end up in git history.
+- Keep the body tight. Every line becomes permanent history.
 
 ### Screenshots with Playwright
 
@@ -342,7 +341,7 @@ cd web && npm run dev                 # :13000
 #    - Save screenshots to a temp location for PR attachment
 ```
 
-Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Reference them in the PR body under the **核心功能截图** section using repo-relative paths.
+Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser_snapshot` to inspect, and `mcp__playwright__browser_take_screenshot` to capture. Post them as a **PR comment**, not in the PR body — the body becomes the commit message.
 
 **⚠ `browser_take_screenshot` 的 `filename` 必须带 `.playwright-mcp/screenshots/` 前缀** —— 裸文件名会相对于 cwd（仓库根目录）解析，把截图泄漏到工作区。`.playwright-mcp/` 目录只承接 snapshot/console 等自动产物（由 `--output-dir` 控制），不影响显式传入的 `filename`：
 
@@ -356,7 +355,7 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 1. Develop on a branch off `origin/staging` (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI change
-4. PR to `staging`. `Closes #<ISSUE>` in a commit message, screenshots in the PR body
+4. PR to `staging`. `Closes #<ISSUE>` + 变更内容 + 测试报告 in the body; screenshots in a PR comment
 5. `gh pr merge <PR> --auto --squash` → verify with `./scripts/deploy-watch.sh staging`
 6. Version bump + release to `main` — see **Development Cycle** step 6 above
 7. `./scripts/deploy-watch.sh prod`

@@ -170,25 +170,32 @@ Always branch feature work from `origin/staging`. `EnterWorktree` bases on `orig
 
 ### Issue auto-close
 
+Put `Closes #N` in the **PR body**. Nothing else is needed.
+
 The repo is configured with:
 
 ```
-squash_merge_commit_message = COMMIT_MESSAGES
+squash_merge_commit_title   = PR_TITLE
+squash_merge_commit_message = PR_BODY
 ```
 
-so a squash commit's body is assembled from **commit messages**; the PR description is discarded. GitHub also only honours closing keywords once they reach the **default branch** (`main`) — a merge into `staging` never triggers them.
+so a squash commit's subject is the PR title and its body is the PR description. The chain is:
 
-Therefore `Closes #N` written only in a PR body is dropped at the squash and never reaches `main`. **Auto-close has never worked in this repo for this reason** — issues #240, #239 and #177 were all closed by hand, and PR #257's body carried a closing keyword while its squash commit `d674539` had none.
-
-Put the keyword in a commit message:
-
-```bash
-git commit -m "fix: stop terminal remounting on address switch
-
-Closes #263"
+```
+PR body (Closes #N)
+  → squash into staging: body becomes the commit message
+  → staging → main via --rebase: message preserved verbatim
+  → commit lands on main (default branch) → GitHub closes the issue
 ```
 
-It then flows: commit message → squash body on `staging` → rebase-merge preserves it → lands on `main` → issue closes at release time.
+Two constraints follow from GitHub's rules, both verified:
+
+1. **Closing keywords are ignored outside the default branch.** The docs are explicit: keywords are interpreted "only when the pull request targets the repository's *default* branch", otherwise "these keywords are ignored, no links are created". Measured: PR #257 had a correctly formatted `Closes #256` on its own line, base `staging`, and `closingIssuesReferences` was **0** — not even a UI link. This is why auto-close never worked here before; issues #240, #239 and #177 were all closed by hand.
+2. **The issue sidebar will not show a linked PR.** The keyword arrives via a commit message, and GitHub notes that in that case "the pull request that contains the commit will not be listed as a linked pull request". The issue still closes. Link it manually via the Development sidebar if the association matters.
+
+`PR_BODY` also forces `squash_merge_commit_title = PR_TITLE`; GitHub rejects `COMMIT_OR_PR_TITLE` + `PR_BODY` as an invalid combination. So squash subjects are always the PR title now, never a single commit's own subject.
+
+**Because the body becomes permanent history**, keep it a change record: 变更内容 + 测试报告 + `Closes #N`. Screenshots go in a PR comment (`gh pr comment`), never the body.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 

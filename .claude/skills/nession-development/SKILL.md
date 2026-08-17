@@ -383,7 +383,7 @@ gh pr create --base staging --title "feat: description" --body "..."
 gh pr merge <PR-NUMBER> --auto --squash
 ```
 
-**⚠ `Closes #N` must live in a commit message, not just the PR body.** This repo sets `squash_merge_commit_message: COMMIT_MESSAGES`, so the squash body is built from commit messages and the PR description is thrown away. Closing keywords also only fire on the default branch (`main`), never on a merge into `staging`. Put it in the commit and it flows: commit → squash body on staging → rebase-merge to main preserves it → issue closes at release. Auto-close has never worked in this repo because the keyword only ever lived in PR bodies.
+**⚠ `Closes #N` goes in the PR body, and the body becomes the commit message.** The repo sets `squash_merge_commit_message = PR_BODY`, so the squash commit's message *is* the PR description. Closing keywords are ignored outside the default branch, so nothing happens at the staging merge — but `--rebase` carries the message to `main`, where the issue closes. See the `nession-cicd` skill for the full chain and its two caveats.
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
@@ -409,7 +409,7 @@ gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merg
 
 ### PR Body Template
 
-Every PR must include these three sections:
+**The PR body becomes the squash commit message** (`squash_merge_commit_message = PR_BODY`), so write it as a permanent change record. Screenshots go in a PR comment, never here.
 
 ```markdown
 ## 变更内容
@@ -426,10 +426,12 @@ Every PR must include these three sections:
 - `npm run lint`: 0 warnings
 - `npm run build`: success
 
-## 核心功能截图
-<!-- 使用 Playwright MCP 收集，展示变更前后 UI 效果 -->
-<!-- 命令：mcp__playwright__browser_navigate → browser_snapshot → browser_take_screenshot -->
+Closes #<ISSUE>
 ```
+
+`Closes #<ISSUE>` in the body is all that is required. It has no effect at the staging merge (closing keywords are ignored outside the default branch), but the body becomes the staging commit message, `--rebase` carries that message to `main`, and GitHub closes the issue there.
+
+One consequence: because the keyword arrives via a commit message rather than a default-branch PR, the issue sidebar will not show a linked PR. The issue still closes. Link it manually via the Development sidebar if that association matters.
 
 Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize. After staging validation and merge to main (with version bump), release workflow builds version-tagged images and updates production kustomize.
 
@@ -501,9 +503,9 @@ cd web && npm run dev
 - [ ] **控制台** — 浏览器 console 无 error/warning（`browser_console_messages`）
 - [ ] **网络** — WebSocket 消息类型符合预期，无不必要的消息
 
-**Collecting screenshots for PR body:**
+**Collecting screenshots (posted as a PR comment, not in the body):**
 
-After functional verification passes, take screenshots of key states for the PR body:
+After functional verification passes, take screenshots of key states:
 
 - Before/after state for each changed feature
 - Empty states (no data, no results)
@@ -511,10 +513,12 @@ After functional verification passes, take screenshots of key states for the PR 
 - Error states (error banners, toasts)
 - Key interactions (modal open/close, terminal output)
 
-Save to `.playwright-mcp/screenshots/` (gitignored). Reference in PR body under **核心功能截图** using repo-relative paths:
+Save to `.playwright-mcp/screenshots/` (gitignored). Post them as a **PR comment** — the PR body becomes the squash commit message, so image markdown there would land in git history permanently.
 
-```markdown
-![feature-name](.playwright-mcp/screenshots/feature-after.png)
+```bash
+gh pr comment <PR-NUMBER> --body "## 核心功能截图
+
+![feature-name](.playwright-mcp/screenshots/feature-after.png)"
 ```
 
 ## Quick Reference
