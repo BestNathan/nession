@@ -387,6 +387,10 @@ pub struct FileWriteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDeletePayload {
     pub path: String,
+    /// Delete a directory's contents too. Defaults to `false` so an older
+    /// client keeps the previous empty-directory-only behaviour.
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -520,6 +524,18 @@ fn make_response<P: Serialize>(request_id: &str, msg_type: &str, payload: P) -> 
         timestamp: now_timestamp(),
         payload,
     }
+}
+
+/// Flatten an `anyhow` error chain into one message.
+///
+/// `Error::to_string` renders only the outermost context, which hid the actual
+/// cause from clients — a failed directory delete reported just the path, not
+/// "Directory not empty". Joining the chain keeps the operation context while
+/// surfacing the underlying OS error.
+fn format_error_chain(error: &anyhow::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    parts.extend(error.chain().skip(1).map(ToString::to_string));
+    parts.join(": ")
 }
 
 fn make_error(request_id: &str, code: &str, message: &str) -> Message<ErrorPayload> {
@@ -1584,13 +1600,13 @@ impl AgentServer {
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
                 let path = payload.path.clone();
-                match file_ops.delete(&payload.path).await {
+                match file_ops.delete(&payload.path, payload.recursive).await {
                     Ok(()) => {
                         let resp = serde_json::json!({ "path": path, "success": true });
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => err("delete_failed", &e.to_string()),
+                    Err(e) => err("delete_failed", &format_error_chain(&e)),
                 }
             }
 
@@ -2230,6 +2246,7 @@ mod tests {
             msg_types::FILE_DELETE,
             FileDeletePayload {
                 path: entry_path.to_string(),
+                recursive: false,
             },
         );
         let del_resp: Message<serde_json::Value> =
@@ -2264,6 +2281,7 @@ mod tests {
             msg_types::FILE_DELETE,
             FileDeletePayload {
                 path: "to_delete.txt".to_string(),
+                recursive: false,
             },
         );
         let del_resp: Message<serde_json::Value> =
@@ -2347,6 +2365,7 @@ mod tests {
             msg_types::FILE_DELETE,
             FileDeletePayload {
                 path: "test_dir/sub_dir".to_string(),
+                recursive: true,
             },
         );
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;
@@ -2354,6 +2373,7 @@ mod tests {
             msg_types::FILE_DELETE,
             FileDeletePayload {
                 path: "test_dir".to_string(),
+                recursive: true,
             },
         );
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;
@@ -2419,6 +2439,7 @@ mod tests {
             msg_types::FILE_DELETE,
             FileDeletePayload {
                 path: "new_name.txt".to_string(),
+                recursive: false,
             },
         );
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &del_req).await;

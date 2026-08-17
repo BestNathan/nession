@@ -195,13 +195,31 @@ impl FileOps {
         Ok(len)
     }
 
-    /// Delete a file or an empty directory.
-    pub async fn delete(&self, path: &str) -> Result<()> {
-        let resolved = self.sandbox.resolve(path)?;
+    /// Delete a file, or a directory.
+    ///
+    /// `recursive` controls directory handling: with `false` only an empty
+    /// directory is removed (`ENOTEMPTY` otherwise), with `true` the whole
+    /// subtree is removed. Callers that mean "delete this folder" — the file
+    /// browser's delete action — must pass `true`, since a non-empty folder is
+    /// the normal case.
+    pub async fn delete(&self, path: &str, recursive: bool) -> Result<()> {
+        // resolve_no_follow, not resolve: a symlink must be unlinked, never
+        // followed — otherwise a recursive delete would wipe its target tree.
+        let resolved = self.sandbox.resolve_no_follow(path)?;
 
         task::spawn_blocking(move || -> Result<()> {
-            if resolved.is_dir() {
-                fs::remove_dir(&resolved).with_context(|| {
+            // symlink_metadata for the same reason: a symlink pointing at a
+            // directory must be treated as a link, not as a directory.
+            let meta = fs::symlink_metadata(&resolved)
+                .with_context(|| format!("failed to stat: {}", resolved.display()))?;
+
+            if meta.is_dir() {
+                let result = if recursive {
+                    fs::remove_dir_all(&resolved)
+                } else {
+                    fs::remove_dir(&resolved)
+                };
+                result.with_context(|| {
                     format!("failed to remove directory: {}", resolved.display())
                 })?;
             } else {
@@ -397,15 +415,89 @@ mod tests {
     async fn test_delete_file() {
         let (dir, ops) = setup();
         fs::write(dir.path().join("del.txt"), b"delete me").unwrap();
-        ops.delete("del.txt").await.unwrap();
+        ops.delete("del.txt", false).await.unwrap();
         assert!(!dir.path().join("del.txt").exists());
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_fails() {
         let (_dir, ops) = setup();
-        let result = ops.delete("nope.txt").await;
+        let result = ops.delete("nope.txt", false).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_empty_dir_non_recursive() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("empty")).unwrap();
+        ops.delete("empty", false).await.unwrap();
+        assert!(!dir.path().join("empty").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_non_empty_dir_non_recursive_fails() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("full")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+
+        let result = ops.delete("full", false).await;
+
+        assert!(result.is_err());
+        assert!(dir.path().join("full").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_non_empty_dir_recursive() {
+        let (dir, ops) = setup();
+        fs::create_dir_all(dir.path().join("full/nested")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+        fs::write(dir.path().join("full/nested/b.txt"), b"b").unwrap();
+
+        ops.delete("full", true).await.unwrap();
+
+        assert!(!dir.path().join("full").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_recursive_on_plain_file() {
+        // The flag is about directories; a file must still just be unlinked.
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("solo.txt"), b"x").unwrap();
+        ops.delete("solo.txt", true).await.unwrap();
+        assert!(!dir.path().join("solo.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_delete_symlink_to_dir_does_not_touch_target() {
+        // symlink_metadata keeps a recursive delete from walking through a
+        // symlink and wiping the directory it points at.
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("target")).unwrap();
+        fs::write(dir.path().join("target/keep.txt"), b"keep").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("target"), dir.path().join("link")).unwrap();
+
+        ops.delete("link", true).await.unwrap();
+
+        assert!(!dir.path().join("link").exists());
+        assert!(dir.path().join("target/keep.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_error_reports_os_reason() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("full")).unwrap();
+        fs::write(dir.path().join("full/a.txt"), b"a").unwrap();
+
+        let err = ops.delete("full", false).await.unwrap_err();
+        let chain: Vec<String> = std::iter::once(err.to_string())
+            .chain(err.chain().skip(1).map(ToString::to_string))
+            .collect();
+
+        // The path context is kept and the OS cause is reachable in the chain.
+        let top = chain.first().expect("error chain is never empty");
+        assert!(top.contains("failed to remove directory"));
+        assert!(chain.len() > 1, "expected an OS cause, got {chain:?}");
     }
 
     #[tokio::test]

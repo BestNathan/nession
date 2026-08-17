@@ -117,8 +117,12 @@ export function createFileOps(p2p: FileTransport) {
     writeFile: (path: string, content: string): Promise<{ path: string; written: number }> =>
       sendRequest(p2p, 'file.write', { path, content: base64Encode(content) }),
 
-    deleteFile: (path: string): Promise<{ path: string; success: boolean }> =>
-      sendRequest(p2p, 'file.delete', { path }),
+    /**
+     * Delete a file, or a directory. Pass `recursive` for a directory that may
+     * have contents — without it the agent only removes an empty one.
+     */
+    deleteFile: (path: string, recursive = false): Promise<{ path: string; success: boolean }> =>
+      sendRequest(p2p, 'file.delete', { path, recursive }),
 
     createDir: (path: string): Promise<{ path: string; success: boolean }> =>
       sendRequest(p2p, 'file.create_dir', { path }),
