@@ -80,7 +80,8 @@ Version bumping (minor vs patch, which files to update) is covered in the nessio
 ### 3. Push and create PR
 
 ```bash
-git checkout -b feat/description
+git fetch origin
+git checkout -b feat/description origin/staging   # branch from the ref you target
 git add -A
 git commit -m "feat: description"
 git push origin feat/description

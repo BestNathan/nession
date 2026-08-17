@@ -128,10 +128,11 @@ Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips
 
 ## 2. Development Workflow
 
-**⚠ CRITICAL: Never develop on `main`. Always create a feature branch first.**
+**⚠ CRITICAL: Never develop on `main`. Always create a feature branch first — based on `origin/staging`, since feature PRs target `staging`.**
 
 ```bash
-git checkout -b feat/<slug>   # or use EnterWorktree for isolated workspace
+git fetch origin
+git checkout -b feat/<slug> origin/staging   # or use EnterWorktree for isolated workspace
 ```
 
 Before committing, verify you are NOT on `main`:
@@ -142,7 +143,8 @@ git branch --show-current     # must NOT be "main"
 If already on `main` with changes, migrate them:
 ```bash
 git stash
-git checkout -b feat/<slug>
+git fetch origin
+git checkout -b feat/<slug> origin/staging
 git stash pop
 ```
 
@@ -259,10 +261,10 @@ Service ports:
 **Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
 
 ```bash
-# 1. START — always from latest main, always new branch
-git checkout main
-git pull
-git checkout -b feat/<slug>
+# 1. START — branch from the SAME ref you will target. Feature PRs target
+#    staging, so branch from origin/staging — NOT from main.
+git fetch origin
+git checkout -b feat/<slug> origin/staging
 
 # 2. DEVELOP — implement, test, commit
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
@@ -304,10 +306,19 @@ git pull
 **⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
 
 ```bash
-git checkout main
-git pull
-git checkout -b feat/<new-slug>
+git fetch origin
+git checkout -b feat/<new-slug> origin/staging
 ```
+
+### Branch from the ref you target
+
+| Work | Branch from | PR base |
+|------|-------------|---------|
+| `feat/**`, `fix/**`, `docs/**` | `origin/staging` | `staging` |
+| `chore/bump-version-X.Y.Z` | `main` (then `git rebase origin/staging`) | `main` |
+| `.github/workflows/*` fixes | `main` | `main` |
+
+**Branching from `main` for a staging-targeted PR is a bug, not a shortcut.** The PR diff is computed against `merge-base(staging, yourBranch)`, so it silently carries every commit `main` has that `staging` lacks — and rebase-merge replays those into `staging` as rewritten duplicates. This actually happened: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`, and the resulting patch-id mismatch made the *next* release conflict on an unrelated file.
 
 ### Why rebase everywhere (never squash)
 
@@ -383,6 +394,15 @@ Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code
 - `fix/<slug>` — bug fixes
 
 When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "feat/<slug>"`.
+
+**⚠ `EnterWorktree` bases the new branch on `origin/main`**, not `origin/staging` (its `worktree.baseRef` defaults to `fresh`, which means `origin/<default-branch>`, and it accepts only `fresh` or `head` — it cannot be pointed at an arbitrary ref). Since feature PRs target `staging`, re-point the branch immediately after entering the worktree:
+
+```bash
+git fetch origin
+git reset --hard origin/staging
+```
+
+Skipping this reproduces the branch-base bug described in **Branch from the ref you target** above.
 
 ### Commit Convention
 
