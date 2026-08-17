@@ -152,6 +152,13 @@ watch_ci() {
   done
 
   # ── Report results ──
+  # Re-query job status to ensure we have the latest conclusions
+  local -A job_status
+  while IFS=$'\t' read -r name conclusion status; do
+    job_status["$name"]="${conclusion:-$status}"
+  done < <(gh run view "$run_id" --repo "$REPO" --json jobs \
+    --jq '.jobs[] | "\(.name)\t\(.conclusion // "")\t\(.status)"' 2>/dev/null)
+
   local -i failed=0
   local -a failed_names=()
   for name in "${!job_status[@]}"; do
