@@ -14,10 +14,11 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 
 ```
 Local dev → verify locally
-  → push branch → PR to staging → quality gate passes → rebase-merge to staging
+  → branch off main → PR to staging → quality gate passes → squash-merge to staging
   → staging builds + deploys to staging environment → validate on staging
-  → version bump (minor 0.x.0 or patch 0.x.y) → bump branch off origin/staging → PR to main
+  → audit what is being released → PR staging → main with every `Closes #N` → --merge
   → release builds multi-arch images → ArgoCD syncs to production
+  → sync main → staging (fast-forward) → version bump if warranted
 ```
 
 ## Deployment Monitoring
@@ -81,7 +82,7 @@ Version bumping (minor vs patch, which files to update) is covered in the nessio
 
 ```bash
 git fetch origin
-git checkout -b feat/description origin/staging   # branch from the ref you target
+git checkout -b feat/description origin/main   # every branch comes off main
 git add -A
 git commit -m "feat: description"
 git push origin feat/description
@@ -103,7 +104,7 @@ gh pr merge <N> --rebase
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **branch off origin/staging → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → bump branch off origin/staging → PR to main**.
+For `feat/**` and `fix/**` branches, the flow is **branch off main → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → PR staging → main with `--merge`**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -111,28 +112,71 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-#    --squash here: one commit per feature on staging. This does NOT hurt
-#    patch-id de-duplication — that single commit is what gets rebased onto
-#    main later, patch intact. Only staging -> main must avoid --squash.
 gh pr merge <PR-NUMBER> --auto --squash
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
 
-# 4. After staging validation, cut a bump branch off origin/staging and PR to main
-#    See version bump section below
+# 4. After staging validation, open the release PR (see "Release: staging → main")
 ```
+
+The feat→staging merge method is **free**. `--squash` is the default because it gives one commit per feature on `staging`, but nothing downstream depends on it: issues close from the release PR body, and the release uses a merge commit which does not care how many commits it is absorbing.
 
 **Auto-merge to staging is safe** because staging is the integration environment — not production. The quality gate (rust-check + web-check) ensures code correctness. Human validation happens on staging before the staging → main merge.
 
 **`--auto` only works when the PR has a check to wait on.** Feature PRs to staging trigger the quality gate, so `--auto` is fine. `chore/**` PRs trigger no CI, so GitHub immediately reports `CLEAN` and rejects auto-merge with `GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)`. Merge those directly, without `--auto`.
 
-**Version bump branches (`chore/**`) don't trigger CI** and can be merged directly:
+### Release: staging → main
 
 ```bash
-# After staging validation passes. Bump branch comes off origin/staging.
+# 1. Audit what is about to ship, and find the issues it resolves
+gh pr list --state merged --base staging --limit 20
+gh issue list --state open
+
+# 2. Open the release PR. Every issue needs its own Closes line.
+gh pr create --base main --head staging \
+  --title "chore: release (staging → main)" \
+  --body "$(cat <<'BODY'
+## 变更内容
+- feat: ... (#PR)
+- fix: ... (#PR)
+
+## 测试报告
+- staging 验收: ...
+
+Closes #<ISSUE>
+Closes #<ISSUE>
+BODY
+)"
+
+# 3. MUST be --merge
+gh pr merge <PR-NUMBER> --merge
+
+# 4. Sync main back into staging — fast-forward, no force push
 git fetch origin
-git checkout -b chore/bump-version-X.Y.Z origin/staging
+git push origin origin/main:refs/heads/staging
+```
+
+**The release PR must be `--merge`.** A merge commit records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main` and step 4 is a fast-forward forever.
+
+`--rebase` breaks this. GitHub's rebase-merge replays `staging`'s commits onto `main` as new SHAs and **leaves `staging` pointing at the originals**, so `staging` is never an ancestor of `main`. Measured over three release cycles:
+
+| Method | Cycle 1 sync | Cycle 2 release | End state |
+|--------|--------------|-----------------|-----------|
+| `--merge` | fast-forward | clean | `staging` ancestor of `main`, 0/0 |
+| `--rebase` | not a fast-forward, needs a merge commit | **conflict** | `staging` 3 commits *ahead* of `main` with duplicates |
+
+`--squash` is worse still: N commits collapse into one whose combined patch-id matches nothing, so the next release replays all N. Measured: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
+
+This is also the historical cause of `staging` sitting ~16 commits behind `main` and needing the merge-commit realignment in PR #279.
+
+### Version bump
+
+A bump is a **separate PR after the release merged**, not part of it. Cut it from `main`, which by then already contains the release.
+
+```bash
+git fetch origin
+git checkout -b chore/bump-version-X.Y.Z origin/main
 # Bump version in all four files: Cargo.toml, Cargo.lock,
 # web/package.json, web/package-lock.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
@@ -141,9 +185,7 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
 ```
 
-**No rebase step, and the branch must not come off `main`.** `main` continuously accumulates `chore: update staging image tags` commits that never flow back to `staging`, so `staging` is permanently ~15 commits behind. Cutting the bump branch from `main` and running `git rebase origin/staging` therefore replays *`main`'s own* kustomize commits onto an older base, where they conflict with each other. Measured: that path conflicts on `k8s/overlays/staging/kustomization.yaml` while applying `4e39257`.
-
-Branching from `origin/staging` avoids it entirely. `main` already contains all of `staging`'s history, so `main..branch` is exactly the new features plus the bump commit, and the rebase-merge applies only those. `main`'s newer kustomize tags and workflow files are untouched — rebase-merge adds the branch's commits to `main`, it does not revert `main`'s files.
+Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
 
 ### Direct-to-main path
 
@@ -164,52 +206,55 @@ Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`,
 
 Two consequences to accept:
 
-- Direct-to-main changes never pass through `staging`, so `staging` drifts further behind. That is tolerated; re-sync `staging` in one pass when convenient rather than after every merge.
+- Direct-to-main changes never pass through `staging`, so `staging` falls behind until the next sync. Sync it with `git push origin origin/main:refs/heads/staging` — a fast-forward, no PR needed.
 - `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `staging` is re-synced.
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
 ### Why the merge method differs per step
 
-`main` accumulates commits `staging` never sees (the automated `chore: update staging image tags` PRs), so the two branches permanently diverge and every release must reconcile them. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
+`main` accumulates commits `staging` never sees (the automated `chore: update staging image tags` PRs), so the two branches diverge between releases. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
 
 | Step | Method | Effect |
 |------|--------|--------|
-| `feature → staging` | `--squash` | One commit per feature. Harmless to de-duplication — that single commit is what gets rebased onto `main` later, patch intact. Also the only way `Closes #N` reaches `main` (see below). |
-| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so already-released commits are never replayed onto `main` again. Preserves commit messages. |
+| `feature → staging` | `--squash` (free) | One commit per feature. Nothing downstream depends on it. |
+| `staging → main` | `--merge` (mandatory) | Merge commit records `staging`'s tip as a parent, so `staging` stays an ancestor of `main` and the sync back is always a fast-forward. |
+| `main → staging` sync | fast-forward push | Only possible because the release used a merge commit. Never force-push. |
 
-Squashing at `staging → main` is what breaks it: N commits collapse into one whose combined patch-id matches nothing, so the next release replays all N and conflicts the moment `main` has touched the same files. Measured: release PR #268 was squash-merged, and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
+See **Release: staging → main** above for the measured three-cycle comparison of `--merge` vs `--rebase`.
 
 ### Branch base
 
-A PR's diff is computed against `merge-base(base, head)`. So a branch cut from `main` but targeting `staging` silently carries every commit `main` has that `staging` lacks, and the merge drags all of it into `staging` — bundled into the squash commit, or replayed as rewritten duplicates under rebase. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`.
+A PR's diff is computed against `merge-base(base, head)`. Branching everything off `main` is correct **because the sync step keeps `main` from falling behind `staging`** — after a release plus sync, the two refs are identical, so "off `main`" and "off `staging`" are the same commit.
 
-Always branch feature work from `origin/staging`. `EnterWorktree` bases on `origin/main` (`worktree.baseRef` accepts only `fresh` | `head`, so it cannot be pointed at another ref) — run `git fetch origin && git reset --hard origin/staging` right after entering a feature worktree.
+Skip the sync and that stops being true: `main` starts missing unreleased work, and a branch cut from `main` lacks code it needs. Measured — with a feature on `staging` but not yet released, a follow-up fix branched from `main` **conflicts**, while the same fix branched from `origin/staging` applies cleanly as a single commit. So the one exception is:
+
+> Follow-up work on code that is on `staging` but not yet released → branch off `origin/staging`.
+
+The reverse mistake still applies in the other direction: a branch cut from `main` but targeting `staging` while `main` is *ahead* drags every extra commit into `staging`. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`. The sync step is what prevents this.
+
+`EnterWorktree` bases on `origin/main` (`worktree.baseRef` accepts only `fresh` | `head`, so it cannot be pointed at another ref), which is now the correct base — no reset needed unless you need the `origin/staging` exception.
 
 ### Issue auto-close
 
-Put `Closes #N` in the **PR body**. Nothing else is needed.
+Put every `Closes #N` in the **`staging` → `main` release PR body**. Nowhere else.
 
-The repo is configured with:
-
-```
-squash_merge_commit_title   = PR_TITLE
-squash_merge_commit_message = PR_BODY
-```
-
-so a squash commit's subject is the PR title and its body is the PR description. The chain is:
+GitHub interprets closing keywords "only when the pull request targets the repository's *default* branch"; otherwise "these keywords are ignored, no links are created". So:
 
 ```
-PR body (Closes #N)
-  → squash into staging: body becomes the commit message
-  → staging → main via --rebase: message preserved verbatim
-  → commit lands on main (default branch) → GitHub closes the issue
+feat → staging PR body:  Closes #N   → IGNORED, no link, issue stays open
+staging → main PR body:  Closes #N   → linked at PR creation, closed on merge
 ```
 
-Two constraints follow from GitHub's rules, both verified:
+Measured: PR #257 had a correctly formatted `Closes #256` on its own line with base `staging`, and `closingIssuesReferences` was **0** — not even a UI link. That is why auto-close never worked here before; issues #240, #239 and #177 were all closed by hand.
 
-1. **Closing keywords are ignored outside the default branch.** The docs are explicit: keywords are interpreted "only when the pull request targets the repository's *default* branch", otherwise "these keywords are ignored, no links are created". Measured: PR #257 had a correctly formatted `Closes #256` on its own line, base `staging`, and `closingIssuesReferences` was **0** — not even a UI link. This is why auto-close never worked here before; issues #240, #239 and #177 were all closed by hand.
-2. **The issue sidebar will not show a linked PR.** The keyword arrives via a commit message, and GitHub notes that in that case "the pull request that contains the commit will not be listed as a linked pull request". The issue still closes. Link it manually via the Development sidebar if the association matters.
+Because the keyword now rides a PR body targeting the default branch, the merge method is irrelevant and the issue **does** get a proper linked-PR entry in its sidebar — unlike the older commit-message approach, where GitHub notes "the pull request that contains the commit will not be listed as a linked pull request".
+
+This is why the release PR needs an audit step: nothing upstream carries the issue reference for you, so an issue not listed in the release PR body stays open after shipping.
+
+```bash
+gh pr view <RELEASE-PR> --json closingIssuesReferences   # verify before merging
+```
 
 `PR_BODY` also forces `squash_merge_commit_title = PR_TITLE`; GitHub rejects `COMMIT_OR_PR_TITLE` + `PR_BODY` as an invalid combination. So squash subjects are always the PR title now, never a single commit's own subject.
 
@@ -236,7 +281,7 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
 6. ArgoCD detects the kustomize change and syncs to staging k8s
 
-**After staging validation**, cut a version bump branch off `origin/staging`, bump the version, and PR to main. The `release.yml` workflow then:
+**After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`), then sync `main` → `staging`, then bump the version if warranted. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
 3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags
@@ -301,7 +346,7 @@ Merge to staging:
   → update-staging-kustomize: commit hash-based tags to main (with [skip ci])
   → ArgoCD: auto-sync to staging k8s
 
-Merge to main (after staging validation + version bump):
+Merge to main (release PR merged with --merge, then optional version bump):
   → release.yml:
   → version-check: only runs if version changed in Cargo.toml/package.json
   → build + docker: version-tagged images (server-{version}-{arch}, etc.)
