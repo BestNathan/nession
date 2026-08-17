@@ -7,12 +7,13 @@ import { lastResizeAtom } from '../state/terminal';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
+import { InputSourceManager } from '../input/InputSourceManager';
 import { TerminalInputHandler } from '../input/TerminalInputHandler';
 import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
-import { TerminalRuntime } from '../runtime/TerminalRuntime';
+import { TerminalInstance } from '../instance/TerminalInstance';
 import type { FontSizeManager } from '../FontSizeManager';
 
 export interface TerminalControllerOptions {
@@ -47,11 +48,12 @@ export class TerminalController {
   readonly session: TerminalSession;
 
   private _terminal: Terminal | null = null;
-  private runtime: TerminalRuntime | null = null;
+  private instance: TerminalInstance;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
   private inputRouter: InputRouter | null = null;
+  private inputSourceManager: InputSourceManager;
   private attached = false;
 
   /** Callbacks → Jotai */
@@ -64,10 +66,13 @@ export class TerminalController {
   constructor(
     session: TerminalSession,
     transportFactory: () => TerminalTransport,
-    private options: TerminalControllerOptions = { rendererType: 'canvas' },
+    options: TerminalControllerOptions = { rendererType: 'canvas' },
   ) {
     this.session = session;
     this.transportFactory = transportFactory;
+    this.instance = new TerminalInstance(options);
+    this._terminal = this.instance.terminal;
+    this.inputSourceManager = new InputSourceManager();
     this.initInputRouter();
   }
 
@@ -103,19 +108,16 @@ export class TerminalController {
     if (this.attached) { return; }
 
     const transport = this.transportFactory();
-    const runtime = new TerminalRuntime(this.options);
-    runtime.onCellSizeChange = () => {
+    this.instance.onCellSizeChange = () => {
       this.resizeController?.remeasure();
     };
-    const terminal = runtime.terminal;
+    const terminal = this.instance.terminal;
 
     this.transport = transport;
-    this.runtime = runtime;
     this._terminal = terminal;
     this.attached = true;
 
-    runtime.open(element);
-    runtime.installMobileInput(element, (text) => { this.transport?.send(text); });
+    this.instance.attach(element);
 
     // Transport → xterm: display output as it arrives.
     transport.onOutput = (data: Uint8Array) => { terminal.write(data); };
@@ -176,8 +178,7 @@ export class TerminalController {
     this.inputRouter?.setMode({ type: 'terminal' });
     this.inputRouter = null;
 
-    this.runtime?.dispose();
-    this.runtime = null;
+    this.instance.detach();
     this._terminal = null;
 
     this.transport?.dispose();
@@ -191,12 +192,38 @@ export class TerminalController {
     this._terminal?.write(data);
   }
 
+  /**
+   * Unified input entry point for all input sources.
+   * Layer 1: Update active source via InputSourceManager
+   * Layer 2: Route to current mode handler via InputRouter
+   */
+  handleInput(event: import('../types').InputEvent): void {
+    // Layer 1: Update active source
+    this.inputSourceManager.setActiveSource(event.source);
+
+    // Layer 2: Route to current mode handler
+    this.inputRouter?.route(event.data);
+  }
+
   /** Send user input to the transport (→ PTY). */
-  send(data: string): void {
+  send(data: string, source: import('../types').InputSource = 'component-input'): void {
     // Toolbar quick-command Ctrl+D ("\x04") routes to the disconnect flow, the
     // same as keyboard Ctrl+D (handled by TerminalInputHandler → onCtrlD).
     if (data === '\x04') { this.onCtrlD?.(); return; }
-    this.transport?.send(data);
+    this.handleInput({ source, data, timestamp: Date.now() });
+  }
+
+  /** Get the currently active input source. */
+  getActiveInputSource(): import('../types').InputSource | null {
+    return this.inputSourceManager.getActiveSource();
+  }
+
+  /**
+   * Register a callback for input source changes.
+   * Returns an unsubscribe function.
+   */
+  onInputSourceChange(callback: (source: import('../types').InputSource) => void): () => void {
+    return this.inputSourceManager.onSourceChange(callback);
   }
 
   /** Flush any input buffered before the transport was attached. */
@@ -245,20 +272,20 @@ export class TerminalController {
   // ── Scroll / font-size / cell dimensions ─────────────────────────────────
 
   /** Scroll the xterm viewport to the bottom. */
-  scrollToBottom(): void { this.runtime?.scrollToBottom(); }
+  scrollToBottom(): void { this.instance.scrollToBottom(); }
   /** Scroll the xterm viewport by whole pages (negative = up). */
-  scrollPages(pages: number): void { this.runtime?.scrollPages(pages); }
+  scrollPages(pages: number): void { this.instance.scrollPages(pages); }
   /** Scroll the xterm viewport by lines (negative = up). */
-  scrollLines(lines: number): void { this.runtime?.scrollLines(lines); }
+  scrollLines(lines: number): void { this.instance.scrollLines(lines); }
 
   /** Font-size manager while attached; null after detach(). */
   get fontSizeManager(): FontSizeManager | null {
-    return this.runtime?.fontSizeManager ?? null;
+    return this.instance?.fontSizeManager ?? null;
   }
 
   /** Current cell pixel dimensions; 8×16 fallback. */
   get cellDimensions(): { width: number; height: number } {
-    return this.runtime?.cellDimensions ?? { width: 8, height: 16 };
+    return this.instance?.cellDimensions ?? { width: 8, height: 16 };
   }
 
   // ── Input mode ───────────────────────────────────────────────────────────

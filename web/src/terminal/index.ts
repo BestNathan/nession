@@ -16,14 +16,16 @@ export type {
 // New architecture: controller
 export { TerminalController, ResizeController } from './controller/TerminalController';
 
-// New architecture: runtime
-export { TerminalRuntime } from './runtime/TerminalRuntime';
-export type { TerminalRuntimeOptions } from './runtime/TerminalRuntime';
+// New architecture: instance
+export { TerminalInstance } from './instance/TerminalInstance';
+export type { TerminalInstanceOptions } from './types';
 
 // New architecture: input
 export { InputRouter } from './input/InputRouter';
+export { InputSourceManager } from './input/InputSourceManager';
 export { TerminalInputHandler } from './input/TerminalInputHandler';
 export type { InputHandler } from './input/InputHandler';
+export type { InputSource, InputEvent } from './types';
 
 // New architecture: transport
 export type { TerminalTransport } from './transport/TerminalTransport';

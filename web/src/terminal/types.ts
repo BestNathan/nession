@@ -18,9 +18,35 @@ export interface ConnectionOptions {
   relayUrl?: string | null;
 }
 
-/** Device class presets for responsive rendering. */
-export interface DeviceProfile {
+/** Device class for responsive rendering. */
+export type DeviceProfile = 'mobile' | 'desktop';
+
+/** Device profile configuration. */
+export interface DeviceProfileConfig {
   fontSize: number;
   lineHeight: number;
   scrollback: number;
+}
+
+/** Options passed to TerminalInstance constructor. */
+export interface TerminalInstanceOptions {
+  rendererType: 'webgl' | 'canvas';
+  fontSize?: number;
+  scrollback?: number;
+}
+
+/** Input source types for the two-layer input system. */
+export type InputSource =
+  | 'keyboard'           // Physical keyboard (Desktop)
+  | 'touch'              // Touch screen (Mobile)
+  | 'mouse'              // Mouse (selection/click)
+  | 'component-input'    // InputPanel component
+  | 'component-quickcmd' // QuickCommandsPanel component
+  | string;              // Extensible for future sources
+
+/** Input event passed through the two-layer input system. */
+export interface InputEvent {
+  source: InputSource;
+  data: string;
+  timestamp: number;
 }
