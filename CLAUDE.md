@@ -270,14 +270,15 @@ git checkout -b feat/<slug> origin/staging
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
-# 3. PUBLISH — push and create PR targeting **staging** (include Closes #<ISSUE> in body)
+# 3. PUBLISH — push and create PR targeting **staging**
+#    Put `Closes #<ISSUE>` in a COMMIT MESSAGE, not just the PR body.
 git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
 # 4. MERGE to staging — quality gate (rust-check + web-check) must pass.
-#    ALWAYS --rebase, never --squash (see "Why rebase everywhere" below).
-#    --auto is safe here: the quality gate gives GitHub a check to wait on.
-gh pr merge <PR-NUMBER> --auto --rebase
+#    --squash here: one commit per feature on staging, and the squash body is
+#    built from your commit messages (so `Closes #N` survives — see below).
+gh pr merge <PR-NUMBER> --auto --squash
 
 # 5. STAGING VALIDATION — CI builds and deploys to staging automatically after merge.
 #    Verify on staging with ./scripts/deploy-watch.sh staging
@@ -318,20 +319,38 @@ git checkout -b feat/<new-slug> origin/staging
 | `chore/bump-version-X.Y.Z` | `main` (then `git rebase origin/staging`) | `main` |
 | `.github/workflows/*` fixes | `main` | `main` |
 
-**Branching from `main` for a staging-targeted PR is a bug, not a shortcut.** The PR diff is computed against `merge-base(staging, yourBranch)`, so it silently carries every commit `main` has that `staging` lacks — and rebase-merge replays those into `staging` as rewritten duplicates. This actually happened: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`, and the resulting patch-id mismatch made the *next* release conflict on an unrelated file.
+**Branching from `main` for a staging-targeted PR is a bug, not a shortcut.** The PR diff is computed against `merge-base(staging, yourBranch)`, so it silently carries every commit `main` has that `staging` lacks — and the merge drags all of it into `staging` (bundled into the squash commit, or replayed as rewritten duplicates under rebase). This actually happened: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`, and the resulting patch-id mismatch made the *next* release conflict on a file that PR never touched.
 
-### Why rebase everywhere (never squash)
+### Why `staging → main` must be rebase
 
-`main` accumulates commits that `staging` never sees (the automated `chore: update staging image tags` PRs). So `main` and `staging` permanently diverge, and every release has to reconcile them. Which merge strategy you use decides whether that reconciliation stays cheap:
+`main` accumulates commits that `staging` never sees (the automated `chore: update staging image tags` PRs). So `main` and `staging` permanently diverge, and every release has to reconcile them. **The merge method that decides whether that reconciliation stays cheap is the `staging → main` one — not the `feature → staging` one.**
 
-| Strategy | What happens on the *next* release |
-|----------|-----------------------------------|
-| `--squash` | Staging's N commits collapse into one commit whose combined patch-id matches **nothing**. Next release replays all N old commits again — and conflicts the moment `main` has touched any of the same files. |
-| `--rebase` | Each staging commit lands on `main` as a 1:1 patch-id twin. Next `git rebase staging` **skips every already-released commit automatically**. Self-correcting. |
+| Step | Method | Why |
+|------|--------|-----|
+| `feature → staging` | `--squash` | One commit per feature on `staging`. Harmless to de-duplication: that single commit is what later gets rebased onto `main`, patch intact. |
+| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so the next `git rebase origin/staging` **skips every already-released commit automatically**. Also preserves commit messages, which is what carries `Closes #N` to the default branch. |
 
-Verified behaviour of `git rebase staging` on a bump branch: commits already released are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits that were rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
+Squashing at the **`staging → main`** step is what breaks it: N staging commits collapse into one commit whose combined patch-id matches nothing, so the next release replays all N again and conflicts the moment `main` has touched the same files. This is not theoretical — release PR #268 was squash-merged, and the next release was measured conflicting on `web/src/terminal/DeviceProfile.ts`.
 
-**⚠ Never commit an empty commit to `staging`.** An empty commit has no computable patch-id, so de-duplication cannot see it and **it is re-applied on every subsequent release**, accumulating a duplicate each time. To trigger a workflow use `gh workflow run` / `workflow_dispatch`, never `git commit --allow-empty`. To drop one that is already on `staging`, mark it `drop` during `git rebase -i staging`.
+Verified behaviour of `git rebase origin/staging` on a bump branch: already-released commits are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
+
+**⚠ Never commit an empty commit to `staging`.** An empty commit has no computable patch-id, so de-duplication cannot see it and **it is re-applied on every subsequent release**, accumulating a duplicate each time. To trigger a workflow use `gh workflow run` / `workflow_dispatch`, never `git commit --allow-empty`. To drop one that is already on `staging`, mark it `drop` during `git rebase -i origin/staging`.
+
+### Closing issues: `Closes #N` goes in a commit message
+
+This repo sets `squash_merge_commit_message: COMMIT_MESSAGES`, so a squash commit's body is assembled from **your commit messages** — the PR description is discarded. And GitHub only honours closing keywords when they reach the **default branch** (`main`), which a merge into `staging` never is.
+
+So a `Closes #N` written only in the PR body is dropped at the squash and never reaches `main`. **Auto-close has never worked in this repo for exactly this reason** — issues #240, #239, #177 were all closed by hand.
+
+Put the keyword in a commit message instead:
+
+```bash
+git commit -m "fix: stop terminal remounting on address switch
+
+Closes #263"
+```
+
+It then flows: commit message → squash body on `staging` → rebase-merge preserves it → lands on `main` → GitHub closes the issue at release time. Keeping it in the PR body too is fine for human readers, but the commit message is what actually does the work.
 
 ### Screenshots with Playwright
 
@@ -365,8 +384,8 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 1. Develop on feature branch (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI changes
-4. Push, create PR targeting **staging** (include `Closes #<ISSUE>` in body, screenshots in PR body) → quality gate runs
-5. Merge to staging with `gh pr merge <PR> --auto --rebase` → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
+4. Push, create PR targeting **staging**. Put `Closes #<ISSUE>` in a **commit message** (not just the PR body — see "Closing issues" above), screenshots in the PR body → quality gate runs
+5. Merge to staging with `gh pr merge <PR> --auto --squash` → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
 6. After staging validation, release to main with a version bump → auto-closes issue + release workflow publishes versioned images
    ```bash
    git fetch origin

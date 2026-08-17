@@ -111,9 +111,10 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-#    --rebase, never --squash. Squashing breaks patch-id de-duplication and
-#    makes every later release replay the whole delta.
-gh pr merge <PR-NUMBER> --auto --rebase
+#    --squash here: one commit per feature on staging. This does NOT hurt
+#    patch-id de-duplication — that single commit is what gets rebased onto
+#    main later, patch intact. Only staging -> main must avoid --squash.
+gh pr merge <PR-NUMBER> --auto --squash
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
