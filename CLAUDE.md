@@ -235,16 +235,11 @@ Triggered by push to `main` or PR. See `.github/workflows/docker-publish.yml`.
 
 ### Deploying to Kubernetes
 
-Deploys are automatic: CI updates the image tags in the overlay and ArgoCD syncs from there. `k8s/` has no top-level kustomization — you must target an overlay explicitly.
+Deploys are automatic: CI updates the overlay image tags and ArgoCD syncs. `k8s/` has no top-level kustomization — always target an overlay.
 
 ```bash
-# Render to inspect what would be applied (preferred over blind apply)
-kubectl kustomize k8s/overlays/staging
-kubectl kustomize k8s/overlays/production
-
-# Manual apply — only for bootstrapping or when ArgoCD is unavailable
-kubectl apply -k k8s/overlays/staging
-kubectl apply -k k8s/overlays/production
+kubectl kustomize k8s/overlays/staging        # inspect before applying
+kubectl apply -k k8s/overlays/production      # bootstrapping / ArgoCD down only
 ```
 
 Service ports:
@@ -261,8 +256,7 @@ Service ports:
 **Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
 
 ```bash
-# 1. START — branch from the SAME ref you will target. Feature PRs target
-#    staging, so branch from origin/staging — NOT from main.
+# 1. START — branch from origin/staging, never from main
 git fetch origin
 git checkout -b feat/<slug> origin/staging
 
@@ -270,39 +264,32 @@ git checkout -b feat/<slug> origin/staging
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
-# 3. PUBLISH — push and create PR targeting **staging**
-#    Put `Closes #<ISSUE>` in a COMMIT MESSAGE, not just the PR body.
+# 3. PUBLISH — PR targets staging; `Closes #<ISSUE>` goes in a commit message
 git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
-# 4. MERGE to staging — quality gate (rust-check + web-check) must pass.
-#    --squash here: one commit per feature on staging, and the squash body is
-#    built from your commit messages (so `Closes #N` survives — see below).
+# 4. MERGE to staging — quality gate (rust-check + web-check) must pass
 gh pr merge <PR-NUMBER> --auto --squash
 
-# 5. STAGING VALIDATION — CI builds and deploys to staging automatically after merge.
-#    Verify on staging with ./scripts/deploy-watch.sh staging
+# 5. STAGING VALIDATION
+./scripts/deploy-watch.sh staging
 
-# 6. VERSION BUMP + RELEASE — after staging validation, rebase staging onto a bump branch
-git fetch origin                       # local `staging` is often stale — refresh first
+# 6. VERSION BUMP + RELEASE
+git fetch origin
 git checkout main && git pull
 git checkout -b chore/bump-version-X.Y.Z
-# Rebase onto origin/staging, NOT the local `staging` branch. A stale local ref
-# silently releases the wrong tree and fabricates conflicts.
-git rebase origin/staging
+git rebase origin/staging          # origin/staging, not local staging
 # Bump version in ALL FOUR files (see "Version Bumping" in nession-development)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
-# chore/** has no CI checks → --auto would fail with "clean status". Merge directly.
-gh pr merge <PR-NUMBER> --rebase
+gh pr merge <PR-NUMBER> --rebase   # no --auto
 
-# 7. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
-git checkout main
-git pull
+# 7. WATCH RELEASE
+./scripts/deploy-watch.sh prod
 ```
 
-**⚠ Order matters in step 6:** `git rebase staging` comes **before** the version-bump commit. Rebasing after the bump would replay your bump commit onto staging and bury it mid-history.
+**⚠ Order matters in step 6:** `git rebase origin/staging` runs **before** the version-bump commit.
 
 **⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
 
@@ -311,46 +298,31 @@ git fetch origin
 git checkout -b feat/<new-slug> origin/staging
 ```
 
-### Branch from the ref you target
+### Branch base and merge method
 
-| Work | Branch from | PR base |
-|------|-------------|---------|
-| `feat/**`, `fix/**`, `docs/**` | `origin/staging` | `staging` |
-| `chore/bump-version-X.Y.Z` | `main` (then `git rebase origin/staging`) | `main` |
-| `.github/workflows/*` fixes | `main` | `main` |
+Branch from the ref you target. Never branch from `main` for a staging-targeted PR.
 
-**Branching from `main` for a staging-targeted PR is a bug, not a shortcut.** The PR diff is computed against `merge-base(staging, yourBranch)`, so it silently carries every commit `main` has that `staging` lacks — and the merge drags all of it into `staging` (bundled into the squash commit, or replayed as rewritten duplicates under rebase). This actually happened: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`, and the resulting patch-id mismatch made the *next* release conflict on a file that PR never touched.
+| Work | Branch from | PR base | Merge with |
+|------|-------------|---------|------------|
+| `feat/**`, `fix/**`, `docs/**` | `origin/staging` | `staging` | `--auto --squash` |
+| `chore/bump-version-X.Y.Z` | `main`, then `git rebase origin/staging` | `main` | `--rebase` |
+| `.github/workflows/*` fixes | `main` | `main` | `--rebase` |
 
-### Why `staging → main` must be rebase
+- `staging → main` must **never** be `--squash`.
+- `--auto` only on PRs that have checks. `chore/**` has none — omit it there.
+- Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
 
-`main` accumulates commits that `staging` never sees (the automated `chore: update staging image tags` PRs). So `main` and `staging` permanently diverge, and every release has to reconcile them. **The merge method that decides whether that reconciliation stays cheap is the `staging → main` one — not the `feature → staging` one.**
+Mechanics and rationale: `nession-cicd` skill.
 
-| Step | Method | Why |
-|------|--------|-----|
-| `feature → staging` | `--squash` | One commit per feature on `staging`. Harmless to de-duplication: that single commit is what later gets rebased onto `main`, patch intact. |
-| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so the next `git rebase origin/staging` **skips every already-released commit automatically**. Also preserves commit messages, which is what carries `Closes #N` to the default branch. |
+### Closing issues
 
-Squashing at the **`staging → main`** step is what breaks it: N staging commits collapse into one commit whose combined patch-id matches nothing, so the next release replays all N again and conflicts the moment `main` has touched the same files. This is not theoretical — release PR #268 was squash-merged, and the next release was measured conflicting on `web/src/terminal/DeviceProfile.ts`.
-
-Verified behaviour of `git rebase origin/staging` on a bump branch: already-released commits are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
-
-**⚠ Never commit an empty commit to `staging`.** An empty commit has no computable patch-id, so de-duplication cannot see it and **it is re-applied on every subsequent release**, accumulating a duplicate each time. To trigger a workflow use `gh workflow run` / `workflow_dispatch`, never `git commit --allow-empty`. To drop one that is already on `staging`, mark it `drop` during `git rebase -i origin/staging`.
-
-### Closing issues: `Closes #N` goes in a commit message
-
-This repo sets `squash_merge_commit_message: COMMIT_MESSAGES`, so a squash commit's body is assembled from **your commit messages** — the PR description is discarded. And GitHub only honours closing keywords when they reach the **default branch** (`main`), which a merge into `staging` never is.
-
-So a `Closes #N` written only in the PR body is dropped at the squash and never reaches `main`. **Auto-close has never worked in this repo for exactly this reason** — issues #240, #239, #177 were all closed by hand.
-
-Put the keyword in a commit message instead:
+`Closes #<ISSUE>` goes in a **commit message**. In the PR body alone it does nothing.
 
 ```bash
 git commit -m "fix: stop terminal remounting on address switch
 
 Closes #263"
 ```
-
-It then flows: commit message → squash body on `staging` → rebase-merge preserves it → lands on `main` → GitHub closes the issue at release time. Keeping it in the PR body too is fine for human readers, but the commit message is what actually does the work.
 
 ### Screenshots with Playwright
 
@@ -381,26 +353,15 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 
 ### Release Flow
 
-1. Develop on feature branch (worktree preferred, see below)
+1. Develop on a branch off `origin/staging` (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
-3. **Collect screenshots** via Playwright MCP for any functional UI changes
-4. Push, create PR targeting **staging**. Put `Closes #<ISSUE>` in a **commit message** (not just the PR body — see "Closing issues" above), screenshots in the PR body → quality gate runs
-5. Merge to staging with `gh pr merge <PR> --auto --squash` → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
-6. After staging validation, release to main with a version bump → auto-closes issue + release workflow publishes versioned images
-   ```bash
-   git fetch origin
-   git checkout main && git pull
-   git checkout -b chore/bump-version-X.Y.Z
-   git rebase origin/staging             # NOT local `staging` — it is often stale
-   # Bump version in all four files (Cargo.toml, Cargo.lock, web/package.json, web/package-lock.json)
-   git add -A && git commit -m "chore: bump version to X.Y.Z"
-   git push -u origin chore/bump-version-X.Y.Z
-   gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
-   gh pr merge <PR-NUMBER> --rebase      # no --auto: chore/** has no checks
-   ```
-7. Watch the release: `./scripts/deploy-watch.sh prod`
+3. **Collect screenshots** via Playwright MCP for any functional UI change
+4. PR to `staging`. `Closes #<ISSUE>` in a commit message, screenshots in the PR body
+5. `gh pr merge <PR> --auto --squash` → verify with `./scripts/deploy-watch.sh staging`
+6. Version bump + release to `main` — see **Development Cycle** step 6 above
+7. `./scripts/deploy-watch.sh prod`
 
-**No manual k8s step.** `release.yml`'s `update-prod-kustomize` job opens a PR that sets the version tags in `k8s/overlays/production/kustomization.yaml`; ArgoCD syncs from there. Do not hand-edit overlay image tags, and do not run `kubectl apply` as part of a release.
+**No manual k8s step.** `release.yml` opens the PR that sets production image tags; ArgoCD syncs. Never hand-edit overlay tags, never `kubectl apply` as part of a release.
 
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
@@ -414,14 +375,12 @@ Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code
 
 When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "feat/<slug>"`.
 
-**⚠ `EnterWorktree` bases the new branch on `origin/main`**, not `origin/staging` (its `worktree.baseRef` defaults to `fresh`, which means `origin/<default-branch>`, and it accepts only `fresh` or `head` — it cannot be pointed at an arbitrary ref). Since feature PRs target `staging`, re-point the branch immediately after entering the worktree:
+**⚠ `EnterWorktree` bases the branch on `origin/main`.** Re-point it immediately after entering:
 
 ```bash
 git fetch origin
 git reset --hard origin/staging
 ```
-
-Skipping this reproduces the branch-base bug described in **Branch from the ref you target** above.
 
 ### Commit Convention
 

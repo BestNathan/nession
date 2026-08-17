@@ -103,7 +103,7 @@ gh pr merge <N> --rebase
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **push → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
+For `feat/**` and `fix/**` branches, the flow is **branch off origin/staging → PR to staging → quality gate → squash-merge to staging → staging deploy → validate → rebase staging onto a bump branch → PR to main**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -147,7 +147,48 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
 ```
 
-**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i staging`.
+**⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so de-duplication cannot see them and they are re-applied on **every** subsequent release. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
+
+### Why the merge method differs per step
+
+`main` accumulates commits `staging` never sees (the automated `chore: update staging image tags` PRs), so the two branches permanently diverge and every release must reconcile them. The method that decides whether that stays cheap is **`staging → main`**, not `feature → staging`.
+
+| Step | Method | Effect |
+|------|--------|--------|
+| `feature → staging` | `--squash` | One commit per feature. Harmless to de-duplication — that single commit is what gets rebased onto `main` later, patch intact. Also the only way `Closes #N` reaches `main` (see below). |
+| `staging → main` | `--rebase` | Each `staging` commit lands on `main` as a 1:1 patch-id twin, so the next `git rebase origin/staging` skips already-released commits automatically. Preserves commit messages. |
+
+Squashing at `staging → main` is what breaks it: N commits collapse into one whose combined patch-id matches nothing, so the next release replays all N and conflicts the moment `main` has touched the same files. Measured: release PR #268 was squash-merged, and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
+
+Verified behaviour of `git rebase origin/staging` on a bump branch: already-released commits are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
+
+### Branch base
+
+A PR's diff is computed against `merge-base(base, head)`. So a branch cut from `main` but targeting `staging` silently carries every commit `main` has that `staging` lacks, and the merge drags all of it into `staging` — bundled into the squash commit, or replayed as rewritten duplicates under rebase. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`.
+
+Always branch feature work from `origin/staging`. `EnterWorktree` bases on `origin/main` (`worktree.baseRef` accepts only `fresh` | `head`, so it cannot be pointed at another ref) — run `git fetch origin && git reset --hard origin/staging` right after entering a feature worktree.
+
+### Issue auto-close
+
+The repo is configured with:
+
+```
+squash_merge_commit_message = COMMIT_MESSAGES
+```
+
+so a squash commit's body is assembled from **commit messages**; the PR description is discarded. GitHub also only honours closing keywords once they reach the **default branch** (`main`) — a merge into `staging` never triggers them.
+
+Therefore `Closes #N` written only in a PR body is dropped at the squash and never reaches `main`. **Auto-close has never worked in this repo for this reason** — issues #240, #239 and #177 were all closed by hand, and PR #257's body carried a closing keyword while its squash commit `d674539` had none.
+
+Put the keyword in a commit message:
+
+```bash
+git commit -m "fix: stop terminal remounting on address switch
+
+Closes #263"
+```
+
+It then flows: commit message → squash body on `staging` → rebase-merge preserves it → lands on `main` → issue closes at release time.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
