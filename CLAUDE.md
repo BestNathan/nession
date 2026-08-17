@@ -128,7 +128,7 @@ Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips
 
 ## 2. Development Workflow
 
-**⚠ CRITICAL: Never develop on `main`. Always create a feature branch first — based on `origin/staging`, since feature PRs target `staging`.**
+**⚠ CRITICAL: Never develop on `main`. Always create a branch first.** Feature work branches off `origin/staging`; `docs/**` and `chore/**` branch off `main` (see **Branch base and merge method**).
 
 ```bash
 git fetch origin
@@ -274,11 +274,9 @@ gh pr merge <PR-NUMBER> --auto --squash
 # 5. STAGING VALIDATION
 ./scripts/deploy-watch.sh staging
 
-# 6. VERSION BUMP + RELEASE
+# 6. VERSION BUMP + RELEASE — bump branch comes off origin/staging
 git fetch origin
-git checkout main && git pull
-git checkout -b chore/bump-version-X.Y.Z
-git rebase origin/staging          # origin/staging, not local staging
+git checkout -b chore/bump-version-X.Y.Z origin/staging
 # Bump version in ALL FOUR files (see "Version Bumping" in nession-development)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
@@ -289,7 +287,7 @@ gh pr merge <PR-NUMBER> --rebase   # no --auto
 ./scripts/deploy-watch.sh prod
 ```
 
-**⚠ Order matters in step 6:** `git rebase origin/staging` runs **before** the version-bump commit.
+**⚠ The bump branch comes off `origin/staging`, never off `main`.** Cutting it from `main` and rebasing onto `origin/staging` replays `main`'s own kustomize commits onto an older base and conflicts.
 
 **⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
 
@@ -304,12 +302,14 @@ Branch from the ref you target. Never branch from `main` for a staging-targeted 
 
 | Work | Branch from | PR base | Merge with |
 |------|-------------|---------|------------|
-| `feat/**`, `fix/**`, `docs/**` | `origin/staging` | `staging` | `--auto --squash` |
-| `chore/bump-version-X.Y.Z` | `main`, then `git rebase origin/staging` | `main` | `--rebase` |
+| `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `origin/staging` | `staging` | `--auto --squash` |
+| `docs/**`, `chore/**` — touches no build input | `main` | `main` | `--rebase` |
 | `.github/workflows/*` fixes | `main` | `main` | `--rebase` |
+| `chore/bump-version-X.Y.Z` | `origin/staging` | `main` | `--rebase` |
 
+- **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`.
 - `staging → main` must **never** be `--squash`.
-- `--auto` only on PRs that have checks. `chore/**` has none — omit it there.
+- `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
 
 Mechanics and rationale: `nession-cicd` skill.
