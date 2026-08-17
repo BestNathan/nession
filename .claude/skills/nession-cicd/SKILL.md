@@ -57,6 +57,8 @@ NEVER BUILD DOCKER IMAGES LOCALLY
 
 CI is the single source of truth for all container images.
 
+**Nothing is ever pruned.** The repo is public, so GHCR storage and GitHub Releases are unmetered — there are no cleanup jobs and none should be added. Every hash-tagged staging image, every version-tagged production image, and all 53+ releases are retained indefinitely, which is what makes "roll back via GHCR" reliable: any previously built tag is still pullable.
+
 ## Development Flow
 
 ### 1. Develop and verify locally
@@ -187,7 +189,7 @@ gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait o
 
 Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
 
-**But "none" means the release never reaches production.** 15 of `release.yml`'s 18 jobs carry `if: needs.version-check.outputs.version_changed == 'true'`; the two cleanup jobs have no `if:` but depend on gated jobs, so they skip too. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no `k8s/overlays/production` update, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
+**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no `k8s/overlays/production` update, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
 
 So the rule is:
 
@@ -330,22 +332,6 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 | `.github/workflows/release.yml` | Release build + deploy (push to main) |
 | `k8s/overlays/staging/kustomization.yaml` | Staging image tags (auto-updated by staging.yml) |
 | `k8s/overlays/production/kustomization.yaml` | Production image tags (auto-updated by release.yml) |
-
-### Cleanup jobs are deliberately inert
-
-`staging.yml` and `release.yml` each end with a `cleanup-ghcr` job, and `release.yml` also has `cleanup-releases`. **None of them has ever deleted anything**, and two of them must stay that way until someone makes an explicit decision.
-
-The reason they no-op: `gh api /users/<owner>/packages/...` needs a token with `read:packages`, and the default `GITHUB_TOKEN` cannot read user-scoped packages. The calls fail. They used to fail into `2>/dev/null || true` and still print "Cleanup complete"; they now emit `::warning::` and exit 0 honestly.
-
-Before "fixing" any of them by adding a PAT, know what would happen on the next run:
-
-| Job | Effect once a token is added |
-|-----|------------------------------|
-| `staging.yml` → `cleanup-ghcr` | Deletes hash-tagged GHCR versions beyond the newest 5 logical versions. Reasonable — this is the intended behaviour. |
-| `release.yml` → `cleanup-ghcr` | Same, now correctly scoped to hash tags. **Before this was fixed it had no tag filter at all** and would have deleted `server-<version>` / `agent-<version>` / `ui-<version>` — the live production images and every rollback target — because staging pushes 9 hash-tagged versions per build and always owns the 5 newest slots. |
-| `release.yml` → `cleanup-releases` | **Would delete 48 of the 53 existing GitHub Releases and their git tags** (`--cleanup-tag`). Irreversible. Deleting a tag also flips `version-check`'s `version_changed` back to `true` for that version. Intentionally left unwired; decide the retention policy first. |
-
-If you add a PAT, add it to one job at a time and check the run log before the next release.
 
 ### Observing Deployments
 
