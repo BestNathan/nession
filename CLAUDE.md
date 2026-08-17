@@ -128,11 +128,11 @@ Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips
 
 ## 2. Development Workflow
 
-**⚠ CRITICAL: Never develop on `main`. Always create a branch first.** Feature work branches off `origin/staging`; `docs/**` and `chore/**` branch off `main` (see **Branch base and merge method**).
+**⚠ CRITICAL: Never develop on `main`. Always create a branch first.** All branches come off `main` (see **Branch base and merge method**).
 
 ```bash
 git fetch origin
-git checkout -b feat/<slug> origin/staging   # or use EnterWorktree for isolated workspace
+git checkout -b feat/<slug> origin/main   # or use EnterWorktree for isolated workspace
 ```
 
 Before committing, verify you are NOT on `main`:
@@ -144,7 +144,7 @@ If already on `main` with changes, migrate them:
 ```bash
 git stash
 git fetch origin
-git checkout -b feat/<slug> origin/staging
+git checkout -b feat/<slug> origin/main
 git stash pop
 ```
 
@@ -256,15 +256,15 @@ Service ports:
 **Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
 
 ```bash
-# 1. START — branch from origin/staging, never from main
+# 1. START — every branch comes off main
 git fetch origin
-git checkout -b feat/<slug> origin/staging
+git checkout -b feat/<slug> origin/main
 
 # 2. DEVELOP — implement, test, commit
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
-# 3. PUBLISH — PR targets staging; `Closes #<ISSUE>` goes in the PR body
+# 3. PUBLISH — PR targets staging. No `Closes #<ISSUE>` here; it goes in the release PR.
 git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
@@ -274,54 +274,81 @@ gh pr merge <PR-NUMBER> --auto --squash
 # 5. STAGING VALIDATION
 ./scripts/deploy-watch.sh staging
 
-# 6. VERSION BUMP + RELEASE — bump branch comes off origin/staging
-git fetch origin
-git checkout -b chore/bump-version-X.Y.Z origin/staging
+# 6. RELEASE — staging → main, MUST be --merge
+gh pr list --state merged --base staging   # audit what is being released, find linked issues
+gh pr create --base main --head staging --title "chore: release (staging → main)" \
+  --body "$(cat <<'BODY'
+## 变更内容
+- ...
+
+## 测试报告
+- ...
+
+Closes #<ISSUE>
+Closes #<ISSUE>
+BODY
+)"
+gh pr merge <PR-NUMBER> --merge   # never --rebase, never --squash
+
+# 7. SYNC — main → staging, always a fast-forward after a --merge release
+git push origin origin/main:refs/heads/staging
+
+# 8. VERSION BUMP — only if this release warrants one
+git checkout -b chore/bump-version-X.Y.Z origin/main
 # Bump version in ALL FOUR files (see "Version Bumping" in nession-development)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
 gh pr merge <PR-NUMBER> --rebase   # no --auto
 
-# 7. WATCH RELEASE
+# 9. WATCH RELEASE
 ./scripts/deploy-watch.sh prod
 ```
 
-**⚠ The bump branch comes off `origin/staging`, never off `main`.** Cutting it from `main` and rebasing onto `origin/staging` replays `main`'s own kustomize commits onto an older base and conflicts.
+**⚠ Step 6 must be `--merge`.** A merge commit keeps `staging` an ancestor of `main`, which is what makes step 7 a fast-forward and step 1 safe. `--rebase` rewrites staging's commits onto `main`, leaving `staging` pointing at orphaned SHAs — staging then drifts and the *next* release conflicts.
 
-**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
+**⚠ Step 7 is not optional.** Branching from `main` (step 1) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new branches then lack code they need to build on.
+
+**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch — its squash commit is not in the branch's ancestry, so a second PR re-carries every old commit and conflicts. Follow-up work starts from a new branch:
 
 ```bash
 git fetch origin
-git checkout -b feat/<new-slug> origin/staging
+git checkout -b fix/<new-slug> origin/main        # normal case
+git checkout -b fix/<new-slug> origin/staging     # only if it builds on unreleased work
 ```
 
 ### Branch base and merge method
 
-Branch from the ref you target. Never branch from `main` for a staging-targeted PR.
+Every branch comes off `main`. Only follow-up work on code that is on `staging` but not yet released may branch off `origin/staging`.
 
 | Work | Branch from | PR base | Merge with |
 |------|-------------|---------|------------|
-| `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `origin/staging` | `staging` | `--auto --squash` |
+| `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `main` | `staging` | `--auto --squash` |
 | `docs/**`, `chore/**` — touches no build input | `main` | `main` | `--rebase` |
 | `.github/workflows/*` fixes | `main` | `main` | `--rebase` |
-| `chore/bump-version-X.Y.Z` | `origin/staging` | `main` | `--rebase` |
+| release — `staging` → `main` | — | `main` | `--merge` |
+| `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--rebase` |
 
 - **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`.
-- `staging → main` must **never** be `--squash`.
+- **The release PR must be `--merge`.** Never `--rebase`, never `--squash`.
+- feat/fix → `staging` merge method is free; nothing downstream depends on it.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
+- After every release, sync `main` → `staging`. It is a fast-forward; never force-push `staging`.
 
 Mechanics and rationale: `nession-cicd` skill.
 
-### PR body is the commit message
+### Issues close at the release PR
 
-Squash merges take the commit message from the **PR body**. So the body must read like a change record, not like scratch notes.
+`Closes #<ISSUE>` belongs in the **`staging` → `main` release PR body** — and nowhere else. GitHub honors closing keywords only when a PR targets the default branch, so the same line in a feat→staging PR does nothing.
 
-- `Closes #<ISSUE>` goes in the **PR body**. Nothing else is needed — it rides the body into `staging`, then to `main` at release, and closes there.
-- **变更内容** and **测试报告** go in the body.
-- **Screenshots go in a PR comment, never the body** — image markdown in the body would end up in git history.
-- Keep the body tight. Every line becomes permanent history.
+- Before opening the release PR, audit what is being released and collect the linked issues:
+  ```bash
+  gh pr list --state merged --base staging --limit 20
+  ```
+- One `Closes #<ISSUE>` line per issue. Missing one means it stays open after shipping.
+- 变更内容 and 测试报告 go in the release PR body too.
+- **Screenshots go in a PR comment, never a body** — image markdown in a body would end up in git history.
 
 ### Screenshots with Playwright
 
@@ -352,13 +379,15 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 
 ### Release Flow
 
-1. Develop on a branch off `origin/staging` (worktree preferred, see below)
+1. Develop on a branch off `main` (worktree preferred, see below)
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI change
-4. PR to `staging`. `Closes #<ISSUE>` + 变更内容 + 测试报告 in the body; screenshots in a PR comment
+4. PR to `staging` — 变更内容 + 测试报告 in the body, screenshots in a PR comment. No `Closes #N` here.
 5. `gh pr merge <PR> --auto --squash` → verify with `./scripts/deploy-watch.sh staging`
-6. Version bump + release to `main` — see **Development Cycle** step 6 above
-7. `./scripts/deploy-watch.sh prod`
+6. Release: PR `staging` → `main` with every `Closes #<ISSUE>` in the body → `gh pr merge <PR> --merge`
+7. Sync `main` → `staging`: `git push origin origin/main:refs/heads/staging`
+8. Version bump only if warranted — see **Development Cycle** step 8
+9. `./scripts/deploy-watch.sh prod`
 
 **No manual k8s step.** `release.yml` opens the PR that sets production image tags; ArgoCD syncs. Never hand-edit overlay tags, never `kubectl apply` as part of a release.
 
@@ -374,7 +403,7 @@ Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code
 
 When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "feat/<slug>"`.
 
-**⚠ `EnterWorktree` bases the branch on `origin/main`.** Re-point it immediately after entering:
+`EnterWorktree` bases the branch on `origin/main`, which is the correct base. Only re-point it when the work builds on unreleased code already on `staging`:
 
 ```bash
 git fetch origin

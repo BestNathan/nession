@@ -70,9 +70,9 @@ gh pr create --title "..." --body "..."  # 创建新 PR
 
 ```bash
 # Claude Code 中直接使用 EnterWorktree 工具创建隔离环境
-# 或者手动：feature 分支的 base 是 origin/staging，不是 main
+# 所有分支的 base 都是 main
 git fetch origin
-git worktree add -b feat/<slug> ../nession-<slug> origin/staging
+git worktree add -b feat/<slug> ../nession-<slug> origin/main
 cd ../nession-<slug>
 ```
 
@@ -284,12 +284,11 @@ On merge to main, CI reads the version from `Cargo.toml` and `web/package.json` 
 **main 只读 → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
 
 ```bash
-# STEP 1: 从 origin/staging 创建隔离 worktree（不要在 main 目录里开发）
-# feature PR 的目标是 staging，所以 base 必须是 origin/staging 而不是 main
-# CC 方式：使用 EnterWorktree 工具（推荐）
+# STEP 1: 从 origin/main 创建隔离 worktree（不要在 main 目录里开发）
+# CC 方式：使用 EnterWorktree 工具（推荐，默认就是 origin/main）
 # 手动方式：
 git fetch origin
-git worktree add -b feat/<slug> ../nession-<slug> origin/staging
+git worktree add -b feat/<slug> ../nession-<slug> origin/main
 cd ../nession-<slug>
 
 # STEP 2: Develop, test, commit each logical unit
@@ -354,9 +353,10 @@ git commit -m "more changes"
 git push                    # commit 推到了已死的远程分支
 gh pr edit <old-pr> --body "..."  # 这个 PR 已经合并了！
 
-# ✅ 正确 — 从最新 origin/staging 新建分支，创建全新 PR
+# ✅ 正确 — 从最新 origin/main 新建分支，创建全新 PR
+# （例外：若改动依赖 staging 上尚未发布的代码，base 用 origin/staging）
 git fetch origin
-git worktree add -b worktree/<new-slug> ../nession-<new-slug> origin/staging
+git worktree add -b worktree/<new-slug> ../nession-<new-slug> origin/main
 cd ../nession-<new-slug>
 # ... 开发 ...
 git push -u origin worktree/<new-slug>
@@ -383,16 +383,23 @@ gh pr create --base staging --title "feat: description" --body "..."
 gh pr merge <PR-NUMBER> --auto --squash
 ```
 
-**⚠ `Closes #N` goes in the PR body, and the body becomes the commit message.** The repo sets `squash_merge_commit_message = PR_BODY`, so the squash commit's message *is* the PR description. Closing keywords are ignored outside the default branch, so nothing happens at the staging merge — but `--rebase` carries the message to `main`, where the issue closes. See the `nession-cicd` skill for the full chain and its two caveats.
+**⚠ No `Closes #N` in a feat→staging PR body.** Closing keywords are ignored unless the PR targets the default branch, so it would silently do nothing. Every `Closes #N` goes in the `staging` → `main` release PR body instead. See the `nession-cicd` skill.
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, release to main from a bump branch cut off `origin/staging`:
+**After staging validation**, release `staging` → `main`, then sync, then bump only if warranted:
 
 ```bash
-# After staging validation passes
-git fetch origin
-git checkout -b chore/bump-version-X.Y.Z origin/staging
+# 1. Audit what ships, then open the release PR with every Closes line
+gh pr list --state merged --base staging --limit 20
+gh pr create --base main --head staging --title "chore: release (staging → main)" --body "..."
+gh pr merge <PR-NUMBER> --merge      # MUST be --merge
+
+# 2. Sync main back into staging — fast-forward
+git push origin origin/main:refs/heads/staging
+
+# 3. Version bump, only if this release warrants one
+git checkout -b chore/bump-version-X.Y.Z origin/main
 # Bump version in all four files (see "Version Bumping" above)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
@@ -400,13 +407,11 @@ gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version 
 gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
 ```
 
-**Do not cut the bump branch from `main`, and do not rebase onto `origin/staging`.** `main` keeps accumulating staging-image-tag commits that never reach `staging`, so that path replays `main`'s own commits onto an older base and conflicts. See `nession-cicd` for the measurement.
-
-**`--rebase` for the bump PR into main; `--squash` for feature PRs into staging.** Squashing at the `staging → main` step destroys the 1:1 patch-id mapping between `staging` and `main`, so already-released work gets replayed on later releases and conflicts as soon as `main` has touched the same files (measured: release PR #268 was squashed, and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). Squashing `feature → staging` is fine — that single commit is what gets rebased onto `main`, patch intact — and it is what lets `Closes #N` reach `main`.
+**The release PR must be `--merge`.** It keeps `staging` an ancestor of `main`, which is what makes step 2 a fast-forward and branching off `main` safe. `--rebase` leaves `staging` on orphaned SHAs and the next release conflicts; `--squash` destroys patch-id de-duplication (measured: release PR #268 was squashed and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). See `nession-cicd` for the three-cycle measurement.
 
 ### PR Body Template
 
-**The PR body becomes the squash commit message** (`squash_merge_commit_message = PR_BODY`), so write it as a permanent change record. Screenshots go in a PR comment, never here.
+**The PR body becomes the squash commit message** (`squash_merge_commit_message = PR_BODY`), so write it as a permanent change record. Screenshots go in a PR comment, never here. `Closes #N` does **not** belong here — it goes in the release PR.
 
 ```markdown
 ## 变更内容
@@ -422,13 +427,9 @@ gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merg
 - `npx tsc --noEmit`: 0 errors
 - `npm run lint`: 0 warnings
 - `npm run build`: success
-
-Closes #<ISSUE>
 ```
 
-`Closes #<ISSUE>` in the body is all that is required. It has no effect at the staging merge (closing keywords are ignored outside the default branch), but the body becomes the staging commit message, `--rebase` carries that message to `main`, and GitHub closes the issue there.
-
-One consequence: because the keyword arrives via a commit message rather than a default-branch PR, the issue sidebar will not show a linked PR. The issue still closes. Link it manually via the Development sidebar if that association matters.
+Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
 
 Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize. After staging validation and merge to main (with version bump), release workflow builds version-tagged images and updates production kustomize.
 
