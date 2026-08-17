@@ -264,19 +264,20 @@ Single version across all components. `Cargo.toml` and `web/package.json` must a
 | New feature, behavior change | Minor | `0.3.1` → `0.4.0` |
 | Bug fix, small tweak | Patch | `0.3.1` → `0.3.2` |
 
-**When in doubt, choose patch.** Both files must be updated:
+**When in doubt, choose patch.** **Four** files must be updated, and they must all agree:
 
-```toml
-# Cargo.toml
-version = "0.4.0"
-```
+| File | What to change |
+|------|----------------|
+| `Cargo.toml` | `[workspace.package]` → `version = "0.4.0"` |
+| `Cargo.lock` | the `version` entry of each workspace crate (5 of them) |
+| `web/package.json` | top-level `"version": "0.4.0"` |
+| `web/package-lock.json` | **two** places: the top-level `"version"` and `packages[""].version` |
 
-```json
-// web/package.json
-"version": "0.4.0"
-```
+`Cargo.lock` is not optional — leaving it stale means the next `cargo` invocation rewrites it and dirties the working tree. Refresh it with `cargo metadata --format-version 1 --offline >/dev/null` after editing `Cargo.toml`.
 
-On merge to main, CI reads the version from these files and creates version-tagged Docker images automatically.
+⚠ In `web/package-lock.json`, only change the two entries that belong to `nession-web`. Transitive dependencies can coincidentally carry the same version string (e.g. `@ts-morph/common` was also at `0.27.0`) — a blind find-and-replace corrupts the lockfile.
+
+On merge to main, CI reads the version from `Cargo.toml` and `web/package.json` and creates version-tagged Docker images automatically.
 
 ## 5. Development Cycle
 
@@ -379,25 +380,30 @@ gh pr create --base staging --title "feat: description" --body "..."
 
 ```bash
 # Enable auto-merge for feat/fix PRs targeting staging
-gh pr merge <PR-NUMBER> --auto --squash
+gh pr merge <PR-NUMBER> --auto --rebase
 ```
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, merge staging to main with a version bump:
+**After staging validation**, release to main by rebasing staging onto a bump branch:
 
 ```bash
 # After staging validation passes
+git fetch origin                  # local `staging` is frequently stale
 git checkout main && git pull
-git checkout -b chore/bump-version
-# Bump version in Cargo.toml and web/package.json
+git checkout -b chore/bump-version-X.Y.Z
+# Rebase staging in FIRST, before the bump commit. Use origin/staging, never the
+# local ref. Already-released commits are dropped automatically
+# ("skipped previously applied commit").
+git rebase origin/staging
+# Bump version in all four files (see "Version Bumping" above)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
-# Merge staging into main (brings all validated features)
-git merge staging
-git push
-gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --squash  # Direct merge, no CI needed
+git push -u origin chore/bump-version-X.Y.Z
+gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
+gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
 ```
+
+**Always `--rebase`, never `--squash`** — for feature PRs into staging and for the bump PR into main alike. Squashing destroys the 1:1 commit mapping that lets `git rebase staging` skip already-released work, so every later release replays the full delta and conflicts as soon as `main` has touched the same files.
 
 ### PR Body Template
 
