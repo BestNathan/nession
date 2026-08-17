@@ -70,9 +70,9 @@ gh pr create --title "..." --body "..."  # 创建新 PR
 
 ```bash
 # Claude Code 中直接使用 EnterWorktree 工具创建隔离环境
-# 或者手动：
-git checkout main && git pull
-git worktree add -b feat/<slug> ../nession-<slug> main
+# 或者手动：feature 分支的 base 是 origin/staging，不是 main
+git fetch origin
+git worktree add -b feat/<slug> ../nession-<slug> origin/staging
 cd ../nession-<slug>
 ```
 
@@ -284,12 +284,12 @@ On merge to main, CI reads the version from `Cargo.toml` and `web/package.json` 
 **main 只读 → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
 
 ```bash
-# STEP 1: 从 main 创建隔离 worktree（不要在 main 目录里开发）
+# STEP 1: 从 origin/staging 创建隔离 worktree（不要在 main 目录里开发）
+# feature PR 的目标是 staging，所以 base 必须是 origin/staging 而不是 main
 # CC 方式：使用 EnterWorktree 工具（推荐）
 # 手动方式：
-git checkout main
-git pull
-git worktree add -b feat/<slug> ../nession-<slug> main
+git fetch origin
+git worktree add -b feat/<slug> ../nession-<slug> origin/staging
 cd ../nession-<slug>
 
 # STEP 2: Develop, test, commit each logical unit
@@ -354,9 +354,9 @@ git commit -m "more changes"
 git push                    # commit 推到了已死的远程分支
 gh pr edit <old-pr> --body "..."  # 这个 PR 已经合并了！
 
-# ✅ 正确 — 从最新 main 新建分支，创建全新 PR
-git checkout main && git pull
-git worktree add -b worktree/<new-slug> ../nession-<new-slug> main
+# ✅ 正确 — 从最新 origin/staging 新建分支，创建全新 PR
+git fetch origin
+git worktree add -b worktree/<new-slug> ../nession-<new-slug> origin/staging
 cd ../nession-<new-slug>
 # ... 开发 ...
 git push -u origin worktree/<new-slug>
