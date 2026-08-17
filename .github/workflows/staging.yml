@@ -3,6 +3,23 @@ name: Staging
 on:
   push:
     branches: ['staging']
+    # Docs and agent-instruction files produce identical images, so building
+    # them wastes a full 12-job multi-arch run AND writes a kustomize commit
+    # to main, leaving main permanently ahead of staging. A push mixing docs
+    # with code still runs — paths-ignore only skips docs-only pushes.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - '.githooks/**'
+      - 'LICENSE'
+
+# Serialize staging runs. update-staging-kustomize rebase-merges a PR into
+# main; two concurrent runs would race there. Do not cancel in progress —
+# a cancelled run can leave a pushed chore/** branch and an open PR behind.
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════
@@ -489,15 +506,27 @@ jobs:
           PACKAGE="nession"
 
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
-          VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
-              --paginate \
-              -q '.[] | (.metadata.container.tags // []) as $t |
-                  [ $t[] | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ] |
-                  if length > 0 then
-                    { id: .id,
-                      created: .created_at,
-                      norm: (.[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
-                  else empty end' 2>/dev/null) || true
+          if ! RAW=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" --paginate 2>&1); then
+            echo "::warning::Cannot list GHCR versions for ${OWNER}/${PACKAGE} — cleanup skipped."
+            echo "::warning::The default GITHUB_TOKEN cannot read user-scoped packages;"
+            echo "::warning::this step needs a PAT with read:packages + delete:packages."
+            echo "$RAW" | head -5
+            exit 0
+          fi
+
+          # --paginate emits one JSON array per page; -s merges the stream and
+          # flatten(1) turns [[page],[page]] into a single array.
+          # Bind the version object to $v before filtering tags — after the
+          # array construction `.` is the tag list, not the version.
+          VERSIONS=$(printf '%s' "$RAW" | jq -c -s 'flatten(1) | .[]
+              | . as $v
+              | [ (($v.metadata.container.tags // [])[])
+                  | select(test("^(server|agent|ui)-[0-9a-f]{7,}")) ] as $hash
+              | if ($hash | length) > 0 then
+                  { id: $v.id,
+                    created: $v.created_at,
+                    norm: ($hash[0] | sub("-amd64$";"") | sub("-arm64$";"")) }
+                else empty end')
 
           if [ -z "$VERSIONS" ]; then
             echo "No hash-tagged versions found — skipping cleanup."
@@ -508,19 +537,22 @@ jobs:
             "group_by(.norm) |
              map({ ids: [.[].id] | unique, created: max_by(.created).created }) |
              sort_by(.created) | reverse |
-             .[${KEEP}:] | [.[].ids[]]" 2>/dev/null) || true
+             .[${KEEP}:] | [.[].ids[]]")
 
           if [ "$TO_DELETE" = "[]" ] || [ -z "$TO_DELETE" ]; then
             echo "Nothing to delete (≤ ${KEEP} logical-version groups)."
             exit 0
           fi
 
-          echo "$TO_DELETE" | jq -r '.[]' | while read -r ID; do
+          DELETED=0
+          for ID in $(echo "$TO_DELETE" | jq -r '.[]'); do
             [ -z "$ID" ] && continue
             echo "Deleting version ${ID}"
-            gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
-              -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed"
+            if gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" -X DELETE --silent; then
+              DELETED=$((DELETED + 1))
+            else
+              echo "::warning::Failed to delete version ${ID}"
+            fi
           done
 
-          DELETED=$(echo "$TO_DELETE" | jq 'length')
           echo "Cleanup complete. Deleted ${DELETED} package versions."
