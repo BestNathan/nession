@@ -173,24 +173,38 @@ Before merging any PR, these MUST pass:
 
 | Gate | Command | Threshold |
 |------|---------|-----------|
-| Unit + integration tests | `cargo test` | 100% pass |
-| Coverage (Rust) | `cargo tarpaulin --out Html` | **≥ 90%** line coverage |
-| Clippy (no allow) | `cargo clippy -- -D warnings` | 0 warnings, **zero** `#[allow]` |
-| Formatting | `cargo fmt -- --check` | clean |
+| Unit + integration tests | `just test` | 100% pass |
+| Coverage (Rust) | `just coverage` | per-crate, see table below |
+| Clippy (no allow) | `cargo clippy --workspace -- -D warnings` | 0 warnings, **zero** `#[allow]` |
+| Formatting | `cargo fmt --all -- --check` | clean |
 | Web unit tests | `cd web && npm test` | 100% pass |
-| Web coverage | `cd web && npm run coverage` | **≥ 80%** line coverage |
+| Web coverage | `just web-coverage` | lines/functions/statements 80%, branches 65% |
 | TypeScript | `cd web && npx tsc --noEmit` | 0 errors |
 | ESLint | `cd web && npm run lint` | 0 warnings |
 | Build | `cd web && npm run build` | success |
 
-Coverage is enforced per-crate. New code must maintain or improve coverage — PRs that drop coverage below 90% are rejected.
+Rust coverage thresholds are per-crate and live in `scripts/check-coverage.sh` — that file is the only source of truth:
+
+| Crate | Threshold |
+|-------|-----------|
+| `nession-common` / `nession-server` | 80% line |
+| `nession-agent` | 80% line (79% on macOS — control-mode tests are skipped there) |
+| `nession-cli` | 40% line (untestable command paths excluded) |
+| `nession-claude-code` | not registered → **not checked** |
+
+Web thresholds live in `web/vite.config.ts` and are not a flat number: lines / functions / statements 80%, **branches 65%**. Note that CI's `web-check` runs `just web-lint` + `just web-test` but **not** `just web-coverage`, so web coverage is gated only by the local pre-push hook.
+
+The tool is `cargo-llvm-cov`, not tarpaulin:
 
 ```bash
-# Install tarpaulin (once)
-cargo install cargo-tarpaulin
+# Install (once)
+cargo install cargo-llvm-cov
 
-# Run coverage
-cargo tarpaulin --out Html --output-dir target/tarpaulin
+# Per-crate threshold check (what the hook and CI run)
+just coverage
+
+# Narrow to specific crates
+./scripts/check-coverage.sh nession-common nession-agent
 ```
 
 ### Error Reporting Convention
@@ -419,11 +433,11 @@ gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merg
 
 ## 测试报告
 - `cargo test`: <N> passed, 0 failed
-- `cargo tarpaulin`: <X>% coverage (threshold: 90%)
+- `just coverage`: all crates above threshold (see scripts/check-coverage.sh)
 - `cargo fmt --all -- --check`: OK
 - `cargo clippy -- -D warnings`: 0 errors
 - `npm test`: <N> passed
-- `npm run coverage`: <X>% (threshold: 80%)
+- `just web-coverage`: <X>% stmts (thresholds: 80/80/65/80)
 - `npx tsc --noEmit`: 0 errors
 - `npm run lint`: 0 warnings
 - `npm run build`: success
@@ -431,7 +445,7 @@ gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merg
 
 Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
 
-Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize. After staging validation and merge to main (with version bump), release workflow builds version-tagged images and updates production kustomize.
+Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize on `main`. After staging validation, the `staging → main` release PR merges with `--merge`; `release.yml` then only builds if a version file changed, so a release carrying runtime changes needs the follow-up bump PR to reach production. See `nession-cicd`.
 
 **Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after merging PR to staging, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
 
@@ -526,13 +540,13 @@ gh pr comment <PR-NUMBER> --body "## 核心功能截图
 | Create worktree (CC) | `EnterWorktree` tool |
 | Create worktree (manual) | `git worktree add -b feat/<slug> ../nession-<slug> main` |
 | Verify not on main | `git branch --show-current` |
-| Run all tests | `cargo test` |
-| Coverage | `cargo tarpaulin --out Html` |
+| Run all tests | `just test` |
+| Coverage | `just coverage` (Rust) / `just web-coverage` (web) |
 | TypeScript | `cd web && npx tsc --noEmit` |
 | Web build | `cd web && npm run build` |
 | Start server | `cargo run -p nession-server` |
 | Start UI dev | `cd web && npm run dev` |
-| Version bump | Edit `Cargo.toml` + `web/package.json` |
+| Version bump | Edit all four: `Cargo.toml`, `Cargo.lock`, `web/package.json`, `web/package-lock.json` |
 | Cleanup worktree | `git worktree remove <path> && git worktree prune` |
 | Check PR state | `gh pr list --head $(git branch --show-current) --state all` |
 | Update existing PR | `gh pr edit <N> --title "..." --body "..."` |
