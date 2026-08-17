@@ -16,7 +16,7 @@ interface TerminalScrollOverlayProps {
  * to page through xterm's scrollback and return to the newest output.
  *
  * Every button calls preventDefault() on pointerdown so tapping never moves
- * focus — the MobileInput textarea keeps focus and the on-screen keyboard
+ * focus — the MobileImeInput textarea keeps focus and the on-screen keyboard
  * stays open. xterm's scroll APIs clamp at the buffer boundaries, so no
  * disabled state or extra clamping is needed here.
  */

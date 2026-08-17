@@ -253,6 +253,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     rendererType: renderer,
     fontSize: PROFILES[deviceProfile].fontSize,
     scrollback: PROFILES[deviceProfile].scrollback,
+    deviceProfile,
   });
 
   // Issue #51: never mount xterm in P2P mode before the socket exists —
