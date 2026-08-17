@@ -233,9 +233,16 @@ Triggered by push to `main` or PR. See `.github/workflows/docker-publish.yml`.
 
 ### Deploying to Kubernetes
 
-Uses kustomize overlays. From repo root:
+Deploys are automatic: CI updates the image tags in the overlay and ArgoCD syncs from there. `k8s/` has no top-level kustomization — you must target an overlay explicitly.
+
 ```bash
-kubectl apply -k k8s/
+# Render to inspect what would be applied (preferred over blind apply)
+kubectl kustomize k8s/overlays/staging
+kubectl kustomize k8s/overlays/production
+
+# Manual apply — only for bootstrapping or when ArgoCD is unavailable
+kubectl apply -k k8s/overlays/staging
+kubectl apply -k k8s/overlays/production
 ```
 
 Service ports:
@@ -266,29 +273,33 @@ git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
 # 4. MERGE to staging — quality gate (rust-check + web-check) must pass.
-#    Use auto-merge for feat/fix PRs to staging:
-gh pr merge <PR-NUMBER> --auto --squash
+#    ALWAYS --rebase, never --squash (see "Why rebase everywhere" below).
+#    --auto is safe here: the quality gate gives GitHub a check to wait on.
+gh pr merge <PR-NUMBER> --auto --rebase
 
 # 5. STAGING VALIDATION — CI builds and deploys to staging automatically after merge.
 #    Verify on staging with ./scripts/deploy-watch.sh staging
 
-# 6. VERSION BUMP + RELEASE — after staging validation, bump version and merge staging to main
+# 6. VERSION BUMP + RELEASE — after staging validation, rebase staging onto a bump branch
+git fetch origin                       # local `staging` is often stale — refresh first
 git checkout main && git pull
-git checkout -b chore/bump-version
-# Edit Cargo.toml and web/package.json to bump version
+git checkout -b chore/bump-version-X.Y.Z
+# Rebase onto origin/staging, NOT the local `staging` branch. A stale local ref
+# silently releases the wrong tree and fabricates conflicts.
+git rebase origin/staging
+# Bump version in ALL FOUR files (see "Version Bumping" in nession-development)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
-git push origin chore/bump-version
-gh pr create --title "chore: bump version to X.Y.Z" --body "Version bump"
-# Merge staging into main (brings all validated features)
-git merge staging
-git push
-# chore/** branches don't trigger CI, so merge directly
-gh pr merge <PR-NUMBER> --squash
+git push -u origin chore/bump-version-X.Y.Z
+gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
+# chore/** has no CI checks → --auto would fail with "clean status". Merge directly.
+gh pr merge <PR-NUMBER> --rebase
 
 # 7. RETURN — back to main, pull merged result. OLD BRANCH IS DEAD.
 git checkout main
 git pull
 ```
+
+**⚠ Order matters in step 6:** `git rebase staging` comes **before** the version-bump commit. Rebasing after the bump would replay your bump commit onto staging and bury it mid-history.
 
 **⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch. Any follow-up work — even a one-line fix — must start from a new branch:
 
@@ -297,6 +308,19 @@ git checkout main
 git pull
 git checkout -b feat/<new-slug>
 ```
+
+### Why rebase everywhere (never squash)
+
+`main` accumulates commits that `staging` never sees (the automated `chore: update staging image tags` PRs). So `main` and `staging` permanently diverge, and every release has to reconcile them. Which merge strategy you use decides whether that reconciliation stays cheap:
+
+| Strategy | What happens on the *next* release |
+|----------|-----------------------------------|
+| `--squash` | Staging's N commits collapse into one commit whose combined patch-id matches **nothing**. Next release replays all N old commits again — and conflicts the moment `main` has touched any of the same files. |
+| `--rebase` | Each staging commit lands on `main` as a 1:1 patch-id twin. Next `git rebase staging` **skips every already-released commit automatically**. Self-correcting. |
+
+Verified behaviour of `git rebase staging` on a bump branch: commits already released are dropped with `skipped previously applied commit`, `Merge branch 'main' into staging` commits are linearized away, and `main`-only commits that were rewritten during the rebase are de-duplicated again by the final rebase-merge. Net effect on `main` is exactly the new work plus the bump commit.
+
+**⚠ Never commit an empty commit to `staging`.** An empty commit has no computable patch-id, so de-duplication cannot see it and **it is re-applied on every subsequent release**, accumulating a duplicate each time. To trigger a workflow use `gh workflow run` / `workflow_dispatch`, never `git commit --allow-empty`. To drop one that is already on `staging`, mark it `drop` during `git rebase -i staging`.
 
 ### Screenshots with Playwright
 
@@ -331,20 +355,22 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI changes
 4. Push, create PR targeting **staging** (include `Closes #<ISSUE>` in body, screenshots in PR body) → quality gate runs
-5. Merge to staging → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
-6. After staging validation, merge staging to main (with version bump) → auto-closes issue + release workflow publishes versioned images
-   - Create version bump branch from main, merge staging into it, PR to main:
-     ```bash
-     git checkout main && git pull
-     git checkout -b chore/bump-version
-     # Bump version in Cargo.toml + web/package.json
-     git add -A && git commit -m "chore: bump version to X.Y.Z"
-     git merge staging && git push
-     gh pr create --title "chore: bump version to X.Y.Z" --body "..."
-     gh pr merge <PR-NUMBER> --squash
-     ```
-7. Update image tags in k8s manifests: `k8s/kustomization.yaml`
-8. `kubectl apply -k k8s/`
+5. Merge to staging with `gh pr merge <PR> --auto --rebase` → CI builds and deploys to staging — verify with `./scripts/deploy-watch.sh staging`
+6. After staging validation, release to main with a version bump → auto-closes issue + release workflow publishes versioned images
+   ```bash
+   git fetch origin
+   git checkout main && git pull
+   git checkout -b chore/bump-version-X.Y.Z
+   git rebase origin/staging             # NOT local `staging` — it is often stale
+   # Bump version in all four files (Cargo.toml, Cargo.lock, web/package.json, web/package-lock.json)
+   git add -A && git commit -m "chore: bump version to X.Y.Z"
+   git push -u origin chore/bump-version-X.Y.Z
+   gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
+   gh pr merge <PR-NUMBER> --rebase      # no --auto: chore/** has no checks
+   ```
+7. Watch the release: `./scripts/deploy-watch.sh prod`
+
+**No manual k8s step.** `release.yml`'s `update-prod-kustomize` job opens a PR that sets the version tags in `k8s/overlays/production/kustomization.yaml`; ArgoCD syncs from there. Do not hand-edit overlay image tags, and do not run `kubectl apply` as part of a release.
 
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
