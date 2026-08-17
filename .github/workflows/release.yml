@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+# Serialize releases. update-prod-kustomize rebase-merges a PR into main, and
+# staging.yml's update-staging-kustomize does the same — both are unserialized
+# against each other, but at least two releases cannot race. Never cancel: a
+# half-finished release can have pushed images and an open kustomize PR.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
   # ═══════════════════════════════════════════════════════════════════
   # Version check — gate for entire workflow
@@ -25,6 +33,18 @@ jobs:
           RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           WEB_VER=$(grep '"version"' web/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+          # server/agent images are tagged from RUST_VER and ui from WEB_VER,
+          # while a single version_changed gate covers both. If the two drift,
+          # bumping only web/package.json would re-push server-${RUST_VER} and
+          # agent-${RUST_VER} over already-released tags and then try to create
+          # a GitHub Release at the existing v${RUST_VER} tag. Fail loudly
+          # instead: the four version files must move together.
+          if [ "$RUST_VER" != "$WEB_VER" ]; then
+            echo "::error::Version mismatch — Cargo.toml=${RUST_VER}, web/package.json=${WEB_VER}."
+            echo "::error::Bump all four version files together (Cargo.toml, Cargo.lock, web/package.json, web/package-lock.json)."
+            exit 1
+          fi
 
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
@@ -526,7 +546,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # Check out main's current tip, not github.sha: main may have advanced
+      # since this run started (staging.yml rebase-merges its own kustomize PR
+      # into main), and branching from a stale commit makes the rebase-merge
+      # below replay onto an unexpected base.
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - run: |
           cd k8s/overlays/production
@@ -542,9 +569,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create a branch for the kustomize update
+          # Create a branch for the kustomize update.
+          # Include the short SHA: version-check deliberately allows retrying
+          # the same version (tag-absent escape hatch), and a version-only
+          # branch name would collide with the branch/PR left behind by the
+          # previous failed attempt.
           RUST_VER="${{ needs.version-check.outputs.rust_version }}"
-          BRANCH_NAME="chore/update-prod-kustomize-v${RUST_VER}"
+          BRANCH_NAME="chore/update-prod-kustomize-v${RUST_VER}-${{ needs.version-check.outputs.short_sha }}"
           git checkout -b "$BRANCH_NAME"
 
           git add k8s/overlays/production/kustomization.yaml
@@ -707,29 +738,40 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Delete old releases (keep last 5)
+        env:
+          KEEP: 5
         run: |
+          # NOT WIRED UP ON PURPOSE. `gh release list` needs GH_TOKEN, which is
+          # deliberately not set: this job has never actually run (the call has
+          # always failed into a suppressed error), so 53 releases have
+          # accumulated. Setting the token would delete 48 of them on the next
+          # release AND their git tags (--cleanup-tag), irreversibly.
+          #
+          # Deleting a tag also flips version-check's `version_changed` back to
+          # true for that version, because it probes `git rev-parse v<ver>`.
+          #
+          # To enable: set GH_TOKEN below, and first decide how much release
+          # history to keep. Until then this step reports honestly instead of
+          # printing "Cleanup complete" while doing nothing.
           echo "Fetching releases..."
-          TAGS=$(gh release list --limit 100 --json tagName,createdAt \
-            -q 'sort_by(.createdAt) | reverse | .[].tagName' 2>/dev/null || echo "")
-
-          if [ -z "$TAGS" ]; then
-            echo "No releases found — skipping cleanup."
+          if ! TAGS=$(gh release list --limit 100 --json tagName,createdAt \
+            -q 'sort_by(.createdAt) | reverse | .[].tagName' 2>&1); then
+            echo "::warning::Cannot list releases — cleanup skipped (no GH_TOKEN)."
+            echo "$TAGS" | head -3
             exit 0
           fi
 
-          COUNT=0
-          for TAG in $TAGS; do
-            COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
-              echo "Deleting release: ${TAG}"
-              gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || \
-                echo "  ⚠ Failed to delete release ${TAG}"
-            else
-              echo "Keeping release: ${TAG} (position: ${COUNT})"
-            fi
-          done
+          if [ -z "$TAGS" ]; then
+            echo "No releases found — nothing to clean up."
+            exit 0
+          fi
 
-          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old releases."
+          TOTAL=$(printf '%s\n' "$TAGS" | grep -c .)
+          if [ "$TOTAL" -gt "$KEEP" ]; then
+            echo "::warning::${TOTAL} releases exist, KEEP=${KEEP}."
+            echo "::warning::Deletion is intentionally not performed — see the comment in this step."
+          fi
+          printf '%s\n' "$TAGS" | head -n "$KEEP" | sed 's/^/Keeping release: /'
 
   # ═══════════════════════════════════════════════════════════════════
   # Cleanup — keep last 5 GHCR version-tagged packages
@@ -740,31 +782,55 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Delete old package versions (keep last 5)
+      - name: Delete old hash-tagged package versions (keep last 5)
+        env:
+          KEEP: 5
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           PACKAGE="nession"
 
+          # Only ever touch hash-tagged versions. Version-tagged images
+          # (server-0.28.0, ...) are the production artifacts and rollback
+          # targets — an unfiltered "keep newest 5" would delete them,
+          # because staging pushes 9 hash-tagged versions per build and so
+          # always owns the 5 newest slots.
           echo "Fetching versions for ${OWNER}/${PACKAGE}..."
-          VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" \
-            --paginate \
-            -q 'sort_by(.created_at) | reverse | .[].id' 2>/dev/null || echo "")
+          if ! RAW=$(gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions" --paginate 2>&1); then
+            echo "::warning::Cannot list GHCR versions for ${OWNER}/${PACKAGE} — cleanup skipped."
+            echo "::warning::The default GITHUB_TOKEN cannot read user-scoped packages;"
+            echo "::warning::this step needs a PAT with read:packages + delete:packages."
+            echo "$RAW" | head -5
+            exit 0
+          fi
+
+          # --paginate emits one JSON array per page; -s merges the stream and
+          # flatten(1) turns [[page],[page]] into a single array, so the sort
+          # below is global rather than per-page.
+          VERSIONS=$(printf '%s' "$RAW" | jq -r -s 'flatten(1)
+            | sort_by(.created_at) | reverse | .[]
+            | select([(.metadata.container.tags // [])[]
+                | test("^(server|agent|ui)-[0-9a-f]{7,}")] | any)
+            | .id')
 
           if [ -z "$VERSIONS" ]; then
-            echo "No versions found — skipping cleanup."
+            echo "No hash-tagged versions found — nothing to clean up."
             exit 0
           fi
 
           COUNT=0
+          DELETED=0
           for ID in $VERSIONS; do
             COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
-              echo "Deleting version ${ID} (position: ${COUNT})"
-              gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" \
-                -X DELETE --silent 2>/dev/null || echo "  ⚠ Failed to delete version ${ID}"
+            if [ "$COUNT" -gt "$KEEP" ]; then
+              echo "Deleting hash-tagged version ${ID} (position ${COUNT})"
+              if gh api "/users/${OWNER}/packages/container/${PACKAGE}/versions/${ID}" -X DELETE --silent; then
+                DELETED=$((DELETED + 1))
+              else
+                echo "::warning::Failed to delete version ${ID}"
+              fi
             else
-              echo "Keeping version ${ID} (position: ${COUNT})"
+              echo "Keeping hash-tagged version ${ID} (position ${COUNT})"
             fi
           done
 
-          echo "Cleanup complete. Deleted $((COUNT > 5 ? COUNT - 5 : 0)) old versions."
+          echo "Cleanup complete. Deleted ${DELETED} of ${COUNT} hash-tagged versions."
