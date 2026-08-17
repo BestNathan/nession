@@ -1551,7 +1551,7 @@ impl AgentServer {
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => err("list_failed", &e.to_string()),
+                    Err(e) => err("list_failed", &format_error_chain(&e)),
                 }
             }
 
@@ -1622,7 +1622,7 @@ impl AgentServer {
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => err("create_dir_failed", &e.to_string()),
+                    Err(e) => err("create_dir_failed", &format_error_chain(&e)),
                 }
             }
 

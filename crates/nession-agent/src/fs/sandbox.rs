@@ -40,20 +40,38 @@ impl PathSandbox {
             return Self::resolve_absolute(path);
         }
 
-        // Relative path: normalize and join with sandbox root.
-        let relative = if let Some(root_name) = self.root.file_name() {
-            Path::new(path)
-                .strip_prefix(root_name)
-                .map(|p| p.as_os_str().to_string_lossy().into_owned())
-                .unwrap_or_else(|_| path.to_string())
-        } else {
-            path.to_string()
-        };
-        let combined = self.root.join(&relative);
+        // Relative path: join with the sandbox root, preferring the literal
+        // reading. Some clients send "<root-name>/rest" meaning "<root>/rest",
+        // so a duplicated leading component is stripped — but only as a
+        // fallback. Stripping unconditionally made a real subdirectory whose
+        // name matches the root's own name unreachable: browsing into
+        // "<root>/<root-name>" silently re-listed the root.
+        let combined = self.root.join(path);
+        if combined.exists() {
+            return Self::resolve_existing_or_ancestor(&combined);
+        }
+
+        if let Some(stripped) = self.strip_duplicated_root_name(path) {
+            // Accept the stripped reading when it exists, or when its parent
+            // does — the latter keeps "create a new file" working.
+            let parent_exists = stripped.parent().is_some_and(Path::exists);
+            if stripped.exists() || parent_exists {
+                return Self::resolve_existing_or_ancestor(&stripped);
+            }
+        }
 
         // Canonicalize. For non-existent paths (create_dir, write_file),
         // walk up the ancestor chain and append the suffix.
         Self::resolve_existing_or_ancestor(&combined)
+    }
+
+    /// If `path` starts with the sandbox root's own directory name, return the
+    /// root joined with the remainder. Returns `None` when there is nothing to
+    /// strip.
+    fn strip_duplicated_root_name(&self, path: &str) -> Option<PathBuf> {
+        let root_name = self.root.file_name()?;
+        let rest = Path::new(path).strip_prefix(root_name).ok()?;
+        Some(self.root.join(rest))
     }
 
     /// Walk up from `base` until an existing ancestor is found, then join
@@ -283,6 +301,49 @@ mod tests {
             resolved,
             dir.path().canonicalize().unwrap().join("nope.txt")
         );
+    }
+
+    /// A real subdirectory whose name matches the sandbox root's own name must
+    /// stay reachable. The duplicated-root-name strip is only a fallback, so
+    /// the literal reading wins whenever it actually exists.
+    #[test]
+    fn test_resolve_prefers_real_subdir_over_root_name_strip() {
+        let parent = tempfile::tempdir().unwrap();
+        let root_path = parent.path().join("proj");
+        fs::create_dir(&root_path).unwrap();
+        let sandbox = PathSandbox::new(&root_path).unwrap();
+
+        // <root>/proj/inside/x.txt — "proj" here is a genuine subdirectory.
+        let nested = root_path.join("proj/inside");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("x.txt"), b"x").unwrap();
+
+        assert_eq!(
+            sandbox.resolve("proj").unwrap(),
+            root_path.join("proj").canonicalize().unwrap()
+        );
+        assert_eq!(
+            sandbox.resolve("proj/inside").unwrap(),
+            nested.canonicalize().unwrap()
+        );
+        assert_eq!(
+            sandbox.resolve("proj/inside/x.txt").unwrap(),
+            nested.join("x.txt").canonicalize().unwrap()
+        );
+    }
+
+    /// With no real `<root>/<root-name>` directory, a client sending
+    /// "<root-name>/rest" still means "<root>/rest".
+    #[test]
+    fn test_resolve_strips_root_name_for_new_file() {
+        let parent = tempfile::tempdir().unwrap();
+        let root_path = parent.path().join("proj");
+        fs::create_dir(&root_path).unwrap();
+        let sandbox = PathSandbox::new(&root_path).unwrap();
+
+        // Nothing exists yet, so the stripped reading wins on parent existence.
+        let resolved = sandbox.resolve("proj/new.txt").unwrap();
+        assert_eq!(resolved, root_path.canonicalize().unwrap().join("new.txt"));
     }
 
     #[test]
