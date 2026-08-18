@@ -83,21 +83,33 @@
 
 ### 分类结果
 
-按契约对 29 个 `tests/` 文件实测归类（判据：`connect_async`/`WebSocketServer::`/`AgentServer::`/`TcpListener::bind` → 端口；`SessionManager::`/`Command::new("tmux")`/`ControlModeSession` → tmux；`Database::(new|open)` → 真实 DB）：
+按契约对 29 个 `tests/` 文件实测归类。判据：**起进程**（任何 `Command::new`）、**开端口**（`TcpListener` / `httptest` / `connect_async`）、**真实 DB**（`Database::new|open` / `NamedTempFile`）三者任一命中即为集成。
 
-**单元层 —— 13 个文件搬进 lib target**
+⚠️ **初稿此处判错了 3 个文件。** 初稿的 grep 只找 `Command::new("tmux"`，漏掉了 `Command::new("cargo")`。实际情况：
+
+| 文件 | 实际行为 | 初稿判定 | 正确判定 |
+|---|---|---|---|
+| `nession-cli/tests/client_commands_test.rs` | spawn 5 个 `cargo` 子进程 | 单元 ❌ | **集成** |
+| `nession-cli/tests/session_commands_test.rs` | spawn 5 个 `cargo` 子进程 | 单元 ❌ | **集成** |
+| `nession-cli/tests/update_integration.rs` | 绑 14 个 httptest 端口 | 单元 ❌ | **集成** |
+
+修正后剩余 10 个「单元」文件已用正确判据逐个复核，无更多漏网。**最终划分：10 单元 / 19 集成。**
+
+这个修正顺带解决了一个隐患，见下文「nession-cli 的双重编译」。
+
+**单元层 —— 10 个文件搬进 lib target**
 
 ```
 nession-common:      config_test.rs   → src/config.rs 内联
                      paths_test.rs    → src/paths.rs 内联
                      protocol_test.rs → src/protocol_tests.rs（sibling）
 nession-agent:       config_test.rs   → src/config.rs 内联
-nession-claude-code: handler_tests.rs  → src/agent.rs 内联
-                     scanner_tests.rs  → src/scanner.rs 内联
+nession-claude-code: scanner_tests.rs  → src/scanner.rs 内联
                      security_tests.rs → src/security.rs 内联
-nession-cli:         client_commands_test.rs, session_commands_test.rs,
-                     terminal_test.rs, update_integration.rs → 各自 src 内联
-nession-server:      broker_test.rs, client_registry_test.rs → 各自 src 内联
+                     handler_tests.rs  → 拆分，见下
+nession-cli:         terminal_test.rs → src/terminal/raw.rs 内联（注意不是 terminal/mod.rs）
+nession-server:      broker_test.rs           → src/broker.rs 内联
+                     client_registry_test.rs  → src/server/client_registry.rs 内联
 ```
 
 内联后源文件行数（已实测，均可接受）：
@@ -112,18 +124,49 @@ nession-server:      broker_test.rs, client_registry_test.rs → 各自 src 内�
 | `nession-claude-code/src/security.rs` | 55 | 40 | 95 |
 | `nession-claude-code/src/agent.rs` | 191 | 56 | 247 |
 
-只有 `protocol.rs` 过厚，用 sibling 文件：
+只有 `protocol.rs` 过厚，用 sibling 文件。**但模块不能叫 `tests`** —— `protocol.rs` 已有 `#[cfg(test)] mod tests`（739–970 行），再声明一个同名模块是 `E0428`：
 
 ```rust
-// src/protocol.rs 末尾
+// src/protocol.rs 末尾 —— 与已有的 mod tests 并存
 #[cfg(test)]
-#[path = "protocol_tests.rs"]
-mod tests;
+mod protocol_tests;
 ```
 
-`#[path]` 相对当前文件所在目录解析，落到 `src/protocol_tests.rs`。测试仍编进 lib target，`cargo test --lib` 照样跑到，源文件不膨胀。**约定：以后任何超过约 600 行的源文件，其单元测试都用这个模式。**
+`mod protocol_tests;` 本身就解析到 `src/protocol_tests.rs`，所以 `#[path]` 属性可以省掉。**约定：以后任何超过约 600 行的源文件，其单元测试都用 sibling 文件模式，模块名取 `<module>_tests` 避免与既有 `mod tests` 冲突。**
 
-**集成层 —— 16 个文件收成 3 个 harness**
+（已实测验证该模式：编译通过、`cargo test --lib` 能跑到、`use super::*` 可触及私有项、clippy `-D warnings` 干净、`cargo fmt` 正常格式化 sibling 文件。）
+
+### 内联的逐文件适配
+
+搬迁不是纯移动 —— `tests/` 里的测试把 crate 当**外部依赖**引用（`use nession_common::config::ServerConfig`），内联后它在 crate **内部**，路径全变。逐文件的实测适配点：
+
+| 目标 | 已有 `mod tests`？ | 必须处理 |
+|---|---|---|
+| `common/src/config.rs` | ✅ 56–103 | 删 `use nession_common::config::…`；**函数体**内 `nession_common::paths::server_db_path()` → `crate::paths::server_db_path()` |
+| `common/src/paths.rs` | ✅ 98–187 | 🔴 **6 个测试函数名硬冲突**，见下；🔴 移入的测试须取 `ENV_MUTEX` 锁；🔴 删掉 `#[allow(clippy::expect_used)]`（CLAUDE.md 禁止，且 `clippy.toml` 的 `allow-expect-in-tests` 已使其冗余） |
+| `common/src/protocol_tests.rs` | ✅ 739–970（另一个模块） | 模块名必须是 `protocol_tests` 而非 `tests` |
+| `agent/src/config.rs` | ✅ 177–318 | 删 `use nession_agent::config::AgentConfig` |
+| `claude-code/src/scanner.rs` | ✅ 172–232 | 去掉 `scanner::` 前缀；🔴 **必须保留 `use std::path::PathBuf;`** —— `scanner.rs` 只 import 了 `Path`，`super::*` 供不上 `PathBuf` |
+| `claude-code/src/security.rs` | ❌ 需新建 | 去掉 `security::` 前缀 |
+| `cli/src/terminal/raw.rs` | ✅ 581–749 | 🔴 **删掉移入文件的 `use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};`** —— 目标模块 584 行已有完全相同的一行，重复显式 import 是 `E0252`；`use tokio::sync::{mpsc, watch}` 收窄为 `mpsc`（`watch` 由 `super::*` 提供） |
+| `server/src/broker.rs` | ❌ 需新建 | 删 `use nession_server::broker::ConnectionBroker` |
+| `server/src/server/client_registry.rs` | ❌ 需新建 | 两个 import 都删，`use super::*;` 覆盖（注意 `super` 深度：测试模块内 `super` = `client_registry`，而文件自身第 6 行的 `super` = `server`） |
+
+**`paths.rs` 的 6 个硬冲突**（`test_nession_home`、`test_server_dir`、`test_agent_dir`、`test_server_db_path`、`test_server_pid_path`、`test_agent_pid_path` 六个名字目标模块里全都已存在）：
+
+处置是**重命名而非删除**。已有的 6 个用 `.ends_with(...)` 断言，移入的 6 个断言与 `dirs::home_dir()/.nession` 精确相等 —— 后者是更强的断言，两者都有价值。移入的加 `_exact` 后缀。
+
+**本次重构不删除任何测试。** 有若干测试与目标模块已有测试语义重叠（`protocol` 的 `test_message_new`、`agent/config` 的 `test_agent_config_default(s)`、`raw.rs` 的按键转换与 extract-output 系列），删掉它们或许是对的，但那是独立的判断题，混进结构性重构会让 `test-inventory.sh` 无法区分「搬丢了」和「故意删了」。**结构重构保持行为不变，语义剪枝另开 PR。**
+
+**`claude-code/tests/handler_tests.rs` 目标要拆。** 它的 3 个测试没有一个碰 `agent.rs`：`full_scan_and_read_flow` 走 `scanner::scan_claude_dir` → 进 `scanner.rs`；`file_too_large_detection` 只用 `security::MAX_FILE_SIZE` → 进 `security.rs`；`pagination_logic` 对一个局部 `String` 做纯算术，**不碰 crate 里任何代码** —— 按不删除原则先随 `scanner.rs` 搬走，同时登记为欠账（它应该被删或改写成真正测分页逻辑）。
+
+**nession-cli 的双重编译（既有问题，本次不修）。** `crates/nession-cli/src/main.rs` 第 6–14 行重新声明了 `mod commands / update / client / terminal / utils`，而不是依赖自己的 lib。这些文件因此同时编进 lib 和 bin 两个 target，其中的内联测试**跑两遍**（已实测确认：`update::tests::binary_status_name_*` 在 `unittests src/lib.rs` 和 `unittests src/main.rs` 各跑一次）。
+
+上面把 3 个 CLI 文件正确归类为集成，顺带避开了最坏的后果 —— 那 10 个 `cargo run --bin nession` 子进程测试和 14 个 httptest 端口不会翻倍。留下的 `terminal_test.rs` 有 8 个纯内存测试，跑两遍无害只是浪费。
+
+根治办法是让 `main.rs` 改用 `use nession_cli::…` 消费 lib，但那是独立的重构，登记为欠账，不塞进本次。
+
+**集成层 —— 19 个文件收成 3 个 harness**
 
 ```
 crates/nession-server/tests/integration/
@@ -149,10 +192,15 @@ crates/nession-agent/tests/integration/
 
 crates/nession-cli/tests/integration/
 ├── main.rs
-└── attach_session.rs    # ← attach_session_test.rs
+├── attach_session.rs    # ← attach_session_test.rs
+├── client_commands.rs   # ← client_commands_test.rs（spawn 子进程）
+├── session_commands.rs  # ← session_commands_test.rs（spawn 子进程）
+└── update.rs            # ← update_integration.rs（绑 httptest 端口）
 ```
 
 `nession-common` 和 `nession-claude-code` 分层后没有集成测试 —— 它们是纯库，符合预期。
+
+**cargo 会自动发现 `tests/integration/main.rs` 并命名 target 为 `integration`**，无需改 `Cargo.toml`（三个 crate 都没有 `[[test]]` 段）。也无任何工具按 target 名引用测试 —— `justfile`、`scripts/filtered-test.sh` 用 `cargo test --workspace`，`check-coverage.sh` 用 `cargo llvm-cov -p <crate>`，所以重命名 target 是安全的。
 
 **收益：**
 - `cargo test --lib` 精确跑单元层，`cargo test --test integration -p <crate>` 精确跑集成层
@@ -390,7 +438,7 @@ pre-commit 加单元层的代价不大：它已经在跑 `cargo clippy --workspa
 
 ### 最大风险是改丢，不是改坏
 
-这次要移动 118 个文件（16 个 Rust 合并进 3 个 harness、13 个 Rust 搬进内联、89 个 web 移位）。任何测试在搬迁中静默失联，现有 gate 都不会报错 —— 测试变少不会让 CI 变红，覆盖率下滑可以被 exclude 藏住。这个仓库已经踩过这个坑，那份陈旧 exclude 名单就是证据。
+这次要移动 118 个文件（19 个 Rust 合并进 3 个 harness、10 个 Rust 搬进内联、89 个 web 移位）。任何测试在搬迁中静默失联，现有 gate 都不会报错 —— 测试变少不会让 CI 变红，覆盖率下滑可以被 exclude 藏住。这个仓库已经踩过这个坑，那份陈旧 exclude 名单就是证据。
 
 ### 防线：`scripts/test-inventory.sh`
 
@@ -436,6 +484,9 @@ PR 2 动 89 个 web 文件，和任何在飞的 web 分支必然冲突。开 PR 
 | 模块 | 为什么现在没测 |
 |---|---|
 | `nession-claude-code` 整个 crate | 覆盖率仅 56%，本次只锁 55% 地板，需提到 80% |
+| `nession-cli/src/main.rs` 的模块重复声明 | 它重新声明 `mod commands/update/client/terminal/utils` 而不消费自己的 lib，导致内联测试跑两遍。根治需独立重构。 |
+| `claude-code` 的 `pagination_logic` 测试 | 对局部 `String` 做纯算术，不碰 crate 任何代码 —— 应删除或改写成真正测分页 |
+| 语义重叠的重复测试 | `protocol::test_message_new`、`agent/config` 的 `test_agent_config_default(s)`、`raw.rs` 的按键转换系列 —— 结构重构不动它们，剪枝另开 PR |
 | `env/EnvPanel.tsx` | WebSocket 集成 |
 | `env/EnvUploadDialog.tsx` | 文件上传 + WebSocket |
 | `env/EnvInlineEditor.tsx` | WebSocket |
