@@ -157,7 +157,25 @@ crates/nession-cli/tests/integration/
 **收益：**
 - `cargo test --lib` 精确跑单元层，`cargo test --test integration -p <crate>` 精确跑集成层
 - test binary 从 16 个降到 3 个，链接次数大幅下降，集成层编译显著变快
-- `main.rs` 承接现在各文件重复的 helper（`TestServer`、`unique_session_name`、`current_timestamp` 至少在 3 个文件里各写了一遍），去重顺带做掉
+- `main.rs` 承接跨文件重复的 helper，去重顺带做掉
+
+**helper 去重的实测范围**（比初稿预估的小得多 —— 初稿断言 `TestServer`/`unique_session_name`/`current_timestamp` 各重复 3 次以上，实测不成立）：
+
+| Crate | helper | 实际情况 | 处置 |
+|---|---|---|---|
+| server | `current_timestamp` | 2 处定义，**字节相同** | 提到 `main.rs` |
+| server | `TestServer` | **仅 1 处定义**（`integration_test.rs`），无重复 | 不动 |
+| server | `unique_session_name` | **仅 1 处定义**（`relay_integration_test.rs`），无重复 | 留在 `relay.rs` |
+| server | `ts()` | `current_timestamp` 的同义异名版 | 可选 `use crate::current_timestamp as ts;` |
+| agent | `unique_session_name` | **5 处定义**，其中 4 处相同 | 相同的 4 处提到 `main.rs` |
+| agent | └ `control_mode_test.rs` 的那份 | **语义不同** —— 前缀多一段 `ctrl-` | **保留为模块私有**，不引用 crate 根的版本 |
+| agent | `start_mock_server` | 2 处，签名相同但**函数体不同**（channel 容量 100 vs 200；转发循环 clone-并忽略错误 vs 无 clone-出错即 break） | **本次不提取** —— 统一会改变 `connection.rs` 的行为 |
+| agent | `start_server(_port)` / `start_test_agent_server()` | 函数体字节相同，仅名字不同且前者有个被丢弃的 `_port` 参数 | **本次不提取** —— 需改 18 处调用点，收益不抵风险 |
+| cli | —— | 单文件，无重复 | 不动 |
+
+**提取 helper 后必须裁剪 import，否则 `-D warnings` 直接失败。** 四个文件的 `std::time` import 会因为 helper 搬走而变成未使用：`websocket.rs`、`full_stack.rs`（server）、`server.rs`、`sync.rs`（agent）。CLAUDE.md 禁止 `#[allow(...)]`，所以这是硬失败而非警告。
+
+**新增的并发暴露面。** `cargo test` 顺序跑各 test binary，但**同一 binary 内的测试并行跑**。agent 从 6 个 binary 合成 1 个，意味着 `tmux.rs`、`control_mode.rs`、`server.rs`、`sync.rs`、`full_chain.rs`、`connection.rs` 的测试第一次同时并发。这一点需要留意：`control_mode` 在 macOS 被跳过的原因恰恰是**并行**的 control-mode 客户端会让 tmux 3.6b 崩溃，合并后 Linux CI 上的并发暴露只增不减。固定端口已核对无冲突（`connection` 用 29081–29085，`sync` 用 29091–29095，其余绑 `127.0.0.1:0`）。若合并后出现 flake，处置手段是 `--test-threads` 或 `cargo-nextest`（按测试隔离进程），而不是把测试改脆。
 
 **已验证无洞：** 三个 `main.rs`（cli/agent/server）里零测试，`--lib` 不会漏掉 bin target 的测试。
 
@@ -331,11 +349,15 @@ pre-commit 加单元层的代价不大：它已经在跑 `cargo clippy --workspa
 
 ## 覆盖率策略
 
-1. **`nession-claude-code` 登记进 `scripts/check-coverage.sh`。** 先 `cargo llvm-cov -p nession-claude-code --json` 量实际值，向下取整到 5 的倍数作为阈值，同时补 `FIX_HINTS`。该 crate 分层后全是单元测试，485 行 src / 16 个测试。
+1. **`nession-claude-code` 登记进 `scripts/check-coverage.sh`，阈值 55%。** 已实测：**56%**（174/309 可执行行）。按"向下取整到 5 的倍数"定 55%，同时补 `FIX_HINTS`。
 
-2. **web 阈值重测。** 删掉第一类 exclude 后分母变大，`lines`/`functions`/`statements` 80 + `branches` 65 按实测值重定。**只降不升，且必须在 PR 里记录降的原因** —— 否则这一步就变成用调阈值掩盖覆盖率下滑。
+   **这个数字比预期低得多**，与其他核心 crate 的 80% 差距明显。登记 55% 的作用是**锁住地板、防止继续下滑**，不代表达标。把"将 `nession-claude-code` 提到 80%"登记为欠账 issue。不在本次补测试 —— 那会把一个结构性重构 PR 变成混合了新测试的大 PR，评审质量下降。
 
-3. **`--skip terminal_io --skip full_chain` 保留，注释写诚实。** 现注释只说了"instrumentation 下太慢"，漏了后半句。这 4 个测试是：
+2. **另需实测的一处：helper 搬迁对分母的影响。** `check-coverage.sh` 用 `endswith("/main.rs")` 排除文件。旧的 `tests/db_test.rs` 等不以 `main.rs` 结尾、其行数计入分母；新增的 `tests/integration/main.rs` 会被排除。所以被提取到 `main.rs` 的 helper 行数从"计入"变为"排除"。影响应该很小，但必须在迁移前后各跑一次 `./scripts/check-coverage.sh` 对比 `[covered/count]` 实数，而不是只看百分比。
+
+3. **web 阈值重测。** 删掉第一类 exclude 后分母变大，`lines`/`functions`/`statements` 80 + `branches` 65 按实测值重定。**只降不升，且必须在 PR 里记录降的原因** —— 否则这一步就变成用调阈值掩盖覆盖率下滑。
+
+4. **`--skip terminal_io` 保留、`--skip full_chain` 删除。** 现注释只说了"instrumentation 下太慢"，漏了后半句。这 4 个测试是：
 
    | 测试 | 位置 | 层 |
    |---|---|---|
@@ -345,6 +367,24 @@ pre-commit 加单元层的代价不大：它已经在跑 `cargo clippy --workspa
    | `relay_attach_and_terminal_io` | `nession-server/tests/relay_integration_test.rs:200` | 集成 |
 
    补充说明：它们覆盖的代码在覆盖率里被算作未覆盖，现有阈值是在这个前提下定的；且它们仍在 `just test-unit` / `just test-integration` 里照跑 —— **跳过的是测量，不是执行**。
+
+   **`--skip full_chain` 必须在本次删除，否则分层会静默破坏覆盖率。** libtest 的 `--skip` 是对**完整测试路径**做子串匹配。`e2e_test.rs` 含 7 个测试，改名为 `full_chain.rs` 后它们全部变成 `full_chain::*`，于是 `--skip full_chain` 会把 7 个全部排除在测量之外，而非预期的 1 个：
+
+   ```
+   full_chain::test_terminal_io_through_full_chain        ← 唯一想跳过的
+   full_chain::test_full_agent_server_integration         ← 会被误跳
+   full_chain::test_client_connects_to_agent_via_p2p      ← 会被误跳
+   full_chain::test_session_lifecycle                     ← 会被误跳
+   full_chain::test_agent_reconnects_after_server_restart ← 会被误跳
+   full_chain::test_multiple_agents_register              ← 会被误跳
+   full_chain::test_graceful_shutdown                     ← 会被误跳
+   ```
+
+   `nession-agent` 阈值卡在 80%（macOS 79%）的边缘，少 6 个测试的覆盖贡献很可能直接跌破。
+
+   而 `--skip full_chain` **现在就已经是冗余的** —— 它唯一要跳过的 `test_terminal_io_through_full_chain` 名字里含 `terminal_io`，已被另一个 filter 匹配。所以删掉它既消除隐患又不改变当前行为。
+
+   不采用「把模块改名成 `e2e.rs` 来避开子串」的做法 —— 那与本设计"Rust 侧不使用 e2e 一词"的决定冲突。模块名保持 `full_chain.rs`，改的是脚本。
 
 ## 迁移顺序与风险
 
@@ -395,6 +435,7 @@ PR 2 动 89 个 web 文件，和任何在飞的 web 分支必然冲突。开 PR 
 
 | 模块 | 为什么现在没测 |
 |---|---|
+| `nession-claude-code` 整个 crate | 覆盖率仅 56%，本次只锁 55% 地板，需提到 80% |
 | `env/EnvPanel.tsx` | WebSocket 集成 |
 | `env/EnvUploadDialog.tsx` | 文件上传 + WebSocket |
 | `env/EnvInlineEditor.tsx` | WebSocket |
