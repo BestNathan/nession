@@ -280,7 +280,7 @@ gh pr merge <PR-NUMBER> --auto --rebase
 # 5. STAGING VALIDATION
 ./scripts/deploy-watch.sh staging
 
-# 6. RELEASE — staging → main, MUST be --rebase
+# 6. RELEASE — staging → main, MUST be --merge
 gh pr list --state merged --base staging   # audit what is being released, find linked issues
 gh pr create --base main --head staging --title "chore: release (staging → main)" \
   --body "$(cat <<'BODY'
@@ -294,7 +294,7 @@ Closes #<ISSUE>
 Closes #<ISSUE>
 BODY
 )"
-gh pr merge <PR-NUMBER> --rebase   # never --merge, never --squash
+gh pr merge <PR-NUMBER> --merge   # never --rebase, never --squash
 
 # 7. VERSION BUMP — only if this release warrants one
 git checkout -b chore/bump-version-X.Y.Z origin/main
@@ -307,25 +307,27 @@ gh pr merge <PR-NUMBER> --rebase   # no --auto
 # 8. WATCH RELEASE — wait for release.yml to finish writing the prod overlay tag
 ./scripts/deploy-watch.sh prod
 
-# 9. RESET — staging back to main. Force push, not a fast-forward.
+# 9. SYNC — main → staging. Always a fast-forward; no force push.
 #    Do this LAST, once main has stopped moving (bump + prod tag commit are in).
 git fetch origin
-git log --oneline origin/main..origin/staging   # MUST be empty — anything listed gets DISCARDED
-git push --force-with-lease=staging:$(git rev-parse origin/staging) \
-  origin origin/main:refs/heads/staging
+git push origin origin/main:refs/heads/staging
 ```
 
-**⚠ Step 6 must be `--rebase`.** Every merge in this repo is a rebase — no merge commits, no squashing. GitHub's rebase-merge replays `staging`'s commits onto `main` as new SHAs and **leaves `staging` pointing at the originals**, so `staging` is not an ancestor of `main` afterwards and step 9 cannot be a fast-forward. That drift is real and measured (2026-08-17: after rebase-releasing PRs #294/#296, `staging` held two orphaned commits while their rebased twins sat on `main`). **Step 9 is what neutralizes it** — 6 and 9 are one operation, never do 6 without 9.
+**⚠ Step 6 must be `--merge`.** The merge commit records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main` and step 9 is a fast-forward forever. No orphaned commits exist, and `staging` never needs a force push.
 
-**⚠ The reset discards whatever is on `staging` but not on `main`.** Right after a release that set is empty — the release just moved it all across, and the orphans left behind are duplicates of what landed. That is why the reset belongs *only* at the end of a release. Run it while unreleased work sits on `staging` and you lose that work. Always check `git log --oneline origin/main..origin/staging` first: it must list nothing but rebase orphans.
+**Why not `--rebase` here** — even though every *other* merge in this repo is a rebase. GitHub's rebase-merge **always rewrites the commits and leaves the head branch pointing at the originals**, so `staging` would stop being an ancestor of `main` after every release. It rewrites even when nothing forces it to: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the *identical* tree `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43.
 
-**⚠ Step 9 is a force push, it is not optional, and it goes last.** Steps 7 and 8 both add commits to `main` (the bump, then `release.yml`'s `chore: update prod image tags`), so resetting before them leaves `staging` two commits behind for no reason. Reset once `main` has stopped moving.
+Those orphans are usually harmless, because a later rebase skips them by patch-id — measured: orphan `67afd56` and its twin `62a5731` both hash to `e56a93b449d8`, and a controlled repro confirmed the replay is skipped. But an orphan whose release rebase **resolved a conflict** carries a different patch-id, so it re-applies and re-conflicts on *every* subsequent release until someone drops it by hand. That is not hypothetical: the 0.29.0 release produced exactly one such orphan, `aeb25f8` (`fdf7df10c5d8`) against `8d0125d` (`be13108ebd0b`), from the overlay conflict. `--merge` removes the entire class rather than relying on de-duplication holding.
 
-Branching from `main` (step 1) is only correct while `main` is not behind `staging`; skip the reset and `main` starts missing unreleased work, new branches lack code they need, and the *next* release conflicts. Force-pushing `staging` is safe here for a reason worth knowing: **ArgoCD reads `main` for both overlays**, so the `staging` branch is not the deploy source for the staging environment (`k8s/overlays/staging` is read from `main`). Rewriting the `staging` branch therefore cannot affect any running deployment. `staging` has `allow_force_pushes: true`; `--force-with-lease` guards against clobbering a concurrent push.
+`--squash` is worse still: N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
-The reset usually triggers no build: after a full release `main`'s tip is `chore: update prod image tags to vX.Y.Z [skip ci]`, and `[skip ci]` suppresses `staging.yml`. If the tip has no `[skip ci]`, staging rebuilds harmlessly at the same code.
+**⚠ Step 9 is not optional, and it goes last.** Steps 7 and 8 both add commits to `main` (the bump, then `release.yml`'s `chore: update prod image tags`), so syncing before them leaves `staging` two commits behind for no reason. Sync once `main` has stopped moving — it is still a fast-forward, since `staging`'s tip is an ancestor of everything added after it.
 
-**⚠ If the release PR reports `mergeable: false` / `rebaseable: false`, do NOT back-merge `main` into `staging`.** Resolve the conflict on a throwaway branch instead, leaving `staging` untouched:
+Branching from `main` (step 1) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new branches then lack code they need to build on.
+
+**Never force-push `staging`.** It has `allow_force_pushes: true` as an escape hatch, but under this flow a force push is never part of the routine — if you find yourself reaching for one, the release was merged with the wrong method.
+
+**⚠ If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Resolve the conflict on a throwaway branch instead, leaving `staging` untouched:
 
 ```bash
 git checkout -b chore/release-<sha> origin/main
@@ -335,7 +337,7 @@ gh pr create --base main --head chore/release-<sha> --title "chore: release (...
 gh pr merge <PR-NUMBER> --rebase
 ```
 
-Then still do step 9. Measured 2026-08-17 on the 0.29.0 release: `staging → main` was `rebaseable: false` on `k8s/overlays/staging/kustomization.yaml`; the cherry-pick branch merged cleanly.
+Then sync step 9 as usual. Measured 2026-08-17 on the 0.29.0 release: `staging → main` reported `mergeable: false`, conflicting on `k8s/overlays/staging/kustomization.yaml`; the cherry-pick branch merged cleanly. Note `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. Under this flow such conflicts should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes them.
 
 **⚠ Step 7 is mandatory when the release contains runtime changes.** 15 of `release.yml`'s 16 jobs are gated on `version_changed` — only `version-check` itself runs — so a release merge that carries no version bump builds nothing — no images, no GitHub Release, no production overlay update. "No bump" means "merged to `main`, not released to production". Test-only or docs-only releases can skip it; anything touching `crates/` or `web/src/` runtime code cannot.
 
@@ -353,22 +355,23 @@ git checkout -b fix/<new-slug> origin/staging     # only if it builds on unrelea
 
 Every branch comes off `main`. Only follow-up work on code that is on `staging` but not yet released may branch off `origin/staging`.
 
-**Every merge is `--rebase`.** No merge commits, no squashing, anywhere.
+**Every merge is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed.
 
 | Work | Branch from | PR base | Merge with |
 |------|-------------|---------|------------|
 | `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `main` | `staging` | `--auto --rebase` |
 | `docs/**`, `chore/**` — touches no build input | `main` | `main` | `--rebase` |
 | `.github/workflows/*` fixes | `main` | `main` | `--rebase` |
-| release — `staging` → `main` | — | `main` | `--rebase` |
+| release — `staging` → `main` | — | `main` | `--merge` |
 | `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--rebase` |
 
 - **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`. Required status checks (`rust-check`, `web-check`) are configured on `staging`, not on `main`.
-- **Rebase-merge preserves each commit's own message; the PR body never enters git history.** Measured: PR #301 rebase-merged as `673664f` kept the commit's message and discarded the body entirely, while squash-merged PR #303 became `3a35e20` with the body as its message. So commit messages are the permanent record now — write them properly, and treat the PR body as review material.
+- **The release PR must be `--merge`; everything else is `--rebase`.** The asymmetry is the point: `staging` is a long-lived branch that gets synced back, so it must stay an ancestor of `main`, and only a merge commit guarantees that. Feature branches are dead after merge, so rebase orphaning them costs nothing.
+- **The PR body never enters git history, under any merge method here.** Rebase-merge keeps each commit's own message (measured: PR #301 → `673664f` kept the message, discarded the body); `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body. Only squash used the body, and nothing squashes now. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
 - **Never let a feature branch touch `k8s/overlays/**`.** Those files are CI-owned on `main` (`staging.yml` and `release.yml` write them). A branch cut from `main` inherits whatever tag was current, and carrying that snapshot into `staging` is what makes a release conflict — it is exactly what broke the 0.29.0 release. Overlay edits, if ever needed by hand, go direct to `main`.
-- **After every release, reset `staging` to `main` with a force push.** It is not a fast-forward — that is expected under rebase, and the reset is what keeps the next release conflict-free. Force-pushing `staging` cannot affect any deployment because ArgoCD reads both overlays from `main`.
+- **After every release, sync `main` → `staging`.** It is a fast-forward; never force-push `staging`.
 
 Mechanics and rationale: `nession-cicd` skill.
 
@@ -381,9 +384,9 @@ Mechanics and rationale: `nession-cicd` skill.
   gh pr list --state merged --base staging --limit 20
   ```
 - One `Closes #<ISSUE>` line per issue. Missing one means it stays open after shipping.
-- Closing keywords work at the PR level, so the merge method is irrelevant — `--rebase` closes the issues just as `--merge` did.
+- Closing keywords work at the PR level, so the merge method is irrelevant — `--merge` closes the issues just as any other method would.
 - 变更内容 and 测试报告 go in the release PR body too.
-- **Screenshots go in a PR comment, not the body.** This used to be because the body became the squash commit message; under rebase-merge the body never enters git history at all, so the reason is now just readability — keep the body a scannable change record.
+- **Screenshots go in a PR comment, not the body.** This used to be because the body became the squash commit message; nothing squashes now and no current merge method writes the body to a commit, so the reason is just readability — keep the body a scannable change record.
 
 ### Screenshots with Playwright
 
@@ -419,10 +422,10 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 3. **Collect screenshots** via Playwright MCP for any functional UI change
 4. PR to `staging` — 变更内容 + 测试报告 in the body, screenshots in a PR comment. No `Closes #N` here.
 5. `gh pr merge <PR> --auto --rebase` → verify with `./scripts/deploy-watch.sh staging`
-6. Release: PR `staging` → `main` with every `Closes #<ISSUE>` in the body → `gh pr merge <PR> --rebase`
+6. Release: PR `staging` → `main` with every `Closes #<ISSUE>` in the body → `gh pr merge <PR> --merge`
 7. Version bump only if warranted — see **Development Cycle** step 7
 8. `./scripts/deploy-watch.sh prod`
-9. Reset `staging` to `main` (force push, see **Development Cycle** step 9) — mandatory, pairs with step 6, and goes last
+9. Sync `main` → `staging` (fast-forward, see **Development Cycle** step 9) — mandatory, and goes last
 
 **No manual k8s step.** `release.yml` opens the PR that sets production image tags; ArgoCD syncs. Never hand-edit overlay tags, never `kubectl apply` as part of a release.
 
@@ -455,7 +458,7 @@ git reset --hard origin/staging
 
 All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.com>`
 
-**Every merge is a rebase, so every commit message lands in `main` verbatim** — nothing collapses them and no PR body replaces them. Write each commit as if it were the permanent record, because it is. Don't leave `wip`/`fixup` subjects on a branch you intend to merge; squash them locally with `git rebase -i` first.
+**Feature branches merge by rebase, so every commit message lands verbatim** — nothing collapses them and no PR body replaces them. Write each commit as if it were the permanent record, because it is. Don't leave `wip`/`fixup` subjects on a branch you intend to merge; squash them locally with `git rebase -i` first.
 
 ## 3. Quality Gates
 
