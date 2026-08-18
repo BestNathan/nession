@@ -270,6 +270,8 @@ web/src/extensions/claude-code/components/__tests__/integration/ 1
 
 ### vitest projects
 
+已对实际安装的 vitest **4.1.9** 核验（读 `web/node_modules/vitest/` 的类型定义与运行时代码，非凭记忆）：
+
 ```ts
 test: {
   projects: [
@@ -281,15 +283,30 @@ test: {
     { extends: true, test: {
         name: 'integration',
         environment: 'jsdom',
-        setupFiles: './src/test/setup.ts',
         include: ['src/**/__tests__/integration/**/*.test.{ts,tsx}'],
+        setupFiles: './src/test/setup.ts',
     }},
   ],
-  coverage: { /* 保持在 root，跨 project 汇总 */ },
+  // coverage / onConsoleLog / globals 必须留在 root —— 见下
 }
 ```
 
-`setupFiles` 只挂在 integration 上 —— `src/test/setup.ts` import `@testing-library/jest-dom/vitest` 并 patch `Element.prototype.getAnimations`、`globalThis.ResizeObserver`、`HTMLCanvasElement.prototype.getContext`，在 node env 下会直接崩。
+核验结论：
+
+| 事项 | 结论 |
+|---|---|
+| `test.projects` | ✅ 4.x 正确写法。`test.workspace` 与独立的 `vitest.workspace.ts` 在 4.x 已**移除**（`workspace?:` 在全部类型定义里零匹配） |
+| `extends: true` | ✅ **必需，不是可选**。它让子 project 加载根配置文件本身，从而继承 `plugins`（react、tailwindcss）和 `resolve.alias`。不加则子 project 拿到裸 Vite server —— 没有别名、没有 react 插件，`.tsx` 测试**直接编译失败** |
+| `coverage` 放哪 | ✅ 只能在 root。它在类型层面被 `NonProjectOptions` 排除，运行时也由 root 强制注入。已实测跨 project 汇总正常 |
+| `onConsoleLog` | ✅ 同样在 `NonProjectOptions` 里，必须留 root（`reporters`/`silent`/`passWithNoTests` 同理） |
+| `globals: true` | ✅ 经 `extends: true` 自动继承，**不要**在 project 里重复 |
+| `--project unit` | ✅ 单数、可重复、支持 `*` 通配与 `!` 取反 |
+
+**🔴 一个会让覆盖率门禁失效的陷阱:`--project` 过滤后的运行仍然按完整的 `coverage.include` glob 计算覆盖率。** 实测：只跑 `unit` project 加 `--coverage`，statements 掉到 40%、lines 33%，会直接跌破阈值 —— 因为分母仍是 `src/**/*.{ts,tsx}` 全量，而分子只有 unit 层跑到的部分。
+
+所以 **`just web-coverage` 必须跑全部 project**，`--project` 只用于本地快速迭代，**永远不与 `--coverage` + 阈值同用**。`scripts/filtered-web-test.sh` 现在不传 `--project`，保持原样即可。
+
+**🔴 配置改动与文件移动必须落在同一个 commit。** 上面的 include glob 今天匹配 **0 个文件**（`__tests__/unit/` 和 `__tests__/integration/` 目录都还不存在，89 个文件都直接躺在 17 个 `__tests__/` 里）。若先改配置后移文件，中间状态是一个「跑了 0 个测试却绿灯」的套件。
 
 ### coverage exclude 清理
 
@@ -312,44 +329,73 @@ e2e/
 ├── package.json              # 只有 @playwright/test
 ├── playwright.config.ts
 ├── fixtures/
+│   ├── server/
+│   │   └── config.toml       # server 的 CWD 必须是这个目录，见下
 │   └── agent-config.e2e.toml
 ├── helpers/
-│   ├── stack.ts              # 启栈/停栈、等健康检查
-│   └── login.ts              # 登录 + localStorage.clear()
+│   ├── reset.ts              # 清 localStorage + sessionStorage
+│   └── dashboard.ts          # 等待 dashboard 就绪
 └── specs/
     ├── login.spec.ts
     ├── session-lifecycle.spec.ts
     └── terminal-io.spec.ts
 ```
 
-### 栈启动
+fixture 放 `e2e/fixtures/` 而不是仓库根 —— 根目录的 `agent-config.toml` 被 `.gitignore` 第 98 行以字面量忽略（且它本来就未被 git 跟踪，尽管 CLAUDE.md 把它列在项目结构里）。放 `e2e/fixtures/` 不受该规则影响，可以提交。
 
-**必须自带 config fixture。** 仓库里的 `agent-config.toml` 不能直接用：
+### 🔴 起栈:CLAUDE.md 记的运行时事实是错的
 
-| 字段 | 仓库值 | 问题 | E2E fixture 值 |
-|---|---|---|---|
-| `server_url` | `ws://nession.nhome.local/ws` | 指向真实部署 | `ws://127.0.0.1:19090/ws` |
-| `listen_address` | `0.0.0.0:19090` | 和 server 撞端口 | `127.0.0.1:19091` |
-| `connect_url` | `ws://agent.nession.nhome.local/ws` | 指向真实部署 | `ws://127.0.0.1:19091/ws` |
-| `auth_token` | `nession-token` | 需与 server 一致 | 空（no-auth 模式） |
+原稿基于 CLAUDE.md 设计了 HTTP 健康检查。实际核验后该方案不成立：
 
-**隔离 HOME：** `HOME=/tmp/nession-e2e`，和 CLAUDE.md 的本地 demo 约定一致，避免污染 `~/.nession`。
+| CLAUDE.md 声称 | 代码实际 |
+|---|---|
+| server = 19090 ws + **10080 http**；agent = 19090 ws + 10080 http | **两个二进制都没有 HTTP 监听。** 整个工作区没有 axum / warp / hyper / actix 任何依赖，都是 `tokio-tungstenite` 的 `accept_async` 直接架在裸 `TcpListener` 上，每进程**只有一个**监听 socket |
+| 存在 `/health` 健康检查 | `/health` 只出现在 `deploy/nginx.conf.template` 和 `deploy/entrypoint-server.sh` —— 它是 **nginx sidecar 的产物**，不是二进制的能力。端口 10080 同理，是 nginx 的端口 |
+| server 监听 `127.0.0.1:19090` | server 硬编码读 **CWD 下的 `config.toml`**，无 CLI 参数、无环境变量覆盖；文件不存在时回落到 **`127.0.0.1:8080`**（刻意覆盖了结构体默认的 `0.0.0.0:19090`）。而 `config.toml` 在仓库里**不存在** |
+| agent 监听 `19091` | agent 默认 `default_listen_address()` = **`0.0.0.0:8080`** |
 
-**Playwright `webServer` 起三个进程**，各自等健康检查通过。顺序有依赖 —— agent 要等 server 起来才能注册：
+由此得出三条硬约束：
 
-1. `nession-server`
-2. `nession-agent -- fixtures/agent-config.e2e.toml`（依赖 1）
-3. `vite preview`（web）
+**1. 健康检查只能用 TCP 连接探测，不能用 HTTP。** Playwright 的 `webServer` 支持 `url`（HTTP GET）或 `port`（TCP connect）二者之一。两个 Rust 进程必须用 **`port:`**；只有 `vite preview` 能用 `url:`。已实测：向 server 端口发普通 `curl` 返回空响应 —— 非 WebSocket 升级请求会被直接丢弃。（另实测：WS 升级在**任意路径**上都成功，`/` 和 `/ws` 都返回 101，所以探测路径无关紧要。）
+
+**2. server 的配置只能通过 CWD 下的 `config.toml` 注入。** 没有第二种机制。所以 Playwright 启 server 时必须设 `cwd: 'fixtures/server'`，并把 `config.toml` 放在那里。`ServerConfig` 的前四个字段（`listen_address`、`tls_cert_path`、`tls_key_path`、`auth_token`）**没有 serde 默认值**，TOML 里必须全写。`db_path` 指向临时目录，避免碰 `~/.nession`。
+
+**3. 两边端口必须显式写死 —— 默认值会撞,而且撞法因平台而异。** server 默认 `127.0.0.1:8080`、agent 默认 `0.0.0.0:8080`。已实测（macOS）：特定地址绑定与通配地址绑定同一端口**双双成功、零报错**，两个进程共用一个端口，连接由内核按地址 specificity 分流；Linux 上通常直接 `EADDRINUSE`。**依赖默认端口的 fixture 会在本地和 CI 上表现不同** —— 这类 bug 极难查，必须从一开始就写死。
+
+另一个坑：仓库根的 `agent-config.toml` 把 `listen_address` 设成 `0.0.0.0:19090`，而那正是 `web/vite.config.ts` 给 **server** 代理 `/ws` 的目标端口。拿它跑 agent 会让 agent 占住 server 的代理目标。
+
+**端口分配（fixture 写死）：** server `127.0.0.1:19090`（必须是这个 —— vite 代理目标写死了它），agent `127.0.0.1:19091`。
+
+### vite preview 可用 —— 已核验它继承 /ws 代理
+
+读 Vite 源码 `resolvePreviewOptions` 确认：`proxy: preview?.proxy ?? server.proxy` —— **`server.proxy` 会被继承**；而 `port: preview?.port` —— **`server.port` 不继承**，回落到 `DEFAULT_PREVIEW_PORT = 4173`。实测也确认 `/ws` 在 preview 上被代理（后端未起时返回 500，证明中间件已挂载）。
+
+所以构建产物是**经 vite 代理**访问 server 的：`DEFAULT_SERVER_URL` = `ws://${window.location.host}/ws` → `ws://localhost:4173/ws` → 代理到 `ws://localhost:19090`。这也是上面 server 端口必须是 19090 的原因。
+
+**🔴 `baseURL` 必须写 `http://localhost:4173`,不能写 `127.0.0.1`。** 实测 preview 默认只绑 `[::1]`（IPv6 localhost）：`curl http://127.0.0.1:4173/` 返回 `000`，`curl http://localhost:4173/` 返回 `200`。（或者给 preview 命令加 `--host 127.0.0.1`。）
+
+**preview 的健康检查不能用路径判断。** SPA fallback 让**任意路径**都返回 200，所以 200 只能证明静态服务器起来了，不能证明应用就绪。就绪判断交给测试里的 dashboard 等待。
 
 ### smoke 覆盖
 
 | spec | 断言 |
 |---|---|
-| `login.spec.ts` | 输入 token → 进 dashboard，连接状态变 connected |
+| `login.spec.ts` | 走**真实表单**：填 `#serverUrl` + `#authToken` → 点 `Connect` → dashboard 出现 |
 | `session-lifecycle.spec.ts` | agent 卡片出现 → 建 session → 列表出现 → kill → 列表消失 |
 | `terminal-io.spec.ts` | attach → 输入 `echo nession-e2e-ok` → 终端出现该输出；P2P 和 relay 各跑一遍 |
 
 **终端断言读 xterm 的 DOM buffer，不做截图比对。** 截图对渲染差异过于敏感，在 CI 上必然退化成噪声。
+
+**选择器（已从代码核验）：**
+
+- 登录：`#serverUrl`（`Server URL` label）、`#authToken`（`Auth Token` label）、按钮可访问名 `Connect`。表单在 `isConnecting` 时全部 disabled，点击后不能再改填。
+- **🔴 不要用 `h1` 判断是否已登录。** `<h1>Nession</h1>` 在 `LoginPage.tsx` 和 `DashboardHeader.tsx` 里**都有**，无法区分。用 `[data-testid="filter-row"]`（`SearchBar.tsx`，全宽度渲染，从不隐藏）。避免 `data-testid="agent-summary-bar"`（`md:hidden`，仅移动端）和 `features-card`（`hidden md:block`）。
+
+**其余两个 spec 用 URL 参数免登录。** `App.tsx` 支持 `?token=<非空值>` 自动连接，跳过整个表单。查询串必须在 hash **之前**（应用用 `createHashRouter` 但读 `window.location.search`）；`?token=` 空值会设置 autoConnect 但 `authToken` 为假值，**不会**连接。server 处于 no-auth 模式时任意非空值都通过。只有 `login.spec.ts` 走真实表单 —— 那正是它要测的东西。
+
+**重置必须清两个 storage。** `web/src/lib/auth.ts` 的 `getToken()` 先读 **sessionStorage** 再读 localStorage。只清 localStorage 不够。需清的键：`token`、`remember`、`nession_server_url`。
+
+**no-auth 模式条件（已核验）：** `handler.rs` 两处守卫都是 `self.config.server_auth_token.is_empty() || 提交值 == 配置值`。所以 server 端 `auth_token` 留空即为 no-auth，客户端任意非空 token 均可 —— 但客户端必须**发**点什么。
 
 ### CI
 
@@ -468,6 +514,16 @@ total            1669
 | 4 | 欠账 issue 登记 | `main` | 纯 docs |
 
 **每个 PR 自带对应的 CLAUDE.md 修改**（第 3 节 Quality Gates 会被 PR 1–3 逐步改旧），而不是最后统一补。文档和代码任何时刻都不脱节。
+
+**PR 3 另需修正 CLAUDE.md 里的错误运行时事实**（不是被本次改动改旧的，是本来就写错的）：
+
+| 位置 | 现在写的 | 应改成 |
+|---|---|---|
+| Service ports 表 | `nession-server 10080 HTTP (health, UI)`、`nession-agent 10080 HTTP (health)` | 二进制无 HTTP 监听；10080 与 `/health` 属于 nginx sidecar，只在 Docker/k8s 运行时存在 |
+| 本地 demo 段 | 「Server listens on 127.0.0.1:19090 (ws) + :10080 (http), agent on :19091」 | server 无 config.toml 时回落 `127.0.0.1:8080`；agent 默认 `0.0.0.0:8080`；两者默认撞端口，必须显式配置 |
+| 项目结构 | 把 `agent-config.toml` 列为「Default agent config」 | 该文件被 `.gitignore` 忽略且未被跟踪，是本地文件而非仓库内容 |
+
+这三条是排查 E2E 起栈问题时踩出来的。留着它们，下一个照文档搭本地环境的人会踩同样的坑。
 
 **顺序不能换。** PR 1 必须最先，因为 `test-inventory.sh` 是 PR 2 的安全网。
 
