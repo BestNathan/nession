@@ -394,38 +394,45 @@ gh pr create --base staging --title "feat: description" --body "..."
 
 ```bash
 # Enable auto-merge for feat/fix PRs targeting staging
-gh pr merge <PR-NUMBER> --auto --squash
+gh pr merge <PR-NUMBER> --auto --rebase
 ```
 
 **⚠ No `Closes #N` in a feat→staging PR body.** Closing keywords are ignored unless the PR targets the default branch, so it would silently do nothing. Every `Closes #N` goes in the `staging` → `main` release PR body instead. See the `nession-cicd` skill.
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, release `staging` → `main`, then sync, then bump only if warranted:
+**After staging validation**, release `staging` → `main`, bump if warranted, then reset `staging` last:
 
 ```bash
 # 1. Audit what ships, then open the release PR with every Closes line
 gh pr list --state merged --base staging --limit 20
 gh pr create --base main --head staging --title "chore: release (staging → main)" --body "..."
-gh pr merge <PR-NUMBER> --merge      # MUST be --merge
+gh pr merge <PR-NUMBER> --rebase     # MUST be --rebase
 
-# 2. Sync main back into staging — fast-forward
-git push origin origin/main:refs/heads/staging
-
-# 3. Version bump, only if this release warrants one
+# 2. Version bump, only if this release warrants one
 git checkout -b chore/bump-version-X.Y.Z origin/main
 # Bump version in all four files (see "Version Bumping" above)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
 gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
+
+# 3. Wait for release.yml to finish writing the production overlay tag
+./scripts/deploy-watch.sh prod
+
+# 4. Reset staging to main — force push, NOT a fast-forward. Pairs with step 1.
+#    Last, once main has stopped moving.
+git fetch origin
+git log --oneline origin/main..origin/staging   # MUST be empty — anything listed gets DISCARDED
+git push --force-with-lease=staging:$(git rev-parse origin/staging) \
+  origin origin/main:refs/heads/staging
 ```
 
-**The release PR must be `--merge`.** It keeps `staging` an ancestor of `main`, which is what makes step 2 a fast-forward and branching off `main` safe. `--rebase` leaves `staging` on orphaned SHAs and the next release conflicts; `--squash` destroys patch-id de-duplication (measured: release PR #268 was squashed and the next release conflicted on `web/src/terminal/DeviceProfile.ts`). See `nession-cicd` for the three-cycle measurement.
+**Every merge is `--rebase`** — no merge commits, no squashing, anywhere. Rebase-merge leaves `staging` on orphaned SHAs, so **step 4 is mandatory and not optional**: it discards them and keeps the next release conflict-free. It goes last because steps 2 and 3 both add commits to `main`. Force-pushing `staging` cannot affect any deployment because ArgoCD reads both overlays from `main`. If the release PR is not rebaseable, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
 
 ### PR Body Template
 
-**The PR body becomes the squash commit message** (`squash_merge_commit_message = PR_BODY`), so write it as a permanent change record. Screenshots go in a PR comment, never here. `Closes #N` does **not** belong here — it goes in the release PR.
+**The PR body is review material, not git history.** Under rebase-merge each commit keeps its own message and the body is never written to a commit (measured: PR #301 rebase-merged as `673664f` kept the commit message and discarded the body). So write real commit messages — they are the permanent record — and use the body to tell a reviewer what changed and how it was verified. Screenshots go in a PR comment so the body stays scannable. `Closes #N` does **not** belong here — it goes in the release PR.
 
 ```markdown
 ## 变更内容
@@ -445,7 +452,7 @@ gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merg
 
 Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
 
-Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize on `main`. After staging validation, the `staging → main` release PR merges with `--merge`; `release.yml` then only builds if a version file changed, so a release carrying runtime changes needs the follow-up bump PR to reach production. See `nession-cicd`.
+Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize on `main`. After staging validation, the `staging → main` release PR merges with `--rebase` and `staging` is then reset to `main`; `release.yml` only builds if a version file changed, so a release carrying runtime changes needs the follow-up bump PR to reach production. See `nession-cicd`.
 
 **Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after merging PR to staging, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
 
@@ -525,7 +532,7 @@ After functional verification passes, take screenshots of key states:
 - Error states (error banners, toasts)
 - Key interactions (modal open/close, terminal output)
 
-Save to `.playwright-mcp/screenshots/` (gitignored). Post them as a **PR comment** — the PR body becomes the squash commit message, so image markdown there would land in git history permanently.
+Save to `.playwright-mcp/screenshots/` (gitignored). Post them as a **PR comment** rather than in the body, so the body stays a scannable change record. (Under the older squash flow the body became the commit message and image markdown would land in git history; rebase-merge never writes the body to a commit, so this is now a readability convention, not a hard constraint.)
 
 ```bash
 gh pr comment <PR-NUMBER> --body "## 核心功能截图
