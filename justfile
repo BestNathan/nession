@@ -16,9 +16,12 @@ lint:
 test-unit:
     ./scripts/filtered-test.sh --lib
 
-# Full test suite (only shows failures + summary)
-test:
-    ./scripts/filtered-test.sh
+# Integration tests only (pre-push)
+test-integration:
+    ./scripts/filtered-test.sh --test integration
+
+# Full test suite (unit + integration)
+test: test-unit test-integration
 
 # Per-crate coverage check against thresholds
 coverage:
