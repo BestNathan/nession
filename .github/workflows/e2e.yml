@@ -15,6 +15,10 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # PLAYWRIGHT_BROWSERS_PATH applies to BOTH install and test — keeps them
+    # pointed at the same directory (and the same one the cache restores to).
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -23,25 +27,25 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
 
-      # ── Node + Playwright ─────────────────────────────────────────────
+      # ── Node ──────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
 
+      # Restore browser cache BEFORE install — a cache hit means the install
+      # below skips the download entirely.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
       # Install Playwright + Chromium only (skip Firefox/WebKit).
-      # PLAYWRIGHT_BROWSERS_PATH=0 installs into e2e/node_modules/ so the
-      # cache restore puts them exactly where Playwright expects them.
       - run: |
           cd e2e
           npm ci
-          PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps
-
-      - uses: actions/cache@v4
-        with:
-          path: e2e/node_modules/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+          npx playwright install chromium --with-deps
 
       # ── Build web (vite preview serves this) ─────────────────────────
       - run: cd web && npm ci && npm run build
