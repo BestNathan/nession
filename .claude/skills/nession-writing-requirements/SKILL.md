@@ -1,286 +1,279 @@
 ---
 name: nession-writing-requirements
-description: Use when the user requests a feature, change, or enhancement to the Nession project and requirements need to be documented. Use when the user says "我需要一个需求文档", "记录一下需求", "create a requirement", or mentions tracking requirements in GitHub Issues. Use when a feature discussion results in decisions that should be preserved as a formal requirement artifact. Do NOT use for bug reports (use GitHub Issues directly with the bug label) or for implementation planning (use brainstorming after this).
+description: Use when the user requests a feature, change, or enhancement to Nession and requirements need documenting, OR when the user reports a bug/缺陷 that should be recorded or tracked. Use when the user says "我需要一个需求文档", "记录一下需求", "create a requirement", "帮我记录个 bug", "报个 bug 到 issue", "这个 bug 提个 issue", or mentions tracking requirements or bugs in GitHub Issues. Do NOT use for implementation planning (use brainstorming after this) or for bugs the user wants fixed immediately with no record (that is plain superpowers:systematic-debugging).
 ---
 
 # Nession Writing Requirements
 
-## Overview
+Requirements and bug analyses live in GitHub Issues, not in the repo. Repo: `BestNathan/nession`.
 
-Turn feature requests into structured requirements documents stored as GitHub Issues with the `requirement` label. Uses `superpowersexy:clarifying-requirements` for the clarification dialogue, then uploads the result to a GitHub Issue instead of saving to the local filesystem. All subsequent modifications update the same issue.
+## Classify first
 
-Core principle: **Requirements live in GitHub Issues, not in the repo.** This keeps requirements visible, searchable, and linked to the implementation PRs that reference them.
+| Input | Path |
+|---|---|
+| New capability, behavior change, "希望能…" | **Requirement** → `superpowersexy:clarifying-requirements` |
+| "should work but doesn't", "X 之后 Y 不刷新", crash, wrong output | **Bug** → `superpowers:systematic-debugging` |
+| Ambiguous | Ask which. |
 
-## When to Use
+Mixed message (requirement + bug together) → run both paths, one issue each.
 
-- User describes a new feature or enhancement for Nession
-- User asks to "record requirements" or "create a requirement document"
-- User says "write this down as a requirement"
-- Feature discussion produces decisions worth preserving as a formal artifact
+Write issue bodies in the reporter's language; keep the section headers below, plus code identifiers, file paths and this skill's own vocabulary (`unverified`, `Investigation Status`), in English.
 
-**Don't use for:**
-- Bug reports → create a GitHub Issue with the `bug` label directly
-- Implementation planning → that's `superpowers:brainstorming` territory
-- Quick fixes with no design ambiguity → just fix them
+## Hard rules
 
-## Process
+- In a hurry ≠ skip the analysis. "直接记一下" means record it efficiently, not record a guess.
+- Analysis precedes filing. Never file first and backfill the analysis.
+- An unconfirmed mechanism goes under **Investigation Status**, marked unverified — never under **Root Cause**.
+- The reporter's scope ("mobile only", "P2P only") is a claim to verify, not a fact. Title by the strongest **verified** fact, never by reported scope and never by an unverified hypothesis.
+- A reporter's stated cause that turns out false goes in **Investigation Status** as a verified fact, and gets said out loud in B5. Don't quietly drop it.
+- One requirement = one issue. Changes edit in place, never a new issue.
+- `bug` is lowercase. Never create `BUG`.
+- `Closes #N` belongs only in the `staging → main` release PR body.
 
-```dot
-digraph nession_writing_requirements {
-    rankdir=TB;
-    "User request received" [shape=doublecircle];
-    "Invoke superpowersexy:clarifying-requirements" [shape=box];
-    "Clarification complete, requirements doc produced" [shape=box];
-    "Check/ensure requirement label exists on repo" [shape=box];
-    "Create GitHub Issue with requirements doc as body" [shape=box];
-    "Label issue with 'requirement'" [shape=box];
-    "Append conversation history to issue as comment" [shape=box];
-    "User reviews issue content" [shape=diamond];
-    "Ready for brainstorming" [shape=doublecircle];
+---
 
-    "User request received" -> "Invoke superpowersexy:clarifying-requirements";
-    "Invoke superpowersexy:clarifying-requirements" -> "Clarification complete, requirements doc produced";
-    "Clarification complete, requirements doc produced" -> "Check/ensure requirement label exists on repo";
-    "Check/ensure requirement label exists on repo" -> "Create GitHub Issue with requirements doc as body";
-    "Create GitHub Issue with requirements doc as body" -> "Label issue with 'requirement'";
-    "Label issue with 'requirement'" -> "Append conversation history to issue as comment";
-    "Append conversation history to issue as comment" -> "User reviews issue content";
-    "User reviews issue content" -> "Create GitHub Issue with requirements doc as body" [label="changes"];
-    "User reviews issue content" -> "Ready for brainstorming" [label="approved"];
-}
-```
+# Requirement path
 
-## Checklist
+1. **`superpowersexy:clarifying-requirements`** — run the clarification process in full
+2. **Skip its local-file step** (`docs/superpowers/requirement/...`) — the document becomes the issue body
+3. **Ensure labels exist** (see Labels)
+4. **Create the issue**
+5. **Append the conversation record**
+6. **User reviews**, iterate as needed
+7. **`superpowers:brainstorming`**
 
-You MUST create a task for each of these items and complete them in order:
-
-1. **Invoke clarifying-requirements** — use `superpowersexy:clarifying-requirements` to understand what the user wants
-2. **Complete clarification** — produce a validated requirements document following the clarifying-requirements process
-3. **Ensure label exists** — check if `requirement` label exists on `BestNathan/nession`, create it if not
-4. **Create GitHub Issue** — upload the requirements document as the issue body
-5. **Apply labels** — add the `requirement` label (and any others the user wants)
-6. **Save conversation history** — add a comment to the issue with the full dialogue record
-7. **User reviews** — ask user to review the issue, iterate if needed
-8. **Transition to brainstorming** — invoke `superpowers:brainstorming`
-
-## The Process
-
-### Step 1: Invoke clarifying-requirements
-
-**REQUIRED SUB-SKILL:** Use `superpowersexy:clarifying-requirements` for the entire clarification dialogue.
-
-Follow the clarifying-requirements process exactly — restate, ask grouped questions with options, explore context, identify edge cases, define success criteria. The ONLY difference is where the final document lands.
-
-**This IS the requirements process.** The only thing our skill changes is the storage backend (GitHub Issues instead of local files) and the conversation history preservation.
-
-### Step 2: After clarification — prepare the issue content
-
-**IMPORTANT:** `superpowersexy:clarifying-requirements` normally saves to `docs/superpowers/requirement/...`. **Skip that local file step.** Instead, take the validated requirements document content and use it as the GitHub Issue body. The issue IS the requirements document.
-
-Once clarifying-requirements produces a validated requirements document, construct the GitHub Issue body:
+### Issue body
 
 ```markdown
 ## Requirements: [Topic]
 
-[Full requirements document content from clarifying-requirements]
+[Full document from clarifying-requirements:
+ Background / Goals / Non-Goals / Scope / Constraints /
+ Success Criteria / Edge Cases / Open Questions]
 
 ---
 **Status:** Draft | In Discussion | Approved
 **Created:** [YYYY-MM-DD]
-**Author:** [user name]
+**Author:** [user]
 ```
 
-Use the exact structure from clarifying-requirements: Background, Goals, Non-Goals, Scope, Constraints, Success Criteria, Edge Cases, Open Questions.
-
-### Step 3: Ensure the `requirement` label exists
+### Commands
 
 ```bash
-# Check if label exists
-gh label list --repo BestNathan/nession --search requirement
-
-# Create if missing
-gh label create requirement --repo BestNathan/nession \
-  --color "0E8A16" \
-  --description "Feature requirements and specifications"
-```
-
-The color `0E8A16` is green — distinct from the existing labels (bug=red, enhancement=blue, documentation=blue).
-
-**Do NOT skip this step.** If the label doesn't exist, the issue won't be filterable. Creating it once is fine (idempotent — gh returns an error if it already exists, just ignore it).
-
-### Step 4: Create the GitHub Issue
-
-```bash
-gh issue create \
-  --repo BestNathan/nession \
+gh issue create --repo BestNathan/nession \
   --title "Requirement: [Topic]" \
-  --body "[Full requirements document]" \
-  --label requirement
+  --body "[document]" \
+  --label requirement --label web --label ui --label ux
+
+gh issue comment [N] --repo BestNathan/nession --body "[conversation record]"
 ```
 
-**Title format:** Always prefix with `Requirement: ` so issues are easily distinguishable from bugs and feature requests.
-
-**Body:** The full requirements document from Step 2. Use proper markdown formatting.
-
-### Step 5: Append conversation history
-
-After creating the issue, add the conversation record as a comment:
-
-```bash
-gh issue comment [ISSUE_NUMBER] \
-  --repo BestNathan/nession \
-  --body "[Conversation history]"
-```
-
-The conversation history comment should have this structure:
+### Conversation record format
 
 ```markdown
 ## Conversation History
 
 ### [YYYY-MM-DD HH:MM] — Initial Request
-
-**User:** [original request, verbatim]
-
+**User:** [verbatim]
 **Agent:** [restatement]
+**User:** [confirmation / correction]
 
-**User:** [confirmation/correction]
-
-### [YYYY-MM-DD HH:MM] — Round 1: Purpose & Audience
-
-**Agent:** [questions asked]
+### [YYYY-MM-DD HH:MM] — Round N: [topic]
+**Agent:** [questions]
 **User:** [answers]
-
-### [YYYY-MM-DD HH:MM] — Round 2: Scope
-
-**Agent:** [questions asked]
-**User:** [answers]
-
-[... continue for all rounds ...]
 
 ### [YYYY-MM-DD HH:MM] — Requirements Finalized
-
-Requirements document agreed upon and uploaded to this issue.
 ```
 
-**Why conversation history matters:**
-- Future readers understand the WHY behind decisions
-- Tradeoffs discussed during clarification are preserved
-- Someone revisiting the requirement months later can see the full context
-- Disagreements and resolutions are documented
+### Handling changes
 
-### Step 6: User review
+```bash
+gh issue edit [N] --repo BestNathan/nession --body "[updated document]"   # edit in place
+gh issue comment [N] --repo BestNathan/nession --body "[change discussion]"
+```
 
-After creating the issue, present the link and ask for review:
+Update Status as it moves: Draft → In Discussion → Approved.
 
-> "Requirements uploaded to GitHub Issue: `https://github.com/BestNathan/nession/issues/[N]`
->
-> Please review the requirements document and conversation history. Let me know if anything needs to be changed before we move to design."
+---
 
-### Step 7: Handle changes
+# Bug path
 
-When the user requests changes to the requirements:
+1. **B0 dedupe** — scan all open issues, not just `--label bug`
+2. **B1 analyze** — `superpowers:systematic-debugging` Phases 1–3
+3. **B2 create issue** — title `Bug: [summary]`
+4. **B3 label** — `bug` + every applicable area
+5. **B4 append the investigation trail**
+6. **B5 ask the user**: fix now (Phase 4) or stop here — and hand back the one question that collapses the hypothesis ranking (e.g. "do preset commands fail too?")
 
-1. **Edit the issue body** — update the requirements document in-place:
-   ```bash
-   gh issue edit [ISSUE_NUMBER] --repo BestNathan/nession --body "[Updated document]"
-   ```
+### B0 dedupe
 
-2. **Add a comment** with the change discussion:
-   ```bash
-   gh issue comment [ISSUE_NUMBER] --repo BestNathan/nession --body "[Change conversation]"
-   ```
+```bash
+gh issue list --repo BestNathan/nession --state open --limit 100 \
+  --json number,title,labels --jq '.[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+```
 
-3. **Update the Status** in the issue body (Draft → In Discussion → Approved)
+| Result | Action |
+|---|---|
+| Duplicate | Comment on the existing issue, don't create |
+| Overlapping, not duplicate | File separately, cross-reference `#N` both ways |
+| Closed issue, same symptom | Mention `#N` in the new issue |
 
-**NEVER create a new issue for changes to the same requirement.** One requirement = one issue. The issue is the single source of truth.
+### B1 analyze
 
-### Step 8: Transition
+**Phase 1** Read the code, trace the data flow to where the bad behavior originates, check recent changes
+**Phase 2** Find the working equivalent path, list the differences
+**Phase 3** State the root-cause hypothesis explicitly, test it minimally against the code
 
-After user approval, invoke `superpowers:brainstorming` to explore design approaches.
+**Floor:** trace the reported path end to end (sender → transport → receiver), plus one working-path comparison.
+**Ceiling:** static evidence only. Demo stacks, intermittent-race repro, instrumentation → defer to **Fix Direction** as the next step. The ceiling governs **filing**, not fixing — once the user picks "fix now" in B5, the local demo stack and Playwright verification required by `nession-development` apply in full.
 
-## Quick Reference
+Output must separate **verified facts** (with file:line) from **hypotheses** (marked unverified).
+
+Root cause not confirmed (can't reproduce, environment unavailable) → write **Investigation Status**: what was checked, what was ruled out, remaining hypotheses ranked, all marked unverified.
+
+### B2 issue body
+
+```markdown
+## Description
+[reporter's words, verbatim]
+
+## Reproduction
+[steps — mark whether reported or locally verified]
+
+## Root Cause
+[confirmed mechanism + file:line]
+[or Investigation Status: verified facts / ruled out / ranked hypotheses (unverified)]
+
+## Impact
+
+## Fix Direction
+[confirmed → the fix; unconfirmed → the next investigation step]
+
+## Location
+- file:line
+```
+
+```bash
+gh issue create --repo BestNathan/nession \
+  --title "Bug: [summary]" \
+  --label bug --label terminal --label web --label ui \
+  --body "[analysis]"
+
+gh issue comment [N] --repo BestNathan/nession \
+  --body "[investigation trail: what was checked, what was ruled out, in order]"
+```
+
+---
+
+# Labels
+
+**Kind — exactly one:** `requirement` | `bug`
+
+**Area — every one that applies:**
+
+| Label | Roughly |
+|---|---|
+| `terminal` | terminal / xterm / tmux behavior, anywhere in the tree |
+| `web` | `web/src/**` |
+| `ui` / `ux` | renders wrong / behaves or communicates wrong |
+| `backend` | roll-up for any Rust-side work |
+| `server` `agent` `cli` `protocol` | `crates/nession-{server,agent,cli,common}/**` |
+| `infra` | Docker, `k8s/**`, `deploy/**`, shipped `*.toml` configs |
+| `ci` | workflows, `scripts/**`, `justfile`, git hooks |
+| `test` | coverage and test infrastructure |
+| `documentation` | a written convention must change |
+
+### Three rules
+
+1. **Apply every label that applies; when unsure, apply it.** `--label` is AND, never OR, so a single-label pull is only complete if labels are generous. Don't deliberate over whether one *quite* fits.
+2. **Label the mechanism AND the affected surface.** A server-side defect that freezes the browser list carries `backend`+`server` *and* `web`+`ux`. Never the surface alone. Mechanism unconfirmed → label every area your ranked hypotheses name; **only those** — an area you never considered is not a labeling reason.
+3. **Narrow when the root cause lands.** Drop the areas whose hypotheses lost; keep the confirmed mechanism, its roll-up, and the surface.
+
+```
+Bug: terminal toolbar quick command does nothing    → bug, terminal, web, ui, ux
+Bug: server drops session events after agent reconnect → bug, backend, agent, server, protocol, web, ux
+Bug: nession-cli PTY size not synced after resize   → bug, terminal, cli, backend, protocol, ui, ux
+Requirement: group session list by agent, collapsible → requirement, web, ui, ux
+Requirement: k8s overlay image tags written by CI   → requirement, ci, infra, documentation
+```
+
+Examples show shape only. **The rules win over the examples** — if your analysis names an area an example omits, apply it.
+
+### Bootstrap (once)
+
+```bash
+create_label() {
+  gh label create "$1" --repo BestNathan/nession --color "$2" --description "$3" 2>/dev/null || echo "exists: $1"
+}
+create_label requirement 0E8A16 "Feature requirements and specifications"
+create_label terminal 1D76DB "Terminal / xterm / tmux behavior"
+create_label web      1D76DB "web/src — React frontend"
+create_label ui       5DADE2 "Visual appearance, layout, styling"
+create_label ux       5DADE2 "Interaction, flow, error feedback"
+create_label backend  0E8A16 "Roll-up: any Rust-side work"
+create_label server   2EA043 "crates/nession-server"
+create_label agent    2EA043 "crates/nession-agent"
+create_label cli      2EA043 "crates/nession-cli"
+create_label protocol A371F7 "crates/nession-common — protocol, shared types"
+create_label infra    6E7781 "Docker, k8s, deploy"
+create_label ci       6E7781 "CI workflows, scripts, justfile, git hooks"
+create_label test     D4A72C "Test coverage and test infrastructure"
+# bug / documentation are GitHub defaults — already exist
+```
+
+Missing label? Create it now. Never drop a label to save a command.
+
+---
+
+# Lifecycle
+
+**Requirement:** Draft → In Discussion → Approved → (implementation PR references it) → Closed. Status lives in the body; update it as it moves.
+
+**Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → fix PR references it → closed by the release PR's `Closes #N`.
+
+```bash
+gh issue edit [N] --repo BestNathan/nession --remove-label server --remove-label protocol
+```
+
+# Edge cases
+
+| Situation | Action |
+|---|---|
+| No `gh` | Save to `docs/superpowers/{requirement,bug}/YYYY-MM-DD-<topic>.md` and tell the user |
+| Already mid-debug | Don't restart the investigation — take the Phase 1–3 findings to B2 |
+| User wants the fix now | File first, then Phase 4 on a `fix/` branch. Never fix silently and retro-file |
+| Conversation record > 65536 chars | Summarize early rounds, keep recent ones verbatim |
+| Which issue was it? | `gh issue list --repo BestNathan/nession --label requirement --search "<keywords>"` |
+
+# Quick reference
+
+Create / comment / edit commands are in the path steps above. Not there:
 
 | Action | Command |
-|--------|---------|
-| Check labels | `gh label list --repo BestNathan/nession` |
-| Create `requirement` label | `gh label create requirement --repo BestNathan/nession --color "0E8A16" --description "Feature requirements and specifications"` |
-| Create issue | `gh issue create --repo BestNathan/nession --title "Requirement: [Topic]" --body "..." --label requirement` |
-| Comment on issue | `gh issue comment [N] --repo BestNathan/nession --body "..."` |
-| Edit issue body | `gh issue edit [N] --repo BestNathan/nession --body "..."` |
-| List requirement issues | `gh issue list --repo BestNathan/nession --label requirement` |
+|---|---|
+| List labels | `gh label list --repo BestNathan/nession` |
+| Pull one area | `gh issue list --repo BestNathan/nession --label terminal --state open` |
+| Area + kind | `gh issue list --repo BestNathan/nession --label terminal --label bug --state open` |
+| OR several areas | `gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"` |
+| Add labels | `gh issue edit [N] --repo BestNathan/nession --add-label terminal --add-label ui` |
+| Narrow labels | `gh issue edit [N] --repo BestNathan/nession --remove-label server` |
+| Find by title | `gh issue list --repo BestNathan/nession --label requirement --search "<keywords>"` |
 
-## Issue Lifecycle
+# Red flags — stop and start over
 
-```
-Draft → In Discussion → Approved → (linked to implementation PR) → Closed
-```
+- Writing to a local file instead of creating an issue
+- Issue has a kind label but no area labels
+- Skipping clarifying-requirements (requirements) or systematic-debugging (bugs)
+- **Root Cause** contains a guess; or every section but **Description** is unverified
+- Issue scoped to the mode / platform / version the reporter named, without checking whether the mechanism depends on it
+- A second issue for the same requirement
+- Root cause confirmed but speculative labels never removed
+- "File it now, analyze later"
 
-- **Draft:** Just created, awaiting user review
-- **In Discussion:** Changes being made based on feedback
-- **Approved:** User confirmed, ready for brainstorming → implementation
-- **Closed:** Implementation PR merged, requirement fulfilled
-
-Update the Status line in the issue body as it progresses.
-
-## Edge Cases
-
-### No `gh` CLI available
-If `gh` is not installed or authenticated, fall back to the clarifying-requirements default: save to `docs/superpowers/requirement/YYYY-MM-DD-<topic>-requirement.md`. Tell the user: "GitHub CLI not available — requirements saved locally instead. Install and authenticate `gh` for Issue integration."
-
-### Multiple requirement discussions active
-Track which issue number corresponds to which requirement. If the user says "change the dark mode requirement," search for the issue by title:
-```bash
-gh issue list --repo BestNathan/nession --label requirement --search "dark mode"
-```
-
-### `requirement` label already exists
-`gh label create` returns an error if the label exists. Ignore this — the label is already set up.
-
-### Very long conversation history
-If the conversation history exceeds GitHub's comment character limit (~65536 chars), summarize older rounds and keep the most recent rounds verbatim.
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Saving requirements to local file | Upload to GitHub Issue instead |
-| Creating multiple issues for same requirement | One requirement = one issue, edit in-place |
-| Forgetting conversation history | Always add the history comment after creating the issue |
-| Skipping label creation check | Always ensure `requirement` label exists |
-| Creating issue before clarification done | Complete clarifying-requirements first |
-| Using wrong label | Use `requirement` (green), not `enhancement` (blue) |
-| Not updating Status line | Update Draft → In Discussion → Approved as it progresses |
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "I'll create the issue later" | Later never comes. Create it NOW, while the requirements are fresh. |
-| "The conversation is in the chat history, no need to save it" | Chat history is invisible to future developers and other agents. Save it in the issue. |
-| "I'll just save it locally and upload later" | Local files are invisible to the team. The issue IS the source of truth. |
-| "This is too simple for an issue" | Simple features still benefit from a written requirement that can be referenced in the PR. |
-| "The user hasn't asked for an issue" | They asked for requirements documentation. The issue IS the documentation. |
-| "I don't want to bother the user with review" | The review step takes <1 minute and prevents hours of misdirected work. |
-
-## Red Flags - STOP and Start Over
-
-- Writing requirements to a local file instead of creating a GitHub Issue
-- Creating an issue without the `requirement` label
-- Skipping the clarifying-requirements process
-- Creating a new issue for changes to an existing requirement
-- Omitting conversation history from the issue
-- "I'll create the issue after the brainstorming session"
-
-**All of these mean: Go back. Follow the process from Step 1.**
-
-## Relationship to Other Skills
+# Relationships
 
 ```
-User Request → nession-writing-requirements → brainstorming → writing-plans → executing-plans
-                  (this skill: clarify +     (HOW)         (steps)       (build)
-                   GitHub Issue)
+requirement → clarifying-requirements ┐
+                                      ├→ GitHub Issue → brainstorming → writing-plans → executing-plans
+bug         → systematic-debugging   ┘                  (bug optionally continues into Phase 4)
 ```
-
-- **superpowersexy:clarifying-requirements**: The dialogue engine (invoked by this skill)
-- **nession-writing-requirements**: The storage layer (this skill — GitHub Issues instead of local files)
-- **superpowers:brainstorming**: Next step after requirements approved
