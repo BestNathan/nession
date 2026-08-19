@@ -1,13 +1,7 @@
-use nession_common::protocol::{
-    AgentAddress, AgentCommandResponsePayload, AgentHeartbeatPayload, AgentMetadata,
-    AgentRegisterPayload, AgentRegisterResponsePayload, AgentStatus, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    HeartbeatMetadata, Message, NetworkType, ProtocolMessage, ServerHeartbeatAckPayload,
-    ServerSessionCreatePayload, ServerSessionKillPayload,
-};
+use super::*;
 
 #[test]
-fn test_message_new() {
+fn test_message_new_from_protocol() {
     let msg: ProtocolMessage<String> = Message::new(
         "test.type".to_string(),
         "msg-1".to_string(),

@@ -189,3 +189,32 @@ impl ClaudeCodeAgentExtension {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // --- Inlined from tests/handler_tests.rs (pagination_logic) ---
+    // NOTE: This test does pure arithmetic on a local String, does not touch
+    // any crate code. Registered as debt — should eventually be removed or
+    // moved to a more appropriate location.
+
+    #[test]
+    fn pagination_logic() {
+        let content = "A".repeat(5000);
+        let limit = 1000;
+
+        let offset = 0;
+        let chunk = &content[offset..std::cmp::min(offset + limit, content.len())];
+        assert_eq!(chunk.len(), 1000);
+
+        let offset = 1000;
+        let chunk = &content[offset..std::cmp::min(offset + limit, content.len())];
+        assert_eq!(chunk.len(), 1000);
+
+        let offset = 4900;
+        let chunk = &content[offset..std::cmp::min(offset + limit, content.len())];
+        assert_eq!(chunk.len(), 100);
+
+        let has_more = offset + limit < content.len();
+        assert!(!has_more);
+    }
+}
