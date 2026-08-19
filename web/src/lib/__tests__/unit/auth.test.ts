@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getToken, setToken, clearToken, getRememberPreference, setRememberPreference } from '@/lib/auth';
 

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { createFileOps } from '@/services/fileOps';
 import type { P2PConnection, P2PMessage } from '@/hooks/useP2PConnection';

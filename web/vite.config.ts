@@ -30,15 +30,43 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/test/setup.ts',
-    css: false,
-    // Suppress jsdom warnings that aren't actionable (canvas, focus-lock internals).
-    onConsoleLog(log: string): boolean | void {
-      if (log.includes("HTMLCanvasElement's getContext")) { return false; }
-      if (log.includes('Function components cannot be given refs')) { return false; }
-    },
+    projects: [
+      {
+        resolve: {
+          alias: {
+            '@': path.resolve(__dirname, './src'),
+          },
+        },
+        test: {
+          name: 'unit',
+          include: ['src/**/__tests__/unit/**/*.test.{ts,tsx}'],
+          environment: 'node',
+          globals: true,
+          setupFiles: './src/test/setup.ts',
+          css: false,
+        },
+      },
+      {
+        resolve: {
+          alias: {
+            '@': path.resolve(__dirname, './src'),
+          },
+        },
+        test: {
+          name: 'integration',
+          include: ['src/**/__tests__/integration/**/*.test.{ts,tsx}'],
+          environment: 'jsdom',
+          globals: true,
+          setupFiles: './src/test/setup.ts',
+          css: false,
+          // Suppress jsdom warnings that aren't actionable (canvas, focus-lock internals).
+          onConsoleLog(log: string): boolean | void {
+            if (log.includes("HTMLCanvasElement's getContext")) { return false; }
+            if (log.includes('Function components cannot be given refs')) { return false; }
+          },
+        },
+      },
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

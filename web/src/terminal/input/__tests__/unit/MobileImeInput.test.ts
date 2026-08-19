@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // web/src/terminal/input/__tests__/MobileImeInput.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Terminal } from '@xterm/xterm';

@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest';
 // ── jsdom polyfills ───────────────────────────────────────────────────────────
 
 // getAnimations — required by @base-ui/react/scroll-area's ScrollAreaViewport.
-if (!Element.prototype.getAnimations) {
+if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
   Element.prototype.getAnimations = () => [];
 }
 
@@ -26,21 +26,23 @@ globalThis.ResizeObserver = class ResizeObserver {
 
 // HTMLCanvasElement.getContext — xterm.js probes WebGL support via canvas;
 // jsdom doesn't implement WebGL. Return null so xterm falls back to DOM renderer.
-HTMLCanvasElement.prototype.getContext = function (
-  this: HTMLCanvasElement,
-  contextId: string,
-  ...args: unknown[]
-) {
-  if (contextId === '2d') {
-    // The overloaded return types of getContext are mutually incompatible;
-    // `any` cast is the only way to delegate to the original while keeping a
-    // single-function override that works for all contextId values.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (HTMLCanvasElement.prototype.getContext as any).call(this, contextId, ...args);
-  }
-  // webgl / webgl2 / bitmaprenderer — not implemented, return null.
-  return null;
-};
+if (typeof HTMLCanvasElement !== 'undefined') {
+  HTMLCanvasElement.prototype.getContext = function (
+    this: HTMLCanvasElement,
+    contextId: string,
+    ...args: unknown[]
+  ) {
+    if (contextId === '2d') {
+      // The overloaded return types of getContext are mutually incompatible;
+      // `any` cast is the only way to delegate to the original while keeping a
+      // single-function override that works for all contextId values.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (HTMLCanvasElement.prototype.getContext as any).call(this, contextId, ...args);
+    }
+    // webgl / webgl2 / bitmaprenderer — not implemented, return null.
+    return null;
+  };
+}
 
 // ── Suppress known-harmless third-party noise ─────────────────────────────────
 
