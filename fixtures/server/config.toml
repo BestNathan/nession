@@ -1,0 +1,11 @@
+# Server configuration for E2E tests.
+# The server reads config.toml from its CWD, which is fixtures/server/ when
+# launched by playwright.config.ts.
+
+listen_address = "127.0.0.1:19090"
+tls_cert_path = ""
+tls_key_path = ""
+auth_token = ""
+
+# Isolated database — must NOT touch ~/.nession.
+db_path = "/tmp/nession-e2e/nession.db"

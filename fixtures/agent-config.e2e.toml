@@ -1,0 +1,12 @@
+# Agent configuration for E2E tests.
+# Launched by playwright.config.ts with CWD=fixtures/ and argv[1] pointing
+# to this file.
+
+agent_id = "e2e-test-node"
+server_url = "ws://127.0.0.1:19090/ws"
+auth_token = "e2e-test-token"
+listen_address = "127.0.0.1:19091"
+
+# Logging — keep it quiet during E2E runs.
+[logging]
+level = "warn"
