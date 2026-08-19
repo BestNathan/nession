@@ -58,7 +58,10 @@ test.describe('Session lifecycle', () => {
     // KillConfirmDialog should open (it's an AlertDialog)
     const killDialog = page.getByRole('alertdialog');
     await expect(killDialog).toBeVisible();
-    await expect(killDialog.getByText('Kill Session')).toBeVisible();
+    // The dialog has both a heading "Kill Session" and a confirm button
+    // "Kill Session" — use heading for the visibility check to avoid the
+    // strict-mode "resolved to 2 elements" violation.
+    await expect(killDialog.getByRole('heading', { name: 'Kill Session' })).toBeVisible();
 
     // Type the session name to confirm
     const confirmInput = page.locator('#kill-confirm-name');

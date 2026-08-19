@@ -239,7 +239,7 @@ impl SessionManager {
             "-c",
             working_dir,
         ])
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::piped());
 
         // Pass through the agent process environment (PATH, NODE_PATH, etc.)
         // so tools installed via init container are available in tmux sessions.
@@ -279,8 +279,8 @@ impl SessionManager {
             );
         }
 
-        let status = cmd.status().await?;
-        let use_e = status.success();
+        let output = cmd.output().await?;
+        let use_e = output.status.success();
 
         if !use_e {
             // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
@@ -299,11 +299,21 @@ impl SessionManager {
                 "-c",
                 working_dir,
             ])
-            .stderr(std::process::Stdio::null());
+            .stderr(std::process::Stdio::piped());
 
-            let status2 = cmd2.status().await?;
-            if !status2.success() {
-                anyhow::bail!("Failed to create session: {name}");
+            let output2 = cmd2.output().await?;
+            if !output2.status.success() {
+                // Surface tmux's actual stderr so the failure is debuggable —
+                // previously we swallowed it and emitted only a generic
+                // "Failed to create session" bail, which made every root cause
+                // look identical.
+                let stage1_err = String::from_utf8_lossy(&output.stderr);
+                let stage2_err = String::from_utf8_lossy(&output2.stderr);
+                anyhow::bail!(
+                    "Failed to create session {name}: stage1 stderr: {}; stage2 stderr: {}",
+                    stage1_err.trim(),
+                    stage2_err.trim()
+                );
             }
 
             // Inject env vars into the live shell via send-keys.

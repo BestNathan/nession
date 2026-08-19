@@ -69,8 +69,14 @@ async function attachToSession(
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
 
-  // Select the desired mode
-  await dialog.getByRole('button', { name: mode }).click();
+  // Select the desired mode. The ModeToggle renders three buttons whose
+  // accessible names include both the mode label AND the hint (e.g.
+  // "Relay Proxy through server (works behind NAT/firewalls)"). A plain
+  // { name: 'Relay' } substring match therefore picks up the Auto buttons
+  // too (their hint text happens to contain the search string). Anchoring
+  // at the start with a regex restricts matches to the mode whose label
+  // actually begins with the name we want.
+  await dialog.getByRole('button', { name: new RegExp(`^${mode}\\b`) }).click();
 
   // Wait for the Attach button to be enabled (attachInfo loaded)
   const attachButton = dialog.getByRole('button', { name: 'Attach' });
