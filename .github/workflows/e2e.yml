@@ -34,6 +34,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
 
+      # tmux is required by nession-agent to create sessions. The runner
+      # image may or may not have it pre-installed; install it explicitly.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
       # Restore browser cache BEFORE install — a cache hit means the install
       # below skips the download entirely.
       - uses: actions/cache@v4
