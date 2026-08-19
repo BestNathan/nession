@@ -33,14 +33,14 @@ export default defineConfig({
   webServer: [
     {
       command: 'cargo run -p nession-server',
-      cwd: `${__dirname}/../fixtures/server`,
+      cwd: `${__dirname}/fixtures/server`,
       tcpPort: 19090,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'cargo run -p nession-agent -- ../fixtures/agent-config.e2e.toml',
-      cwd: `${__dirname}/../fixtures`,
+      command: 'cargo run -p nession-agent -- ./fixtures/agent-config.e2e.toml',
+      cwd: `${__dirname}/fixtures`,
       tcpPort: 19091,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
