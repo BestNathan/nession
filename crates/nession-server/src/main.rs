@@ -46,16 +46,25 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Load server configuration.
+///
+/// The config path is taken from the first argv argument (if present),
+/// falling back to `config.toml` in the current directory.
 fn load_config() -> anyhow::Result<ServerConfig> {
-    let config_path = "config.toml";
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config.toml".to_string());
 
-    if Path::new(config_path).exists() {
+    if Path::new(&config_path).exists() {
         info!("Loading configuration from {}", config_path);
-        let config_str = std::fs::read_to_string(config_path)?;
+        let config_str = std::fs::read_to_string(&config_path)?;
         let config: ServerConfig = toml::from_str(&config_str)?;
         Ok(config)
     } else {
-        info!("No config.toml found, using default configuration");
+        info!(
+            "No config found at '{}', using default configuration",
+            config_path
+        );
         Ok(ServerConfig {
             listen_address: "127.0.0.1:8080".to_string(),
             ..Default::default()
