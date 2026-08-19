@@ -240,6 +240,7 @@ mod tests {
 
     #[test]
     fn test_ensure_component_dirs_creates_directories() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         ensure_component_dirs().expect("ensure_component_dirs should succeed");
         assert!(server_dir().unwrap().exists());
         assert!(agent_dir().unwrap().exists());
