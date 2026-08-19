@@ -53,3 +53,57 @@ pub fn filename(relative_path: &str) -> &str {
 pub fn claude_home_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Inlined from tests/security_tests.rs ---
+
+    #[test]
+    fn rejects_path_traversal() {
+        assert!(!is_path_allowed("../../../etc/passwd"));
+        assert!(!is_path_allowed("agents/../../secret.txt"));
+        assert!(!is_path_allowed("/absolute/path"));
+    }
+
+    #[test]
+    fn rejects_blacklisted_files() {
+        assert!(!is_path_allowed("credentials.json"));
+    }
+
+    #[test]
+    fn allows_valid_paths() {
+        assert!(is_path_allowed("settings.json"));
+        assert!(is_path_allowed("CLAUDE.md"));
+        assert!(is_path_allowed("agents/coder.md"));
+        assert!(is_path_allowed("skills/dev/skill.md"));
+    }
+
+    #[test]
+    fn rejects_disallowed_extensions() {
+        assert!(!is_path_allowed("config.yaml"));
+        assert!(!is_path_allowed("secret.env"));
+        assert!(!is_path_allowed("data.toml"));
+    }
+
+    #[test]
+    fn filename_extraction() {
+        assert_eq!(filename("agents/coder.md"), "coder.md");
+        assert_eq!(filename("settings.json"), "settings.json");
+    }
+
+    #[test]
+    fn claude_home_dir_exists_or_none() {
+        // Just ensure it doesn't panic
+        let _ = claude_home_dir();
+    }
+
+    // --- Inlined from tests/handler_tests.rs (file_too_large_detection) ---
+
+    #[test]
+    fn file_too_large_detection() {
+        assert!(500_000 <= MAX_FILE_SIZE);
+        assert!(2_000_000 > MAX_FILE_SIZE);
+    }
+}
