@@ -29,6 +29,20 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  preview: {
+    port: 4173,
+    proxy: {
+      '/ws': {
+        target: 'ws://localhost:19090',
+        ws: true,
+        changeOrigin: true,
+      },
+      '/api': {
+        target: 'http://localhost:19090',
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     globals: true,
     // Suppress jsdom warnings that aren't actionable (canvas, focus-lock internals).
