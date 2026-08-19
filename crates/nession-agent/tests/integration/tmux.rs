@@ -1,16 +1,7 @@
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::util::{check_tmux_available, send_keys};
 
-/// Generate a unique session name for tests so they never collide with
-/// real user sessions — even across parallel test runs.
-fn unique_session_name(prefix: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("nession-test-{prefix}-{nanos}")
-}
+use super::unique_session_name;
 
 #[tokio::test]
 async fn test_list_sessions_empty() {

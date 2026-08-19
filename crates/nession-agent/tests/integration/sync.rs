@@ -1,5 +1,6 @@
 //! Integration tests for the sync module (heartbeat loop and session watcher).
 
+use super::unique_session_name;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -7,20 +8,11 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::protocol::AgentMetadata;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
-
-/// Generate a unique session name for tests.
-fn unique_session_name(prefix: &str) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("nession-test-{prefix}-{nanos}")
-}
 
 /// Start a mock WebSocket server that collects incoming messages.
 /// Returns a receiver that yields each text message the client sends.

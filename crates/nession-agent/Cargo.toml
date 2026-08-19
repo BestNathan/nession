@@ -40,6 +40,7 @@ system-configuration = "0.6"
 tokio = { workspace = true, features = ["full", "test-util"] }
 nession-server = { path = "../nession-server" }
 base64.workspace = true
+rand.workspace = true
 tempfile = "3"
 
 [lints]
