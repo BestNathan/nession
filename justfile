@@ -12,6 +12,10 @@ fmt:
 lint:
     cargo clippy --workspace -- -D warnings
 
+# Unit tests only (pre-commit)
+test-unit:
+    ./scripts/filtered-test.sh --lib
+
 # Full test suite (only shows failures + summary)
 test:
     ./scripts/filtered-test.sh
@@ -42,6 +46,10 @@ web-coverage:
     ./scripts/filtered-web-test.sh --coverage
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
+# Unit tests for both Rust and web (pre-commit)
+# Note: web-test-unit dependency added in Phase 2 (Task 2.4)
+unit: test-unit
+
 pre-push: test coverage web-test web-coverage
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
