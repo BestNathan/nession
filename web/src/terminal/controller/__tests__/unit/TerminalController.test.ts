@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // web/src/terminal/controller/__tests__/TerminalController.test.ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { TerminalController } from '@/terminal/controller/TerminalController';

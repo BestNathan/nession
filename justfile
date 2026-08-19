@@ -44,6 +44,14 @@ web-lint:
 web-test:
     ./scripts/filtered-web-test.sh
 
+# Unit tests only (node environment)
+web-test-unit:
+    ./scripts/filtered-web-test.sh --project unit
+
+# Integration tests only (jsdom environment)
+web-test-integration:
+    ./scripts/filtered-web-test.sh --project integration
+
 # Coverage check (pre-push, >= 80% threshold) — jsdom noise filtered
 web-coverage:
     ./scripts/filtered-web-test.sh --coverage

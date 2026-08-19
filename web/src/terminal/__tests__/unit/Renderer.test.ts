@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 import { Renderer } from '@/terminal/Renderer';
