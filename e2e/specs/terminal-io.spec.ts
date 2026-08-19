@@ -97,14 +97,14 @@ async function typeInTerminal(page: import('@playwright/test').Page, text: strin
 }
 
 test.describe('Terminal I/O', () => {
-  const SESSION_NAME = 'e2e-terminal';
-
   test.beforeEach(async ({ page }) => {
-    await page.goto('/?token=e2e-test-token');
+    // Use direct WS URL to bypass vite preview's flaky WS proxy.
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
     await waitForDashboard(page);
   });
 
   test('relay mode: echo command and verify output', async ({ page }) => {
+    const SESSION_NAME = 'e2e-terminal-relay';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
 
@@ -122,6 +122,7 @@ test.describe('Terminal I/O', () => {
   });
 
   test('P2P mode: echo command and verify output', async ({ page }) => {
+    const SESSION_NAME = 'e2e-terminal-p2p';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
 

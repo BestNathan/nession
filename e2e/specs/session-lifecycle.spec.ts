@@ -7,7 +7,8 @@ test.describe('Session lifecycle', () => {
   test.beforeEach(async ({ page }) => {
     // Use URL token to skip login. Server runs in no-auth mode (empty auth_token),
     // so any non-empty token is accepted.
-    await page.goto('/?token=e2e-test-token');
+    // Use direct WS URL to bypass vite preview's flaky WS proxy.
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
     await waitForDashboard(page);
   });
 
