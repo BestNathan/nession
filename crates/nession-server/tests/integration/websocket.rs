@@ -2,15 +2,9 @@ use futures_util::{SinkExt, StreamExt};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::connect_async;
 
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
+use super::current_timestamp;
 
 fn test_db_path(name: &str) -> String {
     std::env::temp_dir()

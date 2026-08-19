@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
@@ -8,16 +7,11 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 
+use super::current_timestamp;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
 
 /// Helper struct that starts a server on a random port and provides its address.
 struct TestServer {
