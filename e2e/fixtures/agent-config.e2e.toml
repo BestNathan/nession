@@ -7,6 +7,13 @@ server_url = "ws://127.0.0.1:19090/ws"
 auth_token = "e2e-test-token"
 listen_address = "127.0.0.1:19091"
 
+# Isolated working dir — must NOT default to $HOME. A fresh /tmp/nession-e2e
+# directory is created by globalSetup.ts before the agent starts; tmux
+# sessions are spawned inside it. The real $HOME stays untouched, so rustup
+# (which `cargo run` invokes) still reads ~/.rustup/~/.cargo from the CI
+# runner's real home.
+default_working_dir = "/tmp/nession-e2e"
+
 # Logging — keep it quiet during E2E runs.
 [logging]
 level = "warn"

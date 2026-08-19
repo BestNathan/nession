@@ -29,11 +29,18 @@ import { defineConfig } from '@playwright/test';
  * `create` fails silently whenever a leftover from a previous run has
  * the same name.
  *
- * webServer.env below forces HOME + TMUX_TMPDIR + NESSION_HOME to live
- * under /tmp/nession-e2e. Every Rust process the config spawns uses an
- * isolated tmux socket, isolated working directory, and the server's
- * explicit db_path (/tmp/nession-e2e/nession.db) covers the only other
- * on-disk state.
+ * webServer.env below forces TMUX_TMPDIR + NESSION_HOME to live under
+ * /tmp/nession-e2e. Every Rust process the config spawns uses an
+ * isolated tmux socket, and the server's env-files lookup (driven by
+ * NESSION_HOME, not HOME) and explicit db_path (/tmp/nession-e2e/nession.db)
+ * cover the on-disk state.
+ *
+ * Crucially, HOME is NOT overridden here — `cargo run` invokes rustup,
+ * which reads $HOME/.rustup and $HOME/.cargo. Setting HOME to the
+ * isolated dir made rustup try to download the toolchain into
+ * /tmp/nession-e2e/.rustup and fail with "No such file or directory".
+ * The agent's working dir is set via `default_working_dir` in its
+ * fixture config instead.
  *
  * globalSetup runs BEFORE the webServer processes spawn, so it clears
  * the runtime directory and kills any tmux server that might still hold
@@ -63,7 +70,6 @@ export default defineConfig({
       command: `cargo run -p nession-server -- ${__dirname}/fixtures/server/config.toml`,
       cwd: `${__dirname}/..`,
       env: {
-        HOME: E2E_RUN,
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
         NESSION_HOME: E2E_RUN,
       },
@@ -75,7 +81,6 @@ export default defineConfig({
       command: `cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
       cwd: `${__dirname}/..`,
       env: {
-        HOME: E2E_RUN,
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
         NESSION_HOME: E2E_RUN,
       },
