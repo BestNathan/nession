@@ -1,6 +1,7 @@
 # Server configuration for E2E tests.
-# The server reads config.toml from its CWD, which is fixtures/server/ when
-# launched by playwright.config.ts.
+# The server reads the config path from argv[1]; playwright.config.ts passes
+# this file's absolute path, so the path below is resolved correctly regardless
+# of the process CWD.
 
 listen_address = "127.0.0.1:19090"
 tls_cert_path = ""

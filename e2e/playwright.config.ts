@@ -4,9 +4,13 @@ import { defineConfig } from '@playwright/test';
  * E2E test configuration.
  *
  * Three webServer processes are started before tests run:
- *   1. nession-server (Rust) — reads config.toml from its CWD (fixtures/server/)
- *   2. nession-agent  (Rust) — reads the config path passed as argv
+ *   1. nession-server (Rust) — config path passed as argv[1]
+ *   2. nession-agent  (Rust) — config path passed as argv[1]
  *   3. vite preview          — serves the production build from web/dist/
+ *
+ * Both Rust binaries are launched via `cargo run` from the workspace root
+ * (where Cargo.toml lives). Config paths are resolved as absolute paths so
+ * they do not depend on the process CWD.
  *
  * The Rust services have no HTTP endpoint, so readiness is probed via TCP
  * (tcpPort).  The vite preview server speaks HTTP, so readiness is probed
@@ -32,15 +36,15 @@ export default defineConfig({
 
   webServer: [
     {
-      command: 'cargo run -p nession-server',
-      cwd: `${__dirname}/fixtures/server`,
+      command: `cargo run -p nession-server -- ${__dirname}/fixtures/server/config.toml`,
+      cwd: `${__dirname}/..`,
       tcpPort: 19090,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'cargo run -p nession-agent -- ./fixtures/agent-config.e2e.toml',
-      cwd: `${__dirname}/fixtures`,
+      command: `cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
+      cwd: `${__dirname}/..`,
       tcpPort: 19091,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
