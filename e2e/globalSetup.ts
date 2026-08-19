@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const E2E_RUN = '/tmp/nession-e2e';
@@ -7,16 +7,31 @@ const E2E_TMUX_SOCKET = '/tmp/nession-e2e/tmux';
 /**
  * E2E global setup — runs once BEFORE the webServer processes spawn.
  *
- * Clears the isolated runtime directory (/tmp/nession-e2e) and kills any
- * tmux server that might still hold the socket from a prior aborted run.
+ * Creates the isolated runtime directory and kills any tmux server that
+ * might still hold the socket from a prior aborted run. The agent's
+ * fixture config sets `default_working_dir = "/tmp/nession-e2e"` so tmux
+ * sessions are spawned inside this directory; the server's explicit
+ * `db_path` points to `/tmp/nession-e2e/nession.db`.
+ *
  * After this returns, Playwright spawns the webServers, each of which
- * inherits the TMUX_TMPDIR / HOME / NESSION_HOME set in playwright.config.ts
+ * inherits the TMUX_TMPDIR / NESSION_HOME set in playwright.config.ts
  * and so lands in a fresh, isolated world.
+ *
+ * ── Why not override HOME too? ─────────────────────────────────────────
+ * `cargo run` invokes rustup, which reads `$HOME/.rustup` and
+ * `$HOME/.cargo`. Setting HOME to the isolated dir made rustup try to
+ * download the toolchain into /tmp/nession-e2e/.rustup and fail with
+ * "No such file or directory". The agent's working dir is set via
+ * `default_working_dir` in its fixture config instead.
  */
 export default async function setup(): Promise<() => Promise<void>> {
   // ── Wipe the runtime directory ──────────────────────────────────────────
-  // Recreate empty so tmux can write its socket there when the agent starts.
   rmSync(E2E_RUN, { recursive: true, force: true });
+  // Recreate empty so:
+  //  - tmux can write its socket under /tmp/nession-e2e/tmux/tmux-<uid>/
+  //  - the agent has a valid working dir to spawn sessions into
+  //  - the server has a place to put its SQLite db and log files
+  mkdirSync(E2E_RUN, { recursive: true });
 
   // ── Kill any tmux server at the isolated socket ────────────────────────
   // Targets only the E2E socket path — never the user's real tmux.
