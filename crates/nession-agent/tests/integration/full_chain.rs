@@ -8,6 +8,7 @@
 //! - Heartbeat and session sync between agent and server
 //! - Graceful shutdown
 
+use super::unique_session_name;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
@@ -30,17 +31,6 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 // ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
-
-/// Generate a unique session name for tests so they never collide with
-/// real user sessions.
-fn unique_session_name(prefix: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("nession-test-{prefix}-{nanos}")
-}
 
 /// Start a real nession-server on a random port and return its address.
 async fn start_test_server(

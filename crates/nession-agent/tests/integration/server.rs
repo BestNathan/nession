@@ -4,6 +4,7 @@
 //! bind, connect, send requests, and receive responses. They require a
 //! working tmux installation (same as the tmux manager / pty tests).
 
+use super::unique_session_name;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::server::websocket::{
@@ -14,19 +15,8 @@ use nession_agent::server::websocket::{
 use nession_agent::tmux::manager::SessionManager;
 use serde::Serialize;
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-/// Generate a unique session name for tests — avoids collisions with real
-/// user sessions and between parallel test runs.
-fn unique_session_name(prefix: &str) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("nession-test-{prefix}-{nanos}")
-}
 
 /// Start a test server (OS picks a free port) and return the real bound
 /// address + handle.
