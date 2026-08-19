@@ -408,13 +408,13 @@ fixture 放 `e2e/fixtures/` 而不是仓库根 —— 根目录的 `agent-config
 
 ```makefile
 # ── Rust 分层 ──
-test-unit:                cargo test --workspace --lib
-test-integration:         cargo test --workspace --test integration
+test-unit:                ./scripts/filtered-test.sh --lib
+test-integration:         ./scripts/filtered-test.sh --test integration
 test:        test-unit test-integration        # 保留原名
 
 # ── Web 分层 ──
-web-test-unit:            vitest run --project unit
-web-test-integration:     vitest run --project integration
+web-test-unit:            ./scripts/filtered-web-test.sh --project unit
+web-test-integration:     ./scripts/filtered-web-test.sh --project integration
 web-test:    web-test-unit web-test-integration
 
 # ── E2E ──
@@ -428,6 +428,24 @@ check:       fmt lint coverage                 # 不变（CI rust-check）
 pre-push:    test coverage web-test web-coverage   # 不变
 ```
 
+**新 recipe 必须走两个 filter 脚本，不能直接调 cargo / vitest。** `filtered-test.sh` 把 cargo 输出收敛成「失败 + panic + 汇总」并附调试提示，`filtered-web-test.sh` 过滤 jsdom 噪音、预检 `node_modules`、按失败模式给针对性建议。绕过它们会让分层顺带把这些诊断能力删掉。两个脚本目前都写死了 cargo/vitest 参数，需要改成透传 `"$@"`：
+
+| 脚本 | 现在 | 改成 |
+|---|---|---|
+| `filtered-test.sh` | `cargo test --workspace --color=always` | `cargo test --workspace --color=always "$@"` |
+| `filtered-web-test.sh` | `if [ "$1" = "--coverage" ]` 二选一分支 | 透传 `"$@"`，`--coverage` 不再特殊处理（vitest 自己认这个 flag） |
+
+**`--lib` + `--test integration` 覆盖面已核验，不比 `cargo test --workspace` 少任何唯一测试：**
+
+| target 类型 | `cargo test --workspace` 跑 | 分层后 | 结论 |
+|---|---|---|---|
+| lib | ✅ | ✅ `--lib` | —— |
+| `tests/*` | ✅ | ✅ `--test integration`（分层后只剩这一个 target） | —— |
+| bin | ✅ | ❌ 不跑 | `server`/`agent` 的 `main.rs` 零测试；`cli` 的 bin target 只含**与 lib 重复**的那批（见「双重编译」），无唯一测试丢失 —— 反而少跑一遍 |
+| doc | ✅ | ❌ 不跑 | 已实测全仓库仅 1 处 ``` 围栏，是 `logging.rs` 的 ```toml 配置示例，rustdoc 不当 doctest 编译。**零 doctest** |
+
+**`--workspace --test integration` 对没有该 target 的 crate 不报错。** 已实测：`cargo test --workspace --test db_test --no-run` 在只有 `nession-server` 拥有该 target 的情况下正常完成，未对其余 4 个 crate 报「no test target」。所以 `nession-common` / `nession-claude-code` 分层后没有 `tests/integration/` 也不会让这条 recipe 失败。（三个 crate 的 `Cargo.toml` 均无 `[[test]]` 段，target 名由 cargo 自动取目录名 `integration`。）
+
 `test` / `check` / `pre-push` 的名字和语义都不变 —— 现有 hook 和 CI 无需改动就仍然正确，分层是纯增量。
 
 | gate | 现在 | 之后 |
@@ -439,7 +457,7 @@ pre-push:    test coverage web-test web-coverage   # 不变
 
 pre-commit 加单元层的代价不大：它已经在跑 `cargo clippy --workspace`，编译早就发生，`--lib` 只多出链接和执行；vitest node project 41 个文件不加载 jsdom，秒级。
 
-**顺带修一个既有缺陷：** `pre-commit` 不像 `pre-push` 那样按改动范围收窄，纯 docs 提交也会跑全套。加上单元测试后这个税会被放大，所以同时给 pre-commit 加上 `git diff --cached --name-only` 收窄逻辑（Rust 改动跑 Rust 检查，web 改动跑 web 检查，都没改就跳过）。
+**修正初稿的一个错判：`pre-commit` 已经按改动范围收窄了。** 初稿说它「不像 pre-push 那样收窄」，读代码后不成立 —— `.githooks/pre-commit` 第 10–12 行就在读 `git diff --cached --name-only`，第 21 行 `[ -n "$STAGED_RUST" ]` 与第 32 行 `[ -n "$STAGED_TSX" ]` 已经是范围守卫。所以**没有缺陷要修**，只需把单元测试步骤加进这两个既有分支里（Rust 分支加 `just test-unit`，web 分支加 `just web-test-unit`），范围收窄自动继承。
 
 ## 覆盖率策略
 
