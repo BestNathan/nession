@@ -1,6 +1,6 @@
 ---
 name: nession-development
-description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow
+description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow. Use when starting work from existing GitHub Issues — "把 terminal 相关的 issue 拉出来一起做", "这个 sprint 处理哪些 issue", pulling issues by label, or planning a batch of issues across branches.
 ---
 
 # Nession Development
@@ -10,6 +10,8 @@ description: Use when developing Nession features, writing or running tests, dec
 Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm run dev`, test with `cargo test`, version bump in `Cargo.toml` + `web/package.json`, submit changes via PR. Never build Docker images locally — CI handles that.
 
 **⚠ UI/交互改动必须用 Playwright 验证**：任何涉及 WebUI 视觉、交互、布局、终端行为的改动，必须在本地运行完整栈（server + agent + web），通过 Playwright MCP 在浏览器中验证功能正确后才算完成。仅靠单元测试和类型检查不够。
+
+**Starting from issues rather than a fresh idea?** See "Batch Development by Label" below — it covers pulling an area's issues, ordering them by file-overlap risk, and deciding what shares a branch.
 
 ## ⛔ Iron Law: Never Touch Main
 
@@ -537,10 +539,78 @@ gh pr comment <PR-NUMBER> --body "## 核心功能截图
 ![feature-name](.playwright-mcp/screenshots/feature-after.png)"
 ```
 
+## Batch Development by Label
+
+The label taxonomy (kind + area) is defined in **`nession-writing-requirements`**. Labels are generous and overlapping, so a single-label pull should be complete.
+
+### 1. Pull by label, never by keyword
+
+```bash
+gh issue list --repo BestNathan/nession --label terminal --state open \
+  --json number,title,labels --jq '.[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+
+gh issue list --repo BestNathan/nession --label terminal --label bug --state open   # AND
+gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"   # OR
+```
+
+**⛔ Never scope a batch by keyword search.** Measured: `gh search issues ... terminal` omitted #170 (26 mentions of tmux, zero of "terminal") and included #207 (Filebrowser). It fails in both directions.
+
+### 2. Backfill labels before trusting the pull
+
+Empty or suspiciously small result = labels are missing, not work.
+
+```bash
+# Issues with no area label at all
+gh issue list --repo BestNathan/nession --state open --limit 100 \
+  --json number,title,labels --jq '.[] | select([.labels[].name] | any(IN("terminal","web","ui","ux","backend","server","agent","cli","protocol","infra","ci","test","documentation")) | not) | "\(.number)\t\(.title)"'
+
+gh issue edit 170 --repo BestNathan/nession --add-label terminal --add-label agent --add-label backend
+```
+
+Backfill → re-pull → then plan.
+
+### 3. Order by file overlap
+
+List the files each issue will touch, then group:
+
+| Overlap | Arrangement |
+|---|---|
+| Disjoint (`web/src/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
+| Same directory, different files | Sequential in one lane, rebase each on the previous |
+| Same file, same function | One branch |
+| One issue governs the other's verification (coverage excludes vs the refactor they measure) | Sequential, the governing issue **last** |
+
+Parallelism only holds for disjoint files. Same-directory parallel work conflicts — and a parallel refactor can dodge the conflict via a new-path copy and silently revert the other's fix.
+
+### 4. One issue = one branch = one PR (default)
+
+**Merge into one PR only when:** same root cause (one fix closes all), or same file and same function so splitting conflicts on every rebase.
+
+**Not reasons to merge:** same area label; "it seems faster".
+
+```bash
+EnterWorktree name: "fix/<slug>"
+# develop → gates → Playwright (mandatory for UI/interaction changes)
+gh pr create --base staging --title "fix: ..." --body "..."
+gh pr merge <N> --auto --rebase
+```
+
+Note the issue number in 变更内容. `Closes #N` goes only in the release PR — one line per issue in the batch.
+
+### 5. Report the plan before building
+
+Per issue: number, title, files touched, lane, order within the lane. The user is approving the grouping and ordering.
+
+State what the pull did not cover: which issues were excluded and why, and which labels were judgment rather than evidence.
+
 ## Quick Reference
 
 | Task | Command |
 |------|---------|
+| Pull an area's open issues | `gh issue list --label terminal --state open` |
+| Pull area + kind | `gh issue list --label terminal --label bug --state open` |
+| OR several areas | `gh issue list --search "label:server,agent,protocol state:open"` |
+| Backfill area labels | `gh issue edit <N> --add-label terminal --add-label web` |
 | Create worktree (CC) | `EnterWorktree` tool |
 | Create worktree (manual) | `git worktree add -b feat/<slug> ../nession-<slug> main` |
 | Verify not on main | `git branch --show-current` |
@@ -574,3 +644,7 @@ gh pr comment <PR-NUMBER> --body "## 核心功能截图
 | PR missing test report or screenshots | All three sections are required. Screenshots MUST be collected via Playwright MCP (not manual screenshots). |
 | **Skipping Playwright verification for UI changes** | **FORBIDDEN.** Any UI/interaction change MUST be verified in a real browser with Playwright MCP before pushing. Tests alone are not enough for visual correctness. |
 | `#[allow(clippy::*)]` in Rust | **FORBIDDEN.** Every clippy lint must be fixed properly. |
+| **Scoping a batch by keyword search** | **Measured to fail both ways** — missed #170 (tmux, no "terminal"), pulled #207 (Filebrowser). Pull by label. |
+| Planning a batch off a pull without backfilling labels | An empty/small result means labels are missing, not that work is missing. Backfill, re-pull, then plan. |
+| Bundling issues into one PR because they share an area label | Same label ≠ same work. One issue = one PR unless same root cause or same function. |
+| Running two worktrees over the same directory in parallel | They conflict, and a parallel refactor can silently revert the other's fix. Sequence same-directory work. |
