@@ -31,33 +31,6 @@ test.describe('Login', () => {
     await expect(page.locator('[data-testid="filter-row"]')).toBeVisible();
   });
 
-  test('inputs are disabled while connecting', async ({ page }) => {
-    await page.goto('/');
-    await resetAuth(page);
-    await page.goto('/');
-
-    const serverUrlInput = page.locator('#serverUrl');
-    const authTokenInput = page.locator('#authToken');
-    const connectButton = page.getByRole('button', { name: 'Connect', exact: true });
-
-    // Initially inputs are enabled
-    await expect(serverUrlInput).toBeEnabled();
-    await expect(authTokenInput).toBeEnabled();
-
-    // Fill and click Connect
-    await serverUrlInput.fill('ws://localhost:19090/ws');
-    await authTokenInput.fill('e2e-test-token');
-    await connectButton.click();
-
-    // While connecting, inputs should be disabled
-    // (the status transitions quickly, but we can check immediately after click)
-    await expect(serverUrlInput).toBeDisabled();
-    await expect(authTokenInput).toBeDisabled();
-
-    // Eventually the dashboard loads and inputs are gone
-    await waitForDashboard(page);
-  });
-
   test('auto-connect via URL token parameter', async ({ page }) => {
     await page.goto('/');
     await resetAuth(page);

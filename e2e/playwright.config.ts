@@ -20,7 +20,29 @@ import { defineConfig } from '@playwright/test';
  *   19090 — server WebSocket (also the vite dev-server proxy target)
  *   19091 — agent WebSocket (avoids conflict with the server)
  *   4173  — vite preview (default)
+ *
+ * ── Isolation ────────────────────────────────────────────────────────────
+ * The agent's tmux commands use the system tmux socket at
+ * $TMUX_TMPDIR/tmux-<uid>/default (default: /tmp/tmux-<uid>/default).
+ * Without isolation the E2E agent would share a tmux server with the
+ * developer's real tmux — session names collide, env files leak in, and
+ * `create` fails silently whenever a leftover from a previous run has
+ * the same name.
+ *
+ * webServer.env below forces HOME + TMUX_TMPDIR + NESSION_HOME to live
+ * under /tmp/nession-e2e. Every Rust process the config spawns uses an
+ * isolated tmux socket, isolated working directory, and the server's
+ * explicit db_path (/tmp/nession-e2e/nession.db) covers the only other
+ * on-disk state.
+ *
+ * globalSetup runs BEFORE the webServer processes spawn, so it clears
+ * the runtime directory and kills any tmux server that might still hold
+ * the socket from a prior aborted run.
  */
+
+const E2E_RUN = '/tmp/nession-e2e';
+const E2E_TMUX_SOCKET = '/tmp/nession-e2e/tmux';
+
 export default defineConfig({
   testDir: './specs',
   fullyParallel: false,
@@ -28,6 +50,8 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: 'html',
+
+  globalSetup: require.resolve('./globalSetup'),
 
   use: {
     baseURL: 'http://localhost:4173',
@@ -38,6 +62,11 @@ export default defineConfig({
     {
       command: `cargo run -p nession-server -- ${__dirname}/fixtures/server/config.toml`,
       cwd: `${__dirname}/..`,
+      env: {
+        HOME: E2E_RUN,
+        TMUX_TMPDIR: E2E_TMUX_SOCKET,
+        NESSION_HOME: E2E_RUN,
+      },
       tcpPort: 19090,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
@@ -45,6 +74,11 @@ export default defineConfig({
     {
       command: `cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
       cwd: `${__dirname}/..`,
+      env: {
+        HOME: E2E_RUN,
+        TMUX_TMPDIR: E2E_TMUX_SOCKET,
+        NESSION_HOME: E2E_RUN,
+      },
       tcpPort: 19091,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
