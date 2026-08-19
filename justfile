@@ -40,11 +40,10 @@ web-lint:
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 
-# Unit tests (pre-push) — jsdom noise filtered
-web-test:
-    ./scripts/filtered-web-test.sh
+# All web tests (unit + integration)
+web-test: web-test-unit web-test-integration
 
-# Unit tests only (node environment)
+# Unit tests only (pure logic, node environment)
 web-test-unit:
     ./scripts/filtered-web-test.sh --project unit
 
@@ -52,7 +51,7 @@ web-test-unit:
 web-test-integration:
     ./scripts/filtered-web-test.sh --project integration
 
-# Coverage check (pre-push, >= 80% threshold) — jsdom noise filtered
+# Coverage check (pre-push, >= 80% threshold)
 web-coverage:
     ./scripts/filtered-web-test.sh --coverage
 
