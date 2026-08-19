@@ -7,12 +7,8 @@ const E2E_TMUX_SOCKET = '/tmp/nession-e2e/tmux';
 /**
  * E2E global setup — runs once BEFORE the webServer processes spawn.
  *
- * Creates the isolated runtime directory and kills any tmux server that
- * might still hold the socket from a prior aborted run. The agent's
- * fixture config sets `default_working_dir = "/tmp/nession-e2e"` so tmux
- * sessions are spawned inside this directory; the server's explicit
- * `db_path` points to `/tmp/nession-e2e/nession.db`.
- *
+ * Clears the isolated runtime directory (/tmp/nession-e2e) and kills any
+ * tmux server that might still hold the socket from a prior aborted run.
  * After this returns, Playwright spawns the webServers, each of which
  * inherits the TMUX_TMPDIR / NESSION_HOME set in playwright.config.ts
  * and so lands in a fresh, isolated world.
