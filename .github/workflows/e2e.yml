@@ -1,0 +1,71 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [staging]
+
+# One run per branch/PR. Superseded runs are useless, so cancel them.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # PLAYWRIGHT_BROWSERS_PATH applies to BOTH install and test — keeps them
+    # pointed at the same directory (and the same one the cache restores to).
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust toolchain ────────────────────────────────────────────────
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+
+      # ── Node ──────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      # tmux is required by nession-agent to create sessions. The runner
+      # image may or may not have it pre-installed; install it explicitly.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      # Restore browser cache BEFORE install — a cache hit means the install
+      # below skips the download entirely.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      # Install Playwright + Chromium only (skip Firefox/WebKit).
+      - run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium --with-deps
+
+      # ── Build web (vite preview serves this) ─────────────────────────
+      - run: cd web && npm ci && npm run build
+
+      # Pre-build Rust binaries so the webServer startup is fast and the
+      # three `cargo run` invocations don't each pay the compile cost.
+      # (cargo's flock still serialises them; this is just the first hit.)
+      - run: cargo build -p nession-server -p nession-agent
+
+      # ── Run E2E ───────────────────────────────────────────────────────
+      - run: cd e2e && npx playwright test
+
+      # ── Report ────────────────────────────────────────────────────────
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7

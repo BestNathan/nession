@@ -12,9 +12,16 @@ fmt:
 lint:
     cargo clippy --workspace -- -D warnings
 
-# Full test suite (only shows failures + summary)
-test:
-    ./scripts/filtered-test.sh
+# Unit tests only (pre-commit)
+test-unit:
+    ./scripts/filtered-test.sh --lib
+
+# Integration tests only (pre-push)
+test-integration:
+    ./scripts/filtered-test.sh --test integration
+
+# Full test suite (unit + integration)
+test: test-unit test-integration
 
 # Per-crate coverage check against thresholds
 coverage:
@@ -33,11 +40,18 @@ web-lint:
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 
-# Unit tests (pre-push) — jsdom noise filtered
-web-test:
-    ./scripts/filtered-web-test.sh
+# All web tests (unit + integration)
+web-test: web-test-unit web-test-integration
 
-# Coverage check (pre-push, >= 80% threshold) — jsdom noise filtered
+# Unit tests only (pure logic, node environment)
+web-test-unit:
+    ./scripts/filtered-web-test.sh --project unit
+
+# Integration tests only (jsdom environment)
+web-test-integration:
+    ./scripts/filtered-web-test.sh --project integration
+
+# Coverage check (pre-push, >= 80% threshold)
 web-coverage:
     ./scripts/filtered-web-test.sh --coverage
 
@@ -46,6 +60,10 @@ check-workspace:
     ./scripts/check-dev-workspace.sh session --fetch
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
+# Unit tests for both Rust and web (pre-commit)
+# Note: web-test-unit dependency added in Phase 2 (Task 2.4)
+unit: test-unit
+
 pre-push: test coverage web-test web-coverage
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

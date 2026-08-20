@@ -1,0 +1,20 @@
+# Server configuration for E2E tests.
+# The server reads the config path from argv[1]; playwright.config.ts passes
+# this file's absolute path, so the path below is resolved correctly regardless
+# of the process CWD.
+
+listen_address = "127.0.0.1:19090"
+tls_cert_path = ""
+tls_key_path = ""
+auth_token = ""
+
+# Isolated database — must NOT touch ~/.nession.
+db_path = "/tmp/nession-e2e/nession.db"
+
+# Heartbeat timeout — increased from default (30s) to 120s for CI stability.
+# CI runners can be slow, and we want to avoid false "agent disconnected" errors.
+heartbeat_timeout_secs = 120
+
+# Logging — set to info for debugging CI issues.
+[logging]
+level = "info"

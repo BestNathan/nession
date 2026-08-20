@@ -1,0 +1,24 @@
+# Agent configuration for E2E tests.
+# Launched by playwright.config.ts with argv[1] pointing to this file's
+# absolute path, so the config resolves regardless of the process CWD.
+
+agent_id = "e2e-test-node"
+server_url = "ws://127.0.0.1:19090/ws"
+auth_token = "e2e-test-token"
+listen_address = "127.0.0.1:19091"
+# Advertise localhost so the server can connect back for relay mode.
+# Without this, the agent auto-detects network interfaces (10.x, 172.x)
+# which are not reachable since we only listen on 127.0.0.1.
+advertise_address = "127.0.0.1"
+
+# Isolated working dir — must NOT default to $HOME. A fresh /tmp/nession-e2e
+# directory is created by globalSetup.ts before the agent starts; tmux
+# sessions are spawned inside it. The real $HOME stays untouched, so rustup
+# (which `cargo run` invokes) still reads ~/.rustup/~/.cargo from the CI
+# runner's real home.
+default_working_dir = "/tmp/nession-e2e"
+
+# Logging — set to info for debugging CI issues.
+# Can be reduced to "warn" once agent stability is confirmed.
+[logging]
+level = "info"

@@ -10,7 +10,7 @@ NC='\033[0m'
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-cargo test --workspace --color=always >"$tmp" 2>&1
+cargo test --workspace --color=always "$@" >"$tmp" 2>&1
 rc=$?
 
 # Show test output lines: test results, panics, errors.

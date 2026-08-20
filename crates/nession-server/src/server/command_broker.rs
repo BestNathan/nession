@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use tokio::sync::{oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Sender for outgoing WebSocket messages.
 ///
@@ -71,7 +71,7 @@ impl CommandBroker {
     pub async fn unregister_agent(&self, agent_id: &str) {
         let mut agents = self.agents.write().await;
         if agents.remove(agent_id).is_some() {
-            debug!("CommandBroker: unregistered agent {}", agent_id);
+            info!("CommandBroker: unregistered agent {}", agent_id);
         }
     }
 

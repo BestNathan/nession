@@ -32,46 +32,89 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Diagnostic: print immediately to stderr to confirm process starts
+    eprintln!("[DIAGNOSTIC] nession-agent process started");
+
     // 1. Load configuration
-    let config = load_config()?;
+    eprintln!("[DIAGNOSTIC] Loading configuration...");
+    let config = match load_config() {
+        Ok(c) => {
+            eprintln!("[DIAGNOSTIC] Configuration loaded successfully");
+            c
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to load configuration: {e:?}");
+            return Err(e);
+        }
+    };
 
     // 2. Initialize logging (stdout + file)
-    let _log_guard = nession_common::logging::init_logging(
+    eprintln!("[DIAGNOSTIC] Initializing logging...");
+    let _log_guard = match nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::agent_logs_dir()?,
         "nession-agent",
-    )?;
+    ) {
+        Ok(g) => {
+            eprintln!("[DIAGNOSTIC] Logging initialized successfully");
+            g
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to initialize logging: {e:?}");
+            return Err(e.into());
+        }
+    };
 
+    eprintln!("[DIAGNOSTIC] About to log startup info...");
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
+    eprintln!("[DIAGNOSTIC] Startup info logged");
     info!("Agent ID: {}", config.agent_id);
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
 
+    eprintln!("[DIAGNOSTIC] About to check tmux availability...");
     // 3. Check tmux availability
     match nession_agent::tmux::util::check_tmux_available().await {
-        Ok(true) => info!("tmux is available"),
-        Ok(false) => warn!("tmux does not appear to be available"),
-        Err(e) => warn!("Could not check tmux availability: {}", e),
+        Ok(true) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned true");
+            info!("tmux is available");
+        }
+        Ok(false) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned false");
+            warn!("tmux does not appear to be available");
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned error: {e:?}");
+            warn!("Could not check tmux availability: {}", e);
+        }
     }
+    eprintln!("[DIAGNOSTIC] tmux check completed");
 
     // 4. Start Agent WebSocket server
+    eprintln!("[DIAGNOSTIC] Loading TLS...");
     let tls_option = load_tls(&config)?;
+    eprintln!("[DIAGNOSTIC] TLS loaded");
     // Resolve persistent agent identity. On first run this persists the
     // generated or configured agent_id; on subsequent runs it loads the
     // persisted identity so the server recognises us as the same agent.
+    eprintln!("[DIAGNOSTIC] Resolving agent identity...");
     let identity_path = nession_common::paths::agent_identity_path()?;
+    eprintln!("[DIAGNOSTIC] Identity path: {identity_path:?}");
     let agent_id = identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+    eprintln!("[DIAGNOSTIC] Agent ID resolved: {agent_id}");
 
     let file_root = config
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
+    eprintln!("[DIAGNOSTIC] Creating resize channel...");
     // Resize forwarding channel: the P2P AgentServer publishes tmux
     // `%window-resize` events here (it starts before the central-server
     // connection exists, so it can't hold the handle directly), and the
     // forwarder spawned below drains them into the central server once a
     // live ServerClientHandle is available.
     let (resize_tx, mut resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    eprintln!("[DIAGNOSTIC] Creating AgentServer...");
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -82,10 +125,12 @@ async fn main() -> Result<()> {
         resize_tx,
     )
     .context("failed to create agent server")?;
+    eprintln!("[DIAGNOSTIC] AgentServer created, starting...");
     let (server_handle, listen_addr) = agent_server
         .start()
         .await
         .context("failed to start agent server")?;
+    eprintln!("[DIAGNOSTIC] AgentServer started on {listen_addr}");
     info!("Agent WebSocket server started on {}", listen_addr);
 
     // 5. Connect to central server
@@ -123,13 +168,19 @@ async fn main() -> Result<()> {
 
     let tmux_for_client = Arc::new(SessionManager::new());
 
+    eprintln!("[DIAGNOSTIC] Checking server_url: '{}'", config.server_url);
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
     // server-advertised heartbeat interval (falling back to the local config).
     let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
+        eprintln!("[DIAGNOSTIC] No server_url configured — standalone mode");
         info!("No server_url configured — running in standalone mode");
         (None, config.heartbeat_interval_secs)
     } else {
+        eprintln!(
+            "[DIAGNOSTIC] Connecting to central server at {}...",
+            config.server_url
+        );
         let extensions: Vec<Box<dyn AgentExtension>> =
             vec![Box::new(ClaudeCodeAgentExtension::new())];
         let ext_registry = if extensions.is_empty() {
@@ -157,15 +208,19 @@ async fn main() -> Result<()> {
         // Attempt to connect with a timeout so the agent can still serve
         // local clients even if the central server is unreachable. The
         // supervisor keeps retrying in the background regardless.
+        eprintln!("[DIAGNOSTIC] Calling connect_and_run...");
         tokio::select! {
             result = server_client.connect_and_run() => {
+                eprintln!("[DIAGNOSTIC] connect_and_run returned");
                 match result {
                     Ok((handle, server_interval)) => {
                         let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
+                        eprintln!("[DIAGNOSTIC] Connected to central server!");
                         info!("Connected to central server (heartbeat interval: {}s)", interval);
                         (Some(handle), interval)
                     }
                     Err(e) => {
+                        eprintln!("[DIAGNOSTIC] Failed to connect: {e:?}");
                         error!("Failed to connect to central server: {:#}", e);
                         (None, config.heartbeat_interval_secs)
                     }

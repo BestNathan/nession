@@ -23,13 +23,8 @@ fi
 
 FILTER='HTMLCanvasElement|not wrapped in act|Function components cannot be given refs'
 
-if [ "${1:-}" = "--coverage" ]; then
-  output=$(npx vitest run --coverage --reporter=default 2>&1)
-  rc=$?
-else
-  output=$(npx vitest run --reporter=default 2>&1)
-  rc=$?
-fi
+output=$(npx vitest run "$@" --reporter=default 2>&1)
+rc=$?
 
 echo "$output" | grep -v -E "$FILTER" || true
 

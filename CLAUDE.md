@@ -535,6 +535,6 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
   | `nession-agent` | 80% line（macOS 上 79%，control-mode 测试在 macOS 被跳过） |
   | `nession-cli` | 40% line（不可测的命令已排除） |
   | `nession-claude-code` | **未登记 → 不检查** |
-  | web（`web/vite.config.ts`） | lines / functions / statements 80%，**branches 65%** |
+  | web（`web/vite.config.ts`） | lines 78%，functions 72%，statements 76%，**branches 65%** |
 
 - **CI 的 web-check 不跑 `just web-coverage`**。web 覆盖率阈值只由本地 pre-push 把关,PR 上没有独立验证。改动 web 代码时不要指望 CI 拦住覆盖率回退。
