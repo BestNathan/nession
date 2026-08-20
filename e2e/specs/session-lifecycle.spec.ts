@@ -1,11 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForDashboard } from '../helpers/dashboard';
 
-// TODO: session-lifecycle test is skipped because the agent's WebSocket
-// connection to the server drops during session creation in CI, causing
-// the CreateSessionDialog to stay open with "Agent disconnected" error.
-// Root cause: agent process instability or network issues in CI environment.
-// Re-enable once the agent disconnect issue is resolved.
 test.describe('Session lifecycle', () => {
   const SESSION_NAME = 'e2e-lifecycle';
 
@@ -17,7 +12,7 @@ test.describe('Session lifecycle', () => {
     await waitForDashboard(page);
   });
 
-  test.skip('create a session, verify it appears, then kill it', async ({ page }) => {
+  test('create a session, verify it appears, then kill it', async ({ page }) => {
     // ── Wait for the agent to register ──
     // The "Create" button is enabled only when at least one agent is online.
     // In CI, cargo build + agent startup + heartbeat can take 30-60 seconds.
