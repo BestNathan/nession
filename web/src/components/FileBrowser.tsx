@@ -43,8 +43,7 @@ import { useNewEntryForm } from '../hooks/useNewEntryForm';
 import { useRenameState } from '../hooks/useRenameState';
 import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
 import type { FileOps, FileEntry } from '../services/fileOps';
-import { preloadExtensions } from '@/lib/viewerRegistry';
-import { preload } from '@/lib/codeMirrorLanguages';
+import { registerSeenLangKeys, scanLangKeysFromPaths } from '@/lib/codeMirrorLangs';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
@@ -81,9 +80,9 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     try {
       const result = await fileOps.listDir(path);
       setEntries(result.entries);
-      const exts = preloadExtensions(result.entries.map((e) => e.path));
-      if (exts.length > 0) {
-        preload(exts);
+      const langKeys = scanLangKeysFromPaths(result.entries.map((e) => e.path));
+      if (langKeys.length > 0) {
+        registerSeenLangKeys(langKeys);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load directory';

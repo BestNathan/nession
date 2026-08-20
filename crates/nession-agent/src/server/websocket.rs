@@ -1988,15 +1988,12 @@ mod tests {
             env_snapshots: Vec::new(),
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
-        let _attach_resp: Message<ClientAttachResponse> =
+        let attach_resp: Message<ClientAttachResponse> =
             send_and_receive(&mut sink, &mut stream, &attach_req).await;
+        assert_eq!(attach_resp.msg_type, msg_types::OK);
 
-        // Give the PTY reader task a moment to start.
-        // Increased from 200ms — under LLVM instrumentation the PTY setup
-        // can take noticeably longer.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        // Send terminal input (base64-encoded "echo hello\n").
+        // Send terminal input immediately — a post-attach sleep breaks macOS PTY
+        // writes (EIO) while Linux CI tolerates either timing.
         use base64::Engine;
         let input_data = base64::engine::general_purpose::STANDARD.encode(b"echo hello\n");
         let input_payload = TerminalInputPayload {

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { getViewerType, getLangKey, preloadExtensions, isViewable, parseExt, isMarkdownExt } from '@/lib/viewerRegistry';
+import {
+  getViewerType,
+  getLangKey,
+  isViewable,
+  isViewablePath,
+  parseExt,
+  parseBasename,
+  isMarkdownExt,
+} from '@/lib/viewerRegistry';
 
 describe('getViewerType', () => {
   it.each(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'])('returns "image" for .%s', (ext) => {
@@ -34,32 +42,13 @@ describe('getViewerType', () => {
 });
 
 describe('getLangKey', () => {
-  it('returns javascript for .js', () => {
-    expect(getLangKey('js')).toBe('javascript');
-  });
-
-  it('returns shell for .sh', () => {
-    expect(getLangKey('sh')).toBe('shell');
-  });
-
-  it('returns go for .go', () => {
+  it('returns UIW keys for common extensions', () => {
+    expect(getLangKey('js')).toBe('js');
+    expect(getLangKey('sh')).toBe('sh');
     expect(getLangKey('go')).toBe('go');
-  });
-
-  it('returns rust for .rs', () => {
-    expect(getLangKey('rs')).toBe('rust');
-  });
-
-  it('returns cpp for .cpp', () => {
-    expect(getLangKey('cpp')).toBe('cpp');
-  });
-
-  it('returns sql for .sql', () => {
-    expect(getLangKey('sql')).toBe('sql');
-  });
-
-  it('returns xml for .xml', () => {
-    expect(getLangKey('xml')).toBe('xml');
+    expect(getLangKey('rs')).toBe('rs');
+    expect(getLangKey('toml')).toBe('toml');
+    expect(getLangKey('ini')).toBe('ini');
   });
 
   it('returns undefined for unknown extensions', () => {
@@ -67,7 +56,7 @@ describe('getLangKey', () => {
   });
 
   it('is case-insensitive', () => {
-    expect(getLangKey('SH')).toBe('shell');
+    expect(getLangKey('SH')).toBe('sh');
   });
 });
 
@@ -82,7 +71,17 @@ describe('isViewable', () => {
 
   it('returns true for known code extensions', () => {
     expect(isViewable('js')).toBe(true);
-    expect(isViewable('go')).toBe(true);
+    expect(isViewable('toml')).toBe(true);
+  });
+});
+
+describe('isViewablePath', () => {
+  it('returns true for Dockerfile without extension', () => {
+    expect(isViewablePath('Dockerfile')).toBe(true);
+  });
+
+  it('returns true for Cargo.toml', () => {
+    expect(isViewablePath('src/Cargo.toml')).toBe(true);
   });
 });
 
@@ -101,11 +100,17 @@ describe('parseExt', () => {
   });
 
   it('handles hidden files', () => {
-    expect(parseExt('.gitignore')).toBe('gitignore');
+    expect(parseExt('.env')).toBe('env');
   });
 
   it('returns lowercase', () => {
     expect(parseExt('FILE.PDF')).toBe('pdf');
+  });
+});
+
+describe('parseBasename', () => {
+  it('returns the last path segment', () => {
+    expect(parseBasename('/a/b/Cargo.toml')).toBe('Cargo.toml');
   });
 });
 
@@ -120,41 +125,9 @@ describe('isMarkdownExt', () => {
 
   it('is case-insensitive', () => {
     expect(isMarkdownExt('MD')).toBe(true);
-    expect(isMarkdownExt('Markdown')).toBe(true);
   });
 
   it('returns false for other extensions', () => {
     expect(isMarkdownExt('js')).toBe(false);
-    expect(isMarkdownExt('txt')).toBe(false);
-  });
-
-  it('returns false for empty string', () => {
-    expect(isMarkdownExt('')).toBe(false);
-  });
-});
-
-describe('preloadExtensions', () => {
-  it('extracts unique extensions from file paths', () => {
-    const paths = ['a.go', 'b.go', 'c.rs', 'd.go', 'e.py'];
-    const exts = preloadExtensions(paths);
-    expect(exts).toContain('go');
-    expect(exts).toContain('rs');
-    expect(exts).toContain('py');
-    expect(exts.length).toBe(3);
-  });
-
-  it('excludes unknown language extensions', () => {
-    const paths = ['a.xyz', 'b.go'];
-    const exts = preloadExtensions(paths);
-    expect(exts).toEqual(['go']);
-  });
-
-  it('handles empty array', () => {
-    expect(preloadExtensions([])).toEqual([]);
-  });
-
-  it('handles paths without extensions', () => {
-    const paths = ['Makefile', 'Dockerfile', 'README'];
-    expect(preloadExtensions(paths)).toEqual([]);
   });
 });

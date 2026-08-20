@@ -192,10 +192,7 @@ async fn integration_terminal_io_flow() {
     let _: nession_agent::server::websocket::Message<ClientAttachResponse> =
         round_trip(&mut sink, &mut stream, &req).await;
 
-    // Give the output reader a moment to start.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    // Send terminal input (base64 of "echo hello\n").
+    // Send terminal input immediately — post-attach sleep breaks macOS PTY writes.
     use base64::Engine;
     let input = base64::engine::general_purpose::STANDARD.encode(b"echo hello\n");
     let payload = nession_agent::server::websocket::TerminalInputPayload {
