@@ -32,6 +32,9 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Diagnostic: print immediately to stderr to confirm process starts
+    eprintln!("[DIAGNOSTIC] nession-agent process started");
+
     // 1. Load configuration
     let config = load_config()?;
 
