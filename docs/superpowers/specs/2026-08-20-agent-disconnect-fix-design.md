@@ -213,7 +213,21 @@ After implementing fixes, all E2E tests pass consistently:
 ### CI Stability
 
 **Before fixes:** ~60% failure rate  
-**After fixes:** 100% pass rate over 5 consecutive runs
+**After fixes:** Improved stability, but intermittent failures persist in CI
+
+**Current status (2026-08-20):**
+- Login auto-connect: ✅ Consistently passes
+- Session lifecycle: ⏭️ Skipped (agent still unstable in CI)
+- Terminal I/O relay: ⏭️ Skipped (agent still unstable in CI)
+- Terminal I/O P2P: ⏭️ Skipped (agent still unstable in CI)
+
+**Analysis:** The fixes reduced timeout-related failures and improved observability, but the root cause of agent disconnection in CI environments remains. The agent works reliably locally but exhibits intermittent connection drops in GitHub Actions runners. This suggests environmental factors (resource contention, network latency, process scheduling) that are difficult to reproduce and debug in CI.
+
+**Next steps:**
+1. Add comprehensive logging to agent connection lifecycle
+2. Investigate CI runner resource constraints
+3. Consider using dedicated runners for E2E tests
+4. Explore agent reconnection improvements
 
 ## Monitoring and Observability
 
