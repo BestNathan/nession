@@ -96,12 +96,6 @@ async function typeInTerminal(page: import('@playwright/test').Page, text: strin
   await page.keyboard.type(text, { delay: 20 });
 }
 
-// NOTE: terminal-io tests are skipped due to persistent agent instability
-// in CI environments. Despite stability improvements (PR #317), the agent's
-// WebSocket connection still drops intermittently during CI runs. The tests
-// pass locally but fail in CI. Both relay and P2P modes are affected.
-// TODO: Re-enable once agent connection stability is fully resolved.
-// See: docs/superpowers/specs/2026-08-20-agent-disconnect-fix-design.md
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
@@ -109,7 +103,7 @@ test.describe('Terminal I/O', () => {
     await waitForDashboard(page);
   });
 
-  test.skip('relay mode: echo command and verify output', async ({ page }) => {
+  test('relay mode: echo command and verify output', async ({ page }) => {
     const SESSION_NAME = 'e2e-terminal-relay';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
@@ -127,7 +121,7 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test.skip('P2P mode: echo command and verify output', async ({ page }) => {
+  test('P2P mode: echo command and verify output', async ({ page }) => {
     const SESSION_NAME = 'e2e-terminal-p2p';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
