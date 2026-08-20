@@ -146,17 +146,27 @@ async fn test_heartbeat_loop_respects_interval() {
         sd
     };
 
-    // First heartbeat should arrive around t=2s.
+    // First heartbeat should arrive around t=1s (not the full 2s interval).
+    // The heartbeat loop sends the first heartbeat after a short 1s delay
+    // instead of waiting for the full interval, to reduce the window where
+    // an agent is registered but hasn't heartbeated yet.
     let start = tokio::time::Instant::now();
     let _ = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
         .await
         .expect("timeout waiting for first heartbeat");
     let first_elapsed = start.elapsed();
 
-    // Should be at least 1.5 seconds (some tolerance for CI).
+    // Should be at least 0.8 seconds (some tolerance for CI).
     assert!(
-        first_elapsed >= Duration::from_millis(1500),
+        first_elapsed >= Duration::from_millis(800),
         "first heartbeat came too early: {:?}",
+        first_elapsed
+    );
+
+    // But should arrive well before the full 2s interval.
+    assert!(
+        first_elapsed < Duration::from_millis(1800),
+        "first heartbeat came too late: {:?}",
         first_elapsed
     );
 
