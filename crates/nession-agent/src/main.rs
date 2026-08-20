@@ -65,7 +65,9 @@ async fn main() -> Result<()> {
         }
     };
 
+    eprintln!("[DIAGNOSTIC] About to log startup info...");
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
+    eprintln!("[DIAGNOSTIC] Startup info logged");
     info!("Agent ID: {}", config.agent_id);
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
