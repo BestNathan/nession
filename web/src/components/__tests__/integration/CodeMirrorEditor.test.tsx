@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
+import { EditorView } from '@codemirror/view';
 import { CodeMirrorEditor, type CodeMirrorEditorProps } from '@/components/CodeMirrorEditor';
 import { detectLanguage } from '@/lib/codeMirrorLanguages';
 
@@ -13,6 +14,27 @@ function renderEditor(props: Partial<CodeMirrorEditorProps> = {}) {
   };
   const utils = render(<CodeMirrorEditor {...defaults} {...props} />);
   return { onChange, ...utils };
+}
+
+function getEditorView(): EditorView {
+  const editor = document.querySelector('.cm-editor');
+  expect(editor).toBeTruthy();
+  const view = EditorView.findFromDOM(editor as HTMLElement);
+  expect(view).toBeTruthy();
+  return view as EditorView;
+}
+
+function dispatchKey(
+  target: HTMLElement,
+  init: KeyboardEventInit,
+): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', {
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  target.dispatchEvent(event);
+  return event;
 }
 
 describe('detectLanguage', () => {
@@ -176,13 +198,7 @@ describe('CodeMirrorEditor', () => {
     const content = document.querySelector('.cm-content') as HTMLElement;
     expect(content).toBeTruthy();
 
-    const event = new KeyboardEvent('keydown', {
-      key: 'Tab',
-      code: 'Tab',
-      bubbles: true,
-      cancelable: true,
-    });
-    content.dispatchEvent(event);
+    const event = dispatchKey(content, { key: 'Tab', code: 'Tab' });
 
     // The keybinding claimed the event (so the browser never sees it) and the
     // document gained leading indentation.
@@ -191,5 +207,77 @@ describe('CodeMirrorEditor', () => {
     const next = onChange.mock.calls[0][0] as string;
     expect(next).not.toBe('abc');
     expect(next).toMatch(/^\s+abc$/);
+  });
+
+  it('shows line numbers in the gutter', () => {
+    renderEditor({ value: 'line one\nline two' });
+    expect(document.querySelector('.cm-lineNumbers')).toBeTruthy();
+  });
+
+  it('selects all editor content on Ctrl+A when focused', () => {
+    renderEditor({ value: 'hello world' });
+    const view = getEditorView();
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    view.focus();
+
+    const event = dispatchKey(content, {
+      key: 'a',
+      code: 'KeyA',
+      ctrlKey: true,
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(view.state.selection.main.from).toBe(0);
+    expect(view.state.selection.main.to).toBe(view.state.doc.length);
+  });
+
+  it('undoes edits on Ctrl+Z when editable', () => {
+    const onChange = vi.fn();
+    renderEditor({ value: 'hello', onChange });
+    const view = getEditorView();
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    view.focus();
+
+    view.dispatch({ changes: { from: 5, insert: ' world' } });
+    expect(view.state.doc.toString()).toBe('hello world');
+
+    const event = dispatchKey(content, {
+      key: 'z',
+      code: 'KeyZ',
+      ctrlKey: true,
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(view.state.doc.toString()).toBe('hello');
+  });
+
+  it('does not mutate content on typing when readOnly', () => {
+    const onChange = vi.fn();
+    renderEditor({ value: 'readonly', readOnly: true, onChange });
+    const view = getEditorView();
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    view.focus();
+
+    dispatchKey(content, { key: 'x', code: 'KeyX' });
+
+    expect(view.state.doc.toString()).toBe('readonly');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('still selects all on Ctrl+A in readOnly mode', () => {
+    renderEditor({ value: 'readonly text', readOnly: true });
+    const view = getEditorView();
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    view.focus();
+
+    const event = dispatchKey(content, {
+      key: 'a',
+      code: 'KeyA',
+      ctrlKey: true,
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(view.state.selection.main.from).toBe(0);
+    expect(view.state.selection.main.to).toBe(view.state.doc.length);
   });
 });
