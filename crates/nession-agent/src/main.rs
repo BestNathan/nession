@@ -97,19 +97,24 @@ async fn main() -> Result<()> {
     // Resolve persistent agent identity. On first run this persists the
     // generated or configured agent_id; on subsequent runs it loads the
     // persisted identity so the server recognises us as the same agent.
+    eprintln!("[DIAGNOSTIC] Resolving agent identity...");
     let identity_path = nession_common::paths::agent_identity_path()?;
+    eprintln!("[DIAGNOSTIC] Identity path: {identity_path:?}");
     let agent_id = identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+    eprintln!("[DIAGNOSTIC] Agent ID resolved: {agent_id}");
 
     let file_root = config
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
+    eprintln!("[DIAGNOSTIC] Creating resize channel...");
     // Resize forwarding channel: the P2P AgentServer publishes tmux
     // `%window-resize` events here (it starts before the central-server
     // connection exists, so it can't hold the handle directly), and the
     // forwarder spawned below drains them into the central server once a
     // live ServerClientHandle is available.
     let (resize_tx, mut resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
+    eprintln!("[DIAGNOSTIC] Creating AgentServer...");
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
