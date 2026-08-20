@@ -8,41 +8,71 @@ const EXT_VIEWER_MAP: Record<string, ViewerType> = {
   pdf: 'pdf',
 };
 
+/** Extension → @uiw/codemirror-extensions-langs key (before resolveLangKey aliases). */
 const EXT_LANG_MAP: Record<string, string> = {
-  js: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript',
-  py: 'python',
-  json: 'json',
-  yaml: 'yaml', yml: 'yaml',
-  md: 'markdown',
-  html: 'html',
-  css: 'css',
-  sh: 'shell', bash: 'shell', zsh: 'shell',
+  js: 'js', jsx: 'jsx', mjs: 'mjs', cjs: 'cjs',
+  ts: 'ts', tsx: 'tsx', mts: 'mts', cts: 'cts',
+  py: 'py', pyw: 'pyw', pyx: 'pyx',
+  json: 'json', jsonld: 'jsonld',
+  yaml: 'yaml', yml: 'yml',
+  md: 'md', markdown: 'markdown', mkd: 'mkd',
+  html: 'html', htm: 'htm',
+  css: 'css', scss: 'scss', less: 'less', sass: 'sass', styl: 'styl',
+  sh: 'sh', bash: 'bash', zsh: 'zsh', ksh: 'ksh',
   go: 'go',
-  rs: 'rust',
-  c: 'cpp', cpp: 'cpp', h: 'cpp', hpp: 'cpp',
+  rs: 'rs',
+  c: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', h: 'h', hpp: 'hpp', hh: 'hh', hxx: 'hxx',
   sql: 'sql',
-  xml: 'xml',
+  xml: 'xml', xsd: 'xsd', xsl: 'xsl', svg: 'svg',
   toml: 'toml',
+  ini: 'ini', in: 'in', properties: 'properties',
+  env: 'env',
   java: 'java',
-  rb: 'ruby',
-  php: 'php',
+  rb: 'rb',
+  php: 'php', phtml: 'phtml',
   swift: 'swift',
-  kt: 'kotlin', kotlin: 'kotlin',
+  kt: 'kt', kts: 'kts',
   scala: 'scala',
-  hs: 'haskell',
-  exs: 'elixir', ex: 'elixir',
-  clj: 'clojure', cljs: 'clojure', edn: 'clojure',
+  hs: 'hs',
+  exs: 'exs', ex: 'ex',
+  clj: 'clj', cljs: 'cljs', cljc: 'cljc', edn: 'edn',
   r: 'r',
-  jl: 'julia',
+  jl: 'jl',
   dart: 'dart',
   lua: 'lua',
-  pl: 'perl', pm: 'perl',
-  groovy: 'groovy',
-  cs: 'csharp',
-  fs: 'fsharp', fsi: 'fsharp', fsx: 'fsharp',
-  m: 'objectivec', mm: 'objectivec',
+  pl: 'pl', pm: 'pm',
+  groovy: 'groovy', gradle: 'gradle',
+  cs: 'cs',
+  fs: 'fs', fsi: 'fsi', fsx: 'fsx',
+  m: 'm', mm: 'mm',
+  proto: 'proto',
+  nix: 'nix',
+  vue: 'vue',
+  svelte: 'svelte',
+  solidity: 'solidity',
+  cmake: 'cmake',
+  cfg: 'cfg',
+  ps1: 'ps1', psm1: 'psm1', psd1: 'psd1',
+  dockerfile: 'dockerfile',
+  tf: 'tf', hcl: 'hcl',
+  conf: 'conf',
+  lock: 'lock', mod: 'mod', sum: 'sum',
+  csv: 'csv', log: 'log',
+  vim: 'vim',
+  graphql: 'graphql', gql: 'graphql',
+  prisma: 'prisma',
 };
+
+/** Basenames that open in CodeMirror (extensionless special files). */
+const BASENAME_VIEWABLE = new Set([
+  'Dockerfile',
+  'Makefile',
+  'GNUmakefile',
+  'Jenkinsfile',
+  'Gemfile',
+  'Rakefile',
+  'CMakeLists.txt',
+]);
 
 /** Return the viewer type for a file extension, or null for unsupported. */
 export function getViewerType(ext: string): ViewerType | null {
@@ -50,10 +80,26 @@ export function getViewerType(ext: string): ViewerType | null {
   return EXT_VIEWER_MAP[key] ?? null;
 }
 
-/** Return the CodeMirror language key for a file extension, or undefined. */
+/** Return the CodeMirror / UIW langs key for a file extension, or undefined. */
 export function getLangKey(ext: string): string | undefined {
   const key = ext.toLowerCase();
   return EXT_LANG_MAP[key];
+}
+
+export function parseBasename(path: string): string {
+  return path.split('/').pop() ?? path;
+}
+
+/** Check if a path is openable in FileViewer (media or text/code). */
+export function isViewablePath(path: string): boolean {
+  const ext = parseExt(path);
+  if (getViewerType(ext) !== null) {
+    return true;
+  }
+  if (ext && getLangKey(ext) !== undefined) {
+    return true;
+  }
+  return BASENAME_VIEWABLE.has(parseBasename(path));
 }
 
 /** Check if an extension has any viewer registered (media or code). */
@@ -63,7 +109,7 @@ export function isViewable(ext: string): boolean {
 
 /** Parse extension from a file path (lowercase, no leading dot). */
 export function parseExt(path: string): string {
-  const filename = path.split('/').pop() ?? path;
+  const filename = parseBasename(path);
   const dot = filename.lastIndexOf('.');
   if (dot === -1 || dot === filename.length - 1) {
     return '';
@@ -74,20 +120,5 @@ export function parseExt(path: string): string {
 /** Return true if the extension indicates a markdown file. */
 export function isMarkdownExt(ext: string): boolean {
   const key = ext.toLowerCase();
-  return key === 'md' || key === 'markdown';
-}
-
-/**
- * Given a list of file paths, return unique extensions that have registered
- * CodeMirror language loaders. Used by FileBrowser to fire preload().
- */
-export function preloadExtensions(paths: string[]): string[] {
-  const seen = new Set<string>();
-  for (const path of paths) {
-    const ext = parseExt(path);
-    if (ext && getLangKey(ext) && !seen.has(ext)) {
-      seen.add(ext);
-    }
-  }
-  return Array.from(seen);
+  return key === 'md' || key === 'markdown' || key === 'mkd';
 }
