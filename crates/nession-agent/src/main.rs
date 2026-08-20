@@ -72,15 +72,28 @@ async fn main() -> Result<()> {
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
 
+    eprintln!("[DIAGNOSTIC] About to check tmux availability...");
     // 3. Check tmux availability
     match nession_agent::tmux::util::check_tmux_available().await {
-        Ok(true) => info!("tmux is available"),
-        Ok(false) => warn!("tmux does not appear to be available"),
-        Err(e) => warn!("Could not check tmux availability: {}", e),
+        Ok(true) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned true");
+            info!("tmux is available");
+        }
+        Ok(false) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned false");
+            warn!("tmux does not appear to be available");
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] tmux check returned error: {e:?}");
+            warn!("Could not check tmux availability: {}", e);
+        }
     }
+    eprintln!("[DIAGNOSTIC] tmux check completed");
 
     // 4. Start Agent WebSocket server
+    eprintln!("[DIAGNOSTIC] Loading TLS...");
     let tls_option = load_tls(&config)?;
+    eprintln!("[DIAGNOSTIC] TLS loaded");
     // Resolve persistent agent identity. On first run this persists the
     // generated or configured agent_id; on subsequent runs it loads the
     // persisted identity so the server recognises us as the same agent.
