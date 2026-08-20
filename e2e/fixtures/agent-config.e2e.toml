@@ -14,6 +14,7 @@ listen_address = "127.0.0.1:19091"
 # runner's real home.
 default_working_dir = "/tmp/nession-e2e"
 
-# Logging — keep it quiet during E2E runs.
+# Logging — set to info for debugging CI issues.
+# Can be reduced to "warn" once agent stability is confirmed.
 [logging]
-level = "warn"
+level = "info"
