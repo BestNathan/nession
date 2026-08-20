@@ -296,11 +296,8 @@ async fn relay_attach_and_terminal_io() {
         .await
         .expect("send begin");
 
-    // Give the server time to connect to the agent, send client.attach,
-    // and set up bidirectional forwarding.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // 8. Send terminal.input (base64-encoded) through the relay.
+    // Send terminal.input immediately after relay.begin — macOS PTY writes fail
+    // with EIO when the agent attach subprocess idles too long before input.
     let input_data = base64::engine::general_purpose::STANDARD.encode(b"echo RELAY_TEST_MARKER\n");
     let input_msg = msg(
         "terminal.input",
