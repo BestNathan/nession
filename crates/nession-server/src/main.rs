@@ -41,7 +41,9 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    eprintln!("[DIAGNOSTIC] About to log startup info...");
     info!("Starting nession-server");
+    eprintln!("[DIAGNOSTIC] Startup info logged");
     info!(
         "Configuration loaded: listen_address={}, db_path={}",
         config.listen_address, config.db_path
