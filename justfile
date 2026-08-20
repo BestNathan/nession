@@ -41,6 +41,10 @@ web-test:
 web-coverage:
     ./scripts/filtered-web-test.sh --coverage
 
+# Workspace policy (root = main mirror; dev in worktrees)
+check-workspace:
+    ./scripts/check-dev-workspace.sh session --fetch
+
 # ── Full pre-push ───────────────────────────────────────────────────────────
 pre-push: test coverage web-test web-coverage
 

@@ -1,6 +1,6 @@
 ---
 name: nession-development
-description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow. Use when starting work from existing GitHub Issues — "把 terminal 相关的 issue 拉出来一起做", "这个 sprint 处理哪些 issue", pulling issues by label, or planning a batch of issues across branches.
+description: Use when developing Nession features, writing or running tests, deciding how to bump versions (minor vs patch), creating pull requests, or onboarding to the Nession development workflow. Use when starting work from existing GitHub Issues — "把 terminal 相关的 issue 拉出来一起做", "这个 sprint 处理哪些 issue", pulling issues by label, or planning a batch of issues across branches. Enforces: project root stays on latest main (read-only); all development in .claude/worktrees/.
 ---
 
 # Nession Development
@@ -13,18 +13,39 @@ Monorepo (Rust workspace + React web UI). Develop locally with `cargo run`/`npm 
 
 **Starting from issues rather than a fresh idea?** See "Batch Development by Label" below — it covers pulling an area's issues, ordering them by file-overlap risk, and deciding what shares a branch.
 
-## ⛔ Iron Law: Never Touch Main
+## ⛔ Iron Law: Project Root = Latest Main Only
+
+```
+项目根目录 = origin/main 的只读镜像。
+根目录永远 checkout 在 main 上，且工作区必须干净。
+根目录禁止：改文件、提交、切 feature 分支、跑 cargo/npm 做功能开发。
+```
+
+**每次开新 worktree 前，先在根目录刷新 main：**
+
+```bash
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git status   # 必须 clean
+```
+
+根目录允许的操作：`git fetch`、`git checkout main`、`git pull --ff-only`、`git worktree *`、读代码/文档。
+
+## ⛔ Iron Law: All Development in Worktrees
 
 ```
 主分支 (main) 是只读的。
 绝对不要在 main 上直接开发、修改、或提交任何代码。
+所有开发（feat/fix/chore/docs/版本 bump/发布 cherry-pick）必须在 worktree 中进行。
 ```
 
 | 规则 | 说明 |
 |------|------|
-| **main 是只读的** | 永远不要直接 checkout 到 main，更不要在上面做任何修改 |
-| **所有开发在 worktree 中进行** | 使用 `EnterWorktree` 创建隔离的工作目录 |
-| **一个功能 = 一个 worktree** | 每个 feature/bugfix/release 都从 main 创建独立的 worktree |
+| **根目录 = main 镜像** | 根目录只用来同步 main 和创建 worktree，不做开发 |
+| **main 是只读的** | 永远不要在 main 上提交；worktree 里 `git branch --show-current` 不能是 `main` |
+| **所有开发在 worktree 中进行** | 使用 `EnterWorktree` 或 `git worktree add` 到 `.claude/worktrees/` |
+| **一个功能 = 一个 worktree** | 每个 feature/bugfix/release 都从 origin/main 创建独立的 worktree |
 | **合并后 worktree 即死** | PR 合并后，对应的 worktree 和分支不再使用 |
 
 ## ⛔ Iron Law: Branch Naming Must Trigger CI/CD
@@ -70,15 +91,32 @@ gh pr create --title "..." --body "..."  # 创建新 PR
 
 ### 创建 Worktree 开始开发
 
+**Step 0 — 刷新根目录 main（在 project root 执行）：**
+
 ```bash
-# Claude Code 中直接使用 EnterWorktree 工具创建隔离环境
-# 所有分支的 base 都是 main
 git fetch origin
-git worktree add -b feat/<slug> ../nession-<slug> origin/main
-cd ../nession-<slug>
+git checkout main
+git pull --ff-only origin main
+git status   # 必须 clean
 ```
 
-**Claude Code 推荐方式** — 使用 `EnterWorktree` 工具（自动创建 worktree + 切换目录）。
+**Step 1 — 创建 worktree（不要在根目录里 `git checkout -b`）：**
+
+```bash
+# Claude Code / Cursor — 推荐
+EnterWorktree name: "feat/<slug>"
+
+# 手动 — 从已刷新的根目录
+git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
+cd .claude/worktrees/feat-<slug>
+```
+
+**依赖 staging 上尚未发布代码时** — base 用 `origin/staging`，仍在 `.claude/worktrees/` 下创建，不要在根目录 reset：
+
+```bash
+git worktree add -b fix/<slug> .claude/worktrees/fix-<slug> origin/staging
+cd .claude/worktrees/fix-<slug>
+```
 
 ### 验证当前环境
 
@@ -95,9 +133,10 @@ git branch --show-current   # 必须显示 feat/<slug>，绝对不能是 "main"
 git push -u origin feat/<slug>
 gh pr create --title "feat: <description>" --body "..."
 
-# 2. PR 合并后，清理 worktree
-git checkout main && git pull
-git worktree remove ../nession-<slug>
+# 2. PR 合并后 — 回到根目录刷新 main，清理 worktree
+cd <project-root>
+git fetch origin && git checkout main && git pull --ff-only origin main
+git worktree remove .claude/worktrees/feat-<slug>
 git worktree prune
 git branch -d feat/<slug>
 ```
@@ -108,12 +147,23 @@ git branch -d feat/<slug>
 
 | 违规行为 | 正确做法 |
 |----------|----------|
-| 直接在 main 上 `git checkout -b` | 先确保 main 是干净的（`git status` 无修改），或直接用 worktree |
-| 在 main 目录里切分支开发 | 用 `EnterWorktree` 或 `git worktree add` 创建隔离目录 |
+| 在项目根目录改代码 / 提交 | **禁止。** 根目录只做 main 镜像；所有开发进 worktree |
+| 在项目根目录 `git checkout -b` | 先刷新根目录 main，再 `EnterWorktree` 或 `git worktree add` |
+| 根目录 main 落后 origin/main | `git fetch && git checkout main && git pull --ff-only origin main` |
 | 多个 feature 共用一个 worktree | 每个 feature 独立 worktree，互不干扰 |
-| PR 合并后还在旧分支上继续推 commit | 旧 worktree/分支已死，新建 worktree 从最新 main 开始 |
+| PR 合并后还在旧分支上继续推 commit | 旧 worktree/分支已死，新建 worktree 从最新 origin/main 开始 |
 | **分支名不是 `feat/` 或 `fix/` 前缀** | **CI 不会触发！必须用 `feat/<slug>` 或 `fix/<slug>`** |
 | **EnterWorktree 未传完整分支名** | 传入 `feat/<slug>` 而非裸名，保证 CI 能触发 |
+
+### 自动化 enforcement
+
+| 时机 | 机制 | 检查内容 |
+|------|------|----------|
+| `git commit` | `pre-commit` → `scripts/check-dev-workspace.sh commit` | 禁止在项目根目录提交；禁止在 `main` 上提交 |
+| `git push` | `pre-push` → `scripts/check-dev-workspace.sh push` | 同上 |
+| 开新任务前 | `just check-workspace` | 根目录是否在 `main`、是否干净、是否落后 `origin/main` |
+
+脚本**不能**阻止在根目录改文件（未 commit 前无 hook 可拦）——`session` 模式供 Agent/人工自查。
 
 ## 2. Local Development
 
@@ -297,15 +347,15 @@ On merge to main, CI reads the version from `Cargo.toml` and `web/package.json` 
 
 ## 5. Development Cycle
 
-**main 只读 → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
+**main 只读 → 刷新根目录 main → 创建 worktree → 开发 → PR → staging 验收 → 合并到 main 发布 → 清理 worktree → 旧 worktree 已死 → 重复**
 
 ```bash
-# STEP 1: 从 origin/main 创建隔离 worktree（不要在 main 目录里开发）
-# CC 方式：使用 EnterWorktree 工具（推荐，默认就是 origin/main）
-# 手动方式：
-git fetch origin
-git worktree add -b feat/<slug> ../nession-<slug> origin/main
-cd ../nession-<slug>
+# STEP 0: 在项目根目录刷新 main
+git fetch origin && git checkout main && git pull --ff-only origin main
+
+# STEP 1: 创建隔离 worktree（不要在根目录开发）
+EnterWorktree name: "feat/<slug>"
+# manual: git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
 
 # STEP 2: Develop, test, commit each logical unit
 
@@ -325,10 +375,9 @@ git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
 # STEP 5: After merge to staging — cleanup. OLD WORKTREE IS DEAD.
-# 返回 main 仓库目录，清理 worktree
-git checkout main
-git pull
-git worktree remove ../nession-<slug>
+cd <project-root>
+git fetch origin && git checkout main && git pull --ff-only origin main
+git worktree remove .claude/worktrees/feat-<slug>
 git worktree prune
 git branch -d feat/<slug>
 ```
@@ -369,13 +418,12 @@ git commit -m "more changes"
 git push                    # commit 推到了已死的远程分支
 gh pr edit <old-pr> --body "..."  # 这个 PR 已经合并了！
 
-# ✅ 正确 — 从最新 origin/main 新建分支，创建全新 PR
-# （例外：若改动依赖 staging 上尚未发布的代码，base 用 origin/staging）
+# ✅ 正确 — 刷新根目录 main，新建 worktree，创建全新 PR
 git fetch origin
-git worktree add -b worktree/<new-slug> ../nession-<new-slug> origin/main
-cd ../nession-<new-slug>
+EnterWorktree name: "fix/<new-slug>"
+# manual: git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/main
 # ... 开发 ...
-git push -u origin worktree/<new-slug>
+git push -u origin fix/<new-slug>
 gh pr create --title "..." --body "..."
 ```
 
@@ -411,8 +459,8 @@ gh pr list --state merged --base staging --limit 20
 gh pr create --base main --head staging --title "chore: release (staging → main)" --body "..."
 gh pr merge <PR-NUMBER> --merge      # MUST be --merge
 
-# 2. Version bump, only if this release warrants one
-git checkout -b chore/bump-version-X.Y.Z origin/main
+# 2. Version bump, only if this release warrants one (in a worktree)
+EnterWorktree name: "chore/bump-version-X.Y.Z"
 # Bump version in all four files (see "Version Bumping" above)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
@@ -611,9 +659,10 @@ State what the pull did not cover: which issues were excluded and why, and which
 | Pull area + kind | `gh issue list --label terminal --label bug --state open` |
 | OR several areas | `gh issue list --search "label:server,agent,protocol state:open"` |
 | Backfill area labels | `gh issue edit <N> --add-label terminal --add-label web` |
-| Create worktree (CC) | `EnterWorktree` tool |
-| Create worktree (manual) | `git worktree add -b feat/<slug> ../nession-<slug> main` |
-| Verify not on main | `git branch --show-current` |
+| Create worktree (CC) | `EnterWorktree name: "feat/<slug>"` |
+| Refresh root main | `git fetch && git checkout main && git pull --ff-only origin main` |
+| Create worktree (manual) | `git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main` |
+| Verify not on main | `git branch --show-current` (in worktree, not root) |
 | Run all tests | `just test` |
 | Coverage | `just coverage` (Rust) / `just web-coverage` (web) |
 | TypeScript | `cd web && npx tsc --noEmit` |
@@ -630,9 +679,10 @@ State what the pull did not cover: which issues were excluded and why, and which
 
 | Mistake | Reality |
 |---------|---------|
-| **Committing on `main` directly** | **FORBIDDEN.** main 是只读的。所有开发必须在 worktree 中进行。 |
+| **Editing or committing in project root** | **FORBIDDEN.** Root = latest `main` mirror only. All work in `.claude/worktrees/`. |
+| **Committing on `main` directly** | **FORBIDDEN.** Even in a worktree, `git branch --show-current` must not be `main`. |
 | **feat/fix PR 直接提交到 main** | **FORBIDDEN.** feat/fix PR 必须提交到 staging。只有 staging → main 的发布 PR 才直接提交到 main。 |
-| **在 main 目录中切分支开发** | **FORBIDDEN.** 不要在 main 的 git 目录里 checkout 分支。使用 `EnterWorktree` 或 `git worktree add` 创建隔离的工作目录。 |
+| **在项目根目录切分支开发** | **FORBIDDEN.** 根目录禁止 `git checkout -b`。用 `EnterWorktree` 或 `git worktree add`。 |
 | **PR 合并后继续往旧分支推 commit** | **FORBIDDEN.** PR 合并 = worktree/分支已死。任何后续修改都必须从最新 main 创建新 worktree。 |
 | **PR 已合并还用 `gh pr edit` 更新** | **FORBIDDEN.** 已合并的 PR 不能追加 commit。必须新建分支 + 新 PR。 |
 | `docker build` for Nession | **Forbidden.** CI does that. |

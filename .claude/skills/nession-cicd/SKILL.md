@@ -1,6 +1,6 @@
 ---
 name: nession-cicd
-description: Use when troubleshooting CI/CD pipeline failures for nession, modifying the GitHub Actions workflow, investigating failed Docker builds or k8s deployments, or understanding the CI → ArgoCD deploy chain
+description: Use when troubleshooting CI/CD pipeline failures for nession, modifying the GitHub Actions workflow, investigating failed Docker builds or k8s deployments, or understanding the CI → ArgoCD deploy chain. Enforces: project root stays on latest main (read-only); all branch work in .claude/worktrees/.
 ---
 
 # Nession CI/CD
@@ -44,7 +44,9 @@ Use `scripts/deploy-watch.sh` to monitor deployments end-to-end:
 
 **Prerequisites:** `gh`, `kubectl`, `jq`
 
-## ⛔ Iron Law
+## ⛔ Iron Laws
+
+### Never build Docker locally
 
 ```
 NEVER BUILD DOCKER IMAGES LOCALLY
@@ -60,6 +62,23 @@ NEVER BUILD DOCKER IMAGES LOCALLY
 CI is the single source of truth for all container images.
 
 **Nothing is ever pruned.** The repo is public, so GHCR storage and GitHub Releases are unmetered — there are no cleanup jobs and none should be added. Every hash-tagged staging image, every version-tagged production image, and all 53+ releases are retained indefinitely, which is what makes "roll back via GHCR" reliable: any previously built tag is still pullable.
+
+### Project root = latest main; all dev in worktrees
+
+```
+项目根目录 = origin/main 只读镜像。禁止在根目录开发或提交。
+所有分支工作（feat/fix/chore/docs/版本 bump/workflow 修复）必须在 .claude/worktrees/ 下的 worktree 中进行。
+```
+
+Before any new worktree:
+
+```bash
+git fetch origin && git checkout main && git pull --ff-only origin main
+EnterWorktree name: "feat/<slug>"
+# manual: git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
+```
+
+See `nession-development` for the full worktree lifecycle.
 
 ## Development Flow
 
@@ -84,22 +103,23 @@ Version bumping (minor vs patch, which files to update) is covered in the nessio
 
 ### 3. Push and create PR
 
+Work happens in a worktree (not project root). From the worktree:
+
 ```bash
-git fetch origin
-git checkout -b feat/description origin/main   # every branch comes off main
 git add -A
 git commit -m "feat: description"
-git push origin feat/description
+git push -u origin feat/description
 gh pr create --base staging --title "feat: description" --body "..."
 ```
 
 **Do NOT push directly to main or staging.** All changes go through PRs targeting `staging`.
 
-**Exception — `.github/workflows/*` changes:** GitHub Actions workflows only take effect from the default branch (main). Workflow changes on feature branches are ignored by GitHub. When modifying `.github/workflows/*`, the workflow commit MUST be cherry-picked to a separate branch off `main`, fast-tracked as its own PR, and merged to main immediately — otherwise the change has no effect until the feature PR merges (which may be days or never).
+**Exception — `.github/workflows/*` changes:** GitHub Actions workflows only take effect from the default branch (main). When modifying `.github/workflows/*`, cherry-pick the workflow commit into a **separate worktree** off `origin/main`, fast-track as its own PR, and merge to main immediately.
 
 ```
-# 正确流程 — workflow 变更必须独立合入 main
-git checkout -b chore/workflow-fix origin/main
+# 正确流程 — workflow 变更在 worktree 中，独立合入 main
+git fetch origin && git checkout main && git pull --ff-only origin main
+EnterWorktree name: "chore/workflow-fix"
 git cherry-pick <workflow-commit-hash>
 git push -u origin chore/workflow-fix
 gh pr create --title "chore: ..." --body "..."
@@ -108,7 +128,7 @@ gh pr merge <N> --rebase
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **branch off main → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
+For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -201,10 +221,12 @@ Worth knowing independently of merge strategy, because it explains why `staging.
 
 The `staging` **branch** is not the deploy source for the staging **environment** — `staging.yml` builds on a push to `staging` but writes the overlay tag to `main`, and only that write reaches the cluster. Measured 2026-08-18: the `staging` branch's own overlay said `agent-67afd56` while the running staging pods were on `agent-aeb25f8`, the value from `main`. A consequence worth remembering: the overlay file on the `staging` branch is inert, so never "fix" a stale-looking tag there.
 
-**If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway branch:
+**If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway worktree off `origin/main`:
 
 ```bash
-git checkout -b chore/release-<sha> origin/main
+git fetch origin && git checkout main && git pull --ff-only origin main
+git worktree add -b chore/release-<sha> .claude/worktrees/chore-release-<sha> origin/main
+cd .claude/worktrees/chore-release-<sha>
 git cherry-pick <staging-commit>...          # resolve conflicts here
 git push -u origin chore/release-<sha>
 gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
@@ -224,11 +246,11 @@ gh api repos/BestNathan/nession/pulls/<PR> --jq '{mergeable,rebaseable,mergeable
 
 ### Version bump
 
-A bump is a **separate PR after the release merged**, not part of it. Cut it from `main`, which by then already contains the release.
+A bump is a **separate PR after the release merged**, not part of it. Create it in a worktree off latest `origin/main`:
 
 ```bash
-git fetch origin
-git checkout -b chore/bump-version-X.Y.Z origin/main
+git fetch origin && git checkout main && git pull --ff-only origin main
+EnterWorktree name: "chore/bump-version-X.Y.Z"
 # Bump version in all four files: Cargo.toml, Cargo.lock,
 # web/package.json, web/package-lock.json
 git add -A && git commit -m "chore: bump version to X.Y.Z"
@@ -254,11 +276,11 @@ One escape hatch exists: if the git tag `v<version>` does not resolve, `version-
 
 ### Direct-to-main path
 
-Work that touches **no build input** skips `staging`:
+Work that touches **no build input** skips `staging` — still use a worktree, not project root:
 
 ```bash
-git fetch origin
-git checkout -b docs/<slug> main      # or chore/<slug>
+git fetch origin && git checkout main && git pull --ff-only origin main
+EnterWorktree name: "docs/<slug>"    # or chore/<slug>
 git add -A && git commit -m "docs: ..."
 git push -u origin docs/<slug>
 gh pr create --base main --title "docs: ..." --body "..."
@@ -298,11 +320,11 @@ A PR's diff is computed against `merge-base(base, head)`. Branching everything o
 
 Skip the sync and that stops being true: `main` starts missing unreleased work, and a branch cut from `main` lacks code it needs. Measured — with a feature on `staging` but not yet released, a follow-up fix branched from `main` **conflicts**, while the same fix branched from `origin/staging` applies cleanly as a single commit. So the one exception is:
 
-> Follow-up work on code that is on `staging` but not yet released → branch off `origin/staging`.
+> Follow-up work on code that is on `staging` but not yet released → worktree off `origin/staging` (not root reset).
 
 The reverse mistake still applies in the other direction: a branch cut from `main` but targeting `staging` while `main` is *ahead* drags every extra commit into `staging`. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`. The sync is what prevents this. (Those dragged commits are de-duplicated at the release, so they are noise in review rather than a correctness problem.)
 
-`EnterWorktree` bases on `origin/main` (`worktree.baseRef` accepts only `fresh` | `head`, so it cannot be pointed at another ref), which is now the correct base — no reset needed unless you need the `origin/staging` exception.
+`EnterWorktree` bases on `origin/main` by default. For the staging exception, use manual `git worktree add … origin/staging` — do not reset project root away from `main`.
 
 ### Issue auto-close
 
@@ -429,6 +451,8 @@ Merge to main (release PR merged with --merge, then optional version bump):
 | Mistake | Reality |
 |---------|---------|
 | `docker build` for nession | **Forbidden.** CI builds images. |
+| Developing in project root | **Forbidden.** Root = latest `main` mirror. Use `.claude/worktrees/`. |
+| `git checkout -b` in project root | **Forbidden.** Refresh root main, then `EnterWorktree` or `git worktree add`. |
 | "I'll just patch the k8s image tag" | k8s is read-only for you. Fix the CI or roll back via GHCR tags. |
 | Building locally to "test the Docker image" | Test locally with `cargo run`. |
 | Major version bumps (1.x) | Nession is pre-1.0. Only minor and patch exist. |
