@@ -10,3 +10,7 @@ auth_token = ""
 
 # Isolated database — must NOT touch ~/.nession.
 db_path = "/tmp/nession-e2e/nession.db"
+
+# Heartbeat timeout — increased from default (30s) to 120s for CI stability.
+# CI runners can be slow, and we want to avoid false "agent disconnected" errors.
+heartbeat_timeout_secs = 120
