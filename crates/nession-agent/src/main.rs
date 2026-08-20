@@ -168,13 +168,19 @@ async fn main() -> Result<()> {
 
     let tmux_for_client = Arc::new(SessionManager::new());
 
+    eprintln!("[DIAGNOSTIC] Checking server_url: '{}'", config.server_url);
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
     // server-advertised heartbeat interval (falling back to the local config).
     let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
+        eprintln!("[DIAGNOSTIC] No server_url configured — standalone mode");
         info!("No server_url configured — running in standalone mode");
         (None, config.heartbeat_interval_secs)
     } else {
+        eprintln!(
+            "[DIAGNOSTIC] Connecting to central server at {}...",
+            config.server_url
+        );
         let extensions: Vec<Box<dyn AgentExtension>> =
             vec![Box::new(ClaudeCodeAgentExtension::new())];
         let ext_registry = if extensions.is_empty() {
@@ -202,15 +208,19 @@ async fn main() -> Result<()> {
         // Attempt to connect with a timeout so the agent can still serve
         // local clients even if the central server is unreachable. The
         // supervisor keeps retrying in the background regardless.
+        eprintln!("[DIAGNOSTIC] Calling connect_and_run...");
         tokio::select! {
             result = server_client.connect_and_run() => {
+                eprintln!("[DIAGNOSTIC] connect_and_run returned");
                 match result {
                     Ok((handle, server_interval)) => {
                         let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
+                        eprintln!("[DIAGNOSTIC] Connected to central server!");
                         info!("Connected to central server (heartbeat interval: {}s)", interval);
                         (Some(handle), interval)
                     }
                     Err(e) => {
+                        eprintln!("[DIAGNOSTIC] Failed to connect: {e:?}");
                         error!("Failed to connect to central server: {:#}", e);
                         (None, config.heartbeat_interval_secs)
                     }
