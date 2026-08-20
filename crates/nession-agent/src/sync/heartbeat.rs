@@ -69,6 +69,15 @@ impl HeartbeatLoop {
         // heartbeat before the first real interval has elapsed.
         ticker.tick().await;
 
+        // Send first heartbeat after a short delay (1s) instead of waiting
+        // for the full interval. This reduces the window where an agent is
+        // registered but hasn't sent a heartbeat yet, which is important
+        // for CI environments where operations are slower.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if let Err(e) = self.send_heartbeat().await {
+            error!("Failed to send initial heartbeat: {:#}", e);
+        }
+
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -88,6 +97,14 @@ impl HeartbeatLoop {
 
     /// Collect metrics and send a single heartbeat.
     async fn send_heartbeat(&self) -> Result<()> {
+        // Check if we're connected before collecting metrics and sending.
+        // During reconnection, heartbeats would be queued but dropped,
+        // so skip sending to avoid wasted work and make the issue visible.
+        if !self.handle.is_connected() {
+            tracing::warn!("Skipping heartbeat — not connected to server");
+            return Ok(());
+        }
+
         let sessions = self.tmux.list_sessions().await.unwrap_or_default();
         let session_count = u32::try_from(sessions.len()).unwrap_or(0);
         let active_sessions =
