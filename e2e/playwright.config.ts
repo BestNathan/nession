@@ -78,9 +78,13 @@ export default defineConfig({
       tcpPort: 19090,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
+      // Wait for server to be fully ready before starting agent
+      stdout: 'pipe',
+      stderr: 'pipe',
     },
     {
-      command: `cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
+      // Add a small delay to ensure server is fully ready
+      command: `sleep 5 && cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
       cwd: `${__dirname}/..`,
       env: {
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
@@ -91,6 +95,8 @@ export default defineConfig({
       tcpPort: 19091,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
+      stdout: 'pipe',
+      stderr: 'pipe',
     },
     {
       command: 'npm run preview',
