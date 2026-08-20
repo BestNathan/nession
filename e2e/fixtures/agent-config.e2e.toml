@@ -6,6 +6,10 @@ agent_id = "e2e-test-node"
 server_url = "ws://127.0.0.1:19090/ws"
 auth_token = "e2e-test-token"
 listen_address = "127.0.0.1:19091"
+# Advertise localhost so the server can connect back for relay mode.
+# Without this, the agent auto-detects network interfaces (10.x, 172.x)
+# which are not reachable since we only listen on 127.0.0.1.
+advertise_address = "127.0.0.1"
 
 # Isolated working dir — must NOT default to $HOME. A fresh /tmp/nession-e2e
 # directory is created by globalSetup.ts before the agent starts; tmux
