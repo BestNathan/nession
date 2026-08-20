@@ -72,6 +72,8 @@ export default defineConfig({
       env: {
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
         NESSION_HOME: E2E_RUN,
+        RUST_LOG: 'info',  // Force logging to stdout
+        RUST_BACKTRACE: '1',  // Enable backtraces for debugging
       },
       tcpPort: 19090,
       timeout: 120_000,
@@ -83,6 +85,8 @@ export default defineConfig({
       env: {
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
         NESSION_HOME: E2E_RUN,
+        RUST_LOG: 'info',  // Force logging to stdout
+        RUST_BACKTRACE: '1',  // Enable backtraces for debugging
       },
       tcpPort: 19091,
       timeout: 120_000,
