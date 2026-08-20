@@ -280,10 +280,7 @@ async fn test_terminal_io_through_full_chain() {
         }
     }
 
-    // Give output reader time to start.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Send terminal input.
+    // Send terminal input immediately — post-attach sleep breaks macOS PTY writes.
     use base64::Engine;
     let input = base64::engine::general_purpose::STANDARD.encode(b"echo test123\n");
     let payload = nession_agent::server::websocket::TerminalInputPayload {
