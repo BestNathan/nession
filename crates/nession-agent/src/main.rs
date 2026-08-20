@@ -36,14 +36,34 @@ async fn main() -> Result<()> {
     eprintln!("[DIAGNOSTIC] nession-agent process started");
 
     // 1. Load configuration
-    let config = load_config()?;
+    eprintln!("[DIAGNOSTIC] Loading configuration...");
+    let config = match load_config() {
+        Ok(c) => {
+            eprintln!("[DIAGNOSTIC] Configuration loaded successfully");
+            c
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to load configuration: {e:?}");
+            return Err(e);
+        }
+    };
 
     // 2. Initialize logging (stdout + file)
-    let _log_guard = nession_common::logging::init_logging(
+    eprintln!("[DIAGNOSTIC] Initializing logging...");
+    let _log_guard = match nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::agent_logs_dir()?,
         "nession-agent",
-    )?;
+    ) {
+        Ok(g) => {
+            eprintln!("[DIAGNOSTIC] Logging initialized successfully");
+            g
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to initialize logging: {e:?}");
+            return Err(e.into());
+        }
+    };
 
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
     info!("Agent ID: {}", config.agent_id);
