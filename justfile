@@ -55,6 +55,10 @@ web-test-integration:
 web-coverage:
     ./scripts/filtered-web-test.sh --coverage
 
+# Workspace policy (root = main mirror; dev in worktrees)
+check-workspace:
+    ./scripts/check-dev-workspace.sh session --fetch
+
 # ── Full pre-push ───────────────────────────────────────────────────────────
 # Unit tests for both Rust and web (pre-commit)
 # Note: web-test-unit dependency added in Phase 2 (Task 2.4)

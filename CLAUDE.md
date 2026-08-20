@@ -134,23 +134,57 @@ Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips
 
 ## 2. Development Workflow
 
-**⚠ CRITICAL: Never develop on `main`. Always create a branch first.** All branches come off `main` (see **Branch base and merge method**).
+### Two Iron Laws
+
+**Iron Law 1 — Project root = latest `main` only**
+
+The repository root checkout exists solely to mirror `origin/main`. It is **not** a development workspace.
+
+| Allowed in root | Forbidden in root |
+|-----------------|-------------------|
+| `git fetch origin` | Any file edits |
+| `git checkout main` | Any commits |
+| `git pull --ff-only origin main` (or `git reset --hard origin/main` after fetch) | `git checkout -b …` or any feature branch |
+| `git worktree add/list/remove/prune` | `cargo` / `npm` / tests for feature work |
+| Reading docs, inspecting code | Leaving uncommitted changes |
+
+**Refresh root before every new worktree:**
 
 ```bash
 git fetch origin
-git checkout -b feat/<slug> origin/main   # or use EnterWorktree for isolated workspace
+git checkout main
+git pull --ff-only origin main   # must fast-forward; resolve offline if not
+git status                     # must be clean — no modified/untracked work files
 ```
 
-Before committing, verify you are NOT on `main`:
+**Iron Law 2 — All development in worktrees**
+
+Every change — `feat/**`, `fix/**`, `chore/**`, `docs/**`, release cherry-picks, version bumps — happens in an isolated worktree under `.claude/worktrees/`. **Never develop in the project root.**
+
+```bash
+# Preferred — Claude Code / Cursor
+EnterWorktree name: "feat/<slug>"
+
+# Manual — from clean root on latest main (after Iron Law 1 refresh)
+git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
+cd .claude/worktrees/feat-<slug>
+```
+
+Branch naming must use `feat/<slug>` or `fix/<slug>` (or `chore/**`, `docs/**` for direct-to-main work) so CI triggers correctly. See **Branch base and merge method**.
+
+Before every commit, verify you are **not** on `main`:
+
 ```bash
 git branch --show-current     # must NOT be "main"
 ```
 
-If already on `main` with changes, migrate them:
+**Emergency only** — uncommitted changes accidentally made in root (do not make this a habit):
+
 ```bash
 git stash
-git fetch origin
-git checkout -b feat/<slug> origin/main
+git fetch origin && git checkout main && git pull --ff-only origin main
+git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
+cd .claude/worktrees/feat-<slug>
 git stash pop
 ```
 
@@ -259,14 +293,15 @@ Service ports:
 
 ### Development Cycle
 
-**Start fresh → Feature branch → PR → Merge → Old branch dead → Repeat**
+**Refresh root main → worktree → develop → PR → merge → cleanup worktree → repeat**
 
 ```bash
-# 1. START — every branch comes off main
-git fetch origin
-git checkout -b feat/<slug> origin/main
+# 1. START — refresh root, then create worktree off origin/main
+git fetch origin && git checkout main && git pull --ff-only origin main
+EnterWorktree name: "feat/<slug>"
+# manual: git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
 
-# 2. DEVELOP — implement, test, commit
+# 2. DEVELOP — in the worktree only; implement, test, commit
 cargo test && cargo clippy -- -D warnings && cargo fmt --all -- --check
 cd web && npm run build && npm run lint && cd ..
 
@@ -296,8 +331,9 @@ BODY
 )"
 gh pr merge <PR-NUMBER> --merge   # never --rebase, never --squash
 
-# 7. VERSION BUMP — only if this release warrants one
-git checkout -b chore/bump-version-X.Y.Z origin/main
+# 7. VERSION BUMP — only if this release warrants one (in a worktree, not root)
+EnterWorktree name: "chore/bump-version-X.Y.Z"
+# manual: git worktree add -b chore/bump-version-X.Y.Z .claude/worktrees/chore-bump-X.Y.Z origin/main
 # Bump version in ALL FOUR files (see "Version Bumping" in nession-development)
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
@@ -323,14 +359,16 @@ Those orphans are usually harmless, because a later rebase skips them by patch-i
 
 **⚠ Step 9 is not optional, and it goes last.** Steps 7 and 8 both add commits to `main` (the bump, then `release.yml`'s `chore: update prod image tags`), so syncing before them leaves `staging` two commits behind for no reason. Sync once `main` has stopped moving — it is still a fast-forward, since `staging`'s tip is an ancestor of everything added after it.
 
-Branching from `main` (step 1) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new branches then lack code they need to build on.
+Branching from `origin/main` (step 1 worktree base) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new worktrees then lack code they need to build on.
 
 **Never force-push `staging`.** It has `allow_force_pushes: true` as an escape hatch, but under this flow a force push is never part of the routine — if you find yourself reaching for one, the release was merged with the wrong method.
 
-**⚠ If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Resolve the conflict on a throwaway branch instead, leaving `staging` untouched:
+**⚠ If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Resolve the conflict in a throwaway worktree off `origin/main`, leaving `staging` untouched:
 
 ```bash
-git checkout -b chore/release-<sha> origin/main
+git fetch origin && git checkout main && git pull --ff-only origin/main
+git worktree add -b chore/release-<sha> .claude/worktrees/chore-release-<sha> origin/main
+cd .claude/worktrees/chore-release-<sha>
 git cherry-pick <staging-commit>...        # resolve conflicts here
 git push -u origin chore/release-<sha>
 gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
@@ -343,17 +381,19 @@ Then sync step 9 as usual. Measured 2026-08-17 on the 0.29.0 release: `staging �
 
 **⚠ All four version files move together.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json`; `version-check` now fails the run if the two disagree.
 
-**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch — rebase-merge replayed its commits onto `staging` as *new* SHAs, so the originals are not in the target's ancestry and a second PR re-carries every old commit and conflicts. Follow-up work starts from a new branch:
+**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch — rebase-merge replayed its commits onto `staging` as *new* SHAs, so the originals are not in the target's ancestry and a second PR re-carries every old commit and conflicts. Follow-up work starts from a **new worktree**:
 
 ```bash
-git fetch origin
-git checkout -b fix/<new-slug> origin/main        # normal case
-git checkout -b fix/<new-slug> origin/staging     # only if it builds on unreleased work
+git fetch origin && git checkout main && git pull --ff-only origin/main
+EnterWorktree name: "fix/<new-slug>"
+# normal case — bases on origin/main (EnterWorktree default)
+# unreleased staging dependency:
+git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/staging
 ```
 
 ### Branch base and merge method
 
-Every branch comes off `main`. Only follow-up work on code that is on `staging` but not yet released may branch off `origin/staging`.
+Every branch comes off `main` (via worktree — never `git checkout -b` in project root). Only follow-up work on code that is on `staging` but not yet released may use `origin/staging` as the worktree base.
 
 **Every merge is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed.
 
@@ -417,7 +457,7 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 
 ### Release Flow
 
-1. Develop on a branch off `main` (worktree preferred, see below)
+1. Develop in a worktree off `origin/main` (never in project root — see **Two Iron Laws**)
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI change
 4. PR to `staging` — 变更内容 + 测试报告 in the body, screenshots in a PR comment. No `Closes #N` here.
@@ -433,20 +473,39 @@ For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skill
 
 ### Worktree Convention
 
-Feature work uses isolated git worktrees under `.claude/worktrees/`. Claude Code can create these automatically via `EnterWorktree`.
+| Location | Role |
+|----------|------|
+| **Project root** | Read-only mirror of latest `origin/main` — refresh, spawn worktrees, inspect code |
+| **`.claude/worktrees/<name>/`** | All development — one worktree per branch/PR |
 
-**Branch naming must follow the standard prefix convention** (`feat/` or `fix/`) so CI triggers correctly:
+Claude Code / Cursor: `EnterWorktree name: "feat/<slug>"` (creates under `.claude/worktrees/`, bases on `origin/main`).
+
+**Branch naming** (`feat/` or `fix/` for code changes) so CI triggers correctly:
 - `feat/<slug>` — new features
 - `fix/<slug>` — bug fixes
+- `chore/<slug>`, `docs/<slug>` — direct-to-main work (still in a worktree, not root)
 
-When using `EnterWorktree`, pass the full branch name: `EnterWorktree name: "feat/<slug>"`.
+**After PR merge** — worktree is dead; clean up and refresh root:
 
-`EnterWorktree` bases the branch on `origin/main`, which is the correct base. Only re-point it when the work builds on unreleased code already on `staging`:
+```bash
+# In the worktree: push is done, PR merged
+cd <project-root>                # return to root (still on main)
+git fetch origin && git checkout main && git pull --ff-only origin main
+git worktree remove .claude/worktrees/feat-<slug>
+git worktree prune
+git branch -d feat/<slug>        # local branch, if fully merged
+```
+
+Claude Code: `ExitWorktree` with action `remove`.
+
+**Exception — unreleased code on `staging`:** when follow-up work depends on code not yet on `main`, base the worktree on `origin/staging` instead:
 
 ```bash
 git fetch origin
-git reset --hard origin/staging
+git worktree add -b fix/<slug> .claude/worktrees/fix-<slug> origin/staging
 ```
+
+Do **not** `git reset --hard` in project root — root stays on `main`.
 
 ### Commit Convention
 
@@ -463,8 +522,9 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 ## 3. Quality Gates
 
 - **两个 hook,都在 `.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
-- **`pre-commit` 只跑快检查**：`just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
-- **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
+- **`pre-commit` 只跑快检查**：`scripts/check-dev-workspace.sh commit`（禁止在根目录/`main` 上提交）→ `just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
+- **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：开头同样跑 `check-dev-workspace.sh push`；改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
+- **手动检查**：`just check-workspace`（或 `./scripts/check-dev-workspace.sh session --fetch`）— Agent/开发者开新任务前确认根目录在最新 `main`、当前在 worktree 里开发。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **覆盖率阈值**（`scripts/check-coverage.sh` 是唯一来源,每次遍历全部登记的 crate,不按改动收窄）：
