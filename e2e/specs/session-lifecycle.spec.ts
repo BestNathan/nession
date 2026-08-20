@@ -15,8 +15,9 @@ test.describe('Session lifecycle', () => {
   test('create a session, verify it appears, then kill it', async ({ page }) => {
     // ── Wait for the agent to register ──
     // The "Create" button is enabled only when at least one agent is online.
+    // In CI, cargo build + agent startup + heartbeat can take 30-60 seconds.
     const createButton = page.getByRole('button', { name: 'Create' });
-    await expect(createButton).toBeEnabled({ timeout: 15_000 });
+    await expect(createButton).toBeEnabled({ timeout: 60_000 });
 
     // ── Create session ──
     await createButton.click();
