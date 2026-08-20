@@ -96,12 +96,6 @@ async function typeInTerminal(page: import('@playwright/test').Page, text: strin
   await page.keyboard.type(text, { delay: 20 });
 }
 
-// TODO: terminal-io tests are skipped because:
-// 1. Agent's WS connection to server drops during CI runs ("Agent disconnected")
-// 2. Typed commands don't reach shell in relay mode (buffer stays empty)
-// Root cause investigation needed — likely related to CI runner performance
-// and/or agent heartbeat timing. Re-enable once the agent disconnect issue
-// is resolved.
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
@@ -109,7 +103,7 @@ test.describe('Terminal I/O', () => {
     await waitForDashboard(page);
   });
 
-  test.skip('relay mode: echo command and verify output', async ({ page }) => {
+  test('relay mode: echo command and verify output', async ({ page }) => {
     const SESSION_NAME = 'e2e-terminal-relay';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
@@ -127,7 +121,7 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test.skip('P2P mode: echo command and verify output', async ({ page }) => {
+  test('P2P mode: echo command and verify output', async ({ page }) => {
     const SESSION_NAME = 'e2e-terminal-p2p';
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
