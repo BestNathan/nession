@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { EditorState, Compartment, type Extension } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
-import { defaultKeymap, indentWithTab } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { detectLanguage } from '../lib/codeMirrorLanguages';
+import { codeMirrorSetup } from '../lib/codeMirrorSetup';
 import { useLanguageExtensions } from '../hooks/useLanguageExtensions';
 
 export interface CodeMirrorEditorProps {
@@ -42,10 +42,7 @@ export function CodeMirrorEditor({
   // Build the initial extensions list
   const buildExtensions = useCallback(
     (isReadOnly: boolean, langExts: Extension[]): Extension[] => [
-      // indentWithTab is not part of defaultKeymap, so without it the browser
-      // steals Tab for focus navigation instead of indenting. Tab indents,
-      // Shift-Tab dedents.
-      keymap.of([...defaultKeymap, indentWithTab]),
+      ...codeMirrorSetup,
       oneDark,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
