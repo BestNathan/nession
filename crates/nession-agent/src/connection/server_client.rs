@@ -2535,8 +2535,9 @@ mod tests {
         server_handle.abort();
     }
 
-    /// `server.sessions.list` must answer within the refresh window even while a
-    /// slow-but-not-timed-out `server.session.create` is still in flight.
+    /// `server.sessions.list` must answer ahead of a slow-but-not-timed-out
+    /// `server.session.create` that is still in flight, rather than queueing
+    /// behind it.
     #[cfg(unix)]
     #[tokio::test]
     async fn sessions_list_responds_while_create_is_slow() {
@@ -2579,35 +2580,41 @@ mod tests {
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        // The sessions.list response must arrive before the 2s create finishes.
-        let list_answered = tokio::time::timeout(Duration::from_secs(1), async {
+        // Assert ordering, not elapsed time. Were the list queued behind the
+        // create, the create's response would necessarily come back first — so
+        // "which answered first" proves concurrency on its own. A wall-clock
+        // budget would instead race the machine: connect, register and two
+        // command round trips all had to land inside it, which is not a
+        // property of the code under test.
+        let first = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 let msg = msg_rx.recv().await.expect("server closed");
                 let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                if parsed
+                let command = parsed
                     .get("payload")
                     .and_then(|p| p.get("command"))
                     .and_then(|v| v.as_str())
-                    == Some("sessions.list")
-                {
+                    .unwrap_or_default();
+                if command == "sessions.list" || command == "session.create" {
                     return parsed;
                 }
             }
         })
-        .await;
-        let parsed = list_answered.expect("sessions.list was blocked by the slow create");
+        .await
+        .expect("neither sessions.list nor session.create ever answered");
+
+        let payload = first.get("payload").expect("response carries a payload");
         assert_eq!(
-            parsed
-                .get("payload")
-                .and_then(|p| p.get("request_id"))
-                .and_then(|v| v.as_str()),
+            payload.get("command").and_then(|v| v.as_str()),
+            Some("sessions.list"),
+            "sessions.list was queued behind the slow session.create"
+        );
+        assert_eq!(
+            payload.get("request_id").and_then(|v| v.as_str()),
             Some("req-list")
         );
         assert_eq!(
-            parsed
-                .get("payload")
-                .and_then(|p| p.get("success"))
-                .and_then(serde_json::Value::as_bool),
+            payload.get("success").and_then(serde_json::Value::as_bool),
             Some(true)
         );
 

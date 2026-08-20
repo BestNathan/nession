@@ -1,0 +1,14 @@
+{
+  "name": "nession-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end tests for Nession (Playwright)",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

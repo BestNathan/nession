@@ -8,37 +8,70 @@ use nession_server::server::WebSocketServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Diagnostic: print immediately to stderr to confirm process starts
+    eprintln!("[DIAGNOSTIC] nession-server process started");
+
     // Load configuration first (needed for logging setup).
-    let config = load_config()?;
+    eprintln!("[DIAGNOSTIC] Loading configuration...");
+    let config = match load_config() {
+        Ok(c) => {
+            eprintln!("[DIAGNOSTIC] Configuration loaded successfully");
+            c
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to load configuration: {e:?}");
+            return Err(e);
+        }
+    };
 
     // Initialize logging (stdout + file).
-    let _log_guard = nession_common::logging::init_logging(
+    eprintln!("[DIAGNOSTIC] Initializing logging...");
+    let _log_guard = match nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::server_logs_dir()?,
         "nession-server",
-    )?;
+    ) {
+        Ok(g) => {
+            eprintln!("[DIAGNOSTIC] Logging initialized successfully");
+            g
+        }
+        Err(e) => {
+            eprintln!("[DIAGNOSTIC] ERROR: Failed to initialize logging: {e:?}");
+            return Err(e.into());
+        }
+    };
 
+    eprintln!("[DIAGNOSTIC] About to log startup info...");
     info!("Starting nession-server");
+    eprintln!("[DIAGNOSTIC] Startup info logged");
     info!(
         "Configuration loaded: listen_address={}, db_path={}",
         config.listen_address, config.db_path
     );
 
     // Ensure component directories exist
+    eprintln!("[DIAGNOSTIC] Ensuring component directories...");
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
+    eprintln!("[DIAGNOSTIC] Component directories ensured");
 
     // Initialize database
+    eprintln!("[DIAGNOSTIC] Initializing database...");
     info!("Initializing database at {}", config.db_path);
     let database = Database::new(&config.db_path).await?;
+    eprintln!("[DIAGNOSTIC] Database initialized");
     info!("Database initialized successfully");
 
     // Create and run WebSocket server
+    eprintln!("[DIAGNOSTIC] Creating WebSocket server...");
     info!("Creating WebSocket server");
     let mut server = WebSocketServer::new(config, std::sync::Arc::new(database)).await?;
+    eprintln!("[DIAGNOSTIC] WebSocket server created, starting...");
 
+    eprintln!("[DIAGNOSTIC] Starting WebSocket server...");
     info!("Starting WebSocket server");
     if let Err(e) = server.run().await {
+        eprintln!("[DIAGNOSTIC] Server error: {e:?}");
         error!("Server error: {}", e);
         return Err(e);
     }
@@ -46,16 +79,25 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Load server configuration.
+///
+/// The config path is taken from the first argv argument (if present),
+/// falling back to `config.toml` in the current directory.
 fn load_config() -> anyhow::Result<ServerConfig> {
-    let config_path = "config.toml";
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config.toml".to_string());
 
-    if Path::new(config_path).exists() {
+    if Path::new(&config_path).exists() {
         info!("Loading configuration from {}", config_path);
-        let config_str = std::fs::read_to_string(config_path)?;
+        let config_str = std::fs::read_to_string(&config_path)?;
         let config: ServerConfig = toml::from_str(&config_str)?;
         Ok(config)
     } else {
-        info!("No config.toml found, using default configuration");
+        info!(
+            "No config found at '{}', using default configuration",
+            config_path
+        );
         Ok(ServerConfig {
             listen_address: "127.0.0.1:8080".to_string(),
             ..Default::default()

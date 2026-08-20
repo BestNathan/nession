@@ -1446,7 +1446,10 @@ impl ConnectionHandler {
             )
             .await;
 
-        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        // Wait up to 30 seconds for agent response.
+        // Increased from 10s to handle slow CI environments where tmux operations
+        // and agent processing can take longer.
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(response)) => {
                 let success = response
                     .get("success")
@@ -1637,7 +1640,9 @@ impl ConnectionHandler {
             )
             .await;
 
-        match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        // Wait up to 30 seconds for agent response.
+        // Increased from 10s to handle slow CI environments.
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(response)) => {
                 let success = response
                     .get("success")

@@ -31,6 +31,17 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 fi
 
+# ── Rust: unit tests ───────────────────────────────────────────────────────
+if [ -n "$STAGED_RUST" ]; then
+  echo -e "${YELLOW}→ just test-unit${NC}"
+  if just test-unit; then
+    echo -e "${GREEN}✓ just test-unit${NC}"
+  else
+    echo -e "${RED}✗ just test-unit — fix failures above${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-lint${NC}"
@@ -38,6 +49,17 @@ if [ -n "$STAGED_TSX" ]; then
     echo -e "${GREEN}✓ just web-lint${NC}"
   else
     echo -e "${RED}✗ just web-lint${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
+# ── Web: unit tests ────────────────────────────────────────────────────────
+if [ -n "$STAGED_TSX" ]; then
+  echo -e "${YELLOW}→ just web-test-unit${NC}"
+  if just web-test-unit; then
+    echo -e "${GREEN}✓ just web-test-unit${NC}"
+  else
+    echo -e "${RED}✗ just web-test-unit — fix failures above${NC}"
     HAS_ERROR=1
   fi
 fi

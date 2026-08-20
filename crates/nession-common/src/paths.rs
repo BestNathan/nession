@@ -184,4 +184,65 @@ mod tests {
         let path = server_config_path().unwrap();
         assert!(path.to_string_lossy().ends_with("server-config.toml"));
     }
+
+    // --- Inlined from tests/paths_test.rs (exact-path assertions) ---
+
+    fn expected_home() -> PathBuf {
+        dirs::home_dir()
+            .expect("home directory should be available")
+            .join(".nession")
+    }
+
+    #[test]
+    fn test_nession_home_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(nession_home().unwrap(), expected_home());
+    }
+
+    #[test]
+    fn test_server_dir_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(server_dir().unwrap(), expected_home().join("server"));
+    }
+
+    #[test]
+    fn test_agent_dir_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(agent_dir().unwrap(), expected_home().join("agent"));
+    }
+
+    #[test]
+    fn test_server_db_path_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(
+            server_db_path().unwrap(),
+            expected_home().join("server").join("server.db")
+        );
+    }
+
+    #[test]
+    fn test_server_pid_path_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(
+            server_pid_path().unwrap(),
+            expected_home().join("server").join("server.pid")
+        );
+    }
+
+    #[test]
+    fn test_agent_pid_path_exact() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        assert_eq!(
+            agent_pid_path().unwrap(),
+            expected_home().join("agent").join("agent.pid")
+        );
+    }
+
+    #[test]
+    fn test_ensure_component_dirs_creates_directories() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_component_dirs().expect("ensure_component_dirs should succeed");
+        assert!(server_dir().unwrap().exists());
+        assert!(agent_dir().unwrap().exists());
+    }
 }

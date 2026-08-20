@@ -968,3 +968,6 @@ mod tests {
         assert_eq!(super::default_image_tag(), "unknown");
     }
 }
+
+#[cfg(test)]
+mod protocol_tests;

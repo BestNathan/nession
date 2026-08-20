@@ -5,6 +5,15 @@ import { ThemeManager } from '../ThemeManager';
 import { FontSizeManager } from '../FontSizeManager';
 import type { TerminalInstanceOptions } from '../types';
 
+/**
+ * HTMLElement augmented with `xtermInstance` — a reference to the Terminal
+ * instance mounted inside it. Set by {@link TerminalInstance.attach} so E2E
+ * tests can read the buffer (canvas/webgl renderers don't put text in the DOM).
+ */
+interface XtermMountElement extends HTMLElement {
+  xtermInstance?: Terminal;
+}
+
 const DEFAULT_FONT =
   "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace";
 const DEFAULT_FONT_SIZE = 14;
@@ -51,6 +60,9 @@ export class TerminalInstance {
       return;
     }
     this.terminal.open(element);
+    // Expose the Terminal instance on the container element so E2E tests can
+    // read the buffer (canvas/webgl renderers don't put text in the DOM).
+    (element as XtermMountElement).xtermInstance = this.terminal;
   }
 
   /** Detach from container. No-op: terminal instance stays alive. */
