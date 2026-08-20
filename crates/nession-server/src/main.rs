@@ -8,6 +8,9 @@ use nession_server::server::WebSocketServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Diagnostic: print immediately to stderr to confirm process starts
+    eprintln!("[DIAGNOSTIC] nession-server process started");
+
     // Load configuration first (needed for logging setup).
     let config = load_config()?;
 
