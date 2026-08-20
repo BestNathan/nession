@@ -50,20 +50,28 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Ensure component directories exist
+    eprintln!("[DIAGNOSTIC] Ensuring component directories...");
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
+    eprintln!("[DIAGNOSTIC] Component directories ensured");
 
     // Initialize database
+    eprintln!("[DIAGNOSTIC] Initializing database...");
     info!("Initializing database at {}", config.db_path);
     let database = Database::new(&config.db_path).await?;
+    eprintln!("[DIAGNOSTIC] Database initialized");
     info!("Database initialized successfully");
 
     // Create and run WebSocket server
+    eprintln!("[DIAGNOSTIC] Creating WebSocket server...");
     info!("Creating WebSocket server");
     let mut server = WebSocketServer::new(config, std::sync::Arc::new(database)).await?;
+    eprintln!("[DIAGNOSTIC] WebSocket server created, starting...");
 
+    eprintln!("[DIAGNOSTIC] Starting WebSocket server...");
     info!("Starting WebSocket server");
     if let Err(e) = server.run().await {
+        eprintln!("[DIAGNOSTIC] Server error: {e:?}");
         error!("Server error: {}", e);
         return Err(e);
     }

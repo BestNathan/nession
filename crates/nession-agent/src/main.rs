@@ -125,10 +125,12 @@ async fn main() -> Result<()> {
         resize_tx,
     )
     .context("failed to create agent server")?;
+    eprintln!("[DIAGNOSTIC] AgentServer created, starting...");
     let (server_handle, listen_addr) = agent_server
         .start()
         .await
         .context("failed to start agent server")?;
+    eprintln!("[DIAGNOSTIC] AgentServer started on {listen_addr}");
     info!("Agent WebSocket server started on {}", listen_addr);
 
     // 5. Connect to central server
