@@ -739,7 +739,7 @@ mod tests {
     async fn test_chunked_read_first_chunk() {
         let (dir, ops) = setup();
         // 30-byte file: "0123456789" repeated 3 times.
-        let content: Vec<u8> = (0..30).map(|i| b'0' + (i % 10) as u8).collect();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
         fs::write(dir.path().join("data.bin"), &content).unwrap();
 
         let file_data = ops.read_file("data.bin", Some(0), Some(10)).await.unwrap();
@@ -753,7 +753,7 @@ mod tests {
     #[tokio::test]
     async fn test_chunked_read_middle_chunk() {
         let (dir, ops) = setup();
-        let content: Vec<u8> = (0..30).map(|i| b'0' + (i % 10) as u8).collect();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
         fs::write(dir.path().join("data.bin"), &content).unwrap();
 
         let file_data = ops.read_file("data.bin", Some(10), Some(10)).await.unwrap();
@@ -767,7 +767,7 @@ mod tests {
     #[tokio::test]
     async fn test_chunked_read_last_chunk() {
         let (dir, ops) = setup();
-        let content: Vec<u8> = (0..30).map(|i| b'0' + (i % 10) as u8).collect();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
         fs::write(dir.path().join("data.bin"), &content).unwrap();
 
         let file_data = ops.read_file("data.bin", Some(20), Some(10)).await.unwrap();
@@ -781,7 +781,7 @@ mod tests {
     #[tokio::test]
     async fn test_chunked_read_beyond_eof() {
         let (dir, ops) = setup();
-        let content: Vec<u8> = (0..30).map(|i| b'0' + (i % 10) as u8).collect();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
         fs::write(dir.path().join("data.bin"), &content).unwrap();
 
         // offset=25, limit=10, but only 5 bytes remain.
@@ -797,7 +797,7 @@ mod tests {
     #[tokio::test]
     async fn test_chunked_read_offset_at_eof() {
         let (dir, ops) = setup();
-        let content: Vec<u8> = (0..30).map(|i| b'0' + (i % 10) as u8).collect();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
         fs::write(dir.path().join("data.bin"), &content).unwrap();
 
         // offset == file size → empty result.
