@@ -29,6 +29,10 @@ describe('resolveLangKey', () => {
     expect(resolveLangKey('script.zsh')).toBe('sh');
   });
 
+  it('maps fish to sh', () => {
+    expect(resolveLangKey('script.fish')).toBe('sh');
+  });
+
   it('maps Dockerfile basename to dockerfile loader key', () => {
     expect(resolveLangKey('Dockerfile')).toBe('__dockerfile__');
   });
