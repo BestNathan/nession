@@ -531,7 +531,8 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 
 ## 3. Quality Gates
 
-- **两个 hook,都在 `.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
+- **两个 hook,都在 `.githooks/`**（`git config core.hooksPath`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
+- **⚠️ hook 改动在当前 worktree 里不生效。** 本机的 `core.hooksPath` 是**绝对路径**指向主检出(`/Users/.../nession/.githooks`),不是相对的 `.githooks`。git 是按 worktree 之外的这个绝对路径找 hook 的,所以**所有 worktree 提交时跑的都是主检出那一份**。后果:在 worktree 里改了 `.githooks/*` 之后,本 worktree 的提交仍然走旧 hook —— 新步骤要等改动合进 `main` 且根目录 `git pull` 之后才真正生效。想在合并前验证,直接调 `./.githooks/pre-commit`(需先 `git add` 一些文件,否则它因无 staged 内容直接 exit 0)。
 - **`pre-commit` 只跑快检查**：`scripts/check-dev-workspace.sh commit`（禁止在根目录/`main` 上提交）→ `just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
 - **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：开头同样跑 `check-dev-workspace.sh push`；改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
 - **手动检查**：`just check-workspace`（或 `./scripts/check-dev-workspace.sh session --fetch`）— Agent/开发者开新任务前确认根目录在最新 `main`、当前在 worktree 里开发。
