@@ -1,6 +1,6 @@
 //! Integration tests for the sync module (heartbeat loop and session watcher).
 
-use super::unique_session_name;
+use super::TestSession;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -222,10 +222,8 @@ async fn test_session_watcher_detects_new_session() {
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("watcher-new");
-
-    // Clean up any leftover session.
-    let _ = tmux.kill_session(&session_name).await;
+    let session = TestSession::new("watcher-new");
+    let session_name = session.name().to_string();
 
     // Create the session before starting the watcher.
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
@@ -283,10 +281,8 @@ async fn test_session_watcher_detects_removed_session() {
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
 
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("watcher-removed");
-
-    // Clean up any leftover session.
-    let _ = tmux.kill_session(&session_name).await;
+    let session = TestSession::new("watcher-removed");
+    let session_name = session.name().to_string();
 
     // Create the session before starting the watcher.
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])

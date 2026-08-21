@@ -4,7 +4,7 @@
 //! bind, connect, send requests, and receive responses. They require a
 //! working tmux installation (same as the tmux manager / pty tests).
 
-use super::unique_session_name;
+use super::TestSession;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::server::websocket::{
@@ -104,7 +104,8 @@ async fn integration_session_create_and_kill() {
     let (addr, handle) = start_server(19083).await;
     let (mut sink, mut stream) = connect(addr).await;
 
-    let session_name = unique_session_name("create-kill");
+    let session = TestSession::new("create-kill");
+    let session_name = session.name().to_string();
     let create = SessionCreatePayload {
         name: session_name.to_string(),
         width: 80,
@@ -134,9 +135,8 @@ async fn integration_client_attach_creates_pty() {
     let (mut sink, mut stream) = connect(addr).await;
 
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("attach");
-    // Clean up any leftover session from previous test runs
-    tmux.kill_session(&session_name).await.ok();
+    let session = TestSession::new("attach");
+    let session_name = session.name().to_string();
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
@@ -174,9 +174,8 @@ async fn integration_terminal_io_flow() {
     let (mut sink, mut stream) = connect(addr).await;
 
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("io");
-    // Clean up any leftover session from previous test runs
-    tmux.kill_session(&session_name).await.ok();
+    let session = TestSession::new("io");
+    let session_name = session.name().to_string();
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
@@ -302,9 +301,10 @@ async fn integration_web_ui_session_create() {
     let (addr, handle) = start_server(19089).await;
     let (mut sink, mut stream) = connect(addr).await;
 
+    let session = TestSession::new("web-create");
     let payload = WebSessionCreatePayload {
         agent_id: "local-agent".to_string(),
-        name: unique_session_name("web-create"),
+        name: session.name().to_string(),
         width: 80,
         height: 24,
     };
@@ -335,7 +335,8 @@ async fn integration_web_ui_session_kill() {
 
     // Create a session first.
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("web-kill");
+    let session = TestSession::new("web-kill");
+    let session_name = session.name().to_string();
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
         .await
         .unwrap();
