@@ -8,9 +8,11 @@ export RUSTC_WRAPPER := `which sccache 2>/dev/null || echo ""`
 fmt:
     cargo fmt --all -- --check
 
-# Clippy strict mode — must pass with 0 warnings
+# Clippy strict mode — must pass with 0 warnings.
+# --all-targets so test code is linted too; without it #[cfg(test)] modules and
+# tests/ are skipped entirely.
 lint:
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Unit tests only (pre-commit)
 test-unit:
