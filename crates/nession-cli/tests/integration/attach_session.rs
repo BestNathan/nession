@@ -8,18 +8,26 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-/// Helper to create a test server config
-fn create_test_config(port: u16) -> ServerConfig {
-    ServerConfig {
-        listen_address: format!("127.0.0.1:{port}"),
+/// Helper to create a test server config.
+///
+/// Both the port and the database path are per-run rather than fixed: the port
+/// is OS-assigned, and the database lives in a fresh temp dir removed when the
+/// returned `TempDir` drops. A shared `/tmp/nession_test_<port>.db` was reused
+/// by any concurrent test run.
+fn create_test_config() -> anyhow::Result<(tempfile::TempDir, ServerConfig)> {
+    let dir = tempfile::tempdir()?;
+    let db_path = dir.path().join("server.db").to_string_lossy().into_owned();
+    let config = ServerConfig {
+        listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: format!("/tmp/nession_test_{port}.db"),
+        db_path,
         ..Default::default()
-    }
+    };
+    Ok((dir, config))
 }
 
 async fn start_test_server(
@@ -42,13 +50,13 @@ async fn test_attach_session_p2p_mode() {
     // the connection flow works up to the point where it would fail
 
     // Start server
-    let config = create_test_config(18090);
+    let (_db_dir, config) = create_test_config().unwrap();
 
-    let (_addr, server_handle) = start_test_server(config).await.unwrap();
+    let (addr, server_handle) = start_test_server(config).await.unwrap();
 
     // Try to attach - should fail gracefully since no agent/session exists
     let result = attach_session(
-        "ws://127.0.0.1:18090",
+        &format!("ws://{addr}"),
         "test_token",
         "agent1:session1",
         Some("p2p"),
@@ -65,12 +73,12 @@ async fn test_attach_session_p2p_mode() {
 #[tokio::test]
 async fn test_attach_session_relay_mode() {
     // Similar to P2P test but with relay mode forced
-    let config = create_test_config(18091);
+    let (_db_dir, config) = create_test_config().unwrap();
 
-    let (_addr, server_handle) = start_test_server(config).await.unwrap();
+    let (addr, server_handle) = start_test_server(config).await.unwrap();
 
     let result = attach_session(
-        "ws://127.0.0.1:18091",
+        &format!("ws://{addr}"),
         "test_token",
         "agent1:session1",
         Some("relay"),
@@ -86,12 +94,12 @@ async fn test_attach_session_relay_mode() {
 #[tokio::test]
 async fn test_attach_session_auto_fallback() {
     // Test that auto mode (None) works
-    let config = create_test_config(18092);
+    let (_db_dir, config) = create_test_config().unwrap();
 
-    let (_addr, server_handle) = start_test_server(config).await.unwrap();
+    let (addr, server_handle) = start_test_server(config).await.unwrap();
 
     let result = attach_session(
-        "ws://127.0.0.1:18092",
+        &format!("ws://{addr}"),
         "test_token",
         "agent1:session1",
         None, // Auto mode
@@ -106,12 +114,12 @@ async fn test_attach_session_auto_fallback() {
 
 #[tokio::test]
 async fn test_attach_session_invalid_mode() {
-    let config = create_test_config(18093);
+    let (_db_dir, config) = create_test_config().unwrap();
 
-    let (_addr, server_handle) = start_test_server(config).await.unwrap();
+    let (addr, server_handle) = start_test_server(config).await.unwrap();
 
     let result = attach_session(
-        "ws://127.0.0.1:18093",
+        &format!("ws://{addr}"),
         "test_token",
         "agent1:session1",
         Some("invalid_mode"),
@@ -128,12 +136,12 @@ async fn test_attach_session_invalid_mode() {
 
 #[tokio::test]
 async fn test_attach_session_bad_credentials() {
-    let config = create_test_config(18094);
+    let (_db_dir, config) = create_test_config().unwrap();
 
-    let (_addr, server_handle) = start_test_server(config).await.unwrap();
+    let (addr, server_handle) = start_test_server(config).await.unwrap();
 
     let result = attach_session(
-        "ws://127.0.0.1:18094",
+        &format!("ws://{addr}"),
         "wrong_token",
         "agent1:session1",
         None,

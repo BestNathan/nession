@@ -13,12 +13,44 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message as WsMessage};
 
-/// Start a mock WebSocket server that accepts connections and captures messages.
-async fn start_mock_server(
+/// Start a mock WebSocket server on an OS-assigned port and capture messages.
+///
+/// The port is never hardcoded: two concurrent test runs — two worktrees, or CI
+/// alongside a local run — would otherwise fight over the same number.
+async fn start_mock_server() -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    mpsc::Receiver<String>,
+)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (handle, msg_rx) = serve_mock(listener);
+    Ok((addr, handle, msg_rx))
+}
+
+/// Ask the OS for a free port, then release it.
+///
+/// Only for the reconnection test, which must hand the client an address where
+/// nothing is listening *yet*, so the port cannot stay bound. Re-binding it
+/// later is a small race against the rest of the machine, but far better than a
+/// hardcoded number that races every concurrent test run.
+async fn free_port() -> anyhow::Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
+/// Start the mock server on a port obtained earlier from [`free_port`].
+async fn start_mock_server_on(
     port: u16,
 ) -> anyhow::Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<String>)> {
-    let (msg_tx, msg_rx) = mpsc::channel(100);
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    Ok(serve_mock(listener))
+}
+
+fn serve_mock(listener: TcpListener) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    let (msg_tx, msg_rx) = mpsc::channel(100);
 
     let handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
@@ -48,13 +80,12 @@ async fn start_mock_server(
         }
     });
 
-    Ok((handle, msg_rx))
+    (handle, msg_rx)
 }
 
 #[tokio::test]
 async fn integration_connection_to_mock_server() {
-    let port = 29081;
-    let (server_handle, _msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, _msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -65,7 +96,7 @@ async fn integration_connection_to_mock_server() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{port}"),
+        format!("ws://{addr}"),
         "test-token",
         "integration-agent-1",
         "test-host",
@@ -91,8 +122,7 @@ async fn integration_connection_to_mock_server() {
 
 #[tokio::test]
 async fn integration_registration_message_format() {
-    let port = 29082;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -103,7 +133,7 @@ async fn integration_registration_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{port}"),
+        format!("ws://{addr}"),
         "secret-token-123",
         "integration-agent-2",
         "my-hostname",
@@ -154,8 +184,7 @@ async fn integration_registration_message_format() {
 
 #[tokio::test]
 async fn integration_heartbeat_message_format() {
-    let port = 29083;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -166,7 +195,7 @@ async fn integration_heartbeat_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{port}"),
+        format!("ws://{addr}"),
         "test-token",
         "integration-agent-3",
         "test-host",
@@ -227,8 +256,7 @@ async fn integration_heartbeat_message_format() {
 
 #[tokio::test]
 async fn integration_session_update_message_format() {
-    let port = 29084;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -239,7 +267,7 @@ async fn integration_session_update_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{port}"),
+        format!("ws://{addr}"),
         "test-token",
         "integration-agent-4",
         "test-host",
@@ -296,7 +324,9 @@ async fn integration_reconnection_logic() {
     // is not available. We'll start with no server, verify the client keeps
     // trying, then start a server and verify it connects.
 
-    let port = 29085;
+    // A port nothing is listening on yet — the client must fail and back off
+    // before the server appears below.
+    let port = free_port().await.unwrap();
 
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
@@ -329,7 +359,7 @@ async fn integration_reconnection_logic() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Now start the server.
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (server_handle, mut msg_rx) = start_mock_server_on(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // The client should eventually connect and send registration.
