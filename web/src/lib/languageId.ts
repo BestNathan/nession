@@ -286,21 +286,88 @@ export function parseLangExt(path: string): string {
   return basename.slice(lastDot + 1);
 }
 
+// Pattern-based rules (regex matches against basename)
+// Runs AFTER basename matching but BEFORE extension matching.
+export const PATTERN_RULES: ReadonlyArray<{ readonly pattern: RegExp; readonly language: LanguageId }> = [
+  // .env variant files (.env.local, .env.production, etc.)
+  { pattern: /^\.env\..+$/, language: 'plaintext' },
+  // TypeScript declaration files (also caught by double-ext check, included for consistency)
+  { pattern: /\.d\.ts$/, language: 'typescript' },
+  // Dockerfile variants (case-insensitive, e.g. my-dockerfile, Dockerfile.dev)
+  { pattern: /dockerfile/i, language: 'dockerfile' },
+];
+
+// Shebang interpreter → language mapping
+const SHEBANG_INTERPRETERS: Record<string, LanguageId> = {
+  bash: 'shellscript',
+  sh: 'shellscript',
+  zsh: 'shellscript',
+  python: 'python',
+  node: 'javascript',
+  ruby: 'ruby',
+  perl: 'perl',
+};
+
+/**
+ * Detect language from a shebang line.
+ *
+ * Parses the first line of `content` for `#!` and maps common interpreters
+ * to their LanguageId. Returns `null` if there is no shebang, the interpreter
+ * is unrecognised, or content is empty.
+ */
+export function detectShebang(content: string): LanguageId | null {
+  const newlineIdx = content.indexOf('\n');
+  const firstLine = newlineIdx >= 0 ? content.slice(0, newlineIdx) : content;
+  if (!firstLine.startsWith('#!')) {
+    return null;
+  }
+
+  const rest = firstLine.slice(2).trim();
+  if (rest.length === 0) {
+    return null;
+  }
+
+  const parts = rest.split(/\s+/);
+  // Take basename of the command path
+  let cmd = parts[0];
+  const lastSlash = cmd.lastIndexOf('/');
+  if (lastSlash >= 0) {
+    cmd = cmd.slice(lastSlash + 1);
+  }
+
+  // `env` forwards to the next argument
+  if (cmd === 'env' && parts.length > 1) {
+    cmd = parts[1];
+    const envSlash = cmd.lastIndexOf('/');
+    if (envSlash >= 0) {
+      cmd = cmd.slice(envSlash + 1);
+    }
+  }
+
+  // Strip version suffixes: python3.11 -> python, node18 -> node
+  const base = cmd.replace(/[\d.]+$/, '');
+
+  return SHEBANG_INTERPRETERS[base] ?? null;
+}
+
 /**
  * Detect language from filename
  *
  * Detection priority (execution order):
  *   1. Basename matching (exact filename matches, e.g., "Makefile" -> 'makefile')
  *   2. Double extension matching (e.g., "foo.d.ts" -> 'typescript')
- *   3. Extension matching (e.g., ".ts" -> 'typescript')
- *   4. Shebang detection (TODO: not implemented yet)
- *   5. Content-based detection (TODO: not implemented yet)
- *   6. Fallback to 'plaintext'
+ *   3. Pattern rules (regex on basename, e.g., ".env.local" -> 'plaintext')
+ *   4. Extension matching (e.g., ".ts" -> 'typescript')
+ *   5. Shebang detection (requires `content`, only reached when no extension matched)
+ *   6. Content-based detection (TODO: not implemented yet)
+ *   7. Fallback to 'plaintext'
  *
  * @param filename - File path or basename
+ * @param content  - Optional file content; when provided, shebang detection runs
+ *                   as a fallback for extensionless files.
  * @returns Detected LanguageId, defaults to 'plaintext'
  */
-export function detectLanguage(filename: string): LanguageId {
+export function detectLanguage(filename: string, content?: string): LanguageId {
   // Priority 1: Basename matching
   const basename = parseLangBasename(filename);
   if (basename in BASENAME_RULES) {
@@ -312,15 +379,29 @@ export function detectLanguage(filename: string): LanguageId {
     return 'typescript';
   }
 
-  // Priority 3: Extension matching
+  // Priority 3: Pattern rules
+  for (const rule of PATTERN_RULES) {
+    if (rule.pattern.test(basename)) {
+      return rule.language;
+    }
+  }
+
+  // Priority 4: Extension matching
   const ext = parseLangExt(filename);
   if (ext && ext in EXTENSION_RULES) {
     return EXTENSION_RULES[ext];
   }
 
-  // TODO: Priority 4 - Shebang detection
-  // TODO: Priority 5 - Content-based detection
+  // Priority 5: Shebang detection (only when content is provided)
+  if (content !== undefined) {
+    const shebangLang = detectShebang(content);
+    if (shebangLang !== null) {
+      return shebangLang;
+    }
+  }
 
-  // Priority 6: Fallback
+  // TODO: Priority 6 - Content-based detection
+
+  // Priority 7: Fallback
   return 'plaintext';
 }

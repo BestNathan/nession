@@ -125,8 +125,13 @@ describe('detectLanguage', () => {
   describe('case sensitivity', () => {
     it('basename matching is case-sensitive', () => {
       expect(detectLanguage('MAKEFILE')).toBe('plaintext');
-      expect(detectLanguage('DOCKERFILE')).toBe('plaintext');
       expect(detectLanguage('makefile')).toBe('makefile');
+    });
+
+    it('Dockerfile pattern match is case-insensitive', () => {
+      expect(detectLanguage('DOCKERFILE')).toBe('dockerfile');
+      expect(detectLanguage('Dockerfile')).toBe('dockerfile');
+      expect(detectLanguage('dockerfile')).toBe('dockerfile');
     });
   });
 
@@ -161,6 +166,62 @@ describe('detectLanguage', () => {
 
     it('detects .d.ts as typescript', () => {
       expect(detectLanguage('foo.d.ts')).toBe('typescript');
+    });
+  });
+
+  describe('pattern priority', () => {
+    it('detects .env.local as plaintext', () => {
+      expect(detectLanguage('.env.local')).toBe('plaintext');
+    });
+
+    it('detects .env.production as plaintext', () => {
+      expect(detectLanguage('.env.production')).toBe('plaintext');
+    });
+
+    it('detects foo.d.ts as typescript via pattern', () => {
+      expect(detectLanguage('foo.d.ts')).toBe('typescript');
+    });
+
+    it('detects Dockerfile variant via pattern', () => {
+      expect(detectLanguage('my-dockerfile')).toBe('dockerfile');
+      expect(detectLanguage('Dockerfile.dev')).toBe('dockerfile');
+    });
+  });
+
+  describe('shebang priority', () => {
+    it('detects shellscript from shebang', () => {
+      const content = '#!/usr/bin/env bash\necho hello';
+      expect(detectLanguage('deploy', content)).toBe('shellscript');
+    });
+
+    it('detects python from shebang', () => {
+      const content = '#!/usr/bin/python3\nprint("hi")';
+      expect(detectLanguage('script', content)).toBe('python');
+    });
+
+    it('detects node from shebang', () => {
+      const content = '#!/usr/bin/env node\nconsole.log("hi")';
+      expect(detectLanguage('app', content)).toBe('javascript');
+    });
+
+    it('ignores shebang when extension exists', () => {
+      const content = '#!/usr/bin/env bash\necho hello';
+      expect(detectLanguage('script.py', content)).toBe('python');
+    });
+
+    it('returns plaintext for unrecognized shebang', () => {
+      const content = '#!/usr/bin/custom-interp\nsome stuff';
+      expect(detectLanguage('tool', content)).toBe('plaintext');
+    });
+
+    it('returns plaintext when no shebang and no extension', () => {
+      const content = 'just some text\nno shebang';
+      expect(detectLanguage('notes', content)).toBe('plaintext');
+    });
+
+    it('detects ruby from shebang', () => {
+      const content = '#!/usr/bin/env ruby\nputs "hi"';
+      expect(detectLanguage('runner', content)).toBe('ruby');
     });
   });
 });
