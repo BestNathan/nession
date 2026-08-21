@@ -3,9 +3,15 @@ import { toast } from 'sonner';
 import { toastError } from '@/lib/errorHelpers';
 import { getViewerType, parseExt, isMarkdownExt, type ViewerType } from '@/lib/viewerRegistry';
 import { detectMarkdown } from '@/lib/contentDetector';
-import type { FileOps } from '../services/fileOps';
-
+import { readFileChunked, type FileOps } from '../services/fileOps';
 export type ViewMode = 'preview' | 'raw';
+
+/**
+ * Files larger than this switch to chunked reading with a progress bar.
+ * 10 MB keeps single-request latency bounded on slow P2P links while still
+ * making common text files (configs, logs, source) load in one round-trip.
+ */
+const CHUNKED_READ_THRESHOLD = 10 * 1024 * 1024;
 
 export interface UseFileViewerParams {
   fileOps: FileOps;
@@ -13,6 +19,13 @@ export interface UseFileViewerParams {
   filename: string;
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * File size in bytes, if known up-front from the FileEntry. Files larger than
+   * CHUNKED_READ_THRESHOLD are loaded in chunks with a visible progress bar and
+   * forced read-only — saving them back through a single `file.write` is not
+   * safe at that scale.
+   */
+  fileSize?: number;
 }
 
 /** Decode base64 content to a Blob URL for media viewers. */
@@ -34,19 +47,27 @@ interface FileLoaderResult {
   mediaBlobUrl: string | null;
   loading: boolean;
   error: string | null;
+  loadedBytes: number;
+  totalBytes: number;
+  isChunkedLoading: boolean;
+  forceReadOnly: boolean;
   loadFile: () => Promise<void>;
   setContent: (content: string) => void;
   setOriginalContent: (content: string) => void;
+  handleCancelLoad: () => void;
 }
 
 /**
  * Read-file state: decodes text content or builds a media blob URL, tracks
  * loading/error, and calls `onDecoded` after a text file is decoded so the
- * caller can run content-based markdown detection.
+ * caller can run content-based markdown detection. For files above the chunked
+ * threshold, falls back to progressive chunked reads so the UI can render a
+ * progress bar instead of a frozen skeleton.
  */
 function useFileLoader(
   fileOps: FileOps,
   path: string,
+  fileSize: number | undefined,
   onDecoded: (decoded: string) => void,
 ): FileLoaderResult {
   const onDecodedRef = useRef(onDecoded);
@@ -62,21 +83,72 @@ function useFileLoader(
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadedBytes, setLoadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const [isChunkedLoading, setIsChunkedLoading] = useState(false);
+  const [forceReadOnly, setForceReadOnly] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
+  const chunkedCancelRef = useRef<(() => void) | null>(null);
 
   // Revoke blob URL on unmount
   useEffect(() => {
     return () => {
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
+      if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+      chunkedCancelRef.current?.();
+      chunkedCancelRef.current = null;
     };
   }, []);
 
+  const handleCancelLoad = useCallback(() => {
+    chunkedCancelRef.current?.();
+    chunkedCancelRef.current = null;
+    setIsChunkedLoading(false);
+  }, []);
+
+  // Large text files: chunked read, forced read-only — too big to round-trip.
+  const runChunkedLoad = useCallback(async (size: number) => {
+    setForceReadOnly(true);
+    setIsChunkedLoading(true);
+    setTotalBytes(size);
+    const result = readFileChunked(fileOps, path, (loaded, total) => {
+      setLoadedBytes(loaded);
+      setTotalBytes(total);
+    });
+    chunkedCancelRef.current = result.cancel;
+    try {
+      const fullText = await result.promise;
+      setContent(fullText);
+      setOriginalContent(fullText);
+      onDecodedRef.current(fullText);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') { return; }
+      setError(err instanceof Error ? err.message : 'Failed to read file');
+    } finally {
+      setIsChunkedLoading(false);
+      setLoading(false);
+      chunkedCancelRef.current = null;
+    }
+  }, [fileOps, path]);
+
   const loadFile = useCallback(async () => {
+    // Cancel any in-flight chunked read from a previous load so the stale
+    // resolver can't land after we reset state.
+    chunkedCancelRef.current?.();
+    chunkedCancelRef.current = null;
+
     setLoading(true);
     setError(null);
+    setLoadedBytes(0);
+    setTotalBytes(0);
+    setIsChunkedLoading(false);
+
+    if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
+      await runChunkedLoad(fileSize);
+      return;
+    }
+
+    setForceReadOnly(false);
+
     try {
       const data = await fileOps.readFile(path);
 
@@ -101,7 +173,7 @@ function useFileLoader(
     } finally {
       setLoading(false);
     }
-  }, [path, fileOps, viewerType]);
+  }, [path, fileOps, viewerType, fileSize, runChunkedLoad]);
 
   useEffect(() => {
     loadFile();
@@ -115,9 +187,14 @@ function useFileLoader(
     mediaBlobUrl,
     loading,
     error,
+    loadedBytes,
+    totalBytes,
+    isChunkedLoading,
+    forceReadOnly,
     loadFile,
     setContent,
     setOriginalContent,
+    handleCancelLoad,
   };
 }
 
@@ -126,7 +203,7 @@ function useFileLoader(
  * detection (extension- and content-based), Preview/Raw view mode, dirty
  * tracking, and save. Extracted so the render body stays small.
  */
-export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange }: UseFileViewerParams) {
+export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
   const ext = parseExt(path);
   // Markdown detection — extension-based wins, content-based is fallback
   const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
@@ -158,8 +235,10 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange 
   }, [isMarkdownByExt, ext]);
 
   const {
-    viewerType, content, originalContent, mediaBlobUrl, loading, error, loadFile, setContent, setOriginalContent,
-  } = useFileLoader(fileOps, path, handleDecoded);
+    viewerType, content, originalContent, mediaBlobUrl, loading, error,
+    loadedBytes, totalBytes, isChunkedLoading, forceReadOnly,
+    loadFile, setContent, setOriginalContent, handleCancelLoad,
+  } = useFileLoader(fileOps, path, fileSize, handleDecoded);
 
   // Listen for MarkdownPreview error events
   useEffect(() => {
@@ -173,14 +252,15 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange 
     return () => window.removeEventListener('markdown-preview-error', handler);
   }, [filename]);
 
-  const handleEditToggle = () => { setIsReadOnly((prev) => !prev); };
+  const handleEditToggle = () => {
+    // Chunked-loaded files are forced read-only — too large to round-trip safely.
+    if (forceReadOnly) { return; }
+    setIsReadOnly((prev) => !prev);
+  };
 
   const handleSetViewMode = (mode: ViewMode) => {
     setViewMode(mode);
-    // Entering raw mode always starts in view-only; preview ignores readOnly.
-    if (mode === 'raw') {
-      setIsReadOnly(true);
-    }
+    if (mode === 'raw') { setIsReadOnly(true); }
   };
 
   const handleContentChange = (newContent: string) => {
@@ -213,15 +293,9 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange 
     onClose();
   };
 
-  const handleConfirmClose = () => {
-    setShowUnsavedDialog(false);
-    onClose();
-  };
+  const handleConfirmClose = () => { setShowUnsavedDialog(false); onClose(); };
 
-  const handleSuggestionPreview = () => {
-    setViewMode('preview');
-    setShowSuggestion(false);
-  };
+  const handleSuggestionPreview = () => { setViewMode('preview'); setShowSuggestion(false); };
 
   const handleSuggestionDismiss = () => {
     setShowSuggestion(false);
@@ -247,6 +321,10 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange 
     saving,
     showUnsavedDialog,
     isText,
+    loadedBytes,
+    totalBytes,
+    isChunkedLoading,
+    forceReadOnly,
     setShowUnsavedDialog,
     loadFile,
     handleEditToggle,
@@ -257,5 +335,6 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange 
     handleConfirmClose,
     handleSuggestionPreview,
     handleSuggestionDismiss,
+    handleCancelLoad,
   };
 }

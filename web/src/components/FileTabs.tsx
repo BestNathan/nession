@@ -137,7 +137,7 @@ export function FileTabs({
       </div>
       {!showTerminal && activeFile ? (
         <div className="absolute inset-0">
-          <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
+          <FileViewer key={activeFile.id} fileOps={fileOps} path={activeFile.path} filename={activeFile.filename} fileSize={activeFile.size} onClose={() => handleCloseFile(activeFile.id)} onDirtyChange={(dirty) => handleDirtyChange(activeFile.id, dirty)} />
         </div>
       ) : null}
     </div>

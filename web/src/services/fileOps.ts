@@ -21,12 +21,22 @@ export interface FileEntry {
   is_dir: boolean;
   size: number;
   modified: number;
+  /** Optional MIME type returned by the backend scan. */
+  mime_type?: string;
+  /** True when the backend detected the file is binary (non-text). */
+  is_binary?: boolean;
 }
 
 export interface FileData {
   path: string;
   content: string; // base64
   mime_type: string;
+  /** Byte offset of the returned chunk within the file (chunked reads only). */
+  offset?: number;
+  /** Total size of the file in bytes (chunked reads only). */
+  total_size?: number;
+  /** True when the file has more data past this chunk (chunked reads only). */
+  has_more?: boolean;
 }
 
 // --- Helpers ---
@@ -111,8 +121,8 @@ export function createFileOps(p2p: FileTransport) {
     listDir: (path: string): Promise<{ entries: FileEntry[] }> =>
       sendRequest(p2p, 'file.list', { path }),
 
-    readFile: (path: string): Promise<FileData> =>
-      sendRequest(p2p, 'file.read', { path }),
+    readFile: (path: string, options?: { offset?: number; limit?: number }): Promise<FileData> =>
+      sendRequest(p2p, 'file.read', { path, ...options }),
 
     writeFile: (path: string, content: string): Promise<{ path: string; written: number }> =>
       sendRequest(p2p, 'file.write', { path, content: base64Encode(content) }),
@@ -154,3 +164,57 @@ export function createFileOps(p2p: FileTransport) {
 }
 
 export type FileOps = ReturnType<typeof createFileOps>;
+
+// --- Chunked read helper ---
+
+export interface ChunkedReadResult {
+  cancel: () => void;
+  promise: Promise<string>;
+}
+
+/** Default chunk size — 256 KB keeps each request snappy on slow P2P links. */
+export const DEFAULT_CHUNK_SIZE = 256 * 1024;
+
+/**
+ * Read a text file in chunks via repeated `file.read` requests with offset/limit.
+ * Returns a handle with a `promise` that resolves to the full decoded text, plus
+ * a `cancel` callback that aborts further reads. Progress is reported via the
+ * optional callback with (loadedBytes, totalBytes).
+ *
+ * The offset advances by the decoded chunk length rather than the raw base64
+ * size so the backend can answer with the same byte semantics regardless of
+ * transport encoding.
+ */
+export function readFileChunked(
+  fileOps: FileOps,
+  path: string,
+  onProgress?: (loadedBytes: number, totalBytes: number) => void,
+): ChunkedReadResult {
+  let cancelled = false;
+
+  const promise = (async () => {
+    const chunks: string[] = [];
+    let offset = 0;
+    let totalSize = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      if (cancelled) {
+        throw new DOMException('Read cancelled', 'AbortError');
+      }
+
+      const data = await fileOps.readFile(path, { offset, limit: DEFAULT_CHUNK_SIZE });
+      totalSize = data.total_size ?? 0;
+      const decoded = fileOps.base64Decode(data.content);
+      chunks.push(decoded);
+      offset += decoded.length;
+
+      onProgress?.(offset, totalSize);
+      hasMore = Boolean(data.has_more);
+    }
+
+    return chunks.join('');
+  })();
+
+  return { cancel: () => { cancelled = true; }, promise };
+}
