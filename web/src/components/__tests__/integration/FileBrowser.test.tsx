@@ -66,3 +66,44 @@ describe('FileBrowser copy path', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('/root/f.txt'));
   });
 });
+
+describe('FileBrowser parent directory button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('is disabled when at root', async () => {
+    render(<FileBrowser fileOps={makeFileOps([])} onFileClick={vi.fn()} />);
+
+    const parentBtn = await screen.findByLabelText('Parent directory');
+    expect(parentBtn).toBeDisabled();
+  });
+
+  it('navigates from a nested path to the parent directory', async () => {
+    const fileOps = makeFileOps([]);
+    render(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="a/b/c" />);
+
+    // Wait for initial load at a/b/c
+    await waitFor(() => expect(fileOps.listDir).toHaveBeenCalledWith('a/b/c'));
+
+    const parentBtn = await screen.findByLabelText('Parent directory');
+    expect(parentBtn).toBeEnabled();
+    fireEvent.click(parentBtn);
+
+    // Should navigate to a/b
+    await waitFor(() => expect(fileOps.listDir).toHaveBeenCalledWith('a/b'));
+  });
+
+  it('navigates from a single-segment path to root', async () => {
+    const fileOps = makeFileOps([]);
+    render(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="project" />);
+
+    await waitFor(() => expect(fileOps.listDir).toHaveBeenCalledWith('project'));
+
+    const parentBtn = await screen.findByLabelText('Parent directory');
+    fireEvent.click(parentBtn);
+
+    // Should navigate to root ('')
+    await waitFor(() => expect(fileOps.listDir).toHaveBeenCalledWith(''));
+  });
+});
