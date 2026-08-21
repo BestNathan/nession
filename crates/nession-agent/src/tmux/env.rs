@@ -236,11 +236,16 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_session_scripts_removes_matching_files() {
-        let mgr = EnvManager::new(tmp());
+        // Own temp dir. These script names are fixed, so sharing the system
+        // temp dir let a concurrent test run delete the file this test needs to
+        // survive — a race a single run passes every time.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mgr = EnvManager::new(root.clone());
         let session = "test-cleanup-sess";
-        let source_path = source_script_path(tmp(), "c1", session, "a.env");
-        let unsource_path = unsource_script_path(tmp(), "c1", session, "b.env");
-        let other_session_path = source_script_path(tmp(), "c1", "other-sess", "c.env");
+        let source_path = source_script_path(root.clone(), "c1", session, "a.env");
+        let unsource_path = unsource_script_path(root.clone(), "c1", session, "b.env");
+        let other_session_path = source_script_path(root.clone(), "c1", "other-sess", "c.env");
 
         tokio::fs::write(&source_path, "export X=1\n")
             .await
@@ -255,17 +260,18 @@ mod tests {
         assert!(!source_path.exists());
         assert!(!unsource_path.exists());
         assert!(other_session_path.exists());
-
-        let _ = tokio::fs::remove_file(&other_session_path).await;
     }
 
     #[tokio::test]
     async fn cleanup_client_scripts_removes_matching_files() {
-        let mgr = EnvManager::new(tmp());
+        // Own temp dir, same reasoning as above.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mgr = EnvManager::new(root.clone());
         let client_id = "test-cleanup-client";
-        let source_path = source_script_path(tmp(), client_id, "sess1", "a.env");
-        let unsource_path = unsource_script_path(tmp(), client_id, "sess2", "b.env");
-        let other_client_path = source_script_path(tmp(), "other-client", "sess1", "c.env");
+        let source_path = source_script_path(root.clone(), client_id, "sess1", "a.env");
+        let unsource_path = unsource_script_path(root.clone(), client_id, "sess2", "b.env");
+        let other_client_path = source_script_path(root.clone(), "other-client", "sess1", "c.env");
 
         tokio::fs::write(&source_path, "export X=1\n")
             .await
@@ -280,8 +286,6 @@ mod tests {
         assert!(!source_path.exists());
         assert!(!unsource_path.exists());
         assert!(other_client_path.exists());
-
-        let _ = tokio::fs::remove_file(&other_client_path).await;
     }
 
     #[tokio::test]
