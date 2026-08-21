@@ -207,8 +207,8 @@ cargo run -p nession-agent     # Start agent (needs config)
 
 **Rust linting:**
 ```bash
-cargo fmt --all -- --check      # Formatting check
-cargo clippy -- -D warnings     # Lint — MUST pass with 0 warnings
+cargo fmt --all -- --check                              # Formatting check
+cargo clippy --workspace --all-targets -- -D warnings   # Lint — MUST pass with 0 warnings
 ```
 - `#[allow(clippy::*)]` is **forbidden**. Every clippy lint must be fixed properly, not silenced.
 - **⛔ Lint 规则本身不准擅自改动 —— 任何修改必须先经仓库所有者明确同意。** 规则收紧和放宽都算,包括但不限于:
@@ -221,7 +221,8 @@ cargo clippy -- -D warnings     # Lint — MUST pass with 0 warnings
 - 同理,**测试代码也必须完整受 lint 门禁覆盖**,不能靠"测试是特例"来豁免。测试 helper 里 `unwrap()` 报错,正确做法是把 helper 改成返回 `Result`、由 `#[test]` 函数在调用处 unwrap(clippy 在 `#[test]` 函数内部本就放行),而不是给它加放行开关。
 - `clippy.toml` contains lint thresholds (`cognitive-complexity-threshold = 25`, `too-many-lines-threshold = 150`).
 - Workspace lints in `Cargo.toml` (`[workspace.lints.clippy]`) apply to all crates via `[lints] workspace = true`.
-- ⚠️ 现有门禁 `cargo clippy --workspace` **不带 `--all-targets`,因此测试代码目前完全没被 lint**。加上后有约 389 条既存报错待清理。修改这条门禁的覆盖面同样属于 lint 规则改动,需先获同意。
+- 门禁 `just lint` = `cargo clippy --workspace --all-targets -- -D warnings`。**`--all-targets` 是必须的** —— 没有它,`#[cfg(test)]` 模块和 `tests/` 下的集成测试完全不会被 lint。改动这条门禁的覆盖面同样属于 lint 规则改动,需先获同意。
+- 测试代码里的 `foo[0]` 由 `clippy.toml` 的 `allow-indexing-slicing-in-tests` 放行(2026-08-21 经批准)。理由写在 `clippy.toml` 注释里:该 lint 命中的绝大多数是 `value["key"]` 这种 `serde_json::Value` 索引,而它对缺失键返回 `Value::Null`、**不会 panic**,改成 `.get("key").unwrap()` 反而会凭空引入 panic。
 
 **Rust toolchain:** `rust-toolchain.toml` is the single source of truth (currently `channel = "1.96.0"`). CI uses `actions-rust-lang/setup-rust-toolchain@v1` which reads it natively — no version hardcoded in the workflow. To bump Rust, edit `rust-toolchain.toml` only, then `rustup toolchain install <ver> --component rustfmt --component clippy`.
 
