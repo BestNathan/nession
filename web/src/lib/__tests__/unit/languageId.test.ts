@@ -224,4 +224,26 @@ describe('detectLanguage', () => {
       expect(detectLanguage('runner', content)).toBe('ruby');
     });
   });
+
+  describe('content heuristic priority', () => {
+    it('detects markdown from content when basename/extension miss', () => {
+      const content = '# Title\n\nSome paragraph with **bold**.';
+      expect(detectLanguage('NOTES', content)).toBe('markdown');
+    });
+
+    it('does not override basename with content heuristic', () => {
+      const content = '# Title\n\nSome paragraph.';
+      expect(detectLanguage('Dockerfile', content)).toBe('dockerfile');
+    });
+
+    it('does not override extension with content heuristic', () => {
+      const content = '# Title\n\nSome paragraph.';
+      expect(detectLanguage('README.txt', content)).toBe('markdown');
+    });
+
+    it('falls back to plaintext when no heuristic matches', () => {
+      const content = 'random text without structure';
+      expect(detectLanguage('unknown', content)).toBe('plaintext');
+    });
+  });
 });

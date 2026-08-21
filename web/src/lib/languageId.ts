@@ -351,6 +351,34 @@ export function detectShebang(content: string): LanguageId | null {
 }
 
 /**
+ * Detect markdown from content by checking first 10 lines for common patterns.
+ *
+ * Patterns checked:
+ *   - Headings: `^#{1,6}\s+`
+ *   - Bold/italic: `\*\*[^*]+\*\*`
+ *   - Links: `\[[^\]]+\]\([^)]+\)`
+ *   - Unordered lists: `^[-*+]\s+`
+ *   - Ordered lists: `^\d+\.\s+`
+ *
+ * @param content - File content to analyze
+ * @returns `true` if markdown patterns are detected, `false` otherwise
+ */
+function detectMarkdownFromContent(content: string): boolean {
+  const lines = content.split('\n').slice(0, 10);
+  const text = lines.join('\n');
+
+  const patterns = [
+    /^#{1,6}\s+/m,           // Headings: # Title
+    /\*\*[^*]+\*\*/,          // Bold: **text**
+    /\[[^\]]+\]\([^)]+\)/,   // Links: [text](url)
+    /^[-*+]\s+/m,            // Unordered lists: - item, * item, + item
+    /^\d+\.\s+/m,            // Ordered lists: 1. item
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
+}
+
+/**
  * Detect language from filename
  *
  * Detection priority (execution order):
@@ -359,12 +387,12 @@ export function detectShebang(content: string): LanguageId | null {
  *   3. Pattern rules (regex on basename, e.g., ".env.local" -> 'plaintext')
  *   4. Extension matching (e.g., ".ts" -> 'typescript')
  *   5. Shebang detection (requires `content`, only reached when no extension matched)
- *   6. Content-based detection (TODO: not implemented yet)
+ *   6. Content-based detection (requires `content`, only markdown heuristic currently)
  *   7. Fallback to 'plaintext'
  *
  * @param filename - File path or basename
- * @param content  - Optional file content; when provided, shebang detection runs
- *                   as a fallback for extensionless files.
+ * @param content  - Optional file content; when provided, shebang and content-based
+ *                   detection run as fallbacks when filename-based checks miss.
  * @returns Detected LanguageId, defaults to 'plaintext'
  */
 export function detectLanguage(filename: string, content?: string): LanguageId {
@@ -400,7 +428,12 @@ export function detectLanguage(filename: string, content?: string): LanguageId {
     }
   }
 
-  // TODO: Priority 6 - Content-based detection
+  // Priority 6: Content-based detection (only when content is provided)
+  if (content !== undefined) {
+    if (detectMarkdownFromContent(content)) {
+      return 'markdown';
+    }
+  }
 
   // Priority 7: Fallback
   return 'plaintext';
