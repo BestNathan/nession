@@ -33,8 +33,12 @@ describe('resolveLangKey', () => {
     expect(resolveLangKey('Dockerfile')).toBe('__dockerfile__');
   });
 
-  it('maps Makefile to sh', () => {
-    expect(resolveLangKey('Makefile')).toBe('sh');
+  it('returns null for Makefile (no grammar)', () => {
+    expect(resolveLangKey('Makefile')).toBeNull();
+  });
+
+  it('returns null for GNUmakefile (no grammar)', () => {
+    expect(resolveLangKey('GNUmakefile')).toBeNull();
   });
 
   it('returns null for unknown extension', () => {
