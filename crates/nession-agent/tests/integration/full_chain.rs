@@ -8,7 +8,7 @@
 //! - Heartbeat and session sync between agent and server
 //! - Graceful shutdown
 
-use super::unique_session_name;
+use super::TestSession;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
@@ -230,7 +230,8 @@ async fn test_client_connects_to_agent_via_p2p() {
 #[tokio::test]
 async fn test_terminal_io_through_full_chain() {
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("e2e-io");
+    let session = TestSession::new("e2e-io");
+    let session_name = session.name().to_string();
 
     // Create a tmux session.
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
@@ -348,7 +349,8 @@ async fn test_session_lifecycle() {
     let (mut sink, mut stream) = ws.split();
 
     // Create a session.
-    let session_name = unique_session_name("e2e-lifecycle");
+    let session = TestSession::new("e2e-lifecycle");
+    let session_name = session.name().to_string();
     let create = SessionCreatePayload {
         name: session_name.to_string(),
         width: 80,

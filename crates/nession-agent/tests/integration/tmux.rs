@@ -1,7 +1,7 @@
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::util::{check_tmux_available, send_keys};
 
-use super::unique_session_name;
+use super::{unique_session_name, TestSession};
 
 #[tokio::test]
 async fn test_list_sessions_empty() {
@@ -15,7 +15,8 @@ async fn test_list_sessions_empty() {
 #[tokio::test]
 async fn test_create_and_kill_session() {
     let manager = SessionManager::new();
-    let session_name = unique_session_name("create-kill");
+    let session = TestSession::new("create-kill");
+    let session_name = session.name().to_string();
 
     // Create session
     manager
@@ -38,7 +39,8 @@ async fn test_create_and_kill_session() {
 #[tokio::test]
 async fn test_send_keys() {
     let manager = SessionManager::new();
-    let session_name = unique_session_name("send-keys");
+    let session = TestSession::new("send-keys");
+    let session_name = session.name().to_string();
 
     // Create session
     manager
@@ -81,7 +83,8 @@ async fn test_kill_nonexistent_session() {
 #[tokio::test]
 async fn test_create_duplicate_session() {
     let manager = SessionManager::new();
-    let session_name = unique_session_name("duplicate");
+    let session = TestSession::new("duplicate");
+    let session_name = session.name().to_string();
 
     // Create session
     manager

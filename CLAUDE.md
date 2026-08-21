@@ -525,6 +525,7 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **`pre-commit` 只跑快检查**：`scripts/check-dev-workspace.sh commit`（禁止在根目录/`main` 上提交）→ `just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
 - **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：开头同样跑 `check-dev-workspace.sh push`；改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
 - **手动检查**：`just check-workspace`（或 `./scripts/check-dev-workspace.sh session --fetch`）— Agent/开发者开新任务前确认根目录在最新 `main`、当前在 worktree 里开发。
+- **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **覆盖率阈值**（`scripts/check-coverage.sh` 是唯一来源,每次遍历全部登记的 crate,不按改动收窄）：
