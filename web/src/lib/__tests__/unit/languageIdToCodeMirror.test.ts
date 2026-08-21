@@ -20,7 +20,25 @@ describe('languageIdToCodeMirrorKey', () => {
   it('returns null for plaintext', () => {
     expect(languageIdToCodeMirrorKey('plaintext')).toBeNull();
   });
-  it('returns null for go (no grammar in UIW)', () => {
-    expect(languageIdToCodeMirrorKey('go')).toBeNull();
+  it('maps go to go', () => {
+    expect(languageIdToCodeMirrorKey('go')).toBe('go');
+  });
+  it('maps zsh to sh', () => {
+    expect(languageIdToCodeMirrorKey('zsh')).toBe('sh');
+  });
+  it('maps fish to sh', () => {
+    expect(languageIdToCodeMirrorKey('fish')).toBe('sh');
+  });
+  it('maps makefile to sh', () => {
+    expect(languageIdToCodeMirrorKey('makefile')).toBe('sh');
+  });
+  it('returns null for elixir (no grammar in UIW)', () => {
+    expect(languageIdToCodeMirrorKey('elixir')).toBeNull();
+  });
+  it('returns null for graphql (no grammar in UIW)', () => {
+    expect(languageIdToCodeMirrorKey('graphql')).toBeNull();
+  });
+  it('returns null for terraform (no grammar in UIW)', () => {
+    expect(languageIdToCodeMirrorKey('terraform')).toBeNull();
   });
 });
