@@ -18,7 +18,7 @@ const EXT_LANG_MAP: Record<string, string> = {
   md: 'md', markdown: 'markdown', mkd: 'mkd',
   html: 'html', htm: 'htm',
   css: 'css', scss: 'scss', less: 'less', sass: 'sass', styl: 'styl',
-  sh: 'sh', bash: 'bash', zsh: 'zsh', ksh: 'ksh',
+  sh: 'sh', bash: 'bash', zsh: 'zsh', ksh: 'ksh', fish: 'fish',
   go: 'go',
   rs: 'rs',
   c: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', h: 'h', hpp: 'hpp', hh: 'hh', hxx: 'hxx',

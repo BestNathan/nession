@@ -9,6 +9,7 @@ type LangsModule = typeof import('@uiw/codemirror-extensions-langs');
 const LANG_KEY_ALIASES: Record<string, string> = {
   env: 'properties',
   zsh: 'sh',
+  fish: 'sh',
   kotlin: 'kt',
   javascript: 'js',
   typescript: 'ts',
