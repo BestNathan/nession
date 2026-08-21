@@ -1034,6 +1034,7 @@ fn flatten_snapshots(snapshots: &[EnvSnapshot]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestSession;
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
 
@@ -1449,18 +1450,10 @@ mod tests {
         (handle, msg_rx)
     }
 
-    fn unique_session_name(prefix: &str) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("nession-test-{prefix}-{nanos}")
-    }
-
     #[tokio::test]
     async fn test_server_session_create_command() {
-        let session_name = unique_session_name("server-create");
+        let session = TestSession::new("server-create");
+        let session_name = session.name().to_string();
 
         let port = 28086;
         let (server_handle, mut msg_rx) =
@@ -1575,7 +1568,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_kill_command() {
-        let session_name = unique_session_name("server-kill");
+        let session = TestSession::new("server-kill");
+        let session_name = session.name().to_string();
         let port = 28087;
         let (server_handle, mut msg_rx) =
             start_mock_server_with_session_kill(port, session_name.clone()).await;
@@ -2252,7 +2246,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_env_unset_command() {
-        let session_name = unique_session_name("env-unset");
+        let session = TestSession::new("env-unset");
+        let session_name = session.name().to_string();
         let port = 28091;
         let (server_handle, mut msg_rx) =
             start_mock_server_env_unset(port, session_name.clone()).await;

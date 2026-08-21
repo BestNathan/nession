@@ -1719,20 +1719,11 @@ impl AgentServer {
 mod tests {
     use super::*;
     use crate::fs::ops::FileData;
+    use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-    /// Generate a unique session name for tests.
-    fn unique_session_name(prefix: &str) -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("nession-test-{prefix}-{nanos}")
-    }
 
     /// Start a test server on an ephemeral port and return a handle for
     /// shutdown. Note: the bound address uses port 0, so this helper is
@@ -1889,7 +1880,8 @@ mod tests {
         let (addr, handle) = start_test_server_on(18082).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let session_name = unique_session_name("srv-create-kill");
+        let session = TestSession::new("srv-create-kill");
+        let session_name = session.name().to_string();
 
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the create below doesn't hit a duplicate-name failure.
@@ -1930,7 +1922,8 @@ mod tests {
         // Create a real tmux session first so attach has something to
         // connect to.
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-attach");
+        let session = TestSession::new("srv-attach");
+        let session_name = session.name().to_string();
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the test is re-entrant (tmux rejects a duplicate session name).
         tmux.kill_session(&session_name).await.ok();
@@ -1974,7 +1967,8 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-io");
+        let session = TestSession::new("srv-io");
+        let session_name = session.name().to_string();
         tmux.kill_session(&session_name).await.ok();
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
@@ -2444,7 +2438,8 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-invalid-b64");
+        let session = TestSession::new("srv-invalid-b64");
+        let session_name = session.name().to_string();
         tmux.kill_session(&session_name).await.ok();
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
@@ -2726,7 +2721,8 @@ mod tests {
         let (addr, handle) = start_test_server_on(18101).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let session_name = unique_session_name("web-create-kill");
+        let session = TestSession::new("web-create-kill");
+        let session_name = session.name().to_string();
         let expected_session_id = format!("test-agent:{session_name}");
 
         // Pre-clean
