@@ -81,7 +81,7 @@ async fn test_session_remove_by_agent() {
     let registry = make_registry().await;
     for (i, name) in ["s1", "s2", "s3"].iter().enumerate() {
         let mut session = make_session(
-            &format!("agent_x:{}", name),
+            &format!("agent_x:{name}"),
             "agent_x",
             name,
             SessionStatus::Detached,

@@ -5,6 +5,18 @@
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
 
+# Allow indexing in tests. Owner-approved 2026-08-21; do not change without
+# asking (see "Rust linting" in CLAUDE.md).
+#
+# Rationale: 81% of the indexing_slicing hits under --all-targets (342 of 421
+# sites) are `value["key"]` on a serde_json::Value in a test assertion. The
+# immutable Index impl on Value returns Value::Null for a missing key — it
+# never panics — so the lint's premise does not hold there, and the mechanical
+# rewrite to `.get("key").unwrap()` would ADD a panic where none exists.
+# Genuine Vec/slice indexing in tests panics with "index out of bounds", which
+# is already a legible test failure.
+allow-indexing-slicing-in-tests = true
+
 # Error size threshold for result_large_err lint (bytes)
 large-error-threshold = 256
 

@@ -1795,7 +1795,7 @@ mod tests {
             >,
         >,
     ) {
-        let url = format!("ws://{}", addr);
+        let url = format!("ws://{addr}");
         let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
         ws_stream.split()
     }
@@ -2106,7 +2106,7 @@ mod tests {
                 assert_eq!(resp.msg_type, msg_types::ERROR);
                 assert_eq!(resp.payload.code, "parse_error");
             }
-            other => panic!("expected text frame, got {:?}", other),
+            other => panic!("expected text frame, got {other:?}"),
         }
 
         handle.shutdown().await.ok();
@@ -2252,7 +2252,7 @@ mod tests {
         assert!(del_resp
             .payload
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false));
 
         handle.shutdown().await.ok();
@@ -2287,7 +2287,7 @@ mod tests {
         assert!(del_resp
             .payload
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false));
 
         let read_req = new_message(
@@ -2336,15 +2336,12 @@ mod tests {
         let create_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &create_req).await;
         assert_eq!(create_resp.msg_type, msg_types::OK);
-        assert_eq!(
-            create_resp
-                .payload
-                .get("success")
-                .unwrap()
-                .as_bool()
-                .unwrap(),
-            true
-        );
+        assert!(create_resp
+            .payload
+            .get("success")
+            .unwrap()
+            .as_bool()
+            .unwrap());
 
         // Verify directory exists by listing it
         let list_req = new_message(
@@ -2406,15 +2403,12 @@ mod tests {
         let rename_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &rename_req).await;
         assert_eq!(rename_resp.msg_type, msg_types::OK);
-        assert_eq!(
-            rename_resp
-                .payload
-                .get("success")
-                .unwrap()
-                .as_bool()
-                .unwrap(),
-            true
-        );
+        assert!(rename_resp
+            .payload
+            .get("success")
+            .unwrap()
+            .as_bool()
+            .unwrap());
 
         // Read from new location
         let read_req = new_message(

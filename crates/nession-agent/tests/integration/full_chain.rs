@@ -120,7 +120,7 @@ async fn register_agent_with_server(
     };
 
     let client = ServerClient::new(
-        format!("ws://{}", server_addr),
+        format!("ws://{server_addr}"),
         auth_token,
         agent_id,
         "test-host",
@@ -196,7 +196,7 @@ async fn test_client_connects_to_agent_via_p2p() {
     let (agent_addr, agent_handle) = start_test_agent_server().await;
 
     // Connect a client directly to the agent.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("client connection failed");
     let (mut sink, mut stream) = ws.split();
 
@@ -242,7 +242,7 @@ async fn test_terminal_io_through_full_chain() {
     let (agent_addr, agent_handle) = start_test_agent_server().await;
 
     // Connect client.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("connection failed");
     let (mut sink, mut stream) = ws.split();
 
@@ -344,7 +344,7 @@ async fn test_session_lifecycle() {
     let (agent_addr, agent_handle) = start_test_agent_server().await;
 
     // Connect client.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("connection failed");
     let (mut sink, mut stream) = ws.split();
 

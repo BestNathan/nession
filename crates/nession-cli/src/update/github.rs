@@ -196,8 +196,7 @@ mod tests {
         let valid = ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"];
         assert!(
             valid.contains(&p.as_str()),
-            "platform '{}' not in supported list",
-            p
+            "platform '{p}' not in supported list"
         );
     }
 
@@ -231,7 +230,7 @@ mod tests {
             tag_name: "v0.5.0".into(),
             prerelease: false,
             assets: vec![AssetInfo {
-                name: format!("nession-0.5.0-{}.tar.gz", platform),
+                name: format!("nession-0.5.0-{platform}.tar.gz"),
                 browser_download_url: "https://example.com/tarball.tar.gz".into(),
             }],
         };
@@ -290,7 +289,7 @@ mod tests {
                     browser_download_url: "https://example.com/checksums.txt".into(),
                 },
                 AssetInfo {
-                    name: format!("nession-0.5.0-{}.tar.gz", platform),
+                    name: format!("nession-0.5.0-{platform}.tar.gz"),
                     browser_download_url: "https://example.com/tarball.tar.gz".into(),
                 },
                 AssetInfo {
@@ -300,7 +299,7 @@ mod tests {
             ],
         };
         let asset = client.find_platform_asset(&release).unwrap();
-        assert_eq!(asset.name, format!("nession-0.5.0-{}.tar.gz", platform));
+        assert_eq!(asset.name, format!("nession-0.5.0-{platform}.tar.gz"));
     }
 
     #[test]
@@ -311,12 +310,12 @@ mod tests {
             tag_name: "0.5.0".into(),
             prerelease: false,
             assets: vec![AssetInfo {
-                name: format!("nession-0.5.0-{}.tar.gz", platform),
+                name: format!("nession-0.5.0-{platform}.tar.gz"),
                 browser_download_url: "https://example.com/tarball.tar.gz".into(),
             }],
         };
         let asset = client.find_platform_asset(&release).unwrap();
-        assert_eq!(asset.name, format!("nession-0.5.0-{}.tar.gz", platform));
+        assert_eq!(asset.name, format!("nession-0.5.0-{platform}.tar.gz"));
     }
 
     #[test]

@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 /// Returns a receiver that yields each text message the client sends.
 async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
     let (msg_tx, msg_rx) = mpsc::channel(200);
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
         .await
         .expect("failed to bind mock server");
 
@@ -63,7 +63,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "test-agent-sync",
         "test-host",
@@ -159,15 +159,13 @@ async fn test_heartbeat_loop_respects_interval() {
     // Should be at least 0.8 seconds (some tolerance for CI).
     assert!(
         first_elapsed >= Duration::from_millis(800),
-        "first heartbeat came too early: {:?}",
-        first_elapsed
+        "first heartbeat came too early: {first_elapsed:?}"
     );
 
     // But should arrive well before the full 2s interval.
     assert!(
         first_elapsed < Duration::from_millis(1800),
-        "first heartbeat came too late: {:?}",
-        first_elapsed
+        "first heartbeat came too late: {first_elapsed:?}"
     );
 
     shutdown.shutdown().await.ok();

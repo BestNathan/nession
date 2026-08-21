@@ -11,13 +11,13 @@ use tokio::time::sleep;
 /// Helper to create a test server config
 fn create_test_config(port: u16) -> ServerConfig {
     ServerConfig {
-        listen_address: format!("127.0.0.1:{}", port),
+        listen_address: format!("127.0.0.1:{port}"),
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: format!("/tmp/nession_test_{}.db", port),
+        db_path: format!("/tmp/nession_test_{port}.db"),
         ..Default::default()
     }
 }

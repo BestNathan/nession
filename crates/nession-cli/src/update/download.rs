@@ -115,6 +115,31 @@ pub fn temp_extract_dir() -> Result<PathBuf, UpdateError> {
     Ok(dir)
 }
 
+/// Download install.sh from a GitHub Release and make it executable.
+pub async fn download_installer(
+    client: &Client,
+    release: &ReleaseInfo,
+    dest_dir: &Path,
+) -> Result<PathBuf, UpdateError> {
+    let asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == "install.sh")
+        .ok_or_else(|| UpdateError::AssetNotFound("install.sh not found in release".into()))?;
+
+    let dest = dest_dir.join("install.sh");
+    download_to_file(client, &asset.browser_download_url, &dest).await?;
+
+    // Make executable on Unix systems
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755)).map_err(UpdateError::Io)?;
+    }
+
+    Ok(dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,7 +178,7 @@ mod tests {
         let tarball = dir.path().join("nession-0.5.0-linux-amd64.tar.gz");
         fs::write(&tarball, b"fake-tarball-content").unwrap();
         let expected_hash = sha256_file(&tarball).unwrap();
-        let checksums = format!("{}  nession-0.5.0-linux-amd64.tar.gz\n", expected_hash);
+        let checksums = format!("{expected_hash}  nession-0.5.0-linux-amd64.tar.gz\n");
         assert!(verify_checksum(&tarball, &checksums, "nession-0.5.0-linux-amd64.tar.gz",).is_ok());
     }
 
@@ -290,29 +315,4 @@ mod tests {
         let hash = parse_checksum_line(content, "nession-0.5.0-linux-amd64.tar.gz").unwrap();
         assert_eq!(hash, "bbb");
     }
-}
-
-/// Download install.sh from a GitHub Release and make it executable.
-pub async fn download_installer(
-    client: &Client,
-    release: &ReleaseInfo,
-    dest_dir: &Path,
-) -> Result<PathBuf, UpdateError> {
-    let asset = release
-        .assets
-        .iter()
-        .find(|a| a.name == "install.sh")
-        .ok_or_else(|| UpdateError::AssetNotFound("install.sh not found in release".into()))?;
-
-    let dest = dest_dir.join("install.sh");
-    download_to_file(client, &asset.browser_download_url, &dest).await?;
-
-    // Make executable on Unix systems
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755)).map_err(UpdateError::Io)?;
-    }
-
-    Ok(dest)
 }
