@@ -6,11 +6,16 @@ use tokio_tungstenite::connect_async;
 
 use super::current_timestamp;
 
-fn test_db_path(name: &str) -> String {
-    std::env::temp_dir()
-        .join(name)
-        .to_string_lossy()
-        .to_string()
+/// A database path inside a fresh temp dir, unique per call.
+///
+/// The caller keeps the returned `TempDir` alive; dropping it removes the file
+/// and its WAL/SHM sidecars, so no test needs an explicit `remove_file` — which
+/// only ran on the happy path anyway. A fixed `temp_dir()/<name>` was shared by
+/// every concurrent test run on the machine.
+fn test_db(name: &str) -> anyhow::Result<(tempfile::TempDir, String)> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join(name).to_string_lossy().into_owned();
+    Ok((dir, path))
 }
 
 async fn start_test_server(
@@ -31,6 +36,7 @@ async fn start_test_server(
 
 #[tokio::test]
 async fn test_server_accepts_connection() {
+    let (_db_dir, db_path) = test_db("test_ws_accept.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -38,7 +44,7 @@ async fn test_server_accepts_connection() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_accept.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -48,14 +54,11 @@ async fn test_server_accepts_connection() {
     let result = connect_async(&url).await;
 
     assert!(result.is_ok(), "Server should accept WebSocket connection");
-
-    tokio::fs::remove_file(&test_db_path("test_ws_accept.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_agent_registration() {
+    let (_db_dir, db_path) = test_db("test_ws_register.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -63,7 +66,7 @@ async fn test_agent_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_register.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -107,14 +110,11 @@ async fn test_agent_registration() {
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
     assert_eq!(response_msg["msg_type"], "agent.register.response");
     assert_eq!(response_msg["payload"]["status"], "accepted");
-
-    tokio::fs::remove_file(&test_db_path("test_ws_register.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_invalid_auth_token() {
+    let (_db_dir, db_path) = test_db("test_ws_auth.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -122,7 +122,7 @@ async fn test_invalid_auth_token() {
         auth_token: "correct_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_auth.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -159,14 +159,11 @@ async fn test_invalid_auth_token() {
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
     assert_eq!(response_msg["msg_type"], "client.auth.response");
     assert_eq!(response_msg["payload"]["status"], "failed");
-
-    tokio::fs::remove_file(&test_db_path("test_ws_auth.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_heartbeat_without_registration() {
+    let (_db_dir, db_path) = test_db("test_ws_heartbeat.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -174,7 +171,7 @@ async fn test_heartbeat_without_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_heartbeat.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -213,14 +210,11 @@ async fn test_heartbeat_without_registration() {
         result.is_err(),
         "Server should not respond to heartbeat from unregistered agent"
     );
-
-    tokio::fs::remove_file(&test_db_path("test_ws_heartbeat.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_client_agents_list_unauthenticated() {
+    let (_db_dir, db_path) = test_db("test_ws_alist.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -228,7 +222,7 @@ async fn test_client_agents_list_unauthenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_alist.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -255,14 +249,11 @@ async fn test_client_agents_list_unauthenticated() {
     };
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["payload"]["message"], "Not authenticated");
-
-    tokio::fs::remove_file(&test_db_path("test_ws_alist.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_close_frame_triggers_disconnect() {
+    let (_db_dir, db_path) = test_db("test_ws_close.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -270,7 +261,7 @@ async fn test_close_frame_triggers_disconnect() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_close.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -289,14 +280,11 @@ async fn test_close_frame_triggers_disconnect() {
 
     // Verify server is still running by connecting again.
     let (_ws2, _) = connect_async(&url).await.unwrap();
-
-    tokio::fs::remove_file(&test_db_path("test_ws_close.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_agent_registration_with_connect_url() {
+    let (_db_dir, db_path) = test_db("test_ws_connect_url.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -304,7 +292,7 @@ async fn test_agent_registration_with_connect_url() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_connect_url.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -339,14 +327,11 @@ async fn test_agent_registration_with_connect_url() {
     };
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["payload"]["status"], "accepted");
-
-    tokio::fs::remove_file(&test_db_path("test_ws_connect_url.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_server_local_addr() {
+    let (_db_dir, db_path) = test_db("test_ws_local_addr.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -354,7 +339,7 @@ async fn test_server_local_addr() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_local_addr.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -364,14 +349,11 @@ async fn test_server_local_addr() {
 
     assert_eq!(addr.ip().to_string(), "127.0.0.1");
     assert!(addr.port() > 0);
-
-    tokio::fs::remove_file(&test_db_path("test_ws_local_addr.db"))
-        .await
-        .ok();
 }
 
 #[tokio::test]
 async fn test_client_sessions_list_authenticated() {
+    let (_db_dir, db_path) = test_db("test_ws_sessions_list.db").unwrap();
     let config = nession_common::config::ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         tls_cert_path: String::new(),
@@ -379,7 +361,7 @@ async fn test_client_sessions_list_authenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
-        db_path: test_db_path("test_ws_sessions_list.db"),
+        db_path,
         ..Default::default()
     };
 
@@ -438,8 +420,4 @@ async fn test_client_sessions_list_authenticated() {
     let response_msg: serde_json::Value = serde_json::from_str(&response_text).unwrap();
     assert_eq!(response_msg["msg_type"], "client.sessions.list.response");
     assert!(response_msg["payload"]["sessions"].is_array());
-
-    tokio::fs::remove_file(&test_db_path("test_ws_sessions_list.db"))
-        .await
-        .ok();
 }

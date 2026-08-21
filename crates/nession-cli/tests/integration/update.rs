@@ -243,6 +243,13 @@ async fn background_check_all_scenarios() {
     use chrono::{Duration, Utc};
     use nession_cli::update::cache::{self, UpdateCache};
 
+    // Point NESSION_HOME at a temp dir before touching the cache. Without it
+    // `nession_home()` resolves to $HOME/.nession, so this test deleted and
+    // overwrote the developer's real update-check.json — and two concurrent
+    // runs overwrote each other's, which is how the concurrency check caught it.
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var(nession_common::paths::NESSION_HOME_ENV, home.path());
+
     let cache_path = nession_common::paths::nession_home()
         .unwrap()
         .join("update-check.json");

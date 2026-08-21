@@ -61,6 +61,18 @@ web-coverage:
 check-workspace:
     ./scripts/check-dev-workspace.sh session --fetch
 
+# Static test-isolation check (runs in pre-commit; ~1.5s)
+check-test-isolation:
+    ./scripts/check-test-isolation.sh
+
+# Prove the isolation checker still detects each violation it claims to
+check-test-isolation-selftest:
+    ./scripts/check-test-isolation-selftest.sh
+
+# Diagnostic: run every test binary twice at once (slow, probabilistic — not a gate)
+check-test-concurrency:
+    ./scripts/check-test-concurrency.sh
+
 # ── Full pre-push ───────────────────────────────────────────────────────────
 # Unit tests for both Rust and web (pre-commit)
 # Note: web-test-unit dependency added in Phase 2 (Task 2.4)

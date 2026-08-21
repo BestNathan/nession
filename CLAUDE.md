@@ -320,12 +320,12 @@ git push -u origin feat/<slug>
 gh pr create --base staging --title "feat: <description>" --body "..."
 
 # 4. MERGE to staging — quality gate (rust-check + web-check) must pass
-gh pr merge <PR-NUMBER> --auto --rebase
+gh pr merge <PR-NUMBER> --auto --merge
 
 # 5. STAGING VALIDATION
 ./scripts/deploy-watch.sh staging
 
-# 6. RELEASE — staging → main, MUST be --merge
+# 6. RELEASE — staging → main
 gh pr list --state merged --base staging   # audit what is being released, find linked issues
 gh pr create --base main --head staging --title "chore: release (staging → main)" \
   --body "$(cat <<'BODY'
@@ -339,7 +339,7 @@ Closes #<ISSUE>
 Closes #<ISSUE>
 BODY
 )"
-gh pr merge <PR-NUMBER> --merge   # never --rebase, never --squash
+gh pr merge <PR-NUMBER> --merge
 
 # 7. VERSION BUMP — only if this release warrants one (in a worktree, not root)
 EnterWorktree name: "chore/bump-version-X.Y.Z"
@@ -348,7 +348,7 @@ EnterWorktree name: "chore/bump-version-X.Y.Z"
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
-gh pr merge <PR-NUMBER> --rebase   # no --auto
+gh pr merge <PR-NUMBER> --merge   # no --auto
 
 # 8. WATCH RELEASE — wait for release.yml to finish writing the prod overlay tag
 ./scripts/deploy-watch.sh prod
@@ -359,11 +359,11 @@ git fetch origin
 git push origin origin/main:refs/heads/staging
 ```
 
-**⚠ Step 6 must be `--merge`.** The merge commit records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main` and step 9 is a fast-forward forever. No orphaned commits exist, and `staging` never needs a force push.
+**⚠ Everything is `--merge`. Nothing is ever rebased or squashed.** A merge commit records the head branch's tip as a second parent, so every branch that lands stays in the target's ancestry with its **original SHAs**. `staging` therefore stays an ancestor of `main` and step 9 is a fast-forward forever; no orphaned commits exist anywhere; `staging` never needs a force push.
 
-**Why not `--rebase` here** — even though every *other* merge in this repo is a rebase. GitHub's rebase-merge **always rewrites the commits and leaves the head branch pointing at the originals**, so `staging` would stop being an ancestor of `main` after every release. It rewrites even when nothing forces it to: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the *identical* tree `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43.
+**Why not `--rebase`.** GitHub's rebase-merge **always rewrites the commits and leaves the head branch pointing at the originals**. It rewrites even when nothing forces it to: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the *identical* tree `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43.
 
-Those orphans are usually harmless, because a later rebase skips them by patch-id — measured: orphan `67afd56` and its twin `62a5731` both hash to `e56a93b449d8`, and a controlled repro confirmed the replay is skipped. But an orphan whose release rebase **resolved a conflict** carries a different patch-id, so it re-applies and re-conflicts on *every* subsequent release until someone drops it by hand. That is not hypothetical: the 0.29.0 release produced exactly one such orphan, `aeb25f8` (`fdf7df10c5d8`) against `8d0125d` (`be13108ebd0b`), from the overlay conflict. `--merge` removes the entire class rather than relying on de-duplication holding.
+Those orphans are usually harmless, because a later rebase skips them by patch-id — measured: orphan `67afd56` and its twin `62a5731` both hash to `e56a93b449d8`, and a controlled repro confirmed the replay is skipped. But an orphan whose rebase **resolved a conflict** carries a different patch-id, so it re-applies and re-conflicts on *every* subsequent release until someone drops it by hand. That is not hypothetical: the 0.29.0 release produced exactly one such orphan, `aeb25f8` (`fdf7df10c5d8`) against `8d0125d` (`be13108ebd0b`), from an overlay conflict. `--merge` removes the entire class rather than relying on de-duplication holding.
 
 `--squash` is worse still: N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
@@ -382,16 +382,16 @@ cd .claude/worktrees/chore-release-<sha>
 git cherry-pick <staging-commit>...        # resolve conflicts here
 git push -u origin chore/release-<sha>
 gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
-gh pr merge <PR-NUMBER> --rebase
+gh pr merge <PR-NUMBER> --merge
 ```
 
-Then sync step 9 as usual. Measured 2026-08-17 on the 0.29.0 release: `staging → main` reported `mergeable: false`, conflicting on `k8s/overlays/staging/kustomization.yaml`; the cherry-pick branch merged cleanly. Note `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. Under this flow such conflicts should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes them.
+Then sync step 9 as usual. Measured 2026-08-17 on the 0.29.0 release: `staging → main` reported `mergeable: false`, conflicting on `k8s/overlays/staging/kustomization.yaml`; the cherry-pick branch merged cleanly. Note `mergeable: false` blocks every merge method alike, so switching method never routes around a real conflict. That particular conflict came from the rebase flow rewriting an inherited overlay commit, which `--merge` no longer does — so a release conflict should now be rare enough to treat as a genuine content clash worth reading carefully.
 
 **⚠ Step 7 is mandatory when the release contains runtime changes.** 15 of `release.yml`'s 16 jobs are gated on `version_changed` — only `version-check` itself runs — so a release merge that carries no version bump builds nothing — no images, no GitHub Release, no production overlay update. "No bump" means "merged to `main`, not released to production". Test-only or docs-only releases can skip it; anything touching `crates/` or `web/src/` runtime code cannot.
 
 **⚠ All four version files move together.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json`; `version-check` now fails the run if the two disagree.
 
-**⚠ CRITICAL: Once a PR is merged, that feature branch is DEAD.** Never push more commits to a merged branch — rebase-merge replayed its commits onto `staging` as *new* SHAs, so the originals are not in the target's ancestry and a second PR re-carries every old commit and conflicts. Follow-up work starts from a **new worktree**:
+**Prefer a fresh worktree for follow-up work.** Under `--merge` a landed branch's commits are in the target's ancestry with their original SHAs, so pushing another commit to an already-merged branch and opening a second PR does work — the new PR's diff is just that commit. (This was a hard hazard while the repo rebased: replayed commits got *new* SHAs, the originals were not in the target's ancestry, and a second PR re-carried every old commit and conflicted.) It is still cleaner to start from a new worktree, so the branch name keeps matching one unit of work:
 
 ```bash
 git fetch origin && git checkout main && git pull --ff-only origin/main
@@ -405,22 +405,24 @@ git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/stagi
 
 Every branch comes off `main` (via worktree — never `git checkout -b` in project root). Only follow-up work on code that is on `staging` but not yet released may use `origin/staging` as the worktree base.
 
-**Every merge is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed.
+**Every merge is `--merge`. Nothing is ever rebased or squashed.**
 
 | Work | Branch from | PR base | Merge with |
 |------|-------------|---------|------------|
-| `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `main` | `staging` | `--auto --rebase` |
-| `docs/**`, `chore/**` — touches no build input | `main` | `main` | `--rebase` |
-| `.github/workflows/*` fixes | `main` | `main` | `--rebase` |
+| `feat/**`, `fix/**` — touches `crates/` or `web/src/` | `main` | `staging` | `--auto --merge` |
+| `docs/**`, `chore/**` — touches no build input | `main` | `main` | `--merge` |
+| `.github/workflows/*` fixes | `main` | `main` | `--merge` |
 | release — `staging` → `main` | — | `main` | `--merge` |
-| `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--rebase` |
+| `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--merge` |
 
 - **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`. Required status checks (`rust-check`, `web-check`) are configured on `staging`, not on `main`.
-- **The release PR must be `--merge`; everything else is `--rebase`.** The asymmetry is the point: `staging` is a long-lived branch that gets synced back, so it must stay an ancestor of `main`, and only a merge commit guarantees that. Feature branches are dead after merge, so rebase orphaning them costs nothing.
-- **The PR body never enters git history, under any merge method here.** Rebase-merge keeps each commit's own message (measured: PR #301 → `673664f` kept the message, discarded the body); `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body. Only squash used the body, and nothing squashes now. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
+- **One method everywhere, so ancestry is never rewritten.** Every landed branch stays reachable from the target with its original SHAs. That is what keeps `staging` an ancestor of `main` — making the step 9 sync a fast-forward forever — and it is why none of the orphan-and-patch-id reasoning that a rebase flow needs applies here.
+- **The PR body never enters git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body, and each commit keeps its own message. Only squash ever used the body, and nothing squashes. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
-- **Never let a feature branch touch `k8s/overlays/**`.** Those files are CI-owned on `main` (`staging.yml` and `release.yml` write them). A branch cut from `main` inherits whatever tag was current, and carrying that snapshot into `staging` is what makes a release conflict — it is exactly what broke the 0.29.0 release. Overlay edits, if ever needed by hand, go direct to `main`.
+- **Never let a feature branch *edit* `k8s/overlays/**`.** Those files are CI-owned on `main` (`staging.yml` and `release.yml` write them), so a hand edit races the workflow that owns them. Overlay edits, if ever needed by hand, go direct to `main`.
+
+  What is *no longer* a problem: a branch cut from `main` inherits whatever overlay commit was current, and under `--merge` that commit reaches `staging` with its **original SHA** — shared ancestry, not a divergent edit, so it cannot conflict at release. That inheritance is exactly what broke the 0.29.0 release while the repo rebased. Measured with `git merge-tree`: with a *rebased* copy of an overlay commit on `staging`, `staging → main` conflicted on `k8s/overlays/staging/kustomization.yaml` (exit 1); the same tree without it merged clean (exit 0).
 - **After every release, sync `main` → `staging`.** It is a fast-forward; never force-push `staging`.
 
 Mechanics and rationale: `nession-cicd` skill.
@@ -471,7 +473,7 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 2. Build & test locally: `cargo test && cd web && npm run build`
 3. **Collect screenshots** via Playwright MCP for any functional UI change
 4. PR to `staging` — 变更内容 + 测试报告 in the body, screenshots in a PR comment. No `Closes #N` here.
-5. `gh pr merge <PR> --auto --rebase` → verify with `./scripts/deploy-watch.sh staging`
+5. `gh pr merge <PR> --auto --merge` → verify with `./scripts/deploy-watch.sh staging`
 6. Release: PR `staging` → `main` with every `Closes #<ISSUE>` in the body → `gh pr merge <PR> --merge`
 7. Version bump only if warranted — see **Development Cycle** step 7
 8. `./scripts/deploy-watch.sh prod`
@@ -527,14 +529,23 @@ Do **not** `git reset --hard` in project root — root stays on `main`.
 
 All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.com>`
 
-**Feature branches merge by rebase, so every commit message lands verbatim** — nothing collapses them and no PR body replaces them. Write each commit as if it were the permanent record, because it is. Don't leave `wip`/`fixup` subjects on a branch you intend to merge; squash them locally with `git rebase -i` first.
+**Every commit message lands verbatim** — `--merge` collapses nothing and no PR body replaces them. Write each commit as if it were the permanent record, because it is. Don't leave `wip`/`fixup` subjects on a branch you intend to merge; tidy them locally with `git rebase -i` before pushing (rebasing your own unpushed branch is fine — what the flow never does is *land* a PR by rebase).
 
 ## 3. Quality Gates
 
-- **两个 hook,都在 `.githooks/`**（`git config core.hooksPath = .githooks`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
+- **两个 hook,都在 `.githooks/`**（`git config core.hooksPath`），随仓库版本控制。改 hooks 只改这两个文件。每一步都是 blocking。
+- **⚠️ hook 改动在当前 worktree 里不生效。** 本机的 `core.hooksPath` 是**绝对路径**指向主检出(`/Users/.../nession/.githooks`),不是相对的 `.githooks`。git 是按 worktree 之外的这个绝对路径找 hook 的,所以**所有 worktree 提交时跑的都是主检出那一份**。后果:在 worktree 里改了 `.githooks/*` 之后,本 worktree 的提交仍然走旧 hook —— 新步骤要等改动合进 `main` 且根目录 `git pull` 之后才真正生效。想在合并前验证,直接调 `./.githooks/pre-commit`(需先 `git add` 一些文件,否则它因无 staged 内容直接 exit 0)。
 - **`pre-commit` 只跑快检查**：`scripts/check-dev-workspace.sh commit`（禁止在根目录/`main` 上提交）→ `just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
 - **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：开头同样跑 `check-dev-workspace.sh push`；改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
 - **手动检查**：`just check-workspace`（或 `./scripts/check-dev-workspace.sh session --fetch`）— Agent/开发者开新任务前确认根目录在最新 `main`、当前在 worktree 里开发。
+- **测试并发安全**:测试之间隔离不够,**跑与跑之间**也必须隔离 —— 本仓库多 worktree 并存,CI 也可能和本地同时跑,共享状态会让两轮互相踩,失败看起来像随机的。三条硬规则:
+  - 测试监听端口一律 `bind("127.0.0.1:0")` 由 OS 分配,**不准写死端口号,也不准用"预留端口段"** —— 段位在两轮并发时照样撞。需要一个"没人监听"的地址时,用 `free_port()`(bind :0 拿号后释放),helper 命名为 `*_on()`。
+  - 每个测试用的数据库/临时文件走 `tempfile::tempdir()`,**不准用 `temp_dir()` 拼固定名**,也不准用"时间戳 + 进程内计数"(两个进程同一秒启动、计数都从 0 开始,拼出同一个路径)。
+  - 碰 `paths::nession_home()` 的测试**必须先把 `NESSION_HOME` 指到临时目录** —— 否则它解析成 `$HOME/.nession`,直接改开发者的真实配置。
+
+  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明它还真的能抓到 —— 门禁静默失效比没门禁更糟。
+
+  `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
 - **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。

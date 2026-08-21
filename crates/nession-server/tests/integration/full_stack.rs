@@ -16,24 +16,27 @@ use super::current_timestamp;
 /// Helper struct that starts a server on a random port and provides its address.
 struct TestServer {
     addr: std::net::SocketAddr,
-    db_path: String,
+    /// Owns the database directory; dropping it removes the `.db` and its
+    /// WAL/SHM sidecars synchronously.
+    _db_dir: tempfile::TempDir,
     _handle: tokio::task::JoinHandle<()>,
 }
 
 impl TestServer {
     /// Start a test server with the given auth token and wait until it is ready.
+    /// The database lives in its own `TempDir`. The previous name —
+    /// `temp_dir()/nession_test_integration_<unix_secs>_<counter>.db` —
+    /// collided between concurrent test runs: two processes starting in the
+    /// same second both begin their counter at 0, so they opened the *same*
+    /// SQLite file and failed with "UNIQUE constraint failed:
+    /// seaql_migrations.version".
     async fn start(auth_token: &str) -> anyhow::Result<Self> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let db_path = std::env::temp_dir()
-            .join(format!(
-                "nession_test_integration_{}_{}.db",
-                current_timestamp(),
-                id
-            ))
+        let db_dir = tempfile::tempdir()?;
+        let db_path = db_dir
+            .path()
+            .join("server.db")
             .to_string_lossy()
-            .to_string();
+            .into_owned();
 
         let config = nession_common::config::ServerConfig {
             listen_address: "127.0.0.1:0".to_string(),
@@ -60,7 +63,7 @@ impl TestServer {
 
         Ok(Self {
             addr,
-            db_path,
+            _db_dir: db_dir,
             _handle: handle,
         })
     }
@@ -79,15 +82,6 @@ impl TestServer {
     > {
         let (stream, _) = connect_async(self.ws_url()).await?;
         Ok(stream)
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        let path = self.db_path.clone();
-        tokio::spawn(async move {
-            tokio::fs::remove_file(&path).await.ok();
-        });
     }
 }
 

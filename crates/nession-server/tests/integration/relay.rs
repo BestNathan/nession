@@ -56,16 +56,23 @@ fn msg(msg_type: &str, id: &str, payload: serde_json::Value) -> serde_json::Valu
 }
 
 /// Start the central server on an ephemeral port.
+///
+/// The database lives in its own `TempDir`, returned so the caller keeps it
+/// alive. A `temp_dir()/nession_test_relay_<secs>_<counter>.db` name collided
+/// between concurrent test runs — same second, same starting counter, same file.
 async fn start_server(
     auth_token: &str,
-) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>, String)> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let db_path = std::env::temp_dir()
-        .join(format!("nession_test_relay_{}_{}.db", ts(), id))
+) -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+)> {
+    let db_dir = tempfile::tempdir()?;
+    let db_path = db_dir
+        .path()
+        .join("server.db")
         .to_string_lossy()
-        .to_string();
+        .into_owned();
 
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
@@ -87,7 +94,7 @@ async fn start_server(
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    Ok((addr, handle, db_path))
+    Ok((addr, handle, db_dir))
 }
 
 /// Start the agent's internal WebSocket server (for P2P/relay connections).
@@ -201,7 +208,7 @@ async fn relay_attach_and_terminal_io() {
     SessionManager::new().kill_session(&session_name).await.ok();
 
     // 1. Start server and agent.
-    let (server_addr, server_handle, db_path) = start_server("test-token").await.unwrap();
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
     let (agent_addr, agent_handle) = start_agent("relay-test-agent").await.unwrap();
 
     // 2. Create a tmux session.
@@ -357,7 +364,6 @@ async fn relay_attach_and_terminal_io() {
     client_handle.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle.abort();
-    tokio::fs::remove_file(&db_path).await.ok();
 
     assert!(
         got_output,

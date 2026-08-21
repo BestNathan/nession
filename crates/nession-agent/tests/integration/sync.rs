@@ -16,11 +16,16 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
 /// Start a mock WebSocket server that collects incoming messages.
 /// Returns a receiver that yields each text message the client sends.
-async fn start_mock_server(
-    port: u16,
-) -> anyhow::Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<String>)> {
+async fn start_mock_server() -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    mpsc::Receiver<String>,
+)> {
     let (msg_tx, msg_rx) = mpsc::channel(200);
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    // OS-assigned port: a hardcoded one collides whenever two test runs
+    // overlap — two worktrees, or CI alongside a local run.
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
 
     let handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
@@ -52,11 +57,11 @@ async fn start_mock_server(
         }
     });
 
-    Ok((handle, msg_rx))
+    Ok((addr, handle, msg_rx))
 }
 
 /// Connect to the mock server and return a ServerClientHandle.
-async fn get_handle(port: u16) -> anyhow::Result<ServerClientHandle> {
+async fn get_handle(addr: std::net::SocketAddr) -> anyhow::Result<ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
@@ -65,7 +70,7 @@ async fn get_handle(port: u16) -> anyhow::Result<ServerClientHandle> {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{port}"),
+        format!("ws://{addr}"),
         "test-token",
         "test-agent-sync",
         "test-host",
@@ -89,11 +94,10 @@ async fn get_handle(port: u16) -> anyhow::Result<ServerClientHandle> {
 
 #[tokio::test]
 async fn test_heartbeat_loop_sends_heartbeat() {
-    let port = 29091;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await.unwrap();
+    let handle = get_handle(addr).await.unwrap();
 
     // Skip registration message.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -128,11 +132,10 @@ async fn test_heartbeat_loop_sends_heartbeat() {
 
 #[tokio::test]
 async fn test_heartbeat_loop_respects_interval() {
-    let port = 29092;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await.unwrap();
+    let handle = get_handle(addr).await.unwrap();
 
     // Skip registration message.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -177,11 +180,10 @@ async fn test_heartbeat_loop_respects_interval() {
 
 #[tokio::test]
 async fn test_heartbeat_loop_shutdown() {
-    let port = 29093;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await.unwrap();
+    let handle = get_handle(addr).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
@@ -212,11 +214,10 @@ async fn test_heartbeat_loop_shutdown() {
 
 #[tokio::test]
 async fn test_session_watcher_detects_new_session() {
-    let port = 29094;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await.unwrap();
+    let handle = get_handle(addr).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
@@ -266,11 +267,10 @@ async fn test_session_watcher_detects_new_session() {
 
 #[tokio::test]
 async fn test_session_watcher_detects_removed_session() {
-    let port = 29095;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
+    let (addr, server_handle, mut msg_rx) = start_mock_server().await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await.unwrap();
+    let handle = get_handle(addr).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;

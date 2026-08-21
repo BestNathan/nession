@@ -236,11 +236,16 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_session_scripts_removes_matching_files() {
-        let mgr = EnvManager::new(tmp());
+        // Own temp dir. These script names are fixed, so sharing the system
+        // temp dir let a concurrent test run delete the file this test needs to
+        // survive — a race a single run passes every time.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mgr = EnvManager::new(root.clone());
         let session = "test-cleanup-sess";
-        let source_path = source_script_path(tmp(), "c1", session, "a.env");
-        let unsource_path = unsource_script_path(tmp(), "c1", session, "b.env");
-        let other_session_path = source_script_path(tmp(), "c1", "other-sess", "c.env");
+        let source_path = source_script_path(root.clone(), "c1", session, "a.env");
+        let unsource_path = unsource_script_path(root.clone(), "c1", session, "b.env");
+        let other_session_path = source_script_path(root.clone(), "c1", "other-sess", "c.env");
 
         tokio::fs::write(&source_path, "export X=1\n")
             .await
@@ -255,17 +260,18 @@ mod tests {
         assert!(!source_path.exists());
         assert!(!unsource_path.exists());
         assert!(other_session_path.exists());
-
-        let _ = tokio::fs::remove_file(&other_session_path).await;
     }
 
     #[tokio::test]
     async fn cleanup_client_scripts_removes_matching_files() {
-        let mgr = EnvManager::new(tmp());
+        // Own temp dir, same reasoning as above.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mgr = EnvManager::new(root.clone());
         let client_id = "test-cleanup-client";
-        let source_path = source_script_path(tmp(), client_id, "sess1", "a.env");
-        let unsource_path = unsource_script_path(tmp(), client_id, "sess2", "b.env");
-        let other_client_path = source_script_path(tmp(), "other-client", "sess1", "c.env");
+        let source_path = source_script_path(root.clone(), client_id, "sess1", "a.env");
+        let unsource_path = unsource_script_path(root.clone(), client_id, "sess2", "b.env");
+        let other_client_path = source_script_path(root.clone(), "other-client", "sess1", "c.env");
 
         tokio::fs::write(&source_path, "export X=1\n")
             .await
@@ -280,8 +286,6 @@ mod tests {
         assert!(!source_path.exists());
         assert!(!unsource_path.exists());
         assert!(other_client_path.exists());
-
-        let _ = tokio::fs::remove_file(&other_client_path).await;
     }
 
     #[tokio::test]
@@ -313,18 +317,23 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_uses_configured_script_dir() {
-        // Scripts in a custom dir are cleaned up; a matching file in the
-        // system temp dir is left untouched (proves the dir is honored).
-        let custom = std::env::temp_dir().join("nession-env-test-dir");
-        tokio::fs::create_dir_all(&custom).await.unwrap();
+        // Scripts in a configured dir are cleaned up, proving EnvManager honours
+        // the dir it was given rather than always using the system temp dir.
+        //
+        // The dir is a TempDir rather than a fixed `temp_dir()/nession-env-test-dir`:
+        // sharing that name across concurrent test runs let one run's
+        // `remove_dir_all` delete the other's file, and because the assertion
+        // below is "the file is gone", the test would still pass — silently
+        // proving nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().to_path_buf();
         let mgr = EnvManager::new(custom.clone());
 
         let in_custom = source_script_path(custom.clone(), "cid", "sess", "a.env");
         tokio::fs::write(&in_custom, "export X=1\n").await.unwrap();
+        assert!(in_custom.exists(), "script should exist before cleanup");
 
         mgr.cleanup_client_scripts("cid").await;
         assert!(!in_custom.exists());
-
-        let _ = tokio::fs::remove_dir_all(&custom).await;
     }
 }
