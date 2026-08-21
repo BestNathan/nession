@@ -211,8 +211,17 @@ cargo fmt --all -- --check      # Formatting check
 cargo clippy -- -D warnings     # Lint — MUST pass with 0 warnings
 ```
 - `#[allow(clippy::*)]` is **forbidden**. Every clippy lint must be fixed properly, not silenced.
+- **⛔ Lint 规则本身不准擅自改动 —— 任何修改必须先经仓库所有者明确同意。** 规则收紧和放宽都算,包括但不限于:
+  - `Cargo.toml` 的 `[workspace.lints.*]`(增删条目、改 `deny`/`warn`/`allow` 级别)
+  - `clippy.toml`(阈值,以及 `allow-*-in-tests` 这类放行开关)
+  - 命令行 `-A` / `--allow`,或在 `justfile` / CI 里给 clippy 传放行参数
+  - `#![allow(...)]` crate 级属性、`#[allow(clippy::*)]` 条目级属性
+
+  换句话说:**碰到 lint 报错就修代码,不准改规则来让报错消失。** 想改规则,先带上理由和影响面来问,拿到同意再改。这是为了防止「一条 lint 挡路 → 顺手放宽 → 门禁被逐步蛀空」——放宽一次不会有人注意,但覆盖面是一去不返的。
+- 同理,**测试代码也必须完整受 lint 门禁覆盖**,不能靠"测试是特例"来豁免。测试 helper 里 `unwrap()` 报错,正确做法是把 helper 改成返回 `Result`、由 `#[test]` 函数在调用处 unwrap(clippy 在 `#[test]` 函数内部本就放行),而不是给它加放行开关。
 - `clippy.toml` contains lint thresholds (`cognitive-complexity-threshold = 25`, `too-many-lines-threshold = 150`).
 - Workspace lints in `Cargo.toml` (`[workspace.lints.clippy]`) apply to all crates via `[lints] workspace = true`.
+- ⚠️ 现有门禁 `cargo clippy --workspace` **不带 `--all-targets`,因此测试代码目前完全没被 lint**。加上后有约 389 条既存报错待清理。修改这条门禁的覆盖面同样属于 lint 规则改动,需先获同意。
 
 **Rust toolchain:** `rust-toolchain.toml` is the single source of truth (currently `channel = "1.96.0"`). CI uses `actions-rust-lang/setup-rust-toolchain@v1` which reads it natively — no version hardcoded in the workflow. To bump Rust, edit `rust-toolchain.toml` only, then `rustup toolchain install <ver> --component rustfmt --component clippy`.
 
@@ -528,6 +537,7 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
+- **⛔ 禁止擅自改动 lint 规则**:`[workspace.lints.*]`、`clippy.toml`、命令行 `-A`、`#[allow]` 一律需仓库所有者明确同意后才能改,收紧和放宽都算。报错修代码,不准改规则消错。测试代码同样必须受门禁覆盖,不靠"测试是特例"豁免。详见「Rust linting」。
 - **覆盖率阈值**（`scripts/check-coverage.sh` 是唯一来源,每次遍历全部登记的 crate,不按改动收窄）：
 
   | 目标 | 阈值 |
