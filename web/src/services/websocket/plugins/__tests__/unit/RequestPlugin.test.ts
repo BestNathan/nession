@@ -113,6 +113,30 @@ describe('RequestPlugin', () => {
     });
   });
 
+  describe('deleteAgent', () => {
+    it('resolves on success', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
+      await expect(plugin.deleteAgent('a1')).resolves.toBeUndefined();
+      expect(core.request).toHaveBeenCalledWith('client.agent.delete', { agent_id: 'a1' });
+    });
+
+    it('throws on failure response', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false, error: 'Agent is online' });
+      await expect(plugin.deleteAgent('a1')).rejects.toThrow('Agent is online');
+    });
+
+    it('throws generic error when no message provided', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false });
+      await expect(plugin.deleteAgent('a1')).rejects.toThrow('Delete failed');
+    });
+
+    it('throws when not authenticated', async () => {
+      const unauthCore = createMockCore(false);
+      plugin.install(unauthCore);
+      await expect(plugin.deleteAgent('a1')).rejects.toThrow('Not authenticated');
+    });
+  });
+
   // ── Server ──────────────────────────────────────────────────
 
   describe('serverInfo', () => {
