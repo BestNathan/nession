@@ -26,6 +26,7 @@ function createRequestsMock() {
     createSession: vi.fn(() => Promise.resolve({ success: true })),
     killSession: vi.fn(() => Promise.resolve({ success: true })),
     renameAgent: vi.fn(() => Promise.resolve({})),
+    deleteAgent: vi.fn(() => Promise.resolve()),
     listEnvFiles: vi.fn(() => Promise.resolve({ files: [] })),
     getEnvFile: vi.fn(() => Promise.resolve({ success: true })),
     writeEnvFile: vi.fn(() => Promise.resolve({ success: true })),

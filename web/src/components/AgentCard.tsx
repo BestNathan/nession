@@ -1,4 +1,4 @@
-import { Pencil, Monitor, Box } from 'lucide-react';
+import { Pencil, Monitor, Box, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
@@ -12,9 +12,10 @@ interface AgentCardProps {
   agent: Agent;
   onClick: () => void;
   onRename?: (agent: Agent) => void;
+  onDelete?: (agent: Agent) => void;
 }
 
-export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
+export function AgentCard({ agent, onClick, onRename, onDelete }: AgentCardProps) {
   const {
     editing, editValue, setEditValue, saving, inputRef,
     startEdit, save, handleKeyDown, clearName,
@@ -66,6 +67,17 @@ export function AgentCard({ agent, onClick, onRename }: AgentCardProps) {
             >
               <Pencil className="h-3 w-3 text-muted-foreground" />
             </Button>
+            {agent.status === 'offline' && onDelete && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); onDelete(agent); }}
+                title="Delete agent"
+              >
+                <Trash2 className="h-3 w-3 text-destructive" />
+              </Button>
+            )}
           </div>
         )}
 
