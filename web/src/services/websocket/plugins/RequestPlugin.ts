@@ -74,6 +74,22 @@ export class RequestPlugin implements WebSocketPlugin {
     return response.agent;
   }
 
+  /** Delete an offline agent and all its sessions. Rejects if agent is online. */
+  async deleteAgent(agentId: string): Promise<void> {
+    this.requireAuth();
+
+    const response = await this.core.request<{
+      success: boolean;
+      error?: string;
+    }>('client.agent.delete', {
+      agent_id: agentId,
+    });
+
+    if (!response.success) {
+      throw new Error(response.error || 'Delete failed');
+    }
+  }
+
   // ── Server ────────────────────────────────────────────────────
 
   /** Fetch server info (version, uptime, counts). */

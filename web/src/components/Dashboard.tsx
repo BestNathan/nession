@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAtom, useSetAtom } from 'jotai';
-import type { ConnectionStatus, Session } from '../types';
+import type { Agent, ConnectionStatus, Session } from '../types';
 import { useDashboard } from '../hooks/useDashboard';
 import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
@@ -20,6 +20,7 @@ import { SessionsSection } from './SessionsSection';
 import { AgentDetailPanel } from './AgentDetailPanel';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { KillConfirmDialog } from './KillConfirmDialog';
+import { DeleteAgentConfirmDialog } from './DeleteAgentConfirmDialog';
 export { AgentSection };
 
 interface DashboardProps {
@@ -133,6 +134,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
 
   // Incremented after session create/kill to trigger server info refresh.
   const [serverRefreshKey, setServerRefreshKey] = useState(0);
+  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
 
   const onlineCount = agents.filter((a) => a.status === 'online').length;
   const offlineCount = agents.filter((a) => a.status !== 'online').length;
@@ -177,6 +179,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           onlineCount={onlineCount}
           offlineCount={offlineCount}
           onAgentRename={updateAgent}
+          onAgentDelete={setAgentToDelete}
         />
 
         {/* Sessions */}
@@ -218,6 +221,12 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         onClose={() => setSessionToKill(null)}
         session={sessionToKill}
         onKilled={handleSessionKilled}
+      />
+      <DeleteAgentConfirmDialog
+        isOpen={agentToDelete !== null}
+        onClose={() => setAgentToDelete(null)}
+        agent={agentToDelete}
+        onDeleted={() => { setServerRefreshKey((n) => n + 1); fetchSessions(); }}
       />
       <AttachDialog
         isOpen={attachDialogSession !== null}

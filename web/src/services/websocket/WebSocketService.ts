@@ -165,6 +165,10 @@ export class WebSocketService {
     return this.requests.renameAgent(agentId, displayName);
   }
 
+  async deleteAgent(agentId: string): Promise<void> {
+    return this.requests.deleteAgent(agentId);
+  }
+
   // ── Environment-variable file management (delegated to RequestPlugin) ──
 
   async listEnvFiles(): Promise<EnvListResponse> {

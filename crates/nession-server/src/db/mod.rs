@@ -267,6 +267,15 @@ impl Database {
         Ok(())
     }
 
+    pub async fn delete_agent(&self, agent_id: &str) -> Result<bool> {
+        let result = agents::Entity::delete_many()
+            .filter(agents::Column::AgentId.eq(agent_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to delete agent")?;
+        Ok(result.rows_affected > 0)
+    }
+
     pub async fn list_all_sessions(&self) -> Result<Vec<SessionRow>> {
         let rows = sessions::Entity::find()
             .all(&self.conn)
