@@ -463,15 +463,7 @@ async fn tmux_status(cmd: &mut Command, timeout: Duration) -> Result<std::proces
 #[cfg(test)]
 mod window_size_lock_tests {
     use super::*;
-
-    fn unique_name(prefix: &str) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("{prefix}-{nanos}")
-    }
+    use crate::test_support::TestSession;
 
     async fn read_window_size_option(session: &str) -> Result<String> {
         let out = Command::new("tmux")
@@ -490,26 +482,22 @@ mod window_size_lock_tests {
         }
 
         let mgr = SessionManager::new();
-        let name = unique_name("no-lock-test");
+        let session = TestSession::new("no-lock");
+        let name = session.name();
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-        mgr.create_session(&name, 200, 60, &cwd, &[])
+        mgr.create_session(name, 200, 60, &cwd, &[])
             .await
             .expect("create");
 
         // window-size should NOT be explicitly set, leaving it at tmux default
         // so that clients can resize the window.
-        let val = read_window_size_option(&name).await.expect("show-option");
+        let val = read_window_size_option(name).await.expect("show-option");
         assert!(
             val.is_empty(),
             "expected window-size to be unset, got {val:?}"
         );
-
-        // Cleanup — swallow errors, best-effort.
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", &name])
-            .status()
-            .await;
+        // `session` kills the tmux session on drop, panic or not.
     }
 
     #[tokio::test]
@@ -520,14 +508,15 @@ mod window_size_lock_tests {
         }
 
         let mgr = SessionManager::new();
-        let name = unique_name("cwd-test");
+        let session = TestSession::new("cwd");
+        let name = session.name();
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
-        mgr.create_session(&name, 200, 60, &cwd, &[])
+        mgr.create_session(name, 200, 60, &cwd, &[])
             .await
             .expect("create");
 
-        let result = mgr.get_session_cwd(&name).await.expect("get_session_cwd");
+        let result = mgr.get_session_cwd(name).await.expect("get_session_cwd");
         // Canonicalize both paths: macOS /var is a symlink to /private/var,
         // and tmux may resolve symlinks differently from std::env::temp_dir().
         let expected = std::fs::canonicalize(&cwd).unwrap_or_else(|_| PathBuf::from(&cwd));
@@ -536,11 +525,7 @@ mod window_size_lock_tests {
             actual, expected,
             "CWD should match the session's working directory"
         );
-
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", &name])
-            .status()
-            .await;
+        // `session` kills the tmux session on drop, panic or not.
     }
 
     #[tokio::test]
