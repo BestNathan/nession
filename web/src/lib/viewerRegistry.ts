@@ -1,3 +1,5 @@
+import { detectLanguage } from './languageId';
+
 export type ViewerType = 'image' | 'video' | 'audio' | 'pdf' | 'markdown';
 
 const EXT_VIEWER_MAP: Record<string, ViewerType> = {
@@ -18,7 +20,7 @@ const EXT_LANG_MAP: Record<string, string> = {
   md: 'md', markdown: 'markdown', mkd: 'mkd',
   html: 'html', htm: 'htm',
   css: 'css', scss: 'scss', less: 'less', sass: 'sass', styl: 'styl',
-  sh: 'sh', bash: 'bash', zsh: 'zsh', ksh: 'ksh',
+  sh: 'sh', bash: 'bash', zsh: 'zsh', ksh: 'ksh', fish: 'fish',
   go: 'go',
   rs: 'rs',
   c: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', h: 'h', hpp: 'hpp', hh: 'hh', hxx: 'hxx',
@@ -63,24 +65,16 @@ const EXT_LANG_MAP: Record<string, string> = {
   prisma: 'prisma',
 };
 
-/** Basenames that open in CodeMirror (extensionless special files). */
-const BASENAME_VIEWABLE = new Set([
-  'Dockerfile',
-  'Makefile',
-  'GNUmakefile',
-  'Jenkinsfile',
-  'Gemfile',
-  'Rakefile',
-  'CMakeLists.txt',
-]);
-
 /** Return the viewer type for a file extension, or null for unsupported. */
 export function getViewerType(ext: string): ViewerType | null {
   const key = ext.toLowerCase();
   return EXT_VIEWER_MAP[key] ?? null;
 }
 
-/** Return the CodeMirror / UIW langs key for a file extension, or undefined. */
+/**
+ * Return the CodeMirror / UIW langs key for a file extension, or undefined.
+ * @deprecated Use detectLanguage() + languageIdToCodeMirrorKey() instead.
+ */
 export function getLangKey(ext: string): string | undefined {
   const key = ext.toLowerCase();
   return EXT_LANG_MAP[key];
@@ -90,16 +84,41 @@ export function parseBasename(path: string): string {
   return path.split('/').pop() ?? path;
 }
 
+/** Known text extensions that are viewable even when detected as plaintext. */
+const TEXT_EXTENSIONS = new Set(['txt', 'text', 'log', 'env', 'ini', 'cfg', 'conf', 'lock', 'mod', 'sum', 'csv']);
+
+/** Known text basenames (dotfiles, config files) that are viewable as plaintext. */
+const TEXT_BASENAMES = new Set(['.gitignore', '.env', '.gitattributes', '.gitmodules']);
+
 /** Check if a path is openable in FileViewer (media or text/code). */
 export function isViewablePath(path: string): boolean {
   const ext = parseExt(path);
+
+  // Media files (image/video/audio/pdf) take precedence
   if (getViewerType(ext) !== null) {
     return true;
   }
-  if (ext && getLangKey(ext) !== undefined) {
+
+  // Text/code files: use LanguageId detection
+  const languageId = detectLanguage(path);
+
+  // All LanguageIds except 'plaintext' are viewable (they have meaning)
+  if (languageId !== 'plaintext') {
     return true;
   }
-  return BASENAME_VIEWABLE.has(parseBasename(path));
+
+  // Plaintext is viewable if it has a known text extension
+  if (TEXT_EXTENSIONS.has(ext)) {
+    return true;
+  }
+
+  // Known text basenames (dotfiles, config files)
+  const basename = parseBasename(path);
+  if (TEXT_BASENAMES.has(basename) || basename.startsWith('.env.')) {
+    return true;
+  }
+
+  return false;
 }
 
 /** Check if an extension has any viewer registered (media or code). */
