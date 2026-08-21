@@ -116,6 +116,22 @@ describe('isViewablePath', () => {
     it('config.txt is viewable (text extension)', () => {
       expect(isViewablePath('config.txt')).toBe(true);
     });
+
+    it('Cargo.lock is viewable (text extension)', () => {
+      expect(isViewablePath('Cargo.lock')).toBe(true);
+    });
+
+    it('go.mod is viewable (text extension)', () => {
+      expect(isViewablePath('go.mod')).toBe(true);
+    });
+
+    it('go.sum is viewable (text extension)', () => {
+      expect(isViewablePath('go.sum')).toBe(true);
+    });
+
+    it('data.csv is viewable (text extension)', () => {
+      expect(isViewablePath('data.csv')).toBe(true);
+    });
   });
 });
 

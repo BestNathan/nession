@@ -85,7 +85,7 @@ export function parseBasename(path: string): string {
 }
 
 /** Known text extensions that are viewable even when detected as plaintext. */
-const TEXT_EXTENSIONS = new Set(['txt', 'text', 'log', 'env', 'ini', 'cfg', 'conf']);
+const TEXT_EXTENSIONS = new Set(['txt', 'text', 'log', 'env', 'ini', 'cfg', 'conf', 'lock', 'mod', 'sum', 'csv']);
 
 /** Known text basenames (dotfiles, config files) that are viewable as plaintext. */
 const TEXT_BASENAMES = new Set(['.gitignore', '.env', '.gitattributes', '.gitmodules']);
