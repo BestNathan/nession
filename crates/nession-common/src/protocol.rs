@@ -483,6 +483,21 @@ pub struct ClientEnvDeleteResponsePayload {
     pub error: Option<String>,
 }
 
+// --- Client → Server agent management payloads ---
+
+/// `client.agent.delete` — permanently remove an offline agent and its sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientAgentDeletePayload {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientAgentDeleteResponsePayload {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // --- Quick Commands (issue #95, part 3) ---
 
 /// A single quick command, matching the structure of the `quick_commands` DB

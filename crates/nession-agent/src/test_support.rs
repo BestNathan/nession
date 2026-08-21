@@ -1,34 +1,30 @@
-// Single harness for all nession-agent integration tests.
+//! Test-only helpers shared by this crate's unit tests.
+//!
+//! Integration tests under `tests/` cannot see `#[cfg(test)]` items, so they
+//! keep their own copy of this in `tests/integration/main.rs`. Keep the two in
+//! step: both must produce names starting with [`TEST_SESSION_PREFIX`], and
+//! both must kill the session on drop.
 
-mod connection;
-mod control_mode;
-mod full_chain; // ← e2e_test.rs renamed (spec: Rust has no E2E layer)
-mod server;
-mod sync;
-mod tmux;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-// ── Shared helpers ───────────────────────────────────────────────────────────
-
-// unique_session_name: defined 5× across the 6 files, 4 of them byte-identical.
-// Extract to crate root. control_mode's copy differs (extra ctrl- segment) and
-// stays module-private.
-use rand::Rng;
-
-/// Prefix shared by every tmux session these tests create, so that strays left
+/// Prefix shared by every tmux session the tests create, so that strays left
 /// behind by a crashed run are identifiable and can be swept in bulk.
 /// `scripts/sweep-test-sessions.sh` matches on it.
 pub(crate) const TEST_SESSION_PREFIX: &str = "nession-test-";
 
 pub(crate) fn unique_session_name(prefix: &str) -> String {
-    let suffix: u32 = rand::thread_rng().gen();
-    format!("{TEST_SESSION_PREFIX}{prefix}-{suffix}")
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{TEST_SESSION_PREFIX}{prefix}-{nanos}")
 }
 
 /// Owns a generated session name and kills the tmux session on drop.
 ///
-/// The tests' own `kill_session` calls only run on the happy path, so a panic
-/// between creation and teardown used to leak the session permanently. Drop
-/// runs during unwind too, which closes that hole.
+/// Tests clean up on their happy path only, so a panic between creating the
+/// session and reaching that teardown used to leak it permanently. Drop runs
+/// during unwind too, which closes that hole.
 pub(crate) struct TestSession {
     name: String,
 }

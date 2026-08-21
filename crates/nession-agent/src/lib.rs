@@ -17,3 +17,6 @@ pub mod netwatch;
 pub mod server;
 pub mod sync;
 pub mod tmux;
+
+#[cfg(test)]
+mod test_support;

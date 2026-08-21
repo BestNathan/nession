@@ -7,6 +7,8 @@ export interface OpenFile {
   id: string;
   path: string;
   filename: string;
+  /** File size in bytes at the time of open — drives chunked-load threshold in FileViewer. */
+  size: number;
 }
 
 export const MAX_TABS = 10;
@@ -39,7 +41,7 @@ export function useFileTabs(onTerminalReveal?: () => void) {
     }
 
     const id = generateId('file');
-    setOpenFiles((prev) => [...prev, { id, path: entry.path, filename: entry.name }]);
+    setOpenFiles((prev) => [...prev, { id, path: entry.path, filename: entry.name, size: entry.size }]);
     setActiveTabId(id);
   }, [openFiles, dirtyFiles]);
 

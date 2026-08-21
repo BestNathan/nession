@@ -369,6 +369,12 @@ pub struct FileListPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileReadPayload {
     pub path: String,
+    /// Byte offset for chunked reads. `None` means start from beginning.
+    #[serde(default)]
+    pub offset: Option<u64>,
+    /// Maximum bytes to return for chunked reads. `None` means use default chunk size.
+    #[serde(default)]
+    pub limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1560,7 +1566,10 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                match file_ops.read_file(&payload.path).await {
+                match file_ops
+                    .read_file(&payload.path, payload.offset, payload.limit)
+                    .await
+                {
                     Ok(data) => serde_json::to_string(&make_response(&id, msg_types::OK, data))
                         .unwrap_or_default(),
                     Err(e) => {
@@ -1719,20 +1728,11 @@ impl AgentServer {
 mod tests {
     use super::*;
     use crate::fs::ops::FileData;
+    use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-    /// Generate a unique session name for tests.
-    fn unique_session_name(prefix: &str) -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("nession-test-{prefix}-{nanos}")
-    }
 
     /// Start a test server on an ephemeral port and return a handle for
     /// shutdown. Note: the bound address uses port 0, so this helper is
@@ -1795,7 +1795,7 @@ mod tests {
             >,
         >,
     ) {
-        let url = format!("ws://{}", addr);
+        let url = format!("ws://{addr}");
         let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
         ws_stream.split()
     }
@@ -1889,7 +1889,8 @@ mod tests {
         let (addr, handle) = start_test_server_on(18082).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let session_name = unique_session_name("srv-create-kill");
+        let session = TestSession::new("srv-create-kill");
+        let session_name = session.name().to_string();
 
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the create below doesn't hit a duplicate-name failure.
@@ -1930,7 +1931,8 @@ mod tests {
         // Create a real tmux session first so attach has something to
         // connect to.
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-attach");
+        let session = TestSession::new("srv-attach");
+        let session_name = session.name().to_string();
         // Pre-clean any session left over from a previous crashed/aborted run
         // so the test is re-entrant (tmux rejects a duplicate session name).
         tmux.kill_session(&session_name).await.ok();
@@ -1974,7 +1976,8 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-io");
+        let session = TestSession::new("srv-io");
+        let session_name = session.name().to_string();
         tmux.kill_session(&session_name).await.ok();
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
@@ -2106,7 +2109,7 @@ mod tests {
                 assert_eq!(resp.msg_type, msg_types::ERROR);
                 assert_eq!(resp.payload.code, "parse_error");
             }
-            other => panic!("expected text frame, got {:?}", other),
+            other => panic!("expected text frame, got {other:?}"),
         }
 
         handle.shutdown().await.ok();
@@ -2153,6 +2156,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "roundtrip_test.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =
@@ -2228,6 +2233,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: entry_path.to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =
@@ -2252,7 +2259,7 @@ mod tests {
         assert!(del_resp
             .payload
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false));
 
         handle.shutdown().await.ok();
@@ -2287,13 +2294,15 @@ mod tests {
         assert!(del_resp
             .payload
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false));
 
         let read_req = new_message(
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "to_delete.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<ErrorPayload> =
@@ -2312,6 +2321,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "../etc/passwd".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -2336,15 +2347,12 @@ mod tests {
         let create_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &create_req).await;
         assert_eq!(create_resp.msg_type, msg_types::OK);
-        assert_eq!(
-            create_resp
-                .payload
-                .get("success")
-                .unwrap()
-                .as_bool()
-                .unwrap(),
-            true
-        );
+        assert!(create_resp
+            .payload
+            .get("success")
+            .unwrap()
+            .as_bool()
+            .unwrap());
 
         // Verify directory exists by listing it
         let list_req = new_message(
@@ -2406,21 +2414,20 @@ mod tests {
         let rename_resp: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &rename_req).await;
         assert_eq!(rename_resp.msg_type, msg_types::OK);
-        assert_eq!(
-            rename_resp
-                .payload
-                .get("success")
-                .unwrap()
-                .as_bool()
-                .unwrap(),
-            true
-        );
+        assert!(rename_resp
+            .payload
+            .get("success")
+            .unwrap()
+            .as_bool()
+            .unwrap());
 
         // Read from new location
         let read_req = new_message(
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "new_name.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =
@@ -2450,7 +2457,8 @@ mod tests {
         let (mut sink, mut stream) = connect_client(addr).await;
 
         let tmux = SessionManager::new();
-        let session_name = unique_session_name("srv-invalid-b64");
+        let session = TestSession::new("srv-invalid-b64");
+        let session_name = session.name().to_string();
         tmux.kill_session(&session_name).await.ok();
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
@@ -2732,7 +2740,8 @@ mod tests {
         let (addr, handle) = start_test_server_on(18101).await;
         let (mut sink, mut stream) = connect_client(addr).await;
 
-        let session_name = unique_session_name("web-create-kill");
+        let session = TestSession::new("web-create-kill");
+        let session_name = session.name().to_string();
         let expected_session_id = format!("test-agent:{session_name}");
 
         // Pre-clean

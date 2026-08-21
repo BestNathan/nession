@@ -380,13 +380,13 @@ mod tests {
         fs::write(&target, b"hello").unwrap();
 
         // 1. Relative path with root name duplicated (the failing case).
-        let dup_relative = format!("{}/.bashrc", root_dir_name);
+        let dup_relative = format!("{root_dir_name}/.bashrc");
         let resolved = sandbox.resolve(&dup_relative).unwrap();
         assert_eq!(resolved, target.canonicalize().unwrap());
 
         // 2. Absolute path that starts with the root name — treated as
         //    an absolute filesystem path under the new resolve semantics.
-        let dup_absolute = format!("/{}/.bashrc", root_dir_name);
+        let dup_absolute = format!("/{root_dir_name}/.bashrc");
         let resolved = sandbox.resolve(&dup_absolute).unwrap();
         assert_eq!(resolved, Path::new(&dup_absolute));
 

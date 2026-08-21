@@ -5,7 +5,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
 
-fn create_test_tarball() -> (Vec<u8>, String) {
+fn create_test_tarball() -> anyhow::Result<(Vec<u8>, String)> {
     let mut buf = Vec::new();
     let encoder = GzEncoder::new(&mut buf, flate2::Compression::default());
     let mut archive = tar::Builder::new(encoder);
@@ -15,18 +15,16 @@ fn create_test_tarball() -> (Vec<u8>, String) {
         header.set_size(content.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
-        archive
-            .append_data(&mut header, name, content.as_bytes())
-            .unwrap();
+        archive.append_data(&mut header, name, content.as_bytes())?;
     }
-    let encoder = archive.into_inner().unwrap();
-    encoder.finish().unwrap();
+    let encoder = archive.into_inner()?;
+    encoder.finish()?;
     let hash = {
         let mut hasher = Sha256::new();
         hasher.update(&buf);
         format!("{:x}", hasher.finalize())
     };
-    (buf, hash)
+    Ok((buf, hash))
 }
 
 #[test]
@@ -48,7 +46,7 @@ fn checksum_verification_integration() {
     use nession_cli::update::download;
     let dir = tempfile::tempdir().unwrap();
     let tarball_path = dir.path().join("test.tar.gz");
-    let (tarball_data, expected_hash) = create_test_tarball();
+    let (tarball_data, expected_hash) = create_test_tarball().unwrap();
     fs::write(&tarball_path, &tarball_data).unwrap();
     let actual_hash = download::sha256_file(&tarball_path).unwrap();
     assert_eq!(actual_hash, expected_hash);
@@ -85,7 +83,7 @@ fn extract_and_replace_simulation() {
     use nession_cli::update::{download, replace};
     let dir = tempfile::tempdir().unwrap();
     let tarball_path = dir.path().join("test.tar.gz");
-    let (tarball_data, _) = create_test_tarball();
+    let (tarball_data, _) = create_test_tarball().unwrap();
     fs::write(&tarball_path, &tarball_data).unwrap();
     let extract_dir = dir.path().join("extracted");
     fs::create_dir(&extract_dir).unwrap();

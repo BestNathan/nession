@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 fn unique_session_name(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_nanos();
     format!("nession-test-{prefix}-{nanos}")
 }
@@ -41,7 +41,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 fn ts() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs()
 }
 
@@ -58,7 +58,7 @@ fn msg(msg_type: &str, id: &str, payload: serde_json::Value) -> serde_json::Valu
 /// Start the central server on an ephemeral port.
 async fn start_server(
     auth_token: &str,
-) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>, String) {
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>, String)> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -78,24 +78,24 @@ async fn start_server(
         ..Default::default()
     };
 
-    let db = Database::new(&db_path).await.unwrap();
-    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
-    let addr = server.local_addr().unwrap();
+    let db = Database::new(&db_path).await?;
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
+    let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
         let _ = server.run().await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    (addr, handle, db_path)
+    Ok((addr, handle, db_path))
 }
 
 /// Start the agent's internal WebSocket server (for P2P/relay connections).
 /// OS picks a free port; returns the real bound address.
 async fn start_agent(
     agent_id: &str,
-) -> (std::net::SocketAddr, nession_agent::server::ServerHandle) {
-    let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
+    let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
     let server = AgentServer::new(
         "127.0.0.1:0",
@@ -105,12 +105,11 @@ async fn start_agent(
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
         _resize_tx,
-    )
-    .expect("agent server creation");
+    )?;
 
-    let (handle, addr) = server.start().await.expect("agent server start");
+    let (handle, addr) = server.start().await?;
 
-    (addr, handle)
+    Ok((addr, handle))
 }
 
 /// Register an agent with the central server so it shows as Online.
@@ -119,7 +118,7 @@ async fn register_agent(
     agent_id: &str,
     auth_token: &str,
     agent_port: u16,
-) -> nession_agent::connection::ServerClientHandle {
+) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
@@ -143,11 +142,7 @@ async fn register_agent(
         None, // extension_registry
     );
 
-    client
-        .connect_and_run()
-        .await
-        .expect("agent registration")
-        .0
+    Ok(client.connect_and_run().await?.0)
 }
 
 /// Send a JSON text frame and return the next text frame (skipping non-text).
@@ -164,11 +159,12 @@ async fn send_and_recv(
         >,
     >,
     request: &serde_json::Value,
-) -> serde_json::Value {
-    let request_id = request["id"].as_str().unwrap().to_string();
-    sink.send(WsMessage::Text(request.to_string()))
-        .await
-        .unwrap();
+) -> anyhow::Result<serde_json::Value> {
+    let request_id = request["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("request has no string id"))?
+        .to_string();
+    sink.send(WsMessage::Text(request.to_string())).await?;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
@@ -178,9 +174,10 @@ async fn send_and_recv(
         }
         match tokio::time::timeout(Duration::from_secs(2), stream.next()).await {
             Ok(Some(Ok(WsMessage::Text(text)))) => {
-                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-                if parsed["id"].as_str() == Some(&request_id) {
-                    return parsed;
+                let parsed: serde_json::Value = serde_json::from_str(&text)?;
+                if parsed.get("id").and_then(serde_json::Value::as_str) == Some(request_id.as_str())
+                {
+                    return Ok(parsed);
                 }
                 // Unsolicited message (e.g. terminal.output) — skip.
             }
@@ -204,8 +201,8 @@ async fn relay_attach_and_terminal_io() {
     SessionManager::new().kill_session(&session_name).await.ok();
 
     // 1. Start server and agent.
-    let (server_addr, server_handle, db_path) = start_server("test-token").await;
-    let (agent_addr, agent_handle) = start_agent("relay-test-agent").await;
+    let (server_addr, server_handle, db_path) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle) = start_agent("relay-test-agent").await.unwrap();
 
     // 2. Create a tmux session.
     let tmux = SessionManager::new();
@@ -220,7 +217,8 @@ async fn relay_attach_and_terminal_io() {
         "test-token",
         agent_addr.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // 3b. Start heartbeat loop so the server keeps the agent Online.
     let heartbeat = HeartbeatLoop::new(
@@ -260,7 +258,9 @@ async fn relay_attach_and_terminal_io() {
             "auth_token": "test-token",
         }),
     );
-    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req).await;
+    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
     assert_eq!(
         auth_resp["payload"]["status"], "success",
         "auth failed: {auth_resp}"
@@ -277,7 +277,9 @@ async fn relay_attach_and_terminal_io() {
             "preferred_mode": "relay",
         }),
     );
-    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req).await;
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
     assert_eq!(
         attach_resp["payload"]["status"], "success",
         "attach failed: {attach_resp}"

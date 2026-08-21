@@ -8,7 +8,7 @@
 //! - Heartbeat and session sync between agent and server
 //! - Graceful shutdown
 
-use super::unique_session_name;
+use super::TestSession;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
@@ -35,7 +35,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 /// Start a real nession-server on a random port and return its address.
 async fn start_test_server(
     auth_token: &str,
-) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>, String) {
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>, String)> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -44,7 +44,7 @@ async fn start_test_server(
             "nession_test_e2e_{}_{}.db",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             id
         ))
@@ -62,9 +62,9 @@ async fn start_test_server(
         ..Default::default()
     };
 
-    let db = Database::new(&db_path).await.unwrap();
-    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
-    let addr = server.local_addr().unwrap();
+    let db = Database::new(&db_path).await?;
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
+    let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
         let _ = server.run().await;
@@ -73,7 +73,7 @@ async fn start_test_server(
     // Give the server time to start accepting connections.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    (addr, handle, db_path)
+    Ok((addr, handle, db_path))
 }
 
 /// Remove a test database and its SQLite WAL/SHM sidecar files.
@@ -87,8 +87,9 @@ async fn cleanup_db(db_path: &str) {
 }
 
 /// Start a real agent WebSocket server on an OS-assigned port.
-async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::server::ServerHandle) {
-    let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
+async fn start_test_agent_server(
+) -> anyhow::Result<(std::net::SocketAddr, nession_agent::server::ServerHandle)> {
+    let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (_resize_tx, _resize_rx) = tokio::sync::mpsc::unbounded_channel::<(String, u16, u16)>();
     let server = AgentServer::new(
         "127.0.0.1:0",
@@ -98,11 +99,10 @@ async fn start_test_agent_server() -> (std::net::SocketAddr, nession_agent::serv
         tmp.path().to_string_lossy().as_ref(),
         AttachMode::Plain,
         _resize_tx,
-    )
-    .expect("server creation should succeed");
-    let (handle, addr) = server.start().await.expect("start should succeed");
+    )?;
+    let (handle, addr) = server.start().await?;
 
-    (addr, handle)
+    Ok((addr, handle))
 }
 
 /// Connect to central server and register an agent, returning the handle.
@@ -111,7 +111,7 @@ async fn register_agent_with_server(
     agent_id: &str,
     auth_token: &str,
     agent_port: u16,
-) -> nession_agent::connection::ServerClientHandle {
+) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
@@ -120,7 +120,7 @@ async fn register_agent_with_server(
     };
 
     let client = ServerClient::new(
-        format!("ws://{}", server_addr),
+        format!("ws://{server_addr}"),
         auth_token,
         agent_id,
         "test-host",
@@ -135,11 +135,7 @@ async fn register_agent_with_server(
         None, // extension_registry
     );
 
-    client
-        .connect_and_run()
-        .await
-        .expect("agent registration failed")
-        .0
+    Ok(client.connect_and_run().await?.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,15 +145,16 @@ async fn register_agent_with_server(
 #[tokio::test]
 async fn test_full_agent_server_integration() {
     // Start a real central server.
-    let (server_addr, server_handle, db_path) = start_test_server("test-token").await;
+    let (server_addr, server_handle, db_path) = start_test_server("test-token").await.unwrap();
 
     // Start a real agent server.
-    let (agent_addr, agent_server_handle) = start_test_agent_server().await;
+    let (agent_addr, agent_server_handle) = start_test_agent_server().await.unwrap();
 
     // Register agent with central server.
     let client_handle =
         register_agent_with_server(server_addr, "e2e-agent-1", "test-token", agent_addr.port())
-            .await;
+            .await
+            .unwrap();
 
     // Give it time to register.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -193,10 +190,10 @@ async fn test_full_agent_server_integration() {
 #[tokio::test]
 async fn test_client_connects_to_agent_via_p2p() {
     // Start agent server.
-    let (agent_addr, agent_handle) = start_test_agent_server().await;
+    let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Connect a client directly to the agent.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("client connection failed");
     let (mut sink, mut stream) = ws.split();
 
@@ -230,7 +227,8 @@ async fn test_client_connects_to_agent_via_p2p() {
 #[tokio::test]
 async fn test_terminal_io_through_full_chain() {
     let tmux = SessionManager::new();
-    let session_name = unique_session_name("e2e-io");
+    let session = TestSession::new("e2e-io");
+    let session_name = session.name().to_string();
 
     // Create a tmux session.
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
@@ -238,10 +236,10 @@ async fn test_terminal_io_through_full_chain() {
         .unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle) = start_test_agent_server().await;
+    let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Connect client.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("connection failed");
     let (mut sink, mut stream) = ws.split();
 
@@ -340,15 +338,16 @@ async fn test_session_lifecycle() {
     let _tmux = SessionManager::new();
 
     // Start agent server.
-    let (agent_addr, agent_handle) = start_test_agent_server().await;
+    let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Connect client.
-    let url = format!("ws://{}", agent_addr);
+    let url = format!("ws://{agent_addr}");
     let (ws, _) = connect_async(&url).await.expect("connection failed");
     let (mut sink, mut stream) = ws.split();
 
     // Create a session.
-    let session_name = unique_session_name("e2e-lifecycle");
+    let session = TestSession::new("e2e-lifecycle");
+    let session_name = session.name().to_string();
     let create = SessionCreatePayload {
         name: session_name.to_string(),
         width: 80,
@@ -416,10 +415,11 @@ async fn test_session_lifecycle() {
 
 #[tokio::test]
 async fn test_agent_reconnects_after_server_restart() {
-    let (server_addr1, server_handle1, db_path1) = start_test_server("reconnect-token").await;
+    let (server_addr1, server_handle1, db_path1) =
+        start_test_server("reconnect-token").await.unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle) = start_test_agent_server().await;
+    let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Register with first server.
     let client_handle = register_agent_with_server(
@@ -428,7 +428,8 @@ async fn test_agent_reconnects_after_server_restart() {
         "reconnect-token",
         agent_addr.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -437,7 +438,8 @@ async fn test_agent_reconnects_after_server_restart() {
     cleanup_db(&db_path1).await;
 
     // Start a new server on a different port.
-    let (server_addr2, server_handle2, db_path2) = start_test_server("reconnect-token").await;
+    let (server_addr2, server_handle2, db_path2) =
+        start_test_server("reconnect-token").await.unwrap();
 
     // The agent's ServerClient has automatic reconnection, but we need to manually
     // reconnect for this test since we changed server addresses.
@@ -451,7 +453,8 @@ async fn test_agent_reconnects_after_server_restart() {
         "reconnect-token",
         agent_addr.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -468,12 +471,12 @@ async fn test_agent_reconnects_after_server_restart() {
 
 #[tokio::test]
 async fn test_multiple_agents_register() {
-    let (server_addr, server_handle, db_path) = start_test_server("multi-token").await;
+    let (server_addr, server_handle, db_path) = start_test_server("multi-token").await.unwrap();
 
     // Start multiple agent servers.
-    let (agent_addr1, agent_handle1) = start_test_agent_server().await;
-    let (agent_addr2, agent_handle2) = start_test_agent_server().await;
-    let (agent_addr3, agent_handle3) = start_test_agent_server().await;
+    let (agent_addr1, agent_handle1) = start_test_agent_server().await.unwrap();
+    let (agent_addr2, agent_handle2) = start_test_agent_server().await.unwrap();
+    let (agent_addr3, agent_handle3) = start_test_agent_server().await.unwrap();
 
     // Register all agents.
     let handle1 = register_agent_with_server(
@@ -482,7 +485,8 @@ async fn test_multiple_agents_register() {
         "multi-token",
         agent_addr1.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let handle2 = register_agent_with_server(
         server_addr,
@@ -490,7 +494,8 @@ async fn test_multiple_agents_register() {
         "multi-token",
         agent_addr2.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let handle3 = register_agent_with_server(
         server_addr,
@@ -498,7 +503,8 @@ async fn test_multiple_agents_register() {
         "multi-token",
         agent_addr3.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -522,8 +528,8 @@ async fn test_multiple_agents_register() {
 
 #[tokio::test]
 async fn test_graceful_shutdown() {
-    let (server_addr, server_handle, db_path) = start_test_server("shutdown-token").await;
-    let (agent_addr, agent_handle) = start_test_agent_server().await;
+    let (server_addr, server_handle, db_path) = start_test_server("shutdown-token").await.unwrap();
+    let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Register agent.
     let client_handle = register_agent_with_server(
@@ -532,7 +538,8 @@ async fn test_graceful_shutdown() {
         "shutdown-token",
         agent_addr.port(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Start heartbeat.
     let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 10);

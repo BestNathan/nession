@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { createFileOps } from '@/services/fileOps';
+import { createFileOps, readFileChunked, DEFAULT_CHUNK_SIZE } from '@/services/fileOps';
 import type { P2PConnection, P2PMessage } from '@/hooks/useP2PConnection';
 
 interface MockP2P extends P2PConnection {
@@ -96,6 +96,21 @@ describe('fileOps', () => {
       const result = await promise;
       expect(result.path).toBe('/etc/hosts');
       expect(result.content).toBe('MTI3LjAuMC4x');
+    });
+
+    it('forwards offset and limit options when provided', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+
+      const promise = ops.readFile('/etc/hosts', { offset: 1024, limit: 512 });
+      await flush();
+      const sendCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(sendCall.payload).toEqual({ path: '/etc/hosts', offset: 1024, limit: 512 });
+
+      p2p._respond(sendCall.id, 'ok', {
+        path: '/etc/hosts', content: '', mime_type: 'text/plain',
+      });
+      await promise;
     });
   });
 
@@ -273,6 +288,112 @@ describe('fileOps', () => {
 
       const result = await promise;
       expect(result.written).toBe(11);
+    });
+  });
+
+  describe('readFileChunked', () => {
+    it('fetches chunks until has_more is false and concatenates decoded text', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+      const progress = vi.fn();
+
+      const chunks = ['chunk-1', 'chunk-2', 'chunk-3'];
+      let callIndex = 0;
+
+      const p = readFileChunked(ops, '/big.txt', progress).promise;
+
+      // Respond to each successive file.read request with a chunk.
+      while (callIndex < chunks.length) {
+        await flush();
+        const sendCalls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+        const call = sendCalls[callIndex][0];
+        expect(call.msg_type).toBe('file.read');
+        expect(call.payload.path).toBe('/big.txt');
+        expect(call.payload.offset).toBe(callIndex * chunks[0].length);
+        expect(call.payload.limit).toBe(DEFAULT_CHUNK_SIZE);
+
+        const isLast = callIndex === chunks.length - 1;
+        p2p._respond(call.id, 'ok', {
+          path: '/big.txt',
+          content: btoa(chunks[callIndex]),
+          mime_type: 'text/plain',
+          offset: call.payload.offset,
+          total_size: chunks.join('').length,
+          has_more: !isLast,
+        });
+        callIndex += 1;
+      }
+
+      const fullText = await p;
+      expect(fullText).toBe(chunks.join(''));
+      // Progress fires once per chunk with cumulative offsets.
+      expect(progress).toHaveBeenCalledTimes(chunks.length);
+      expect(progress.mock.calls[chunks.length - 1][0]).toBe(chunks.join('').length);
+      expect(progress.mock.calls[chunks.length - 1][1]).toBe(chunks.join('').length);
+    });
+
+    it('cancel() stops further requests and rejects with AbortError', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+
+      const handle = readFileChunked(ops, '/big.txt');
+
+      // Respond to the first chunk with has_more=true so the loop wants to continue.
+      await flush();
+      const firstCall = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      p2p._respond(firstCall.id, 'ok', {
+        path: '/big.txt',
+        content: btoa('first'),
+        mime_type: 'text/plain',
+        total_size: 100,
+        has_more: true,
+      });
+
+      // Cancel immediately before the next send.
+      handle.cancel();
+
+      await expect(handle.promise).rejects.toThrow(/cancelled/i);
+      // Only the first chunk was requested — cancellation stopped the loop.
+      expect((p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+    });
+
+    it('returns single-chunk content immediately when has_more is false on first response', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+      const progress = vi.fn();
+
+      const p = readFileChunked(ops, '/small.txt', progress).promise;
+
+      await flush();
+      const call = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      p2p._respond(call.id, 'ok', {
+        path: '/small.txt',
+        content: btoa('only-chunk'),
+        mime_type: 'text/plain',
+        total_size: 10,
+        has_more: false,
+      });
+
+      const text = await p;
+      expect(text).toBe('only-chunk');
+      expect(progress).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('getCwd', () => {
+    it('sends file.cwd with session_id and returns path', async () => {
+      const p2p = makeP2PConnection();
+      const ops = createFileOps(p2p);
+
+      const promise = ops.getCwd('agent-1:my-session');
+      await flush();
+      const call = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(call.msg_type).toBe('file.cwd');
+      expect(call.payload.session_id).toBe('agent-1:my-session');
+
+      p2p._respond(call.id, 'ok', { path: '/home/user/project' });
+      const result = await promise;
+      expect(result.path).toBe('/home/user/project');
     });
   });
 });

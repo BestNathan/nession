@@ -14,15 +14,17 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message as WsMessage};
 
 /// Start a mock WebSocket server that accepts connections and captures messages.
-async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+async fn start_mock_server(
+    port: u16,
+) -> anyhow::Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<String>)> {
     let (msg_tx, msg_rx) = mpsc::channel(100);
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-        .await
-        .expect("failed to bind mock server");
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
 
     let handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let ws = accept_async(stream).await.expect("failed to accept ws");
+            let ws = accept_async(stream)
+                .await
+                .unwrap_or_else(|e| panic!("failed to accept ws: {e}"));
             let (mut sink, mut stream) = ws.split();
 
             // Send a registration response.
@@ -46,13 +48,13 @@ async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Rec
         }
     });
 
-    (handle, msg_rx)
+    Ok((handle, msg_rx))
 }
 
 #[tokio::test]
 async fn integration_connection_to_mock_server() {
     let port = 29081;
-    let (server_handle, _msg_rx) = start_mock_server(port).await;
+    let (server_handle, _msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -63,7 +65,7 @@ async fn integration_connection_to_mock_server() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-1",
         "test-host",
@@ -90,7 +92,7 @@ async fn integration_connection_to_mock_server() {
 #[tokio::test]
 async fn integration_registration_message_format() {
     let port = 29082;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -101,7 +103,7 @@ async fn integration_registration_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "secret-token-123",
         "integration-agent-2",
         "my-hostname",
@@ -153,7 +155,7 @@ async fn integration_registration_message_format() {
 #[tokio::test]
 async fn integration_heartbeat_message_format() {
     let port = 29083;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -164,7 +166,7 @@ async fn integration_heartbeat_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-3",
         "test-host",
@@ -226,7 +228,7 @@ async fn integration_heartbeat_message_format() {
 #[tokio::test]
 async fn integration_session_update_message_format() {
     let port = 29084;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let metadata = AgentMetadata {
@@ -237,7 +239,7 @@ async fn integration_session_update_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-4",
         "test-host",
@@ -304,7 +306,7 @@ async fn integration_reconnection_logic() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-5",
         "test-host",
@@ -327,7 +329,7 @@ async fn integration_reconnection_logic() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Now start the server.
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // The client should eventually connect and send registration.

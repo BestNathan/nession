@@ -1,7 +1,8 @@
 import type { ComponentType } from 'react';
-import { Edit3, Save, Eye, Code, Info } from 'lucide-react';
+import { Edit3, Save, Eye, Code, Info, Lock } from 'lucide-react';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
+import { Progress } from './ui/progress';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { ImageViewer } from './ImageViewer';
@@ -19,6 +20,7 @@ import {
   AlertDialogCancel,
 } from './ui/alert-dialog';
 import { type ViewerType } from '@/lib/viewerRegistry';
+import { formatSize } from '@/lib/format';
 import { useFileViewer, type ViewMode } from '@/hooks/useFileViewer';
 import type { FileOps } from '../services/fileOps';
 
@@ -26,6 +28,8 @@ export interface FileViewerProps {
   fileOps: FileOps;
   path: string;
   filename: string;
+  /** File size in bytes — when above the chunked threshold, forces read-only with progress. */
+  fileSize?: number;
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
@@ -38,6 +42,7 @@ interface FileViewerToolbarProps {
   saving: boolean;
   isMarkdown: boolean;
   viewMode: ViewMode;
+  forceReadOnly: boolean;
   onSave: () => void;
   onEditToggle: () => void;
   onSetViewMode: (mode: ViewMode) => void;
@@ -45,15 +50,20 @@ interface FileViewerToolbarProps {
 }
 
 function FileViewerToolbar({
-  filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, onSave, onEditToggle, onSetViewMode, onCloseClick,
+  filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
 }: FileViewerToolbarProps) {
   // Markdown files get a Preview/Raw mode toggle; Edit is only offered in raw mode.
-  const showEditToggle = isText && (!isMarkdown || viewMode === 'raw');
+  const showEditToggle = isText && !forceReadOnly && (!isMarkdown || viewMode === 'raw');
 
   return (
     <div className="flex items-center justify-between px-2 py-1 border-b flex-shrink-0">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground truncate max-w-[200px]">{filename}</span>
+        {forceReadOnly && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">
+            <Lock className="h-2.5 w-2.5" /> Read-only
+          </span>
+        )}
         {isDirty && <span className="w-2 h-2 rounded-full bg-amber-500" title="Unsaved changes" />}
       </div>
       <div className="flex items-center gap-1">
@@ -108,17 +118,33 @@ interface FileViewerContentProps {
   isMarkdown: boolean;
   viewMode: ViewMode;
   showSuggestion: boolean;
+  isChunkedLoading: boolean;
+  loadedBytes: number;
+  totalBytes: number;
   onRetry: () => void;
   onChange: (value: string) => void;
   onSuggestionPreview: () => void;
   onSuggestionDismiss: () => void;
+  onCancelLoad: () => void;
 }
 
 function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, filename, originalContent, content,
   isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
-  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss,
+  isChunkedLoading, loadedBytes, totalBytes,
+  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
 }: FileViewerContentProps) {
+  // Chunked progress view — shown while a large file is being downloaded in chunks.
+  const chunkedProgressView = (
+    <div className="flex flex-col items-center justify-center h-full gap-3 p-6">
+      <p className="text-sm text-muted-foreground">
+        Loading… {formatSize(loadedBytes)} / {formatSize(totalBytes)}
+      </p>
+      <Progress value={totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0} className="w-64" />
+      <Button variant="outline" size="sm" onClick={onCancelLoad}>Cancel</Button>
+    </div>
+  );
+
   // Media viewers
   if (viewerType && viewerType !== 'markdown') {
     const mediaViewers: Partial<Record<ViewerType, ComponentType<{ blobUrl: string; filename: string }>>> = {
@@ -160,7 +186,7 @@ function FileViewerContent({
           </div>
         )}
         <div className="flex-1 min-h-0">
-          {loading ? (
+          {isChunkedLoading ? chunkedProgressView : loading ? (
             <div className="flex flex-col p-3 gap-2">
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-3/4" />
@@ -202,7 +228,7 @@ function FileViewerContent({
         </div>
       )}
       <div className="flex-1 min-h-0">
-        {loading ? (
+        {isChunkedLoading ? chunkedProgressView : loading ? (
           <div className="flex flex-col p-3 gap-2">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
@@ -226,7 +252,7 @@ function FileViewerContent({
   );
 }
 
-export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: FileViewerProps) {
+export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirtyChange }: FileViewerProps) {
   const {
     viewerType,
     isMarkdown,
@@ -242,6 +268,10 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
     saving,
     showUnsavedDialog,
     isText,
+    loadedBytes,
+    totalBytes,
+    isChunkedLoading,
+    forceReadOnly,
     setShowUnsavedDialog,
     loadFile,
     handleEditToggle,
@@ -252,7 +282,8 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
     handleConfirmClose,
     handleSuggestionPreview,
     handleSuggestionDismiss,
-  } = useFileViewer({ fileOps, path, filename, onClose, onDirtyChange });
+    handleCancelLoad,
+  } = useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize });
 
   return (
     <div className="flex flex-col h-full">
@@ -264,6 +295,7 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
         saving={saving}
         isMarkdown={isMarkdown}
         viewMode={viewMode}
+        forceReadOnly={forceReadOnly}
         onSave={handleSave}
         onEditToggle={handleEditToggle}
         onSetViewMode={handleSetViewMode}
@@ -282,10 +314,14 @@ export function FileViewer({ fileOps, path, filename, onClose, onDirtyChange }: 
         isMarkdown={isMarkdown}
         viewMode={viewMode}
         showSuggestion={showSuggestion}
+        isChunkedLoading={isChunkedLoading}
+        loadedBytes={loadedBytes}
+        totalBytes={totalBytes}
         onRetry={loadFile}
         onChange={handleContentChange}
         onSuggestionPreview={handleSuggestionPreview}
         onSuggestionDismiss={handleSuggestionDismiss}
+        onCancelLoad={handleCancelLoad}
       />
 
       <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>

@@ -182,7 +182,7 @@ mod tests {
         let clock_ticks = get_clock_ticks().unwrap();
         assert!(clock_ticks > 0);
         // Typically 100 on most systems
-        assert!(clock_ticks >= 1 && clock_ticks <= 1000);
+        assert!((1..=1000).contains(&clock_ticks));
     }
 
     #[test]

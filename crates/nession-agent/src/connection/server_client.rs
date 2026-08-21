@@ -1034,13 +1034,14 @@ fn flatten_snapshots(snapshots: &[EnvSnapshot]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestSession;
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
 
     /// Start a mock WebSocket server that accepts connections and echoes messages.
     async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -1089,7 +1090,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-1",
             "test-host",
@@ -1136,7 +1137,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-2",
             "test-host",
@@ -1193,7 +1194,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-3",
             "test-host",
@@ -1242,7 +1243,7 @@ mod tests {
         port: u16,
         interval_secs: u64,
     ) -> tokio::task::JoinHandle<()> {
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
         tokio::spawn(async move {
@@ -1278,7 +1279,7 @@ mod tests {
             image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-iv",
             "test-host",
@@ -1308,7 +1309,7 @@ mod tests {
         // accepts a second connection and forwards the agent_id of whatever it
         // receives so the test can confirm a re-registration happened.
         let (re_tx, mut re_rx) = mpsc::channel::<String>(4);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("bind");
         let server_handle = tokio::spawn(async move {
@@ -1358,7 +1359,7 @@ mod tests {
             image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "reconnect-agent",
             "test-host",
@@ -1399,7 +1400,7 @@ mod tests {
         session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -1449,18 +1450,10 @@ mod tests {
         (handle, msg_rx)
     }
 
-    fn unique_session_name(prefix: &str) -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        format!("nession-test-{prefix}-{nanos}")
-    }
-
     #[tokio::test]
     async fn test_server_session_create_command() {
-        let session_name = unique_session_name("server-create");
+        let session = TestSession::new("server-create");
+        let session_name = session.name().to_string();
 
         let port = 28086;
         let (server_handle, mut msg_rx) =
@@ -1475,7 +1468,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-create",
             "test-host",
@@ -1519,7 +1512,7 @@ mod tests {
         session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -1575,7 +1568,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_kill_command() {
-        let session_name = unique_session_name("server-kill");
+        let session = TestSession::new("server-kill");
+        let session_name = session.name().to_string();
         let port = 28087;
         let (server_handle, mut msg_rx) =
             start_mock_server_with_session_kill(port, session_name.clone()).await;
@@ -1589,7 +1583,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-kill",
             "test-host",
@@ -1627,7 +1621,7 @@ mod tests {
         port: u16,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (_msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -1682,7 +1676,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-ack",
             "test-host",
@@ -1935,7 +1929,7 @@ mod tests {
         port: u16,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -1986,7 +1980,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-env-list",
             "test-host",
@@ -2022,7 +2016,7 @@ mod tests {
         port: u16,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -2076,7 +2070,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-sessions-list",
             "test-host",
@@ -2114,7 +2108,7 @@ mod tests {
         port: u16,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -2165,7 +2159,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-env-query",
             "test-host",
@@ -2202,7 +2196,7 @@ mod tests {
         session_name: String,
     ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .expect("failed to bind mock server");
 
@@ -2252,7 +2246,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_session_env_unset_command() {
-        let session_name = unique_session_name("env-unset");
+        let session = TestSession::new("env-unset");
+        let session_name = session.name().to_string();
         let port = 28091;
         let (server_handle, mut msg_rx) =
             start_mock_server_env_unset(port, session_name.clone()).await;
@@ -2266,7 +2261,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-env-unset",
             "test-host",
@@ -2315,7 +2310,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{}", port),
+            format!("ws://127.0.0.1:{port}"),
             "test-token",
             "test-agent-backoff",
             "test-host",

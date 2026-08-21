@@ -2,12 +2,40 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use tokio::task;
 
 use super::sandbox::PathSandbox;
 
-/// Maximum file size for read operations (10 MB).
+/// Maximum file size for the legacy (no offset/limit) read path (10 MB).
 const MAX_READ_SIZE: u64 = 10 * 1024 * 1024;
+/// Absolute ceiling for chunked reads (50 MB).
+const MAX_CHUNKED_READ_SIZE: u64 = 50 * 1024 * 1024;
+/// Default chunk size when the caller supplies a limit of `None` (256 KB).
+const DEFAULT_CHUNK_SIZE: u64 = 256 * 1024;
+
+/// Application MIME subtypes that are actually text-based.
+const TEXT_LIKE_APPLICATION_TYPES: &[&str] = &[
+    "application/json",
+    "application/javascript",
+    "application/xml",
+    "application/x-yaml",
+    "application/toml",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/sql",
+    "application/graphql",
+    "application/xhtml+xml",
+    "application/x-www-form-urlencoded",
+];
+
+/// Returns `true` when a MIME type represents binary (non-text) content.
+fn is_binary_mime(mime: &str) -> bool {
+    if mime.starts_with("text/") {
+        return false;
+    }
+    !TEXT_LIKE_APPLICATION_TYPES.contains(&mime)
+}
 
 /// A filesystem entry returned by directory listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +47,10 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: u64,
     pub modified: u64,
+    /// Inferred MIME type (from file extension). Directories use "inode/directory".
+    pub mime_type: String,
+    /// Whether the file is binary (non-text) content.
+    pub is_binary: bool,
 }
 
 /// Data returned by a file read operation.
@@ -29,6 +61,15 @@ pub struct FileData {
     pub content: String,
     /// MIME type (e.g. "text/plain", "application/json").
     pub mime_type: String,
+    /// Byte offset into the file where this chunk starts.
+    #[serde(default)]
+    pub offset: u64,
+    /// Total file size in bytes.
+    #[serde(default)]
+    pub total_size: u64,
+    /// Whether more bytes remain after this chunk.
+    #[serde(default)]
+    pub has_more: bool,
 }
 
 /// High-level file operations scoped to a sandbox root.
@@ -80,6 +121,7 @@ impl FileOps {
                 let metadata = entry.metadata()?;
                 let entry_path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
+                let is_dir = metadata.is_dir();
 
                 // Compute path usable by sandbox.resolve() on the next call.
                 // Prefer a path relative to the sandbox root; when the entry
@@ -91,11 +133,22 @@ impl FileOps {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| entry_path.to_string_lossy().to_string());
 
+                // Infer MIME type and binary flag from the entry name.
+                let (mime_type, is_binary) = if is_dir {
+                    ("inode/directory".to_string(), false)
+                } else {
+                    let mime = mime_guess::from_path(&entry_path)
+                        .first_or_text_plain()
+                        .to_string();
+                    let binary = is_binary_mime(&mime);
+                    (mime, binary)
+                };
+
                 result.push(FileEntry {
                     name,
                     path: relative_path,
                     full_path: entry_path.to_string_lossy().to_string(),
-                    is_dir: metadata.is_dir(),
+                    is_dir,
                     size: metadata.len(),
                     modified: metadata
                         .modified()
@@ -103,6 +156,8 @@ impl FileOps {
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_secs())
                         .unwrap_or(0),
+                    mime_type,
+                    is_binary,
                 });
             }
 
@@ -121,47 +176,94 @@ impl FileOps {
     }
 
     /// Read the contents of a file. Returns base64-encoded content.
-    /// Rejects files larger than `MAX_READ_SIZE`.
-    pub async fn read_file(&self, path: &str) -> Result<FileData> {
+    ///
+    /// When `offset` and `limit` are both `None`, the entire file is returned
+    /// (up to `MAX_READ_SIZE`, 10 MB) — the backward-compatible fast path.
+    ///
+    /// When either is `Some`, a chunked read is performed: the file may be up
+    /// to `MAX_CHUNKED_READ_SIZE` (50 MB), only `limit` bytes starting at
+    /// `offset` are returned, and `has_more` reports whether additional bytes
+    /// remain past the returned window.
+    pub async fn read_file(
+        &self,
+        path: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<FileData> {
         let resolved = self.sandbox.resolve(path)?;
         let user_path = path.to_string();
         let path_for_mime = user_path.clone();
+        let chunked = offset.is_some() || limit.is_some();
 
-        let content = task::spawn_blocking(move || -> Result<(Vec<u8>, String)> {
-            let metadata = fs::metadata(&resolved)
-                .with_context(|| format!("failed to read metadata: {}", resolved.display()))?;
+        let result = task::spawn_blocking(
+            move || -> Result<(Vec<u8>, String, u64, u64, bool)> {
+                let metadata = fs::metadata(&resolved).with_context(|| {
+                    format!("failed to read metadata: {}", resolved.display())
+                })?;
 
-            if metadata.is_dir() {
-                anyhow::bail!("is_directory: cannot read a directory");
-            }
+                if metadata.is_dir() {
+                    anyhow::bail!("is_directory: cannot read a directory");
+                }
 
-            let size = metadata.len();
-            if size > MAX_READ_SIZE {
-                anyhow::bail!(
-                    "file_too_large: file is {size} bytes, max allowed is {MAX_READ_SIZE} bytes"
-                );
-            }
+                let size = metadata.len();
+                let mime = mime_guess::from_path(&path_for_mime)
+                    .first_or_text_plain()
+                    .to_string();
 
-            let data = fs::read(&resolved)
-                .with_context(|| format!("failed to read file: {}", resolved.display()))?;
+                if !chunked {
+                    // Backward-compatible path: reject anything over 10 MB.
+                    if size > MAX_READ_SIZE {
+                        anyhow::bail!(
+                            "file_too_large: file is {size} bytes, max allowed is {MAX_READ_SIZE} bytes"
+                        );
+                    }
+                    let data = fs::read(&resolved).with_context(|| {
+                        format!("failed to read file: {}", resolved.display())
+                    })?;
+                    return Ok((data, mime, 0, size, false));
+                }
 
-            // Detect MIME type from the user-supplied path extension
-            // (avoids leaking the on-disk path to the caller via MIME
-            // detection resolution).
-            let mime = mime_guess::from_path(&path_for_mime)
-                .first_or_text_plain()
-                .to_string();
+                // Chunked path.
+                if size > MAX_CHUNKED_READ_SIZE {
+                    anyhow::bail!(
+                        "file_too_large: file is {size} bytes, max allowed is {MAX_CHUNKED_READ_SIZE} bytes"
+                    );
+                }
 
-            Ok((data, mime))
-        })
+                let actual_offset = offset.unwrap_or(0);
+                let actual_limit = limit.unwrap_or(DEFAULT_CHUNK_SIZE).min(MAX_CHUNKED_READ_SIZE);
+
+                let mut file = fs::File::open(&resolved).with_context(|| {
+                    format!("failed to open file: {}", resolved.display())
+                })?;
+
+                if actual_offset > 0 {
+                    file.seek(SeekFrom::Start(actual_offset)).with_context(|| {
+                        format!("failed to seek to offset {actual_offset}")
+                    })?;
+                }
+
+                let mut buf = vec![0u8; actual_limit as usize];
+                let bytes_read = file.read(&mut buf).with_context(|| {
+                    format!("failed to read file: {}", resolved.display())
+                })?;
+                buf.truncate(bytes_read);
+
+                let has_more = actual_offset + (bytes_read as u64) < size;
+                Ok((buf, mime, actual_offset, size, has_more))
+            },
+        )
         .await??;
 
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&content.0);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&result.0);
 
         Ok(FileData {
             path: user_path,
             content: encoded,
-            mime_type: content.1,
+            mime_type: result.1,
+            offset: result.2,
+            total_size: result.3,
+            has_more: result.4,
         })
     }
 
@@ -362,7 +464,7 @@ mod tests {
         );
 
         // Verify round-trip: pass a path from list_dir back to read_file.
-        let content = ops.read_file(&file.path).await.unwrap();
+        let content = ops.read_file(&file.path, None, None).await.unwrap();
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&content.content)
             .unwrap();
@@ -384,7 +486,7 @@ mod tests {
         assert_eq!(file.path, "deep/nested/file.txt");
 
         // Round-trip through read_file.
-        let data = ops.read_file(&file.path).await.unwrap();
+        let data = ops.read_file(&file.path, None, None).await.unwrap();
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&data.content)
             .unwrap();
@@ -400,7 +502,7 @@ mod tests {
         let written = ops.write_file("test.txt", &b64).await.unwrap();
         assert_eq!(written, content.len() as u64);
 
-        let file_data = ops.read_file("test.txt").await.unwrap();
+        let file_data = ops.read_file("test.txt", None, None).await.unwrap();
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&file_data.content)
             .unwrap();
@@ -411,7 +513,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_nonexistent_file_fails() {
         let (_dir, ops) = setup();
-        let result = ops.read_file("nonexistent.txt").await;
+        let result = ops.read_file("nonexistent.txt", None, None).await;
         assert!(result.is_err());
     }
 
@@ -419,7 +521,7 @@ mod tests {
     async fn test_read_directory_fails() {
         let (dir, ops) = setup();
         fs::create_dir(dir.path().join("mydir")).unwrap();
-        let result = ops.read_file("mydir").await;
+        let result = ops.read_file("mydir", None, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("is_directory"));
     }
@@ -625,5 +727,125 @@ mod tests {
             fs::read_to_string(dir.path().join("deep/nested/file.txt")).unwrap(),
             "deep"
         );
+    }
+
+    fn decode_b64(b64: &str) -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_chunked_read_first_chunk() {
+        let (dir, ops) = setup();
+        // 30-byte file: "0123456789" repeated 3 times.
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
+        fs::write(dir.path().join("data.bin"), &content).unwrap();
+
+        let file_data = ops.read_file("data.bin", Some(0), Some(10)).await.unwrap();
+        let decoded = decode_b64(&file_data.content);
+        assert_eq!(decoded, &content[..10]);
+        assert_eq!(file_data.offset, 0);
+        assert_eq!(file_data.total_size, 30);
+        assert!(file_data.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_chunked_read_middle_chunk() {
+        let (dir, ops) = setup();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
+        fs::write(dir.path().join("data.bin"), &content).unwrap();
+
+        let file_data = ops.read_file("data.bin", Some(10), Some(10)).await.unwrap();
+        let decoded = decode_b64(&file_data.content);
+        assert_eq!(decoded, &content[10..20]);
+        assert_eq!(file_data.offset, 10);
+        assert_eq!(file_data.total_size, 30);
+        assert!(file_data.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_chunked_read_last_chunk() {
+        let (dir, ops) = setup();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
+        fs::write(dir.path().join("data.bin"), &content).unwrap();
+
+        let file_data = ops.read_file("data.bin", Some(20), Some(10)).await.unwrap();
+        let decoded = decode_b64(&file_data.content);
+        assert_eq!(decoded, &content[20..30]);
+        assert_eq!(file_data.offset, 20);
+        assert_eq!(file_data.total_size, 30);
+        assert!(!file_data.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_chunked_read_beyond_eof() {
+        let (dir, ops) = setup();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
+        fs::write(dir.path().join("data.bin"), &content).unwrap();
+
+        // offset=25, limit=10, but only 5 bytes remain.
+        let file_data = ops.read_file("data.bin", Some(25), Some(10)).await.unwrap();
+        let decoded = decode_b64(&file_data.content);
+        assert_eq!(decoded.len(), 5);
+        assert_eq!(decoded, &content[25..30]);
+        assert_eq!(file_data.offset, 25);
+        assert_eq!(file_data.total_size, 30);
+        assert!(!file_data.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_chunked_read_offset_at_eof() {
+        let (dir, ops) = setup();
+        let content: Vec<u8> = (0..30u8).map(|i| b'0' + (i % 10)).collect();
+        fs::write(dir.path().join("data.bin"), &content).unwrap();
+
+        // offset == file size → empty result.
+        let file_data = ops.read_file("data.bin", Some(30), Some(10)).await.unwrap();
+        let decoded = decode_b64(&file_data.content);
+        assert!(decoded.is_empty());
+        assert_eq!(file_data.offset, 30);
+        assert_eq!(file_data.total_size, 30);
+        assert!(!file_data.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_file_entry_mime_and_binary() {
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("a.txt"), b"text").unwrap();
+        fs::write(dir.path().join("b.json"), b"{}").unwrap();
+        // Minimal valid PNG header (just the 8-byte signature) to make it a
+        // real binary file; the extension alone drives MIME detection.
+        fs::write(dir.path().join("c.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+
+        let entries = ops.list_dir("").await.unwrap();
+        let find = |name: &str| entries.iter().find(|e| e.name == name).unwrap();
+
+        let txt = find("a.txt");
+        assert_eq!(txt.mime_type, "text/plain");
+        assert!(!txt.is_binary);
+
+        let json = find("b.json");
+        assert_eq!(json.mime_type, "application/json");
+        assert!(!json.is_binary);
+
+        let png = find("c.png");
+        assert_eq!(png.mime_type, "image/png");
+        assert!(png.is_binary);
+    }
+
+    #[tokio::test]
+    async fn test_backward_compat_read_file_no_offset() {
+        let (dir, ops) = setup();
+        let content = b"hello world, this is a test file";
+        fs::write(dir.path().join("file.txt"), content).unwrap();
+
+        let file_data = ops.read_file("file.txt", None, None).await.unwrap();
+        assert_eq!(file_data.offset, 0);
+        assert_eq!(file_data.total_size, content.len() as u64);
+        assert!(!file_data.has_more);
+
+        let decoded = decode_b64(&file_data.content);
+        assert_eq!(decoded, content);
     }
 }

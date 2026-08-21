@@ -22,7 +22,7 @@ struct TestServer {
 
 impl TestServer {
     /// Start a test server with the given auth token and wait until it is ready.
-    async fn start(auth_token: &str) -> Self {
+    async fn start(auth_token: &str) -> anyhow::Result<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -46,9 +46,9 @@ impl TestServer {
             ..Default::default()
         };
 
-        let db = Database::new(&db_path).await.unwrap();
-        let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
-        let addr = server.local_addr().unwrap();
+        let db = Database::new(&db_path).await?;
+        let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
+        let addr = server.local_addr()?;
 
         let handle = tokio::spawn(async move {
             // Errors are expected when tests tear down — ignore them.
@@ -58,11 +58,11 @@ impl TestServer {
         // Give the accept-loop a moment to start.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        Self {
+        Ok(Self {
             addr,
             db_path,
             _handle: handle,
-        }
+        })
     }
 
     fn ws_url(&self) -> String {
@@ -72,10 +72,13 @@ impl TestServer {
     /// Connect a raw WebSocket client.
     async fn connect(
         &self,
-    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
-    {
-        let (stream, _) = connect_async(self.ws_url()).await.unwrap();
-        stream
+    ) -> anyhow::Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    > {
+        let (stream, _) = connect_async(self.ws_url()).await?;
+        Ok(stream)
     }
 }
 
@@ -94,8 +97,9 @@ async fn send_text(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     text: String,
-) {
-    ws.send(WsMessage::Text(text)).await.unwrap();
+) -> anyhow::Result<()> {
+    ws.send(WsMessage::Text(text)).await?;
+    Ok(())
 }
 
 /// Receive the next text message, panicking if the connection closes or a non-text frame arrives.
@@ -106,8 +110,8 @@ async fn recv_text(
 ) -> String {
     match ws.next().await {
         Some(Ok(WsMessage::Text(t))) => t,
-        Some(Ok(other)) => panic!("Expected text message, got: {:?}", other),
-        Some(Err(e)) => panic!("WebSocket error: {}", e),
+        Some(Ok(other)) => panic!("Expected text message, got: {other:?}"),
+        Some(Err(e)) => panic!("WebSocket error: {e}"),
         None => panic!("WebSocket stream ended unexpectedly"),
     }
 }
@@ -134,18 +138,18 @@ async fn try_recv_text(
 
 #[tokio::test]
 async fn test_server_starts_and_accepts_connections() {
-    let server = TestServer::start("token").await;
-    let _ws = server.connect().await;
+    let server = TestServer::start("token").await.unwrap();
+    let _ws = server.connect().await.unwrap();
     // If we got here, the server accepted a connection.
 }
 
 #[tokio::test]
 async fn test_server_accepts_multiple_simultaneous_connections() {
-    let server = TestServer::start("token").await;
+    let server = TestServer::start("token").await.unwrap();
 
     let mut clients = Vec::new();
     for _ in 0..5 {
-        clients.push(server.connect().await);
+        clients.push(server.connect().await.unwrap());
     }
     assert_eq!(clients.len(), 5);
 }
@@ -156,8 +160,8 @@ async fn test_server_accepts_multiple_simultaneous_connections() {
 
 #[tokio::test]
 async fn test_agent_registration_success() {
-    let server = TestServer::start("secret").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("secret").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let msg = serde_json::json!({
         "msg_type": "agent.register",
@@ -178,7 +182,7 @@ async fn test_agent_registration_success() {
         }
     });
 
-    send_text(&mut ws, msg.to_string()).await;
+    send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
     assert_eq!(resp["msg_type"], "agent.register.response");
@@ -188,8 +192,8 @@ async fn test_agent_registration_success() {
 
 #[tokio::test]
 async fn test_agent_registration_rejected_bad_token() {
-    let server = TestServer::start("correct_token").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("correct_token").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let msg = serde_json::json!({
         "msg_type": "agent.register",
@@ -210,7 +214,7 @@ async fn test_agent_registration_rejected_bad_token() {
         }
     });
 
-    send_text(&mut ws, msg.to_string()).await;
+    send_text(&mut ws, msg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
     assert_eq!(resp["msg_type"], "agent.register.response");
@@ -219,11 +223,11 @@ async fn test_agent_registration_rejected_bad_token() {
 
 #[tokio::test]
 async fn test_multiple_agents_register_independently() {
-    let server = TestServer::start("shared_token").await;
+    let server = TestServer::start("shared_token").await.unwrap();
 
     // Register two agents on separate connections.
-    let mut ws1 = server.connect().await;
-    let mut ws2 = server.connect().await;
+    let mut ws1 = server.connect().await.unwrap();
+    let mut ws2 = server.connect().await.unwrap();
 
     let make_reg = |agent_id: &str| {
         serde_json::json!({
@@ -246,8 +250,12 @@ async fn test_multiple_agents_register_independently() {
         })
     };
 
-    send_text(&mut ws1, make_reg("agent-A").to_string()).await;
-    send_text(&mut ws2, make_reg("agent-B").to_string()).await;
+    send_text(&mut ws1, make_reg("agent-A").to_string())
+        .await
+        .unwrap();
+    send_text(&mut ws2, make_reg("agent-B").to_string())
+        .await
+        .unwrap();
 
     let resp1: serde_json::Value = serde_json::from_str(&recv_text(&mut ws1).await).unwrap();
     let resp2: serde_json::Value = serde_json::from_str(&recv_text(&mut ws2).await).unwrap();
@@ -262,8 +270,8 @@ async fn test_multiple_agents_register_independently() {
 
 #[tokio::test]
 async fn test_heartbeat_after_registration_is_acked() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     // Register first.
     let reg = serde_json::json!({
@@ -284,7 +292,7 @@ async fn test_heartbeat_after_registration_is_acked() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut ws, reg.to_string()).await;
+    send_text(&mut ws, reg.to_string()).await.unwrap();
     let _ = recv_text(&mut ws).await; // consume the registration response
 
     // Send a heartbeat.
@@ -303,7 +311,7 @@ async fn test_heartbeat_after_registration_is_acked() {
             }
         }
     });
-    send_text(&mut ws, hb.to_string()).await;
+    send_text(&mut ws, hb.to_string()).await.unwrap();
 
     // The server acknowledges heartbeats so the agent can confirm the link.
     let result = try_recv_text(&mut ws, 500).await;
@@ -315,8 +323,8 @@ async fn test_heartbeat_after_registration_is_acked() {
 
 #[tokio::test]
 async fn test_heartbeat_without_registration_is_silent() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let hb = serde_json::json!({
         "msg_type": "agent.heartbeat",
@@ -329,7 +337,7 @@ async fn test_heartbeat_without_registration_is_silent() {
             "active_sessions": 0
         }
     });
-    send_text(&mut ws, hb.to_string()).await;
+    send_text(&mut ws, hb.to_string()).await.unwrap();
 
     let result = try_recv_text(&mut ws, 500).await;
     assert!(
@@ -340,8 +348,8 @@ async fn test_heartbeat_without_registration_is_silent() {
 
 #[tokio::test]
 async fn test_multiple_heartbeats_accepted() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     // Register.
     let reg = serde_json::json!({
@@ -362,7 +370,7 @@ async fn test_multiple_heartbeats_accepted() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut ws, reg.to_string()).await;
+    send_text(&mut ws, reg.to_string()).await.unwrap();
     let _ = recv_text(&mut ws).await; // consume registration response
 
     // Send several heartbeats.
@@ -378,7 +386,7 @@ async fn test_multiple_heartbeats_accepted() {
                 "active_sessions": i
             }
         });
-        send_text(&mut ws, hb.to_string()).await;
+        send_text(&mut ws, hb.to_string()).await.unwrap();
     }
 
     // Each heartbeat should be acknowledged.
@@ -397,8 +405,8 @@ async fn test_multiple_heartbeats_accepted() {
 
 #[tokio::test]
 async fn test_client_auth_success() {
-    let server = TestServer::start("client_secret").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("client_secret").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
         "msg_type": "client.auth",
@@ -408,7 +416,7 @@ async fn test_client_auth_success() {
             "auth_token": "client_secret"
         }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["msg_type"], "client.auth.response");
@@ -418,8 +426,8 @@ async fn test_client_auth_success() {
 
 #[tokio::test]
 async fn test_client_auth_failure() {
-    let server = TestServer::start("real_secret").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("real_secret").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
         "msg_type": "client.auth",
@@ -429,7 +437,7 @@ async fn test_client_auth_failure() {
             "auth_token": "bad_secret"
         }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["msg_type"], "client.auth.response");
@@ -438,10 +446,10 @@ async fn test_client_auth_failure() {
 
 #[tokio::test]
 async fn test_multiple_clients_auth_simultaneously() {
-    let server = TestServer::start("shared_client_tok").await;
+    let server = TestServer::start("shared_client_tok").await.unwrap();
 
-    let mut ws1 = server.connect().await;
-    let mut ws2 = server.connect().await;
+    let mut ws1 = server.connect().await.unwrap();
+    let mut ws2 = server.connect().await.unwrap();
 
     let auth1 = serde_json::json!({
         "msg_type": "client.auth",
@@ -456,8 +464,8 @@ async fn test_multiple_clients_auth_simultaneously() {
         "payload": { "auth_token": "shared_client_tok" }
     });
 
-    send_text(&mut ws1, auth1.to_string()).await;
-    send_text(&mut ws2, auth2.to_string()).await;
+    send_text(&mut ws1, auth1.to_string()).await.unwrap();
+    send_text(&mut ws2, auth2.to_string()).await.unwrap();
 
     let resp1: serde_json::Value = serde_json::from_str(&recv_text(&mut ws1).await).unwrap();
     let resp2: serde_json::Value = serde_json::from_str(&recv_text(&mut ws2).await).unwrap();
@@ -472,10 +480,10 @@ async fn test_multiple_clients_auth_simultaneously() {
 
 #[tokio::test]
 async fn test_full_workflow_agent_and_client() {
-    let server = TestServer::start("workflow_token").await;
+    let server = TestServer::start("workflow_token").await.unwrap();
 
     // --- Step 1: Agent registers ---
-    let mut agent_ws = server.connect().await;
+    let mut agent_ws = server.connect().await.unwrap();
     let reg = serde_json::json!({
         "msg_type": "agent.register",
         "id": "wf-reg",
@@ -494,7 +502,7 @@ async fn test_full_workflow_agent_and_client() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut agent_ws, reg.to_string()).await;
+    send_text(&mut agent_ws, reg.to_string()).await.unwrap();
     let reg_resp: serde_json::Value =
         serde_json::from_str(&recv_text(&mut agent_ws).await).unwrap();
     assert_eq!(reg_resp["payload"]["status"], "accepted");
@@ -515,7 +523,7 @@ async fn test_full_workflow_agent_and_client() {
             }
         }
     });
-    send_text(&mut agent_ws, hb.to_string()).await;
+    send_text(&mut agent_ws, hb.to_string()).await.unwrap();
     // Heartbeats are acknowledged.
     let hb_result = try_recv_text(&mut agent_ws, 300).await;
     let ack: serde_json::Value =
@@ -523,7 +531,7 @@ async fn test_full_workflow_agent_and_client() {
     assert_eq!(ack["msg_type"], "server.heartbeat.ack");
 
     // --- Step 3: Client authenticates ---
-    let mut client_ws = server.connect().await;
+    let mut client_ws = server.connect().await.unwrap();
     let auth = serde_json::json!({
         "msg_type": "client.auth",
         "id": "wf-auth",
@@ -532,7 +540,7 @@ async fn test_full_workflow_agent_and_client() {
             "auth_token": "workflow_token"
         }
     });
-    send_text(&mut client_ws, auth.to_string()).await;
+    send_text(&mut client_ws, auth.to_string()).await.unwrap();
     let auth_resp: serde_json::Value =
         serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
     assert_eq!(auth_resp["payload"]["status"], "success");
@@ -549,7 +557,7 @@ async fn test_full_workflow_agent_and_client() {
             "active_sessions": 2
         }
     });
-    send_text(&mut agent_ws, hb2.to_string()).await;
+    send_text(&mut agent_ws, hb2.to_string()).await.unwrap();
     let hb2_result = try_recv_text(&mut agent_ws, 300).await;
     let ack2: serde_json::Value =
         serde_json::from_str(&hb2_result.expect("expected second heartbeat ack")).unwrap();
@@ -562,8 +570,8 @@ async fn test_full_workflow_agent_and_client() {
 
 #[tokio::test]
 async fn test_unknown_message_type_is_ignored() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let unknown = serde_json::json!({
         "msg_type": "totally.unknown",
@@ -571,7 +579,7 @@ async fn test_unknown_message_type_is_ignored() {
         "timestamp": current_timestamp(),
         "payload": { "foo": "bar" }
     });
-    send_text(&mut ws, unknown.to_string()).await;
+    send_text(&mut ws, unknown.to_string()).await.unwrap();
 
     let result = try_recv_text(&mut ws, 500).await;
     assert!(
@@ -587,8 +595,8 @@ async fn test_unknown_message_type_is_ignored() {
 #[tokio::test]
 async fn test_agent_can_register_then_authenticate_as_client() {
     // A single connection that first registers as an agent, then sends client.auth.
-    let server = TestServer::start("dual_tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("dual_tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     // Register as agent.
     let reg = serde_json::json!({
@@ -609,7 +617,7 @@ async fn test_agent_can_register_then_authenticate_as_client() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut ws, reg.to_string()).await;
+    send_text(&mut ws, reg.to_string()).await.unwrap();
     let reg_resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(reg_resp["payload"]["status"], "accepted");
 
@@ -620,32 +628,34 @@ async fn test_agent_can_register_then_authenticate_as_client() {
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "dual_tok" }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
     let auth_resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(auth_resp["payload"]["status"], "success");
 }
 
 #[tokio::test]
 async fn test_malformed_json_does_not_crash_server() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     // Send garbage data.
-    send_text(&mut ws, "not json at all".to_string()).await;
+    send_text(&mut ws, "not json at all".to_string())
+        .await
+        .unwrap();
 
     // The server should handle the parse error gracefully.
     // The connection may close or the message may be silently dropped.
     // Wait a bit and then verify the server is still up by connecting a new client.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let mut ws2 = server.connect().await;
+    let mut ws2 = server.connect().await.unwrap();
     let auth = serde_json::json!({
         "msg_type": "client.auth",
         "id": "post-crash",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "tok" }
     });
-    send_text(&mut ws2, auth.to_string()).await;
+    send_text(&mut ws2, auth.to_string()).await.unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws2).await).unwrap();
     assert_eq!(resp["payload"]["status"], "success");
@@ -653,8 +663,8 @@ async fn test_malformed_json_does_not_crash_server() {
 
 #[tokio::test]
 async fn test_response_preserves_message_id() {
-    let server = TestServer::start("id_tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("id_tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let unique_id = "unique-msg-id-42";
     let reg = serde_json::json!({
@@ -675,15 +685,15 @@ async fn test_response_preserves_message_id() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut ws, reg.to_string()).await;
+    send_text(&mut ws, reg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["id"], unique_id);
 }
 
 #[tokio::test]
 async fn test_response_includes_timestamp() {
-    let server = TestServer::start("ts_tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("ts_tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let before = current_timestamp();
 
@@ -693,7 +703,7 @@ async fn test_response_includes_timestamp() {
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "ts_tok" }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
 
     let after = current_timestamp();
@@ -702,10 +712,7 @@ async fn test_response_includes_timestamp() {
         .expect("response must include timestamp");
     assert!(
         ts >= before && ts <= after,
-        "Timestamp {} should be between {} and {}",
-        ts,
-        before,
-        after
+        "Timestamp {ts} should be between {before} and {after}"
     );
 }
 
@@ -715,10 +722,11 @@ async fn test_response_includes_timestamp() {
 
 #[tokio::test]
 async fn test_concurrent_agent_registrations() {
-    let server = TestServer::start("conc_tok").await;
+    let server = TestServer::start("conc_tok").await.unwrap();
     let mut handles = Vec::new();
 
-    for i in 0..10 {
+    // u16 so the port arithmetic below needs no cast (3000 + 9 fits comfortably).
+    for i in 0u16..10u16 {
         let url = format!("ws://{}", server.addr);
         let handle = tokio::spawn(async move {
             let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -731,7 +739,7 @@ async fn test_concurrent_agent_registrations() {
                     "agent_id": format!("agent-{}", i),
                     "hostname": format!("host-{}", i),
                     "ip_address": "127.0.0.1",
-                    "port": 3000 + i as u16,
+                    "port": 3000 + i,
                     "auth_token": "conc_tok",
                     "metadata": {
                         "tmux_version": "3.3a",
@@ -761,23 +769,23 @@ async fn test_concurrent_agent_registrations() {
 
 #[tokio::test]
 async fn test_connection_disconnect_does_not_affect_others() {
-    let server = TestServer::start("disc_tok").await;
+    let server = TestServer::start("disc_tok").await.unwrap();
 
     // Connect and immediately drop (disconnect).
     {
-        let _ws = server.connect().await;
+        let _ws = server.connect().await.unwrap();
         // _ws is dropped here.
     }
 
     // Server should still accept new connections.
-    let mut ws = server.connect().await;
+    let mut ws = server.connect().await.unwrap();
     let auth = serde_json::json!({
         "msg_type": "client.auth",
         "id": "after-disc",
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "disc_tok" }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["status"], "success");
 }
@@ -788,8 +796,8 @@ async fn test_connection_disconnect_does_not_affect_others() {
 
 #[tokio::test]
 async fn test_agent_session_update_active() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     // Register agent.
     send_text(
@@ -806,7 +814,8 @@ async fn test_agent_session_update_active() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     // Send session update.
@@ -822,7 +831,8 @@ async fn test_agent_session_update_active() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Session updates are not acknowledged via response (optimistic).
     // Verify silence (no error response).
@@ -835,8 +845,8 @@ async fn test_agent_session_update_active() {
 
 #[tokio::test]
 async fn test_agent_session_update_detached() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -849,7 +859,8 @@ async fn test_agent_session_update_detached() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -861,7 +872,8 @@ async fn test_agent_session_update_detached() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let result = try_recv_text(&mut ws, 300).await;
     assert!(result.is_none());
@@ -869,8 +881,8 @@ async fn test_agent_session_update_detached() {
 
 #[tokio::test]
 async fn test_agent_session_update_gone_removes_session() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -883,7 +895,8 @@ async fn test_agent_session_update_gone_removes_session() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     // Create a session first.
@@ -896,7 +909,8 @@ async fn test_agent_session_update_gone_removes_session() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Now remove it.
     send_text(
@@ -908,7 +922,8 @@ async fn test_agent_session_update_gone_removes_session() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let result = try_recv_text(&mut ws, 300).await;
     assert!(result.is_none());
@@ -916,8 +931,8 @@ async fn test_agent_session_update_gone_removes_session() {
 
 #[tokio::test]
 async fn test_session_update_from_unregistered_agent_is_silent() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -928,7 +943,8 @@ async fn test_session_update_from_unregistered_agent_is_silent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let result = try_recv_text(&mut ws, 300).await;
     assert!(result.is_none());
@@ -940,8 +956,8 @@ async fn test_session_update_from_unregistered_agent_is_silent() {
 
 #[tokio::test]
 async fn test_client_agents_list_requires_auth() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -951,7 +967,8 @@ async fn test_client_agents_list_requires_auth() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["message"], "Not authenticated");
@@ -959,10 +976,10 @@ async fn test_client_agents_list_requires_auth() {
 
 #[tokio::test]
 async fn test_client_agents_list_returns_registered_agents() {
-    let server = TestServer::start("tok").await;
+    let server = TestServer::start("tok").await.unwrap();
 
     // Register an agent first.
-    let mut agent_ws = server.connect().await;
+    let mut agent_ws = server.connect().await.unwrap();
     send_text(
         &mut agent_ws,
         serde_json::json!({
@@ -974,11 +991,12 @@ async fn test_client_agents_list_returns_registered_agents() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut agent_ws).await;
 
     // Client authenticates and lists agents.
-    let mut client_ws = server.connect().await;
+    let mut client_ws = server.connect().await.unwrap();
     send_text(
         &mut client_ws,
         serde_json::json!({
@@ -987,7 +1005,8 @@ async fn test_client_agents_list_returns_registered_agents() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut client_ws).await;
 
     send_text(
@@ -998,7 +1017,8 @@ async fn test_client_agents_list_returns_registered_agents() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
     assert_eq!(resp["msg_type"], "client.agents.list.response");
@@ -1023,8 +1043,8 @@ async fn test_client_agents_list_returns_registered_agents() {
 
 #[tokio::test]
 async fn test_client_sessions_list_requires_auth() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1034,7 +1054,8 @@ async fn test_client_sessions_list_requires_auth() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["message"], "Not authenticated");
@@ -1042,10 +1063,10 @@ async fn test_client_sessions_list_requires_auth() {
 
 #[tokio::test]
 async fn test_client_sessions_list_returns_sessions() {
-    let server = TestServer::start("tok").await;
+    let server = TestServer::start("tok").await.unwrap();
 
     // Register agent and push a session update.
-    let mut agent_ws = server.connect().await;
+    let mut agent_ws = server.connect().await.unwrap();
     send_text(
         &mut agent_ws,
         serde_json::json!({
@@ -1057,7 +1078,8 @@ async fn test_client_sessions_list_returns_sessions() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut agent_ws).await;
 
     send_text(
@@ -1069,10 +1091,11 @@ async fn test_client_sessions_list_returns_sessions() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Client lists sessions.
-    let mut client_ws = server.connect().await;
+    let mut client_ws = server.connect().await.unwrap();
     send_text(
         &mut client_ws,
         serde_json::json!({
@@ -1081,7 +1104,8 @@ async fn test_client_sessions_list_returns_sessions() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut client_ws).await;
 
     send_text(
@@ -1092,7 +1116,8 @@ async fn test_client_sessions_list_returns_sessions() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
     let sessions = resp["payload"]["sessions"].as_array().unwrap();
@@ -1103,10 +1128,10 @@ async fn test_client_sessions_list_returns_sessions() {
 
 #[tokio::test]
 async fn test_client_sessions_list_filtered_by_agent() {
-    let server = TestServer::start("tok").await;
+    let server = TestServer::start("tok").await.unwrap();
 
     // Register two agents with sessions.
-    let mut agent1 = server.connect().await;
+    let mut agent1 = server.connect().await.unwrap();
     send_text(
         &mut agent1,
         serde_json::json!({
@@ -1118,7 +1143,8 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut agent1).await;
     send_text(
         &mut agent1,
@@ -1129,9 +1155,10 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
-    let mut agent2 = server.connect().await;
+    let mut agent2 = server.connect().await.unwrap();
     send_text(
         &mut agent2,
         serde_json::json!({
@@ -1143,7 +1170,8 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut agent2).await;
     send_text(
         &mut agent2,
@@ -1154,10 +1182,11 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Client lists sessions filtered by agent-x.
-    let mut client = server.connect().await;
+    let mut client = server.connect().await.unwrap();
     send_text(
         &mut client,
         serde_json::json!({
@@ -1166,7 +1195,8 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut client).await;
 
     send_text(
@@ -1177,7 +1207,8 @@ async fn test_client_sessions_list_filtered_by_agent() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // The broadcast channel (capacity 16) may still hold stale
     // `sessions.changed` messages from the agent register path.
@@ -1200,8 +1231,8 @@ async fn test_client_sessions_list_filtered_by_agent() {
 
 #[tokio::test]
 async fn test_client_session_attach_requires_auth() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1211,7 +1242,8 @@ async fn test_client_session_attach_requires_auth() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["message"], "Not authenticated");
@@ -1219,8 +1251,8 @@ async fn test_client_session_attach_requires_auth() {
 
 #[tokio::test]
 async fn test_client_session_attach_invalid_format() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1230,7 +1262,8 @@ async fn test_client_session_attach_invalid_format() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -1241,7 +1274,8 @@ async fn test_client_session_attach_invalid_format() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert!(resp["payload"]["message"]
@@ -1252,8 +1286,8 @@ async fn test_client_session_attach_invalid_format() {
 
 #[tokio::test]
 async fn test_client_session_attach_session_not_found() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1263,7 +1297,8 @@ async fn test_client_session_attach_session_not_found() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -1274,7 +1309,8 @@ async fn test_client_session_attach_session_not_found() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert!(resp["payload"]["message"]
@@ -1285,10 +1321,10 @@ async fn test_client_session_attach_session_not_found() {
 
 #[tokio::test]
 async fn test_client_session_attach_p2p_mode() {
-    let server = TestServer::start("tok").await;
+    let server = TestServer::start("tok").await.unwrap();
 
     // Register agent with a connect_url.
-    let mut agent_ws = server.connect().await;
+    let mut agent_ws = server.connect().await.unwrap();
     send_text(
         &mut agent_ws,
         serde_json::json!({
@@ -1301,7 +1337,8 @@ async fn test_client_session_attach_p2p_mode() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut agent_ws).await;
 
     // Push session.
@@ -1314,10 +1351,11 @@ async fn test_client_session_attach_p2p_mode() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Client attaches.
-    let mut client = server.connect().await;
+    let mut client = server.connect().await.unwrap();
     send_text(
         &mut client,
         serde_json::json!({
@@ -1326,7 +1364,8 @@ async fn test_client_session_attach_p2p_mode() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut client).await;
 
     send_text(
@@ -1337,7 +1376,8 @@ async fn test_client_session_attach_p2p_mode() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     // Skip any broadcast messages that arrive before the attach response.
     let attach_resp = loop {
@@ -1364,8 +1404,8 @@ async fn test_client_session_attach_p2p_mode() {
 
 #[tokio::test]
 async fn test_client_session_create_requires_auth() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1375,7 +1415,8 @@ async fn test_client_session_create_requires_auth() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["error"], "Not authenticated");
@@ -1383,8 +1424,8 @@ async fn test_client_session_create_requires_auth() {
 
 #[tokio::test]
 async fn test_client_session_create_missing_fields() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1394,7 +1435,8 @@ async fn test_client_session_create_missing_fields() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -1405,7 +1447,8 @@ async fn test_client_session_create_missing_fields() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert!(!resp["payload"]["success"].as_bool().unwrap());
@@ -1413,8 +1456,8 @@ async fn test_client_session_create_missing_fields() {
 
 #[tokio::test]
 async fn test_client_session_kill_requires_auth() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1424,7 +1467,8 @@ async fn test_client_session_kill_requires_auth() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["error"], "Not authenticated");
@@ -1432,8 +1476,8 @@ async fn test_client_session_kill_requires_auth() {
 
 #[tokio::test]
 async fn test_client_session_kill_invalid_format() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1443,7 +1487,8 @@ async fn test_client_session_kill_invalid_format() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -1454,7 +1499,8 @@ async fn test_client_session_kill_invalid_format() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert!(resp["payload"]["error"]
@@ -1465,8 +1511,8 @@ async fn test_client_session_kill_invalid_format() {
 
 #[tokio::test]
 async fn test_client_session_kill_agent_not_found() {
-    let server = TestServer::start("tok").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("tok").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     send_text(
         &mut ws,
@@ -1476,7 +1522,8 @@ async fn test_client_session_kill_agent_not_found() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
     let _ = recv_text(&mut ws).await;
 
     send_text(
@@ -1487,7 +1534,8 @@ async fn test_client_session_kill_agent_not_found() {
         })
         .to_string(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert!(resp["payload"]["error"]
@@ -1502,9 +1550,9 @@ async fn test_client_session_kill_agent_not_found() {
 
 #[tokio::test]
 async fn test_no_auth_mode_accepts_any_agent() {
-    let server = TestServer::start("").await; // empty token = no-auth mode
+    let server = TestServer::start("").await.unwrap(); // empty token = no-auth mode
 
-    let mut ws = server.connect().await;
+    let mut ws = server.connect().await.unwrap();
     let reg = serde_json::json!({
         "msg_type": "agent.register",
         "id": "reg-noauth",
@@ -1521,15 +1569,15 @@ async fn test_no_auth_mode_accepts_any_agent() {
             "protocol_version": "1.0"
         }
     });
-    send_text(&mut ws, reg.to_string()).await;
+    send_text(&mut ws, reg.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["status"], "accepted");
 }
 
 #[tokio::test]
 async fn test_no_auth_mode_accepts_any_client() {
-    let server = TestServer::start("").await;
-    let mut ws = server.connect().await;
+    let server = TestServer::start("").await.unwrap();
+    let mut ws = server.connect().await.unwrap();
 
     let auth = serde_json::json!({
         "msg_type": "client.auth",
@@ -1537,7 +1585,7 @@ async fn test_no_auth_mode_accepts_any_client() {
         "timestamp": current_timestamp(),
         "payload": { "auth_token": "random" }
     });
-    send_text(&mut ws, auth.to_string()).await;
+    send_text(&mut ws, auth.to_string()).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut ws).await).unwrap();
     assert_eq!(resp["payload"]["status"], "success");
 }
