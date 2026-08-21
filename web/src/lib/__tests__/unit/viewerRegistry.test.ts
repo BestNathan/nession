@@ -83,6 +83,40 @@ describe('isViewablePath', () => {
   it('returns true for Cargo.toml', () => {
     expect(isViewablePath('src/Cargo.toml')).toBe(true);
   });
+
+  describe('with LanguageId', () => {
+    it('README is viewable (markdown)', () => {
+      expect(isViewablePath('README')).toBe(true);
+    });
+
+    it('random.bin is not viewable', () => {
+      expect(isViewablePath('random.bin')).toBe(false);
+    });
+
+    it('.gitignore is viewable (plaintext)', () => {
+      expect(isViewablePath('.gitignore')).toBe(true);
+    });
+
+    it('image.png is viewable (media)', () => {
+      expect(isViewablePath('image.png')).toBe(true);
+    });
+
+    it('svg is viewable as image (media takes precedence)', () => {
+      expect(isViewablePath('icon.svg')).toBe(true);
+    });
+
+    it('unknown extension is not viewable', () => {
+      expect(isViewablePath('file.xyz123')).toBe(false);
+    });
+
+    it('.env.local is viewable (plaintext basename)', () => {
+      expect(isViewablePath('.env.local')).toBe(true);
+    });
+
+    it('config.txt is viewable (text extension)', () => {
+      expect(isViewablePath('config.txt')).toBe(true);
+    });
+  });
 });
 
 describe('parseExt', () => {
