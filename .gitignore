@@ -8,8 +8,25 @@ Cargo.lock.bak
 # ================================
 # Node.js / Frontend
 # ================================
+# node_modules at any depth
 node_modules/
-web/node_modules/
+
+# Node project files — only under web/, ignore if accidentally created at root
+/package.json
+/package-lock.json
+/yarn.lock
+/pnpm-lock.yaml
+/bun.lockb
+/tsconfig.json
+/tsconfig.*.json
+/vite.config.*
+/eslint.config.*
+/.npmrc
+/.yarnrc
+!web/package.json
+!web/package-lock.json
+
+# Web build outputs & caches
 web/dist/
 web/dist-ssr/
 *.tsbuildinfo
