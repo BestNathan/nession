@@ -23,7 +23,6 @@ const LANGUAGE_ID_TO_CODEMIRROR: Partial<Record<LanguageId, string>> = {
   bash: 'bash',
   zsh: 'sh',
   fish: 'sh',
-  makefile: 'sh',
   go: 'go',
   rust: 'rs',
   markdown: 'md',

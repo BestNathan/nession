@@ -29,8 +29,8 @@ describe('languageIdToCodeMirrorKey', () => {
   it('maps fish to sh', () => {
     expect(languageIdToCodeMirrorKey('fish')).toBe('sh');
   });
-  it('maps makefile to sh', () => {
-    expect(languageIdToCodeMirrorKey('makefile')).toBe('sh');
+  it('returns null for makefile (no grammar)', () => {
+    expect(languageIdToCodeMirrorKey('makefile')).toBeNull();
   });
   it('returns null for elixir (no grammar in UIW)', () => {
     expect(languageIdToCodeMirrorKey('elixir')).toBeNull();

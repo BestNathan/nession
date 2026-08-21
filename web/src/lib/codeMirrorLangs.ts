@@ -18,13 +18,10 @@ const LANG_KEY_ALIASES: Record<string, string> = {
   python: 'py',
   markdown: 'md',
   dockerfile: '__dockerfile__',
-  makefile: 'sh',
 };
 
 const BASENAME_LANG_KEYS: Record<string, string> = {
   Dockerfile: '__dockerfile__',
-  Makefile: 'sh',
-  GNUmakefile: 'sh',
   Jenkinsfile: 'groovy',
   Gemfile: 'rb',
   Rakefile: 'rb',
