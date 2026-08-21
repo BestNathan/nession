@@ -33,21 +33,23 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 // ---------------------------------------------------------------------------
 
 /// Start a real nession-server on a random port and return its address.
+/// The database lives in its own `TempDir`, returned so the caller keeps it
+/// alive; dropping it removes the `.db` and its WAL/SHM sidecars. The previous
+/// name — `temp_dir()/<prefix>_<unix_secs>_<counter>.db` — collided between
+/// concurrent test runs: two processes starting in the same second both begin
+/// their counter at 0, so they opened the *same* SQLite file and failed with
+/// "database is locked" or "UNIQUE constraint failed: seaql_migrations.version".
 async fn start_test_server(
     auth_token: &str,
-) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>, String)> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let db_path = std::env::temp_dir()
-        .join(format!(
-            "nession_test_e2e_{}_{}.db",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            id
-        ))
+) -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+)> {
+    let db_dir = tempfile::tempdir()?;
+    let db_path = db_dir
+        .path()
+        .join("server.db")
         .to_string_lossy()
         .into_owned();
 
@@ -73,17 +75,7 @@ async fn start_test_server(
     // Give the server time to start accepting connections.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    Ok((addr, handle, db_path))
-}
-
-/// Remove a test database and its SQLite WAL/SHM sidecar files.
-///
-/// WAL mode leaves `-wal`/`-shm` files next to the main `.db`; deleting only
-/// the main file leaves them behind as stray artifacts.
-async fn cleanup_db(db_path: &str) {
-    tokio::fs::remove_file(db_path).await.ok();
-    tokio::fs::remove_file(format!("{db_path}-wal")).await.ok();
-    tokio::fs::remove_file(format!("{db_path}-shm")).await.ok();
+    Ok((addr, handle, db_dir))
 }
 
 /// Start a real agent WebSocket server on an OS-assigned port.
@@ -145,7 +137,7 @@ async fn register_agent_with_server(
 #[tokio::test]
 async fn test_full_agent_server_integration() {
     // Start a real central server.
-    let (server_addr, server_handle, db_path) = start_test_server("test-token").await.unwrap();
+    let (server_addr, server_handle, _db_dir) = start_test_server("test-token").await.unwrap();
 
     // Start a real agent server.
     let (agent_addr, agent_server_handle) = start_test_agent_server().await.unwrap();
@@ -180,7 +172,6 @@ async fn test_full_agent_server_integration() {
     server_handle.abort();
 
     // Clean up database.
-    cleanup_db(&db_path).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +406,7 @@ async fn test_session_lifecycle() {
 
 #[tokio::test]
 async fn test_agent_reconnects_after_server_restart() {
-    let (server_addr1, server_handle1, db_path1) =
+    let (server_addr1, server_handle1, db_dir1) =
         start_test_server("reconnect-token").await.unwrap();
 
     // Start agent server.
@@ -435,10 +426,10 @@ async fn test_agent_reconnects_after_server_restart() {
 
     // Kill the first server.
     server_handle1.abort();
-    cleanup_db(&db_path1).await;
+    drop(db_dir1); // removes server 1's database, as before
 
     // Start a new server on a different port.
-    let (server_addr2, server_handle2, db_path2) =
+    let (server_addr2, server_handle2, _db_dir2) =
         start_test_server("reconnect-token").await.unwrap();
 
     // The agent's ServerClient has automatic reconnection, but we need to manually
@@ -462,7 +453,6 @@ async fn test_agent_reconnects_after_server_restart() {
     client_handle2.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle2.abort();
-    cleanup_db(&db_path2).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +461,7 @@ async fn test_agent_reconnects_after_server_restart() {
 
 #[tokio::test]
 async fn test_multiple_agents_register() {
-    let (server_addr, server_handle, db_path) = start_test_server("multi-token").await.unwrap();
+    let (server_addr, server_handle, _db_dir) = start_test_server("multi-token").await.unwrap();
 
     // Start multiple agent servers.
     let (agent_addr1, agent_handle1) = start_test_agent_server().await.unwrap();
@@ -519,7 +509,6 @@ async fn test_multiple_agents_register() {
     agent_handle2.shutdown().await.ok();
     agent_handle3.shutdown().await.ok();
     server_handle.abort();
-    cleanup_db(&db_path).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +517,7 @@ async fn test_multiple_agents_register() {
 
 #[tokio::test]
 async fn test_graceful_shutdown() {
-    let (server_addr, server_handle, db_path) = start_test_server("shutdown-token").await.unwrap();
+    let (server_addr, server_handle, _db_dir) = start_test_server("shutdown-token").await.unwrap();
     let (agent_addr, agent_handle) = start_test_agent_server().await.unwrap();
 
     // Register agent.
@@ -566,6 +555,4 @@ async fn test_graceful_shutdown() {
 
     // Give everything time to shut down cleanly.
     tokio::time::sleep(Duration::from_millis(100)).await;
-
-    cleanup_db(&db_path).await;
 }
