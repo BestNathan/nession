@@ -47,7 +47,7 @@ type WsStream = futures_util::stream::SplitStream<
 >;
 
 async fn connect(addr: SocketAddr) -> (WsSink, WsStream) {
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (ws, _resp) = connect_async(&url).await.expect("connect should succeed");
     ws.split()
 }

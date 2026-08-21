@@ -46,7 +46,7 @@ async fn test_register_and_send_command() {
     let (addr, captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut sink, _stream) = ws_stream.split();
@@ -84,7 +84,7 @@ async fn test_resolve_command() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut sink, _stream) = ws_stream.split();
@@ -130,7 +130,7 @@ async fn test_unregister_agent_resolves_pending() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut sink, _stream) = ws_stream.split();
@@ -182,7 +182,7 @@ async fn test_multiple_concurrent_commands() {
     let (addr, _captured, _handle) = start_mock_agent().await;
     let broker = CommandBroker::new();
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut sink, _stream) = ws_stream.split();

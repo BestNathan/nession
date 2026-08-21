@@ -41,7 +41,7 @@ async fn test_server_accepts_connection() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let result = connect_async(&url).await;
 
     assert!(result.is_ok(), "Server should accept WebSocket connection");
@@ -66,7 +66,7 @@ async fn test_agent_registration() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let register_msg = serde_json::json!({
@@ -125,7 +125,7 @@ async fn test_invalid_auth_token() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let auth_msg = serde_json::json!({
@@ -177,7 +177,7 @@ async fn test_heartbeat_without_registration() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     let heartbeat_msg = serde_json::json!({
@@ -231,7 +231,7 @@ async fn test_client_agents_list_unauthenticated() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     let msg = serde_json::json!({
@@ -273,7 +273,7 @@ async fn test_close_frame_triggers_disconnect() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     // Send a close frame.
@@ -307,7 +307,7 @@ async fn test_agent_registration_with_connect_url() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
 
     let msg = serde_json::json!({
@@ -382,7 +382,7 @@ async fn test_client_sessions_list_authenticated() {
 
     let (addr, _handle) = start_test_server(config).await;
 
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
 
     // Authenticate

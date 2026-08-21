@@ -16,7 +16,7 @@ use tokio_tungstenite::{accept_async, tungstenite::protocol::Message as WsMessag
 /// Start a mock WebSocket server that accepts connections and captures messages.
 async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
     let (msg_tx, msg_rx) = mpsc::channel(100);
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
         .await
         .expect("failed to bind mock server");
 
@@ -63,7 +63,7 @@ async fn integration_connection_to_mock_server() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-1",
         "test-host",
@@ -101,7 +101,7 @@ async fn integration_registration_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "secret-token-123",
         "integration-agent-2",
         "my-hostname",
@@ -164,7 +164,7 @@ async fn integration_heartbeat_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-3",
         "test-host",
@@ -237,7 +237,7 @@ async fn integration_session_update_message_format() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-4",
         "test-host",
@@ -304,7 +304,7 @@ async fn integration_reconnection_logic() {
     };
 
     let client = ServerClient::new(
-        format!("ws://127.0.0.1:{}", port),
+        format!("ws://127.0.0.1:{port}"),
         "test-token",
         "integration-agent-5",
         "test-host",

@@ -38,7 +38,7 @@ async fn test_session_create_flow() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect mock agent
-    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut agent_sink, mut agent_stream) = agent_ws.split();
@@ -65,7 +65,7 @@ async fn test_session_create_flow() {
     let _ = agent_stream.next().await; // register response
 
     // Connect client
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
@@ -140,7 +140,7 @@ async fn test_session_kill_flow() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect mock agent
-    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut agent_sink, mut agent_stream) = agent_ws.split();
@@ -167,7 +167,7 @@ async fn test_session_kill_flow() {
     let _ = agent_stream.next().await;
 
     // Connect & auth client
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();
@@ -263,7 +263,7 @@ async fn test_create_with_offline_agent_returns_error() {
     let (addr, _server_handle) = start_server().await;
 
     // Connect & auth client (no agent registered)
-    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", addr))
+    let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
     let (mut client_sink, mut client_stream) = client_ws.split();

@@ -106,8 +106,8 @@ async fn recv_text(
 ) -> String {
     match ws.next().await {
         Some(Ok(WsMessage::Text(t))) => t,
-        Some(Ok(other)) => panic!("Expected text message, got: {:?}", other),
-        Some(Err(e)) => panic!("WebSocket error: {}", e),
+        Some(Ok(other)) => panic!("Expected text message, got: {other:?}"),
+        Some(Err(e)) => panic!("WebSocket error: {e}"),
         None => panic!("WebSocket stream ended unexpectedly"),
     }
 }
@@ -702,10 +702,7 @@ async fn test_response_includes_timestamp() {
         .expect("response must include timestamp");
     assert!(
         ts >= before && ts <= after,
-        "Timestamp {} should be between {} and {}",
-        ts,
-        before,
-        after
+        "Timestamp {ts} should be between {before} and {after}"
     );
 }
 
