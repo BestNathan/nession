@@ -317,18 +317,23 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_uses_configured_script_dir() {
-        // Scripts in a custom dir are cleaned up; a matching file in the
-        // system temp dir is left untouched (proves the dir is honored).
-        let custom = std::env::temp_dir().join("nession-env-test-dir");
-        tokio::fs::create_dir_all(&custom).await.unwrap();
+        // Scripts in a configured dir are cleaned up, proving EnvManager honours
+        // the dir it was given rather than always using the system temp dir.
+        //
+        // The dir is a TempDir rather than a fixed `temp_dir()/nession-env-test-dir`:
+        // sharing that name across concurrent test runs let one run's
+        // `remove_dir_all` delete the other's file, and because the assertion
+        // below is "the file is gone", the test would still pass — silently
+        // proving nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().to_path_buf();
         let mgr = EnvManager::new(custom.clone());
 
         let in_custom = source_script_path(custom.clone(), "cid", "sess", "a.env");
         tokio::fs::write(&in_custom, "export X=1\n").await.unwrap();
+        assert!(in_custom.exists(), "script should exist before cleanup");
 
         mgr.cleanup_client_scripts("cid").await;
         assert!(!in_custom.exists());
-
-        let _ = tokio::fs::remove_dir_all(&custom).await;
     }
 }

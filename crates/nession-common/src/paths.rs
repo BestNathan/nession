@@ -117,7 +117,8 @@ mod tests {
     #[test]
     fn test_nession_home_env_override() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = std::env::temp_dir().join("nession-test-home");
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().to_path_buf();
         std::env::set_var("NESSION_HOME", tmp.to_string_lossy().as_ref());
         let home = nession_home().unwrap();
         assert_eq!(home, tmp);

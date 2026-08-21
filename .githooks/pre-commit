@@ -42,6 +42,22 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 fi
 
+# ── Rust: test isolation (static, ~1.5s) ───────────────────────────────────
+# Catches a new test hardcoding a listen port, naming a fixed file in the
+# shared temp dir, or reaching into the real $HOME/.nession — all of which make
+# two concurrent test runs fight. Static on purpose: running the suite twice
+# (scripts/check-test-concurrency.sh) is probabilistic and load-sensitive, so it
+# stays a diagnostic rather than a gate.
+if [ -n "$STAGED_RUST" ]; then
+  echo -e "${YELLOW}→ check-test-isolation${NC}"
+  if ./scripts/check-test-isolation.sh; then
+    echo -e "${GREEN}✓ check-test-isolation${NC}"
+  else
+    echo -e "${RED}✗ check-test-isolation — see the fix line under each finding${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-lint${NC}"

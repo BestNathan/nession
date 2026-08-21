@@ -535,11 +535,14 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **`pre-commit` 只跑快检查**：`scripts/check-dev-workspace.sh commit`（禁止在根目录/`main` 上提交）→ `just quick`（`cargo fmt --check` → `cargo clippy --workspace -D warnings`）+ `just web-lint`（`eslint --max-warnings 0` → `tsc --noEmit`）。不跑测试,不跑覆盖率。
 - **`pre-push` 跑测试和覆盖率,且按改动范围收窄**：开头同样跑 `check-dev-workspace.sh push`；改了 `.rs` / `Cargo.{toml,lock}` / `rust-toolchain.toml` / `.cargo/` → `just test` + `just coverage`;改了 `web/**.{ts,tsx,js,css}` → `just web-test` + `just web-coverage`。两者都没改则整个跳过。
 - **手动检查**：`just check-workspace`（或 `./scripts/check-dev-workspace.sh session --fetch`）— Agent/开发者开新任务前确认根目录在最新 `main`、当前在 worktree 里开发。
-- **测试并发安全**:`./scripts/check-test-concurrency.sh` —— 把每个测试二进制同时跑两遍,要求两遍都通过。它抓的是**跑与跑之间**共享的状态(单跑一遍永远发现不了),这在本仓库很常见:多个 worktree 并存,CI 也可能和本地同时跑。三条硬规则:
-  - 测试监听端口一律 `bind("127.0.0.1:0")` 由 OS 分配,**不准写死端口号,也不准用"预留端口段"** —— 段位在两轮并发时照样撞。需要一个"没人监听"的地址时,用 `free_port()`(bind :0 拿号后释放)。
+- **测试并发安全**:测试之间隔离不够,**跑与跑之间**也必须隔离 —— 本仓库多 worktree 并存,CI 也可能和本地同时跑,共享状态会让两轮互相踩,失败看起来像随机的。三条硬规则:
+  - 测试监听端口一律 `bind("127.0.0.1:0")` 由 OS 分配,**不准写死端口号,也不准用"预留端口段"** —— 段位在两轮并发时照样撞。需要一个"没人监听"的地址时,用 `free_port()`(bind :0 拿号后释放),helper 命名为 `*_on()`。
   - 每个测试用的数据库/临时文件走 `tempfile::tempdir()`,**不准用 `temp_dir()` 拼固定名**,也不准用"时间戳 + 进程内计数"(两个进程同一秒启动、计数都从 0 开始,拼出同一个路径)。
   - 碰 `paths::nession_home()` 的测试**必须先把 `NESSION_HOME` 指到临时目录** —— 否则它解析成 `$HOME/.nession`,直接改开发者的真实配置。
-  该脚本目前**不在任何 hook / CI 里**;接入门禁属于 lint/门禁改动,需先获同意。
+
+  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明它还真的能抓到 —— 门禁静默失效比没门禁更糟。
+
+  `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
 - **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
