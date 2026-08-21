@@ -10,15 +10,15 @@ use nession_server::server::{
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 
-async fn make_handler() -> ConnectionHandler {
-    let db = Arc::new(Database::new(":memory:").await.unwrap());
+async fn make_handler() -> anyhow::Result<ConnectionHandler> {
+    let db = Arc::new(Database::new(":memory:").await?);
     let agent_registry = Arc::new(AgentRegistry::new(30, Arc::clone(&db))); // 30 second heartbeat timeout
     let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
     let command_broker = Arc::new(CommandBroker::new());
     let client_registry = Arc::new(ClientRegistry::new());
     let web_client_registry = Arc::new(WebClientRegistry::new());
     let env_service = EnvService::new(Arc::clone(&db));
-    ConnectionHandler::new(
+    Ok(ConnectionHandler::new(
         ConnectionHandlerDeps {
             agent_registry,
             session_registry,
@@ -32,7 +32,7 @@ async fn make_handler() -> ConnectionHandler {
             server_auth_token: "test_token".to_string(),
             heartbeat_interval_secs: 30,
         },
-    )
+    ))
 }
 
 fn make_text_message(msg_type: &str, payload: serde_json::Value) -> Message {
@@ -47,7 +47,7 @@ fn make_text_message(msg_type: &str, payload: serde_json::Value) -> Message {
 
 #[tokio::test]
 async fn test_agent_command_response_without_registration() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // Send command response without registering first
     let msg = make_text_message(
@@ -68,7 +68,7 @@ async fn test_agent_command_response_without_registration() {
 
 #[tokio::test]
 async fn test_agent_command_response_missing_request_id() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // First register as an agent
     let register_msg = make_text_message(
@@ -107,7 +107,7 @@ async fn test_agent_command_response_missing_request_id() {
 
 #[tokio::test]
 async fn test_agent_command_response_with_valid_request() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // First register as an agent
     let register_msg = make_text_message(
@@ -148,7 +148,7 @@ async fn test_agent_command_response_with_valid_request() {
 
 #[tokio::test]
 async fn test_unknown_message_type() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     let msg = make_text_message("unknown.message.type", serde_json::json!({}));
 
@@ -161,7 +161,7 @@ async fn test_unknown_message_type() {
 
 #[tokio::test]
 async fn test_agent_session_update_unknown_status() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // First register as an agent
     let register_msg = make_text_message(
@@ -203,7 +203,7 @@ async fn test_agent_session_update_unknown_status() {
 
 #[tokio::test]
 async fn test_client_session_attach_agent_offline() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // Authenticate as client
     let auth_msg = make_text_message(
@@ -235,7 +235,7 @@ async fn test_client_session_attach_agent_offline() {
 
 #[tokio::test]
 async fn test_client_session_create_agent_offline() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // Authenticate as client
     let auth_msg = make_text_message(
@@ -267,7 +267,7 @@ async fn test_client_session_create_agent_offline() {
 
 #[tokio::test]
 async fn test_client_session_kill_agent_offline() {
-    let mut handler = make_handler().await;
+    let mut handler = make_handler().await.unwrap();
 
     // Authenticate as client
     let auth_msg = make_text_message(

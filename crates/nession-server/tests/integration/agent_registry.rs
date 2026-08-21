@@ -7,16 +7,20 @@ use tempfile::NamedTempFile;
 
 /// Build an `AgentRegistry` backed by a throwaway on-disk SQLite DB. The temp
 /// file guard must be kept alive for the registry's lifetime.
-async fn test_registry(timeout_secs: u64) -> (AgentRegistry, NamedTempFile) {
-    let temp_file = NamedTempFile::new().unwrap();
-    let db_path = temp_file.path().to_str().unwrap().to_string();
-    let db = Database::new(&db_path).await.unwrap();
-    (AgentRegistry::new(timeout_secs, Arc::new(db)), temp_file)
+async fn test_registry(timeout_secs: u64) -> anyhow::Result<(AgentRegistry, NamedTempFile)> {
+    let temp_file = NamedTempFile::new()?;
+    let db_path = temp_file
+        .path()
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("temp db path is not valid UTF-8"))?
+        .to_string();
+    let db = Database::new(&db_path).await?;
+    Ok((AgentRegistry::new(timeout_secs, Arc::new(db)), temp_file))
 }
 
 #[tokio::test]
 async fn test_agent_registration() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
 
     let agent = AgentInfo {
         agent_id: "agent_123".to_string(),
@@ -48,7 +52,7 @@ async fn test_agent_registration() {
 
 #[tokio::test]
 async fn test_agent_heartbeat_update() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
 
     let agent = AgentInfo {
         agent_id: "agent_123".to_string(),
@@ -88,7 +92,7 @@ async fn test_agent_heartbeat_update() {
 
 #[tokio::test]
 async fn test_heartbeat_status_transition_is_meaningful() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
 
     let agent = AgentInfo {
         agent_id: "a1".to_string(),
@@ -122,7 +126,7 @@ async fn test_heartbeat_status_transition_is_meaningful() {
 
 #[tokio::test]
 async fn test_agent_list_all() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
     registry
         .register(AgentInfo {
             agent_id: "a1".to_string(),
@@ -174,7 +178,7 @@ async fn test_agent_list_all() {
 
 #[tokio::test]
 async fn test_agent_unregister() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
     registry
         .register(AgentInfo {
             agent_id: "to_remove".to_string(),
@@ -205,7 +209,7 @@ async fn test_agent_unregister() {
 
 #[tokio::test]
 async fn test_agent_check_offline() {
-    let (registry, _db_guard) = test_registry(1).await;
+    let (registry, _db_guard) = test_registry(1).await.unwrap();
 
     let agent = AgentInfo {
         agent_id: "stale".to_string(),
@@ -238,7 +242,7 @@ async fn test_agent_check_offline() {
 
 #[tokio::test]
 async fn test_agent_check_offline_skips_already_offline() {
-    let (registry, _db_guard) = test_registry(1).await;
+    let (registry, _db_guard) = test_registry(1).await.unwrap();
 
     let agent = AgentInfo {
         agent_id: "already_off".to_string(),
@@ -269,7 +273,7 @@ async fn test_agent_check_offline_skips_already_offline() {
 
 #[tokio::test]
 async fn test_update_heartbeat_nonexistent_agent_is_noop() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
     // Should not panic and should return false
     let changed = registry.update_heartbeat("nonexistent", 0, 0).await;
     assert!(!changed);
@@ -277,6 +281,6 @@ async fn test_update_heartbeat_nonexistent_agent_is_noop() {
 
 #[tokio::test]
 async fn test_get_nonexistent_agent_returns_none() {
-    let (registry, _db_guard) = test_registry(30).await;
+    let (registry, _db_guard) = test_registry(30).await.unwrap();
     assert!(registry.get("ghost").await.is_none());
 }

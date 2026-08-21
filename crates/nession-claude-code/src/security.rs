@@ -103,7 +103,9 @@ mod tests {
 
     #[test]
     fn file_too_large_detection() {
-        assert!(500_000 <= MAX_FILE_SIZE);
-        assert!(2_000_000 > MAX_FILE_SIZE);
+        // Both operands are constants, so these are compile-time assertions:
+        // MAX_FILE_SIZE must sit between 500 KB and 2 MB.
+        const { assert!(500_000 <= MAX_FILE_SIZE) };
+        const { assert!(2_000_000 > MAX_FILE_SIZE) };
     }
 }

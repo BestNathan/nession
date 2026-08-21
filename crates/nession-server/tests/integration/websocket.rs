@@ -15,15 +15,18 @@ fn test_db_path(name: &str) -> String {
 
 async fn start_test_server(
     config: nession_common::config::ServerConfig,
-) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
-    let db = Database::new(&config.db_path).await.unwrap();
-    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
-    let addr = server.local_addr().unwrap();
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
+    let db = Database::new(&config.db_path).await?;
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
+    let addr = server.local_addr()?;
     let handle = tokio::spawn(async move {
-        server.run().await.unwrap();
+        server
+            .run()
+            .await
+            .unwrap_or_else(|e| panic!("test server run failed: {e}"));
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    (addr, handle)
+    Ok((addr, handle))
 }
 
 #[tokio::test]
@@ -39,7 +42,7 @@ async fn test_server_accepts_connection() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let result = connect_async(&url).await;
@@ -64,7 +67,7 @@ async fn test_agent_registration() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -123,7 +126,7 @@ async fn test_invalid_auth_token() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -175,7 +178,7 @@ async fn test_heartbeat_without_registration() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();
@@ -229,7 +232,7 @@ async fn test_client_agents_list_unauthenticated() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -271,7 +274,7 @@ async fn test_close_frame_triggers_disconnect() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -305,7 +308,7 @@ async fn test_agent_registration_with_connect_url() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -380,7 +383,7 @@ async fn test_client_sessions_list_authenticated() {
         ..Default::default()
     };
 
-    let (addr, _handle) = start_test_server(config).await;
+    let (addr, _handle) = start_test_server(config).await.unwrap();
 
     let url = format!("ws://{addr}");
     let (mut ws_stream, _) = connect_async(&url).await.unwrap();

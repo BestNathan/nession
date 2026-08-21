@@ -5,19 +5,21 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a mock agent WebSocket server and return (addr, captured messages).
-async fn start_mock_agent() -> (
+async fn start_mock_agent() -> anyhow::Result<(
     std::net::SocketAddr,
     Arc<Mutex<Vec<String>>>,
     tokio::task::JoinHandle<()>,
-) {
+)> {
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_clone = captured.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
 
     let handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream)
+                .await
+                .unwrap_or_else(|e| panic!("mock agent handshake failed: {e}"));
             let (mut sink, mut stream) = ws.split();
             let _ = sink
                 .send(WsMessage::Text(
@@ -38,12 +40,12 @@ async fn start_mock_agent() -> (
     });
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    (addr, captured, handle)
+    Ok((addr, captured, handle))
 }
 
 #[tokio::test]
 async fn test_register_and_send_command() {
-    let (addr, captured, _handle) = start_mock_agent().await;
+    let (addr, captured, _handle) = start_mock_agent().await.unwrap();
     let broker = CommandBroker::new();
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
@@ -81,7 +83,7 @@ async fn test_register_and_send_command() {
 
 #[tokio::test]
 async fn test_resolve_command() {
-    let (addr, _captured, _handle) = start_mock_agent().await;
+    let (addr, _captured, _handle) = start_mock_agent().await.unwrap();
     let broker = CommandBroker::new();
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
@@ -127,7 +129,7 @@ async fn test_resolve_command() {
 
 #[tokio::test]
 async fn test_unregister_agent_resolves_pending() {
-    let (addr, _captured, _handle) = start_mock_agent().await;
+    let (addr, _captured, _handle) = start_mock_agent().await.unwrap();
     let broker = CommandBroker::new();
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
@@ -179,7 +181,7 @@ async fn test_send_command_unknown_agent() {
 
 #[tokio::test]
 async fn test_multiple_concurrent_commands() {
-    let (addr, _captured, _handle) = start_mock_agent().await;
+    let (addr, _captured, _handle) = start_mock_agent().await.unwrap();
     let broker = CommandBroker::new();
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))

@@ -16,15 +16,17 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
 /// Start a mock WebSocket server that collects incoming messages.
 /// Returns a receiver that yields each text message the client sends.
-async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+async fn start_mock_server(
+    port: u16,
+) -> anyhow::Result<(tokio::task::JoinHandle<()>, mpsc::Receiver<String>)> {
     let (msg_tx, msg_rx) = mpsc::channel(200);
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
-        .await
-        .expect("failed to bind mock server");
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
 
     let handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let ws = accept_async(stream).await.expect("failed to accept ws");
+            let ws = accept_async(stream)
+                .await
+                .unwrap_or_else(|e| panic!("failed to accept ws: {e}"));
             let (mut sink, mut stream) = ws.split();
 
             // Send registration response.
@@ -50,11 +52,11 @@ async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Rec
         }
     });
 
-    (handle, msg_rx)
+    Ok((handle, msg_rx))
 }
 
 /// Connect to the mock server and return a ServerClientHandle.
-async fn get_handle(port: u16) -> ServerClientHandle {
+async fn get_handle(port: u16) -> anyhow::Result<ServerClientHandle> {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
         os_version: "Linux".to_string(),
@@ -78,7 +80,7 @@ async fn get_handle(port: u16) -> ServerClientHandle {
         None, // extension_registry
     );
 
-    client.connect_and_run().await.expect("connect failed").0
+    Ok(client.connect_and_run().await?.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -88,10 +90,10 @@ async fn get_handle(port: u16) -> ServerClientHandle {
 #[tokio::test]
 async fn test_heartbeat_loop_sends_heartbeat() {
     let port = 29091;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await;
+    let handle = get_handle(port).await.unwrap();
 
     // Skip registration message.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -127,10 +129,10 @@ async fn test_heartbeat_loop_sends_heartbeat() {
 #[tokio::test]
 async fn test_heartbeat_loop_respects_interval() {
     let port = 29092;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await;
+    let handle = get_handle(port).await.unwrap();
 
     // Skip registration message.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv())
@@ -176,10 +178,10 @@ async fn test_heartbeat_loop_respects_interval() {
 #[tokio::test]
 async fn test_heartbeat_loop_shutdown() {
     let port = 29093;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await;
+    let handle = get_handle(port).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
@@ -211,10 +213,10 @@ async fn test_heartbeat_loop_shutdown() {
 #[tokio::test]
 async fn test_session_watcher_detects_new_session() {
     let port = 29094;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await;
+    let handle = get_handle(port).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
@@ -237,17 +239,12 @@ async fn test_session_watcher_detects_new_session() {
 
     // Wait for a session update message.
     let found = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            match msg_rx.recv().await {
-                Some(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["msg_type"] == "agent.session.update"
-                        && parsed["payload"]["session_name"] == session_name
-                    {
-                        return parsed;
-                    }
-                }
-                None => break,
+        while let Some(msg) = msg_rx.recv().await {
+            let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+            if parsed["msg_type"] == "agent.session.update"
+                && parsed["payload"]["session_name"] == session_name
+            {
+                return parsed;
             }
         }
         unreachable!("channel closed before session update received")
@@ -270,10 +267,10 @@ async fn test_session_watcher_detects_new_session() {
 #[tokio::test]
 async fn test_session_watcher_detects_removed_session() {
     let port = 29095;
-    let (server_handle, mut msg_rx) = start_mock_server(port).await;
+    let (server_handle, mut msg_rx) = start_mock_server(port).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let handle = get_handle(port).await;
+    let handle = get_handle(port).await.unwrap();
 
     // Skip registration.
     let _ = tokio::time::timeout(Duration::from_secs(2), msg_rx.recv()).await;
@@ -319,18 +316,13 @@ async fn test_session_watcher_detects_removed_session() {
 
     // Wait for "gone" update.
     let found = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            match msg_rx.recv().await {
-                Some(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["msg_type"] == "agent.session.update"
-                        && parsed["payload"]["session_name"] == session_name
-                        && parsed["payload"]["status"] == "gone"
-                    {
-                        return parsed;
-                    }
-                }
-                None => break,
+        while let Some(msg) = msg_rx.recv().await {
+            let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+            if parsed["msg_type"] == "agent.session.update"
+                && parsed["payload"]["session_name"] == session_name
+                && parsed["payload"]["status"] == "gone"
+            {
+                return parsed;
             }
         }
         unreachable!("channel closed before removal update received")

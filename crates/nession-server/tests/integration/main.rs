@@ -20,6 +20,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
+        .unwrap_or_default()
         .as_secs()
 }
