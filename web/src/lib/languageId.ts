@@ -70,7 +70,12 @@ export type LanguageId =
   | 'protobuf'
   | 'thrift'
   | 'vue'
-  | 'svelte';
+  | 'svelte'
+  | 'objective-c'
+  | 'nginx'
+  | 'vim'
+  | 'prisma'
+  | 'solidity';
 
 // Basename priority rules (exact filename matches)
 export const BASENAME_RULES: Record<string, LanguageId> = {
@@ -110,6 +115,130 @@ export const BASENAME_RULES: Record<string, LanguageId> = {
   '.profile': 'shellscript',
   '.bash_profile': 'shellscript',
   '.zprofile': 'shellscript',
+};
+
+// Extension-based language detection rules
+export const EXTENSION_RULES: Record<string, LanguageId> = {
+  // JavaScript/TypeScript
+  js: 'javascript',
+  jsx: 'javascriptreact',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescriptreact',
+  mts: 'typescript',
+  cts: 'typescript',
+
+  // Python
+  py: 'python',
+  pyw: 'python',
+  pyx: 'python',
+
+  // Data formats
+  json: 'json',
+  jsonld: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  xml: 'xml',
+  xsd: 'xml',
+  xsl: 'xml',
+
+  // Markup
+  md: 'markdown',
+  markdown: 'markdown',
+  mkd: 'markdown',
+  html: 'html',
+  htm: 'html',
+
+  // Styles
+  css: 'css',
+  scss: 'scss',
+  sass: 'scss',
+  less: 'less',
+  styl: 'css',
+
+  // Shell
+  sh: 'shellscript',
+  bash: 'shellscript',
+  zsh: 'shellscript',
+  ksh: 'shellscript',
+
+  // Compiled languages
+  go: 'go',
+  rs: 'rust',
+  c: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  h: 'c',
+  hpp: 'cpp',
+  hh: 'cpp',
+  hxx: 'cpp',
+  java: 'java',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  scala: 'scala',
+  swift: 'swift',
+  cs: 'csharp',
+  fs: 'fsharp',
+  m: 'objective-c',
+  mm: 'objective-c',
+
+  // Scripting languages
+  rb: 'ruby',
+  php: 'php',
+  phtml: 'php',
+  lua: 'lua',
+  pl: 'perl',
+  pm: 'perl',
+  r: 'r',
+  jl: 'julia',
+  dart: 'dart',
+
+  // Functional languages
+  hs: 'haskell',
+  exs: 'elixir',
+  ex: 'elixir',
+  erl: 'erlang',
+
+  // Config files
+  ini: 'ini',
+  properties: 'properties',
+  cfg: 'ini',
+  conf: 'nginx',
+
+  // Web frameworks
+  vue: 'vue',
+  svelte: 'svelte',
+
+  // Database
+  sql: 'sql',
+  graphql: 'graphql',
+  gql: 'graphql',
+
+  // Infrastructure
+  tf: 'terraform',
+  hcl: 'terraform',
+  proto: 'protobuf',
+  nix: 'nix',
+  dockerfile: 'dockerfile',
+  cmake: 'cmake',
+
+  // PowerShell
+  ps1: 'powershell',
+  psm1: 'powershell',
+  psd1: 'powershell',
+
+  // Misc
+  vim: 'vim',
+  prisma: 'prisma',
+  solidity: 'solidity',
+  csv: 'plaintext',
+  log: 'log',
+  lock: 'plaintext',
+  mod: 'plaintext',
+  sum: 'plaintext',
 };
 
 /**
@@ -162,10 +291,11 @@ export function parseLangExt(path: string): string {
  *
  * Detection priority (execution order):
  *   1. Basename matching (exact filename matches, e.g., "Makefile" -> 'makefile')
- *   2. Extension matching (TODO: not implemented yet)
- *   3. Shebang detection (TODO: not implemented yet)
- *   4. Content-based detection (TODO: not implemented yet)
- *   5. Fallback to 'plaintext'
+ *   2. Double extension matching (e.g., "foo.d.ts" -> 'typescript')
+ *   3. Extension matching (e.g., ".ts" -> 'typescript')
+ *   4. Shebang detection (TODO: not implemented yet)
+ *   5. Content-based detection (TODO: not implemented yet)
+ *   6. Fallback to 'plaintext'
  *
  * @param filename - File path or basename
  * @returns Detected LanguageId, defaults to 'plaintext'
@@ -177,10 +307,20 @@ export function detectLanguage(filename: string): LanguageId {
     return BASENAME_RULES[basename];
   }
 
-  // TODO: Priority 2 - Extension matching
-  // TODO: Priority 3 - Shebang detection
-  // TODO: Priority 4 - Content-based detection
+  // Priority 2: Double extension matching (e.g., .d.ts)
+  if (basename.endsWith('.d.ts')) {
+    return 'typescript';
+  }
 
-  // Priority 5: Fallback
+  // Priority 3: Extension matching
+  const ext = parseLangExt(filename);
+  if (ext && ext in EXTENSION_RULES) {
+    return EXTENSION_RULES[ext];
+  }
+
+  // TODO: Priority 4 - Shebang detection
+  // TODO: Priority 5 - Content-based detection
+
+  // Priority 6: Fallback
   return 'plaintext';
 }
