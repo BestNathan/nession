@@ -11,6 +11,7 @@ import {
   Pencil,
   Trash2,
   FolderSync,
+  FolderUp,
   Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -98,6 +99,8 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     loadDir(currentPath);
   }, [currentPath, loadDir]);
   const handleRefresh = () => loadDir(currentPath);
+  const segments = currentPath ? currentPath.split('/').filter(Boolean) : [];
+  const handleGoToParent = () => setCurrentPath(segments.slice(0, -1).join('/'));
   const [cwdLoading, setCwdLoading] = useState(false);
   const handleNavigateToCwd = async () => {
     if (!onGetTerminalPwd) { return; }
@@ -243,14 +246,14 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
     return 0;
   });
 
-  const segments = currentPath ? currentPath.split('/').filter(Boolean) : [];
-
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <FileToolbar
         loading={loading}
         cwdLoading={cwdLoading}
+        onGoToParent={handleGoToParent}
+        parentDisabled={segments.length === 0}
         onRefresh={handleRefresh}
         onNewFile={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }}
         onNewFolder={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }}
@@ -421,6 +424,8 @@ function FileBrowserDialogs({
 interface FileToolbarProps {
   loading: boolean;
   cwdLoading: boolean;
+  onGoToParent: () => void;
+  parentDisabled: boolean;
   onRefresh: () => void;
   onNewFile: () => void;
   onNewFolder: () => void;
@@ -432,6 +437,8 @@ interface FileToolbarProps {
 function FileToolbar({
   loading,
   cwdLoading,
+  onGoToParent,
+  parentDisabled,
   onRefresh,
   onNewFile,
   onNewFolder,
@@ -441,6 +448,18 @@ function FileToolbar({
 }: FileToolbarProps) {
   return (
     <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onGoToParent} disabled={parentDisabled} aria-label="Parent directory" />
+          }
+        >
+          <FolderUp className="h-3.5 w-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Parent directory</p>
+        </TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={
