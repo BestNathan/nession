@@ -1039,11 +1039,31 @@ mod tests {
     use tokio_tungstenite::accept_async;
 
     /// Start a mock WebSocket server that accepts connections and echoes messages.
-    async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    /// Ask the OS for a free port, then release it.
+    ///
+    /// For tests that must point the client at an address where nothing is
+    /// listening. Re-use of the number is a small race against the rest of the
+    /// machine, but far better than a hardcoded port that races every
+    /// concurrent test run.
+    async fn free_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to reserve a port");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        port
+    }
+
+    async fn start_mock_server() -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -1073,13 +1093,12 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_connection_and_registration() {
-        let port = 28081;
-        let (server_handle, mut msg_rx) = start_mock_server(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1090,7 +1109,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-1",
             "test-host",
@@ -1125,8 +1144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_heartbeat_message_format() {
-        let port = 28082;
-        let (server_handle, mut msg_rx) = start_mock_server(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1137,7 +1155,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-2",
             "test-host",
@@ -1182,8 +1200,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_update_message_format() {
-        let port = 28083;
-        let (server_handle, mut msg_rx) = start_mock_server(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1194,7 +1211,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-3",
             "test-host",
@@ -1240,13 +1257,13 @@ mod tests {
     /// Mock server that advertises a heartbeat interval in its register
     /// response, then (after `accepts` connections) stays idle.
     async fn start_mock_server_with_interval(
-        port: u16,
         interval_secs: u64,
-    ) -> tokio::task::JoinHandle<()> {
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
-        tokio::spawn(async move {
+        let addr = listener.local_addr().expect("mock server local_addr");
+        let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
                 let ws = accept_async(stream).await.expect("failed to accept ws");
                 let (mut sink, mut stream) = ws.split();
@@ -1263,13 +1280,13 @@ mod tests {
                 let _ = sink.send(WsMessage::Text(response.to_string())).await;
                 while let Some(Ok(_)) = stream.next().await {}
             }
-        })
+        });
+        (addr, handle)
     }
 
     #[tokio::test]
     async fn test_register_response_conveys_heartbeat_interval() {
-        let port = 28084;
-        let server_handle = start_mock_server_with_interval(port, 42).await;
+        let (addr, server_handle) = start_mock_server_with_interval(42).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1279,7 +1296,7 @@ mod tests {
             image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-iv",
             "test-host",
@@ -1303,15 +1320,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_supervisor_reconnects_after_drop() {
-        let port = 28085;
-
         // Server that accepts a first connection, registers, then drops it;
         // accepts a second connection and forwards the agent_id of whatever it
         // receives so the test can confirm a re-registration happened.
         let (re_tx, mut re_rx) = mpsc::channel::<String>(4);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
-            .await
-            .expect("bind");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("mock server local_addr");
         let server_handle = tokio::spawn(async move {
             for round in 0..2u32 {
                 if let Ok((stream, _)) = listener.accept().await {
@@ -1359,7 +1373,7 @@ mod tests {
             image_tag: "test".to_string(),
         };
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "reconnect-agent",
             "test-host",
@@ -1396,13 +1410,17 @@ mod tests {
 
     /// Mock server that sends a session create command after registration.
     async fn start_mock_server_with_session_create(
-        port: u16,
         session_name: String,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -1447,7 +1465,7 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
@@ -1455,9 +1473,8 @@ mod tests {
         let session = TestSession::new("server-create");
         let session_name = session.name().to_string();
 
-        let port = 28086;
-        let (server_handle, mut msg_rx) =
-            start_mock_server_with_session_create(port, session_name.clone()).await;
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_with_session_create(session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1468,7 +1485,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-create",
             "test-host",
@@ -1508,13 +1525,17 @@ mod tests {
 
     /// Mock server that sends a session kill command after registration.
     async fn start_mock_server_with_session_kill(
-        port: u16,
         session_name: String,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -1563,16 +1584,15 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_server_session_kill_command() {
         let session = TestSession::new("server-kill");
         let session_name = session.name().to_string();
-        let port = 28087;
-        let (server_handle, mut msg_rx) =
-            start_mock_server_with_session_kill(port, session_name.clone()).await;
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_with_session_kill(session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1583,7 +1603,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-kill",
             "test-host",
@@ -1617,13 +1637,16 @@ mod tests {
     }
 
     /// Mock server that sends a heartbeat ack after registration.
-    async fn start_mock_server_with_heartbeat_ack(
-        port: u16,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    async fn start_mock_server_with_heartbeat_ack() -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (_msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -1659,13 +1682,12 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_server_heartbeat_ack() {
-        let port = 28088;
-        let (server_handle, _msg_rx) = start_mock_server_with_heartbeat_ack(port).await;
+        let (addr, server_handle, _msg_rx) = start_mock_server_with_heartbeat_ack().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1676,7 +1698,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-ack",
             "test-host",
@@ -1925,13 +1947,16 @@ mod tests {
     }
 
     /// Mock server that sends env.list command after registration.
-    async fn start_mock_server_env_list(
-        port: u16,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    async fn start_mock_server_env_list() -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -1963,13 +1988,12 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_server_env_list_command() {
-        let port = 28089;
-        let (server_handle, mut msg_rx) = start_mock_server_env_list(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server_env_list().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1980,7 +2004,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-env-list",
             "test-host",
@@ -2012,13 +2036,16 @@ mod tests {
     }
 
     /// Mock server that sends sessions.list command after registration.
-    async fn start_mock_server_sessions_list(
-        port: u16,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    async fn start_mock_server_sessions_list() -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -2050,7 +2077,7 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     /// The agent answers `server.sessions.list` with its live tmux sessions.
@@ -2058,8 +2085,7 @@ mod tests {
     /// or not tmux is available on the machine running it.
     #[tokio::test]
     async fn test_server_sessions_list_command() {
-        let port = 28094;
-        let (server_handle, mut msg_rx) = start_mock_server_sessions_list(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server_sessions_list().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -2070,7 +2096,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-sessions-list",
             "test-host",
@@ -2104,13 +2130,16 @@ mod tests {
     }
 
     /// Mock server that sends env.query command after registration.
-    async fn start_mock_server_env_query(
-        port: u16,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    async fn start_mock_server_env_query() -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -2142,13 +2171,12 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_server_env_query_command() {
-        let port = 28090;
-        let (server_handle, mut msg_rx) = start_mock_server_env_query(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server_env_query().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -2159,7 +2187,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-env-query",
             "test-host",
@@ -2192,13 +2220,17 @@ mod tests {
 
     /// Mock server that sends server.session.env.unset command.
     async fn start_mock_server_env_unset(
-        port: u16,
         session_name: String,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -2241,16 +2273,15 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     #[tokio::test]
     async fn test_server_session_env_unset_command() {
         let session = TestSession::new("env-unset");
         let session_name = session.name().to_string();
-        let port = 28091;
-        let (server_handle, mut msg_rx) =
-            start_mock_server_env_unset(port, session_name.clone()).await;
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_env_unset(session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -2261,7 +2292,7 @@ mod tests {
         };
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-env-unset",
             "test-host",
@@ -2299,8 +2330,8 @@ mod tests {
     async fn test_supervisor_shutdown_during_backoff() {
         // Connect to a port that doesn't exist — the supervisor will enter backoff.
         // Then shutdown during backoff.
-        let port = 28092;
         // Don't start a server — connect will fail immediately
+        let port = free_port().await;
 
         let metadata = AgentMetadata {
             tmux_version: "3.3".to_string(),
@@ -2397,13 +2428,17 @@ mod tests {
     /// Mock server that sends `server.session.create` immediately followed by
     /// `server.sessions.list`, then forwards all client responses.
     async fn start_mock_server_create_then_list(
-        port: u16,
         session_name: String,
-    ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<String>) {
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<String>,
+    ) {
         let (msg_tx, msg_rx) = mpsc::channel(100);
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
+        let addr = listener.local_addr().expect("mock server local_addr");
 
         let handle = tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
@@ -2448,7 +2483,7 @@ mod tests {
             }
         });
 
-        (handle, msg_rx)
+        (addr, handle, msg_rx)
     }
 
     /// A hung `list-sessions` (30s timeout, 5s actual hang) must not block a
@@ -2456,7 +2491,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn heartbeat_flows_while_tmux_command_hangs() {
-        let port = 28095;
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("list-started");
         let shim = write_fake_tmux(
@@ -2477,11 +2511,11 @@ mod tests {
             Arc::new(m)
         };
 
-        let (server_handle, mut msg_rx) = start_mock_server_sessions_list(port).await;
+        let (addr, server_handle, mut msg_rx) = start_mock_server_sessions_list().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-hang",
             "test-host",
@@ -2536,7 +2570,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn sessions_list_responds_while_create_is_slow() {
-        let port = 28096;
         let dir = tempfile::tempdir().unwrap();
         // new-session is slow (2s, under the 10s create timeout); list is fast.
         let shim = write_fake_tmux(
@@ -2554,12 +2587,12 @@ mod tests {
             Arc::new(m)
         };
 
-        let (server_handle, mut msg_rx) =
-            start_mock_server_create_then_list(port, "slow-create-test".to_string()).await;
+        let (addr, server_handle, mut msg_rx) =
+            start_mock_server_create_then_list("slow-create-test".to_string()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let client = ServerClient::new(
-            format!("ws://127.0.0.1:{port}"),
+            format!("ws://{addr}"),
             "test-token",
             "test-agent-slow-create",
             "test-host",

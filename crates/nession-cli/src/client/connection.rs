@@ -585,8 +585,10 @@ mod tests {
     use tokio_tungstenite::accept_async;
 
     /// Start a mock WebSocket server that accepts connections and echoes messages.
-    async fn start_mock_server(port: u16) -> (tokio::task::JoinHandle<()>, SocketAddr) {
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+    /// Binds an OS-assigned port. A hardcoded one collides whenever two test
+    /// runs overlap — two worktrees, or CI alongside a local run.
+    async fn start_mock_server() -> (tokio::task::JoinHandle<()>, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
         let addr = listener.local_addr().unwrap();
@@ -737,8 +739,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_and_authenticate_success() {
-        let port = 29081;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let result = ClientConnection::connect(&format!("ws://{addr}"), "valid_token").await;
@@ -749,8 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_and_authenticate_failure() {
-        let port = 29082;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let result = ClientConnection::connect(&format!("ws://{addr}"), "invalid_token").await;
@@ -765,8 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_agents() {
-        let port = 29083;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
@@ -783,8 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_sessions() {
-        let port = 29084;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
@@ -801,8 +799,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_sessions_with_agent_filter() {
-        let port = 29085;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
@@ -817,8 +814,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_attach_p2p() {
-        let port = 29086;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
@@ -840,8 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_attach_relay() {
-        let port = 29087;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
@@ -861,8 +856,9 @@ mod tests {
     }
 
     /// Start a mock agent server for testing create_session_on_agent and kill_session_on_agent
-    async fn start_mock_agent_server(port: u16) -> (tokio::task::JoinHandle<()>, SocketAddr) {
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+    /// Binds an OS-assigned port, same reasoning as `start_mock_server`.
+    async fn start_mock_agent_server() -> (tokio::task::JoinHandle<()>, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock agent server");
         let addr = listener.local_addr().unwrap();
@@ -938,8 +934,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_session_on_agent() {
-        let port = 29088;
-        let (server_handle, addr) = start_mock_agent_server(port).await;
+        let (server_handle, addr) = start_mock_agent_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let result = create_session_on_agent(&format!("{addr}"), "test-session", 80, 24).await;
@@ -951,8 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_kill_session_on_agent() {
-        let port = 29089;
-        let (server_handle, addr) = start_mock_agent_server(port).await;
+        let (server_handle, addr) = start_mock_agent_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let result = kill_session_on_agent(&format!("{addr}"), "test-session").await;
@@ -964,8 +958,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_close() {
-        let port = 29090;
-        let (server_handle, addr) = start_mock_server(port).await;
+        let (server_handle, addr) = start_mock_server().await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let mut conn = ClientConnection::connect(&format!("ws://{addr}"), "valid_token")
