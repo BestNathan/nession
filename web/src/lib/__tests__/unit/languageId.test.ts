@@ -129,4 +129,38 @@ describe('detectLanguage', () => {
       expect(detectLanguage('makefile')).toBe('makefile');
     });
   });
+
+  describe('extension priority', () => {
+    it('detects .ts as typescript', () => {
+      expect(detectLanguage('foo.ts')).toBe('typescript');
+    });
+
+    it('detects .rs as rust', () => {
+      expect(detectLanguage('main.rs')).toBe('rust');
+    });
+
+    it('detects .py as python', () => {
+      expect(detectLanguage('script.py')).toBe('python');
+    });
+
+    it('detects .json as json', () => {
+      expect(detectLanguage('package.json')).toBe('json');
+    });
+
+    it('detects .md as markdown', () => {
+      expect(detectLanguage('README.md')).toBe('markdown');
+    });
+
+    it('detects .env as plaintext (breaking change)', () => {
+      expect(detectLanguage('.env')).toBe('plaintext');
+    });
+
+    it('detects unknown extension as plaintext', () => {
+      expect(detectLanguage('file.xyz')).toBe('plaintext');
+    });
+
+    it('detects .d.ts as typescript', () => {
+      expect(detectLanguage('foo.d.ts')).toBe('typescript');
+    });
+  });
 });
