@@ -369,6 +369,12 @@ pub struct FileListPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileReadPayload {
     pub path: String,
+    /// Byte offset for chunked reads. `None` means start from beginning.
+    #[serde(default)]
+    pub offset: Option<u64>,
+    /// Maximum bytes to return for chunked reads. `None` means use default chunk size.
+    #[serde(default)]
+    pub limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1560,7 +1566,10 @@ impl AgentServer {
                     Ok(p) => p,
                     Err(e) => return err("parse_error", &e.to_string()),
                 };
-                match file_ops.read_file(&payload.path).await {
+                match file_ops
+                    .read_file(&payload.path, payload.offset, payload.limit)
+                    .await
+                {
                     Ok(data) => serde_json::to_string(&make_response(&id, msg_types::OK, data))
                         .unwrap_or_default(),
                     Err(e) => {
@@ -2153,6 +2162,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "roundtrip_test.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =
@@ -2228,6 +2239,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: entry_path.to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =
@@ -2294,6 +2307,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "to_delete.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<ErrorPayload> =
@@ -2312,6 +2327,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "../etc/passwd".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -2421,6 +2438,8 @@ mod tests {
             msg_types::FILE_READ,
             FileReadPayload {
                 path: "new_name.txt".to_string(),
+                offset: None,
+                limit: None,
             },
         );
         let read_resp: Message<FileData> =

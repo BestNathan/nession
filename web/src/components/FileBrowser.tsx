@@ -58,7 +58,8 @@ export interface FileBrowserProps {
   onGetTerminalPwd?: () => Promise<string>;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB — hard gate, matches backend limit
+const MAX_TEXT_FILE_SIZE = 50 * 1024 * 1024; // 50 MB — text reads use chunked loading above 10 MB
+const MAX_BINARY_FILE_SIZE = 10 * 1024 * 1024; // 10 MB — binary previews stay single-request
 
 type SortKey = 'name' | 'size' | 'modified';
 type SortDir = 'asc' | 'desc';
@@ -111,13 +112,16 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
   const handleEntryClick = (entry: FileEntry) => {
     if (entry.is_dir) {
       setCurrentPath(entry.path);
-    } else {
-      if (entry.size > MAX_FILE_SIZE) {
-        toast.error(`File too large for preview (>${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB)`);
-        return;
-      }
-      onFileClick(entry);
+      return;
     }
+    const isBinary = entry.is_binary ?? false;
+    const maxSize = isBinary ? MAX_BINARY_FILE_SIZE : MAX_TEXT_FILE_SIZE;
+    if (entry.size > maxSize) {
+      const label = isBinary ? 'Binary file' : 'File';
+      toast.error(`${label} too large for preview (>${maxSize / 1024 / 1024}MB)`);
+      return;
+    }
+    onFileClick(entry);
   };
 
   const handleCreate = useCallback(async (name: string, kind: 'file' | 'folder') => {
@@ -170,21 +174,13 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
 
   const handleRenameSubmit = async () => {
     const name = renameState.renameValue.trim();
-    if (!name) {
-      toast.error('Name cannot be empty');
-      return;
-    }
+    if (!name) { toast.error('Name cannot be empty'); return; }
     if (!renameState.renamingPath) {return;}
-
-    const oldName = renameState.renamingPath.substring(renameState.renamingPath.lastIndexOf('/') + 1);
-    if (name === oldName) {
-      renameState.cancelRename();
-      return;
-    }
-
-    const parentPath = renameState.renamingPath.substring(0, renameState.renamingPath.lastIndexOf('/'));
+    const lastSlash = renameState.renamingPath.lastIndexOf('/');
+    const oldName = renameState.renamingPath.substring(lastSlash + 1);
+    if (name === oldName) { renameState.cancelRename(); return; }
+    const parentPath = renameState.renamingPath.substring(0, lastSlash);
     const newPath = parentPath ? `${parentPath}/${name}` : name;
-
     try {
       await fileOps.renameFile(renameState.renamingPath, newPath);
       toast.success(`Renamed to ${name}`);
@@ -324,60 +320,29 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
         ) : sortedEntries.length === 0 ? (
           <div className="p-3 text-center text-sm text-muted-foreground">This directory is empty</div>
         ) : (
-          sortedEntries.map((entry) =>
-            renameState.renamingPath === entry.path ? (
-              <div key={entry.path} className="flex items-center gap-1 w-full px-2 py-0.5">
-                {entry.is_dir ? (
-                  <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
-                ) : (
-                  <File className="h-3.5 w-3.5 mr-1 text-muted-foreground flex-shrink-0" />
-                )}
-                <Input
-                  autoFocus
-                  value={renameState.renameValue}
-                  onChange={(e) => renameState.setRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {handleRenameSubmit();}
-                    if (e.key === 'Escape') {handleRenameCancel();}
-                  }}
-                  className="h-6 text-xs flex-1"
+          sortedEntries.map((entry) => {
+            if (renameState.renamingPath === entry.path) {
+              return (
+                <FileEntryRenameRow
+                  key={entry.path}
+                  entry={entry}
+                  renameState={renameState}
+                  onRenameSubmit={handleRenameSubmit}
+                  onCancel={handleRenameCancel}
                 />
-                <Button size="sm" className="h-6 text-xs" onClick={handleRenameSubmit}>Rename</Button>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleRenameCancel}>Cancel</Button>
-              </div>
-            ) : (
-              <ContextMenu key={entry.path}>
-                <ContextMenuTrigger
-                  onClick={() => handleEntryClick(entry)}
-                  className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default"
-                >
-                  {entry.is_dir ? (
-                    <Folder className="h-3.5 w-3.5 mr-1.5 text-blue-400 flex-shrink-0" />
-                  ) : (
-                    <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
-                  )}
-                  <span className="flex-1 truncate min-w-0">{entry.name}</span>
-                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-                  <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-36">
-                  <ContextMenuItem onClick={() => handleCopyPath(entry.path, 'Path')}>
-                    <Copy /> Copy path
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => handleCopyPath(entry.full_path, 'Full path')}>
-                    <Copy /> Copy full path
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => handleRenameStart(entry)}>
-                    <Pencil /> Rename
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem variant="destructive" onClick={() => handleDelete(entry)}>
-                    <Trash2 /> Delete
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            ),
-          )
+              );
+            }
+            return (
+              <FileEntryRow
+                key={entry.path}
+                entry={entry}
+                onClick={handleEntryClick}
+                onCopyPath={handleCopyPath}
+                onRenameStart={handleRenameStart}
+                onDelete={handleDelete}
+              />
+            );
+          })
         )}
       </div>
 
@@ -386,6 +351,83 @@ export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDele
         onDeleteTargetChange={dialogs.setDeleteTarget}
         onDeleteConfirm={handleDeleteConfirm}
       />
+    </div>
+  );
+}
+
+interface FileEntryRowProps {
+  entry: FileEntry;
+  onClick: (entry: FileEntry) => void;
+  onCopyPath: (text: string, label: string) => void;
+  onRenameStart: (entry: FileEntry) => void;
+  onDelete: (entry: FileEntry) => void;
+}
+
+function FileEntryRow({ entry, onClick, onCopyPath, onRenameStart, onDelete }: FileEntryRowProps) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        onClick={() => onClick(entry)}
+        className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default"
+      >
+        {entry.is_dir ? (
+          <Folder className="h-3.5 w-3.5 mr-1.5 text-blue-400 flex-shrink-0" />
+        ) : (
+          <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
+        )}
+        <span className="flex-1 truncate min-w-0">{entry.name}</span>
+        {entry.is_binary && !entry.is_dir && (
+          <span className="px-1 rounded bg-muted text-muted-foreground text-[9px] leading-tight mr-1 flex-shrink-0">BIN</span>
+        )}
+        <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{entry.is_dir ? '' : formatSize(entry.size)}</span>
+        <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-36">
+        <ContextMenuItem onClick={() => onCopyPath(entry.path, 'Path')}>
+          <Copy /> Copy path
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onCopyPath(entry.full_path, 'Full path')}>
+          <Copy /> Copy full path
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onRenameStart(entry)}>
+          <Pencil /> Rename
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onClick={() => onDelete(entry)}>
+          <Trash2 /> Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+interface FileEntryRenameRowProps {
+  entry: FileEntry;
+  renameState: ReturnType<typeof useRenameState>;
+  onRenameSubmit: () => void;
+  onCancel: () => void;
+}
+
+function FileEntryRenameRow({ entry, renameState, onRenameSubmit, onCancel }: FileEntryRenameRowProps) {
+  return (
+    <div className="flex items-center gap-1 w-full px-2 py-0.5">
+      {entry.is_dir ? (
+        <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
+      ) : (
+        <File className="h-3.5 w-3.5 mr-1 text-muted-foreground flex-shrink-0" />
+      )}
+      <Input
+        autoFocus
+        value={renameState.renameValue}
+        onChange={(e) => renameState.setRenameValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {onRenameSubmit();}
+          if (e.key === 'Escape') {onCancel();}
+        }}
+        className="h-6 text-xs flex-1"
+      />
+      <Button size="sm" className="h-6 text-xs" onClick={onRenameSubmit}>Rename</Button>
+      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel}>Cancel</Button>
     </div>
   );
 }

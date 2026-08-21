@@ -143,4 +143,39 @@ describe('FileTabs', () => {
     fireEvent.click(fileButton);
     await waitFor(() => expect(onSheetToggle).toHaveBeenCalledWith(false));
   });
+
+  it('closes a file tab when the close button is clicked', async () => {
+    mockMatchMedia(false);
+    const fileOps = makeFileOps([FILE]);
+    render(
+      <FileTabs
+        fileOps={fileOps}
+        terminalElement={<div data-testid="terminal-marker">TERMINAL</div>}
+        {...bottomBarProps}
+      />,
+    );
+
+    // Open a file tab.
+    fireEvent.click(screen.getByTitle('Open panel'));
+    const fileButton = await screen.findByText('f.txt');
+    fireEvent.click(fileButton);
+
+    // Wait for the tab to appear.
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /f\.txt/i })).toBeInTheDocument();
+    });
+
+    // Hover to reveal the close button (opacity-0 → opacity-100), then click it.
+    const tab = screen.getByRole('tab', { name: /f\.txt/i });
+    fireEvent.mouseEnter(tab);
+    const closeButtons = tab.querySelectorAll('svg');
+    // The close X is the last SVG in the tab.
+    const closeX = closeButtons[closeButtons.length - 1];
+    fireEvent.click(closeX);
+
+    // Tab should be gone and terminal visible again.
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /f\.txt/i })).not.toBeInTheDocument();
+    });
+  });
 });
