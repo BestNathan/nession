@@ -195,18 +195,12 @@ mod tests {
 
     #[test]
     fn is_process_running_known_process() {
-        // launchd (macOS) or systemd (Linux) should always be running.
-        let pid = is_process_running("launchd");
-        if pid.is_none() {
-            // Try Linux systemd.
-            let pid = is_process_running("systemd");
-            if pid.is_none() {
-                // Neither found, test at least doesn't crash.
-                return;
-            }
-            assert!(pid.unwrap() > 0);
-        } else {
-            assert!(pid.unwrap() > 0);
+        // launchd (macOS) or systemd (Linux) should always be running. If
+        // neither is found (unusual container), the test still proved the call
+        // does not crash, so there is nothing left to assert.
+        let pid = is_process_running("launchd").or_else(|| is_process_running("systemd"));
+        if let Some(pid) = pid {
+            assert!(pid > 0);
         }
     }
 
@@ -221,10 +215,14 @@ mod tests {
         std::fs::set_permissions(dir.path(), dir_perms).unwrap();
         let result = check_write_permission(&file_path);
         assert!(matches!(result, Err(UpdateError::PermissionDenied(_))));
-        // Restore permissions so tempdir cleanup doesn't fail.
-        let mut dir_perms = std::fs::metadata(dir.path()).unwrap().permissions();
-        dir_perms.set_readonly(false);
-        std::fs::set_permissions(dir.path(), dir_perms).unwrap();
+        // Restore permissions so tempdir cleanup doesn't fail. Set the mode
+        // explicitly rather than via `set_readonly(false)`, which on Unix
+        // clears the mode to world-writable (0o777).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     #[test]

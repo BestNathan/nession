@@ -15,7 +15,7 @@ use tokio::time::sleep;
 fn unique_session_name(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_nanos();
     format!("nession-test-ctrl-{prefix}-{nanos}")
 }

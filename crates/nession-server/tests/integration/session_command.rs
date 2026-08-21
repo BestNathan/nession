@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Start a real server on a random port.
-async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+async fn start_server() -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: "test".to_string(),
@@ -21,21 +21,21 @@ async fn start_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
         ..Default::default()
     };
 
-    let db = Database::new(":memory:").await.unwrap();
-    let mut server = WebSocketServer::new(config, Arc::new(db)).await.unwrap();
-    let addr = server.local_addr().unwrap();
+    let db = Database::new(":memory:").await?;
+    let mut server = WebSocketServer::new(config, Arc::new(db)).await?;
+    let addr = server.local_addr()?;
 
     let handle = tokio::spawn(async move {
         let _ = server.run().await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    (addr, handle)
+    Ok((addr, handle))
 }
 
 #[tokio::test]
 async fn test_session_create_flow() {
-    let (addr, _server_handle) = start_server().await;
+    let (addr, _server_handle) = start_server().await.unwrap();
 
     // Connect mock agent
     let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
@@ -137,7 +137,7 @@ async fn test_session_create_flow() {
 
 #[tokio::test]
 async fn test_session_kill_flow() {
-    let (addr, _server_handle) = start_server().await;
+    let (addr, _server_handle) = start_server().await.unwrap();
 
     // Connect mock agent
     let (agent_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
@@ -260,7 +260,7 @@ async fn test_session_kill_flow() {
 
 #[tokio::test]
 async fn test_create_with_offline_agent_returns_error() {
-    let (addr, _server_handle) = start_server().await;
+    let (addr, _server_handle) = start_server().await.unwrap();
 
     // Connect & auth client (no agent registered)
     let (client_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))

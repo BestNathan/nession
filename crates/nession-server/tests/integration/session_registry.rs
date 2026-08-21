@@ -4,9 +4,9 @@ use chrono::Utc;
 use nession_server::db::Database;
 use nession_server::registry::session::{SessionInfo, SessionRegistry, SessionStatus};
 
-async fn make_registry() -> SessionRegistry {
-    let db = Database::new(":memory:").await.unwrap();
-    SessionRegistry::new(Arc::new(db))
+async fn make_registry() -> anyhow::Result<SessionRegistry> {
+    let db = Database::new(":memory:").await?;
+    Ok(SessionRegistry::new(Arc::new(db)))
 }
 
 fn make_session(id: &str, agent: &str, name: &str, status: SessionStatus) -> SessionInfo {
@@ -24,7 +24,7 @@ fn make_session(id: &str, agent: &str, name: &str, status: SessionStatus) -> Ses
 
 #[tokio::test]
 async fn test_session_update() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
 
     let session = make_session(
         "agent_123:dev-work",
@@ -42,7 +42,7 @@ async fn test_session_update() {
 
 #[tokio::test]
 async fn test_list_sessions_by_agent() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
 
     let session1 = make_session(
         "agent_123:session1",
@@ -67,7 +67,7 @@ async fn test_list_sessions_by_agent() {
 
 #[tokio::test]
 async fn test_session_remove() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     let session = make_session("agent_1:sess", "agent_1", "sess", SessionStatus::Active);
     registry.update_session(session).await;
     assert!(registry.get("agent_1:sess").await.is_some());
@@ -78,15 +78,15 @@ async fn test_session_remove() {
 
 #[tokio::test]
 async fn test_session_remove_by_agent() {
-    let registry = make_registry().await;
-    for (i, name) in ["s1", "s2", "s3"].iter().enumerate() {
+    let registry = make_registry().await.unwrap();
+    for (name, window_count) in ["s1", "s2", "s3"].iter().zip(1u32..) {
         let mut session = make_session(
             &format!("agent_x:{name}"),
             "agent_x",
             name,
             SessionStatus::Detached,
         );
-        session.window_count = 1 + i as u32;
+        session.window_count = window_count;
         registry.update_session(session).await;
     }
     // Also add a session for another agent
@@ -110,19 +110,19 @@ async fn test_session_remove_by_agent() {
 
 #[tokio::test]
 async fn test_session_list_empty() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     assert!(registry.list().await.is_empty());
 }
 
 #[tokio::test]
 async fn test_session_list_by_agent_empty() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     assert!(registry.list_by_agent("nobody").await.is_empty());
 }
 
 #[tokio::test]
 async fn test_session_update_overwrites() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     registry
         .update_session(make_session("a:s", "a", "s", SessionStatus::Detached))
         .await;
@@ -144,14 +144,14 @@ async fn test_session_update_overwrites() {
 
 #[tokio::test]
 async fn test_remove_nonexistent_session_is_noop() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     registry.remove("ghost:session").await;
     // Should not panic
 }
 
 #[tokio::test]
 async fn test_session_recovery_empty_db() {
-    let registry = make_registry().await;
+    let registry = make_registry().await.unwrap();
     registry.load_from_db().await;
     assert!(registry.list().await.is_empty());
 }
