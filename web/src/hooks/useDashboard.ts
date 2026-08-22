@@ -21,6 +21,7 @@ export interface DashboardState {
   filteredSessions: Session[];
   showCreateModal: boolean;
   sessionToKill: Session | null;
+  previewSession: Session | null;
   searchQuery: string;
   statusFilter: StatusFilter;
   sortField: SortField;
@@ -32,6 +33,7 @@ export interface DashboardState {
   toggleSort: (field: SortField) => void;
   setShowCreateModal: (show: boolean) => void;
   setSessionToKill: (s: Session | null) => void;
+  setPreviewSession: (s: Session | null) => void;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
   fetchSessions: (opts?: FetchSessionsOptions) => Promise<void>;
@@ -120,6 +122,7 @@ export function useDashboard(_wsService?: WebSocketService): DashboardState {
     selectedAgent, setSelectedAgent,
     showCreateModal, setShowCreateModal,
     sessionToKill, setSessionToKill,
+    previewSession, setPreviewSession,
   } = useDashboardModals();
 
   // Derived filtered lists (memoised on data + filter state)
@@ -158,6 +161,7 @@ export function useDashboard(_wsService?: WebSocketService): DashboardState {
     filteredSessions,
     showCreateModal,
     sessionToKill,
+    previewSession,
     searchQuery,
     statusFilter,
     sortField,
@@ -169,6 +173,7 @@ export function useDashboard(_wsService?: WebSocketService): DashboardState {
     toggleSort,
     setShowCreateModal,
     setSessionToKill,
+    setPreviewSession,
     handleSessionKilled,
     handleSessionCreated,
     fetchSessions,

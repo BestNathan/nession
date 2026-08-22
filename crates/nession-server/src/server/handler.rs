@@ -171,6 +171,9 @@ impl ConnectionHandler {
             "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
             "client.session.create" => self.handle_client_session_create(msg).await,
             "client.session.kill" => self.handle_client_session_kill(msg).await,
+            "client.session.capture_preview" => {
+                self.handle_client_session_capture_preview(msg).await
+            }
             "client.env.list" => self.handle_client_env_list(msg).await,
             "client.env.get" => self.handle_client_env_get(msg).await,
             "client.env.write" => self.handle_client_env_write(msg).await,
@@ -2042,6 +2045,134 @@ impl ConnectionHandler {
         }
     }
 
+    /// Handle `client.session.capture_preview` — capture tmux scrollback from
+    /// a session on its agent and relay the base64-encoded ANSI back to the client.
+    async fn handle_client_session_capture_preview(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        info!(
+            "handle_client_session_capture_preview: called with msg_id={}",
+            msg.id
+        );
+
+        if !self.authenticated_client {
+            warn!("handle_client_session_capture_preview: client not authenticated");
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.capture_preview.response",
+                json!({ "error": "Not authenticated" }),
+            ));
+        }
+
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let lines_raw = msg
+            .payload
+            .get("lines")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(2000);
+        let lines: u32 = u32::try_from(lines_raw).unwrap_or(u32::MAX);
+
+        info!(
+            "handle_client_session_capture_preview: session_id={}, lines={}",
+            session_id, lines
+        );
+
+        let (agent_id, session_name) = match session_id.split_once(':') {
+            Some((aid, sname)) => (aid.to_string(), sname.to_string()),
+            None => {
+                warn!(
+                    "handle_client_session_capture_preview: invalid session_id format: {}",
+                    session_id
+                );
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": "Invalid session_id format. Expected 'agent_id:session_name'" }),
+                ));
+            }
+        };
+
+        info!(
+            "handle_client_session_capture_preview: agent_id={}, session_name={}",
+            agent_id, session_name
+        );
+
+        // Check agent is online
+        let agent = self.agent_registry.get(&agent_id).await;
+        match agent {
+            Some(a) if a.status != AgentStatus::Online => {
+                warn!(
+                    "handle_client_session_capture_preview: agent {} is offline",
+                    agent_id
+                );
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": format!("Agent '{}' is offline", agent_id) }),
+                ));
+            }
+            None => {
+                warn!(
+                    "handle_client_session_capture_preview: agent {} not found in registry",
+                    agent_id
+                );
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": format!("Agent '{}' not found", agent_id) }),
+                ));
+            }
+            Some(_) => {
+                info!(
+                    "handle_client_session_capture_preview: agent {} is online",
+                    agent_id
+                );
+            }
+        }
+
+        // Relay to agent with 15s timeout (capture can be slow for large lines)
+        let payload = json!({
+            "session_name": session_name,
+            "lines": lines,
+        });
+        info!("handle_client_session_capture_preview: calling agent_command_with_timeout for agent {}", agent_id);
+        match self
+            .agent_command_with_timeout(
+                &agent_id,
+                "session.capture_preview",
+                payload,
+                Duration::from_secs(15),
+            )
+            .await
+        {
+            Ok(response) => {
+                info!(
+                    "handle_client_session_capture_preview: got response from agent {}",
+                    agent_id
+                );
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    response,
+                ))
+            }
+            Err(e) => {
+                warn!("handle_client_session_capture_preview: agent_command_with_timeout failed for agent {}: {}", agent_id, e);
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": e }),
+                ))
+            }
+        }
+    }
+
     // ========================================================================
     // Environment-variable file management
     // ========================================================================
@@ -2069,6 +2200,11 @@ impl ConnectionHandler {
         timeout: Duration,
     ) -> Result<serde_json::Value, String> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        info!(
+            "agent_command_with_timeout: sending {} to agent {} (req: {})",
+            msg_type, agent_id, request_id
+        );
+
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("request_id".to_string(), json!(request_id));
         }
@@ -2076,10 +2212,29 @@ impl ConnectionHandler {
             .command_broker
             .send_command(agent_id, msg_type, &request_id, payload)
             .await;
+        info!(
+            "agent_command_with_timeout: waiting for response from agent {} (req: {})",
+            agent_id, request_id
+        );
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err("Agent disconnected".to_string()),
-            Err(_) => Err("Timeout waiting for agent response".to_string()),
+            Ok(Ok(response)) => {
+                info!(
+                    "agent_command_with_timeout: got response from agent {} (req: {})",
+                    agent_id, request_id
+                );
+                Ok(response)
+            }
+            Ok(Err(e)) => {
+                warn!("agent_command_with_timeout: oneshot receiver error for agent {} (req: {}): {:?}", agent_id, request_id, e);
+                Err("Agent disconnected".to_string())
+            }
+            Err(_) => {
+                warn!(
+                    "agent_command_with_timeout: timeout waiting for agent {} (req: {})",
+                    agent_id, request_id
+                );
+                Err("Timeout waiting for agent response".to_string())
+            }
         }
     }
 

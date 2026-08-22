@@ -112,6 +112,8 @@ export default defineConfig({
         'src/hooks/useProbePolling.ts',
         'src/hooks/useQuickCommands.ts',
         'src/hooks/useVisibilityReconnect.ts',
+        // Browser-only PNG export (DOM manipulation, offscreen xterm)
+        'src/lib/previewPng.ts',
         'src/components/env/EnvUploadDialog.tsx',
         'src/components/env/EnvInlineEditor.tsx',
         'src/components/env/useEnvManager.ts',
