@@ -180,7 +180,7 @@ export function SessionPreviewDialog({
               Save PNG
             </Button>
           </div>
-          <div className="flex-1 min-h-0 border rounded bg-black/50">
+          <div className="flex-1 min-h-0 border rounded bg-black/50 overflow-hidden">
             <StatusContent
               status={status}
               ansi={ansi}
