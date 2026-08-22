@@ -12,7 +12,7 @@ describe('useSessionPreview', () => {
 
   it('captures and transitions to ready', async () => {
     vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue('hello'),
+      capturePreview: vi.fn().mockResolvedValue({ ansi: 'hello', cols: 80, rows: 24 }),
     } as unknown as ReturnType<typeof useWebSocket>);
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
@@ -20,6 +20,8 @@ describe('useSessionPreview', () => {
     });
     expect(result.current.status).toBe('ready');
     expect(result.current.ansi).toBe('hello');
+    expect(result.current.cols).toBe(80);
+    expect(result.current.rows).toBe(24);
   });
 
   it('transitions to error on failure', async () => {
@@ -36,7 +38,7 @@ describe('useSessionPreview', () => {
 
   it('reset clears state', async () => {
     vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue('data'),
+      capturePreview: vi.fn().mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 }),
     } as unknown as ReturnType<typeof useWebSocket>);
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
@@ -52,7 +54,7 @@ describe('useSessionPreview', () => {
 
   it('empty capture result stays idle', async () => {
     vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue(''),
+      capturePreview: vi.fn().mockResolvedValue({ ansi: '', cols: 80, rows: 24 }),
     } as unknown as ReturnType<typeof useWebSocket>);
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
@@ -63,7 +65,7 @@ describe('useSessionPreview', () => {
   });
 
   it('calls capturePreview with correct args', async () => {
-    const captureFn = vi.fn().mockResolvedValue('data');
+    const captureFn = vi.fn().mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 });
     vi.mocked(useWebSocket).mockReturnValue({
       capturePreview: captureFn,
     } as unknown as ReturnType<typeof useWebSocket>);
