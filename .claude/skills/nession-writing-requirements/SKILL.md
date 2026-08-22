@@ -169,6 +169,8 @@ gh issue comment [N] --repo BestNathan/nession \
 
 **Kind — exactly one:** `requirement` | `bug`
 
+**Workflow — at most one:** `in-progress` (agent claim lock; see `nession-development` § Claim before you build)
+
 **Area — every one that applies:**
 
 | Label | Roughly |
@@ -218,6 +220,7 @@ create_label protocol A371F7 "crates/nession-common — protocol, shared types"
 create_label infra    6E7781 "Docker, k8s, deploy"
 create_label ci       6E7781 "CI workflows, scripts, justfile, git hooks"
 create_label test     D4A72C "Test coverage and test infrastructure"
+create_label in-progress FBBA52 "An agent is actively working on this issue"
 # bug / documentation are GitHub defaults — already exist
 ```
 
@@ -227,9 +230,9 @@ Missing label? Create it now. Never drop a label to save a command.
 
 # Lifecycle
 
-**Requirement:** Draft → In Discussion → Approved → (implementation PR references it) → Closed. Status lives in the body; update it as it moves.
+**Requirement:** Draft → In Discussion → Approved → **claimed (`in-progress`)** → (implementation PR references it) → claim released → Closed. Status lives in the body; update it as it moves.
 
-**Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → fix PR references it → closed by the release PR's `Closes #N`.
+**Bug:** Filed with analysis → on confirmation, one edit updates the body *and* narrows the labels → **claimed (`in-progress`)** → fix PR references it → claim released → closed by the release PR's `Closes #N`.
 
 ```bash
 gh issue edit [N] --repo BestNathan/nession --remove-label server --remove-label protocol
@@ -255,6 +258,9 @@ Create / comment / edit commands are in the path steps above. Not there:
 | Pull one area | `gh issue list --repo BestNathan/nession --label terminal --state open` |
 | Area + kind | `gh issue list --repo BestNathan/nession --label terminal --label bug --state open` |
 | OR several areas | `gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"` |
+| Check claim on #N | `gh issue view [N] --json title,state,labels,comments` |
+| Claim issue | `gh issue edit [N] --add-label in-progress` |
+| Release claim | `gh issue edit [N] --remove-label in-progress` |
 | Add labels | `gh issue edit [N] --repo BestNathan/nession --add-label terminal --add-label ui` |
 | Narrow labels | `gh issue edit [N] --repo BestNathan/nession --remove-label server` |
 | Find by title | `gh issue list --repo BestNathan/nession --label requirement --search "<keywords>"` |
