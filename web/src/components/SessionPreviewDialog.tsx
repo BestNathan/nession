@@ -109,6 +109,13 @@ export function SessionPreviewDialog({
     reset();
   });
 
+  // Auto-fetch when dialog opens
+  useEffect(() => {
+    if (isOpen && sessionId) {
+      capture(sessionId, DEFAULT_LINES);
+    }
+  }, [isOpen, sessionId, capture]);
+
   const handleRefresh = () => {
     if (lines < 1 || lines > MAX_LINES) {
       return;
