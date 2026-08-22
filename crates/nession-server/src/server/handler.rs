@@ -2051,7 +2051,13 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        info!(
+            "handle_client_session_capture_preview: called with msg_id={}",
+            msg.id
+        );
+
         if !self.authenticated_client {
+            warn!("handle_client_session_capture_preview: client not authenticated");
             return Ok(reply_json(
                 &msg.id,
                 "client.session.capture_preview.response",
@@ -2072,9 +2078,18 @@ impl ConnectionHandler {
             .unwrap_or(2000);
         let lines: u32 = u32::try_from(lines_raw).unwrap_or(u32::MAX);
 
+        info!(
+            "handle_client_session_capture_preview: session_id={}, lines={}",
+            session_id, lines
+        );
+
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
+                warn!(
+                    "handle_client_session_capture_preview: invalid session_id format: {}",
+                    session_id
+                );
                 return Ok(reply_json(
                     &msg.id,
                     "client.session.capture_preview.response",
@@ -2083,10 +2098,19 @@ impl ConnectionHandler {
             }
         };
 
+        info!(
+            "handle_client_session_capture_preview: agent_id={}, session_name={}",
+            agent_id, session_name
+        );
+
         // Check agent is online
         let agent = self.agent_registry.get(&agent_id).await;
         match agent {
             Some(a) if a.status != AgentStatus::Online => {
+                warn!(
+                    "handle_client_session_capture_preview: agent {} is offline",
+                    agent_id
+                );
                 return Ok(reply_json(
                     &msg.id,
                     "client.session.capture_preview.response",
@@ -2094,13 +2118,22 @@ impl ConnectionHandler {
                 ));
             }
             None => {
+                warn!(
+                    "handle_client_session_capture_preview: agent {} not found in registry",
+                    agent_id
+                );
                 return Ok(reply_json(
                     &msg.id,
                     "client.session.capture_preview.response",
                     json!({ "error": format!("Agent '{}' not found", agent_id) }),
                 ));
             }
-            _ => {}
+            Some(_) => {
+                info!(
+                    "handle_client_session_capture_preview: agent {} is online",
+                    agent_id
+                );
+            }
         }
 
         // Relay to agent with 15s timeout (capture can be slow for large lines)
@@ -2108,6 +2141,7 @@ impl ConnectionHandler {
             "session_name": session_name,
             "lines": lines,
         });
+        info!("handle_client_session_capture_preview: calling agent_command_with_timeout for agent {}", agent_id);
         match self
             .agent_command_with_timeout(
                 &agent_id,
@@ -2117,16 +2151,25 @@ impl ConnectionHandler {
             )
             .await
         {
-            Ok(response) => Ok(reply_json(
-                &msg.id,
-                "client.session.capture_preview.response",
-                response,
-            )),
-            Err(e) => Ok(reply_json(
-                &msg.id,
-                "client.session.capture_preview.response",
-                json!({ "error": e }),
-            )),
+            Ok(response) => {
+                info!(
+                    "handle_client_session_capture_preview: got response from agent {}",
+                    agent_id
+                );
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    response,
+                ))
+            }
+            Err(e) => {
+                warn!("handle_client_session_capture_preview: agent_command_with_timeout failed for agent {}: {}", agent_id, e);
+                Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": e }),
+                ))
+            }
         }
     }
 
@@ -2157,6 +2200,11 @@ impl ConnectionHandler {
         timeout: Duration,
     ) -> Result<serde_json::Value, String> {
         let request_id = uuid::Uuid::new_v4().to_string();
+        info!(
+            "agent_command_with_timeout: sending {} to agent {} (req: {})",
+            msg_type, agent_id, request_id
+        );
+
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("request_id".to_string(), json!(request_id));
         }
@@ -2164,10 +2212,29 @@ impl ConnectionHandler {
             .command_broker
             .send_command(agent_id, msg_type, &request_id, payload)
             .await;
+        info!(
+            "agent_command_with_timeout: waiting for response from agent {} (req: {})",
+            agent_id, request_id
+        );
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err("Agent disconnected".to_string()),
-            Err(_) => Err("Timeout waiting for agent response".to_string()),
+            Ok(Ok(response)) => {
+                info!(
+                    "agent_command_with_timeout: got response from agent {} (req: {})",
+                    agent_id, request_id
+                );
+                Ok(response)
+            }
+            Ok(Err(e)) => {
+                warn!("agent_command_with_timeout: oneshot receiver error for agent {} (req: {}): {:?}", agent_id, request_id, e);
+                Err("Agent disconnected".to_string())
+            }
+            Err(_) => {
+                warn!(
+                    "agent_command_with_timeout: timeout waiting for agent {} (req: {})",
+                    agent_id, request_id
+                );
+                Err("Timeout waiting for agent response".to_string())
+            }
         }
     }
 

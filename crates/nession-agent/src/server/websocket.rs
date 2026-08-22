@@ -1026,15 +1026,25 @@ impl AgentServer {
             }
 
             msg_types::SESSION_CAPTURE_PREVIEW => {
+                info!("agent: received session.capture_preview request id={}", id);
                 let payload: SessionCapturePreviewPayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
-                        Err(e) => return err("parse_error", &e.to_string()),
+                        Err(e) => {
+                            warn!("agent: failed to parse SessionCapturePreviewPayload: {}", e);
+                            return err("parse_error", &e.to_string());
+                        }
                     };
+                info!(
+                    "agent: capture_preview session_name={} lines={}",
+                    payload.session_name, payload.lines
+                );
                 if payload.lines == 0 {
+                    warn!("agent: capture_preview invalid lines=0");
                     return err("invalid_lines", "lines must be > 0");
                 }
                 if payload.lines > 100_000 {
+                    warn!("agent: capture_preview lines too large: {}", payload.lines);
                     return err("lines_too_large", "lines exceeds 100000 ceiling");
                 }
                 match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
@@ -1043,18 +1053,26 @@ impl AgentServer {
                     Ok(Some(bytes)) => {
                         use base64::Engine;
                         let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        info!(
+                            "agent: capture_preview success, ansi_b64 length={}",
+                            ansi_b64.len()
+                        );
                         let resp = SessionCapturePreviewResponse { ansi_b64 };
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
                     Ok(None) => {
+                        info!("agent: capture_preview success but empty (no scrollback)");
                         let resp = SessionCapturePreviewResponse {
                             ansi_b64: String::new(),
                         };
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => err("capture_failed", &e.to_string()),
+                    Err(e) => {
+                        warn!("agent: capture_preview failed: {}", e);
+                        err("capture_failed", &e.to_string())
+                    }
                 }
             }
 
