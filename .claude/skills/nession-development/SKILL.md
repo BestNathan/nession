@@ -591,11 +591,66 @@ gh pr comment <PR-NUMBER> --body "## 核心功能截图
 
 The label taxonomy (kind + area) is defined in **`nession-writing-requirements`**. Labels are generous and overlapping, so a single-label pull should be complete.
 
+### 0. Claim before you build (mandatory)
+
+Multiple agents can pick the same issue if nobody marks it. **`in-progress` is the claim lock** — add it before any worktree or code, remove it when the PR merges or you abandon the issue.
+
+**Do not filter `in-progress` out of list pulls.** Show every open issue; mark claimed ones in the output so the user can see status at a glance:
+
+```bash
+gh issue list --repo BestNathan/nession --label terminal --state open \
+  --json number,title,labels --jq '.[] | "\(.number)\t\(if ([.labels[].name] | index("in-progress")) then "🔒" else "  " end)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+```
+
+**When the user names a specific issue (e.g. "做 #345") — check claim first:**
+
+```bash
+gh issue view 345 --repo BestNathan/nession --json title,state,labels,comments \
+  --jq '{title, state, claimed: ([.labels[].name] | index("in-progress") != null), claim: ([.comments[] | select(.body | test("🤖 \\*\\*Claimed\\*\\*"))] | last | {body, createdAt, author: .author.login})}'
+```
+
+| Result | Action |
+|---|---|
+| Not claimed | Proceed to claim (below), then worktree |
+| Claimed | **Stop.** Show the user: issue title, claim comment (branch, time, agent), and ask whether to wait or take over a stale claim. Do **not** open a worktree or write code. |
+| Stale claim (>48h, no linked PR) | Show claim info, ask user whether to take over. Only re-claim after explicit approval. |
+
+**Claim (first action after the user approves working on an unclaimed #N):**
+
+```bash
+# Re-check — another agent may have claimed since you last looked
+gh issue view N --repo BestNathan/nession --json labels --jq '.labels[].name' | grep -qx in-progress \
+  && echo "Already claimed — show claim info to user" && exit 1
+
+gh issue edit N --repo BestNathan/nession --add-label in-progress
+gh issue comment N --repo BestNathan/nession --body "$(cat <<'EOF'
+🤖 **Claimed** — agent starting work.
+
+- **Branch:** feat/<slug> (or fix/<slug>)
+- **Claimed at:** YYYY-MM-DD HH:MM UTC+8
+
+Remove `in-progress` when the PR merges to staging, or comment here if abandoning.
+EOF
+)"
+```
+
+Then create the worktree. **Never** open a worktree for an issue you have not claimed.
+
+**Release the claim:**
+
+| Outcome | Action |
+|---|---|
+| PR merged to `staging` | `gh issue edit N --remove-label in-progress` (PR body already notes the issue number) |
+| Abandoned / blocked | Comment why, then `--remove-label in-progress` |
+| Stale claim takeover | Comment that you are taking over, then re-claim with a fresh comment |
+
+**⛔ Never** start implementation on a claimed issue unless the user explicitly approves a takeover (stale or otherwise).
+
 ### 1. Pull by label, never by keyword
 
 ```bash
 gh issue list --repo BestNathan/nession --label terminal --state open \
-  --json number,title,labels --jq '.[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+  --json number,title,labels --jq '.[] | "\(.number)\t\(if ([.labels[].name] | index("in-progress")) then "🔒" else "  " end)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
 
 gh issue list --repo BestNathan/nession --label terminal --label bug --state open   # AND
 gh issue list --repo BestNathan/nession --search "label:server,agent,protocol state:open"   # OR
@@ -655,9 +710,12 @@ State what the pull did not cover: which issues were excluded and why, and which
 
 | Task | Command |
 |------|---------|
-| Pull an area's open issues | `gh issue list --label terminal --state open` |
+| Pull an area's open issues | `gh issue list --label terminal --state open` (🔒 in jq output = `in-progress`) |
 | Pull area + kind | `gh issue list --label terminal --label bug --state open` |
 | OR several areas | `gh issue list --search "label:server,agent,protocol state:open"` |
+| Check claim on #N | `gh issue view <N> --json title,state,labels,comments` |
+| Claim issue | `gh issue edit <N> --add-label in-progress` + claim comment |
+| Release claim | `gh issue edit <N> --remove-label in-progress` |
 | Backfill area labels | `gh issue edit <N> --add-label terminal --add-label web` |
 | Create worktree (CC) | `EnterWorktree name: "feat/<slug>"` |
 | Refresh root main | `git fetch && git checkout main && git pull --ff-only origin main` |
@@ -698,3 +756,7 @@ State what the pull did not cover: which issues were excluded and why, and which
 | Planning a batch off a pull without backfilling labels | An empty/small result means labels are missing, not that work is missing. Backfill, re-pull, then plan. |
 | Bundling issues into one PR because they share an area label | Same label ≠ same work. One issue = one PR unless same root cause or same function. |
 | Running two worktrees over the same directory in parallel | They conflict, and a parallel refactor can silently revert the other's fix. Sequence same-directory work. |
+| **Starting work without claiming the issue** | **FORBIDDEN.** Add `in-progress` + claim comment before the worktree. |
+| **Starting work on a claimed issue without checking** | Query claim status first. If claimed, show info to the user — do not silently proceed. |
+| **Working on an issue another agent claimed** | **FORBIDDEN** unless the user explicitly approves takeover. |
+| **Leaving `in-progress` after merge or abandon** | Release the label. Stale claims block every other agent. |
