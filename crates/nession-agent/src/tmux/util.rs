@@ -62,13 +62,42 @@ pub async fn check_tmux_available() -> Result<bool> {
 /// including ANSI escape sequences so xterm.js can render formatting.
 ///
 /// Returns:
-/// - `Ok(Some(bytes))` — tmux exited 0 and stdout is non-empty.
+/// - `Ok(Some((bytes, cols, rows)))` — tmux exited 0 and stdout is non-empty.
 /// - `Ok(None)` — tmux exited 0 but stdout is empty (session exists, no history yet).
 /// - `Err(e)` — tmux binary missing, failed to spawn, or exited non-zero.
 pub async fn capture_scrollback(
     session: &str,
     lines: u32,
-) -> Result<Option<Vec<u8>>, std::io::Error> {
+) -> Result<Option<(Vec<u8>, u16, u16)>, std::io::Error> {
+    // First, get the session dimensions
+    let dims_output = Command::new("tmux")
+        .args([
+            "display-message",
+            "-t",
+            session,
+            "-p",
+            "#{window_width} #{window_height}",
+        ])
+        .output()
+        .await?;
+
+    let (cols, rows) = if dims_output.status.success() {
+        let dims_str = String::from_utf8_lossy(&dims_output.stdout);
+        let mut parts = dims_str.split_whitespace();
+        let cols = parts
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(80);
+        let rows = parts
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(24);
+        (cols, rows)
+    } else {
+        (80, 24) // Default fallback
+    };
+
+    // Then capture the scrollback
     let lines_str = lines.to_string();
     let output = Command::new("tmux")
         .args([
@@ -88,7 +117,7 @@ pub async fn capture_scrollback(
         if output.stdout.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(output.stdout))
+            Ok(Some((output.stdout, cols, rows)))
         }
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);

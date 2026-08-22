@@ -9,23 +9,24 @@ import { CATPPUCCIN_MOCHA } from '@/terminal/ThemeManager';
 export async function exportSessionPreviewPng(
   ansi: string,
   sessionName: string,
+  cols?: number,
+  rows?: number,
 ): Promise<void> {
-  // Calculate cols from actual max line width, capped at 300
+  // Use provided dimensions or calculate from content
   const lines = ansi.split('\n');
-  const maxLineWidth = Math.max(1, ...lines.map((l) => l.length));
-  const cols = Math.min(maxLineWidth, 300);
-  const lineCount = Math.max(1, lines.length);
+  const actualCols = cols ?? Math.min(Math.max(1, ...lines.map((l) => l.length)), 300);
+  const actualRows = rows ?? Math.max(1, lines.length);
 
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.left = '-99999px';
   // Approximate width: cols * 8px per char (monospace at 14px)
-  container.style.width = `${cols * 8}px`;
+  container.style.width = `${actualCols * 8}px`;
   document.body.appendChild(container);
 
   const offscreen = new Terminal({
-    cols,
-    rows: lineCount,
+    cols: actualCols,
+    rows: actualRows,
     convertEol: true,
     disableStdin: true,
     fontFamily: 'JetBrains Mono, monospace',

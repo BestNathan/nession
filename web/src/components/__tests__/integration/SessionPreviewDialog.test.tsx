@@ -33,6 +33,8 @@ describe('SessionPreviewDialog', () => {
     vi.mocked(useSessionPreview).mockReturnValue({
       status: 'idle',
       ansi: '',
+      cols: undefined,
+      rows: undefined,
       error: null,
       capture: vi.fn(),
       reset: vi.fn(),
@@ -50,6 +52,8 @@ describe('SessionPreviewDialog', () => {
     vi.mocked(useSessionPreview).mockReturnValue({
       status: 'loading',
       ansi: '',
+      cols: undefined,
+      rows: undefined,
       error: null,
       capture: vi.fn(),
       reset: vi.fn(),
@@ -66,6 +70,8 @@ describe('SessionPreviewDialog', () => {
     vi.mocked(useSessionPreview).mockReturnValue({
       status: 'error',
       ansi: '',
+      cols: undefined,
+      rows: undefined,
       error: 'tmux failed',
       capture: vi.fn(),
       reset: vi.fn(),
@@ -82,6 +88,8 @@ describe('SessionPreviewDialog', () => {
     vi.mocked(useSessionPreview).mockReturnValue({
       status: 'idle',
       ansi: '',
+      cols: undefined,
+      rows: undefined,
       error: null,
       capture,
       reset: vi.fn(),

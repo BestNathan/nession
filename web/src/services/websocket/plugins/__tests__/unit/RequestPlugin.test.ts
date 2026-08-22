@@ -424,13 +424,17 @@ describe('RequestPlugin', () => {
     it('sends correct msg_type + payload and decodes base64', async () => {
       const ansi = 'hello world';
       const b64 = btoa(ansi);
-      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ ansi_b64: b64 });
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ansi_b64: b64,
+        cols: 80,
+        rows: 24,
+      });
       const result = await plugin.capturePreview('agent1:sess1', 500);
       expect(core.request).toHaveBeenCalledWith('client.session.capture_preview', {
         session_id: 'agent1:sess1',
         lines: 500,
       });
-      expect(result).toBe(ansi);
+      expect(result).toEqual({ ansi, cols: 80, rows: 24 });
     });
 
     it('throws on error response', async () => {

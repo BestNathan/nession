@@ -30,12 +30,21 @@ interface SessionPreviewDialogProps {
 const DEFAULT_LINES = 2000;
 const MAX_LINES = 10000;
 
-function ReadonlyTerminal({ ansi }: { ansi: string }) {
+function ReadonlyTerminal({
+  ansi,
+  cols,
+  rows,
+}: {
+  ansi: string;
+  cols?: number;
+  rows?: number;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) {
       return;
     }
+    // Use actual tmux dimensions if available, otherwise fit to container
     const term = new Terminal({
       convertEol: true,
       disableStdin: true,
@@ -43,26 +52,35 @@ function ReadonlyTerminal({ ansi }: { ansi: string }) {
       fontFamily: 'JetBrains Mono, monospace',
       fontSize: 13,
       theme: CATPPUCCIN_MOCHA,
+      cols: cols,
+      rows: rows,
     });
-    const fit = new FitAddon();
     term.loadAddon(new CanvasAddon());
-    term.loadAddon(fit);
     term.open(ref.current);
-    fit.fit();
+    // Only use FitAddon if we don't have explicit dimensions
+    if (!cols || !rows) {
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      fit.fit();
+    }
     term.write(ansi);
     return () => term.dispose();
-  }, [ansi]);
+  }, [ansi, cols, rows]);
   return <div ref={ref} className="h-full w-full" />;
 }
 
 function StatusContent({
   status,
   ansi,
+  cols,
+  rows,
   error,
   onRefresh,
 }: {
   status: PreviewStatus;
   ansi: string;
+  cols?: number;
+  rows?: number;
   error: string | null;
   onRefresh: () => void;
 }) {
@@ -76,7 +94,7 @@ function StatusContent({
     );
   }
   if (status === 'ready') {
-    return <ReadonlyTerminal ansi={ansi} />;
+    return <ReadonlyTerminal ansi={ansi} cols={cols} rows={rows} />;
   }
   if (status === 'error') {
     return (
@@ -102,7 +120,7 @@ export function SessionPreviewDialog({
   sessionName,
 }: SessionPreviewDialogProps) {
   const [lines, setLines] = useState(DEFAULT_LINES);
-  const { status, ansi, error, capture, reset } = useSessionPreview();
+  const { status, ansi, cols, rows, error, capture, reset } = useSessionPreview();
 
   useDialogReset(isOpen, () => {
     setLines(DEFAULT_LINES);
@@ -127,7 +145,7 @@ export function SessionPreviewDialog({
     if (status !== 'ready' || !ansi) {
       return;
     }
-    await exportSessionPreviewPng(ansi, sessionName);
+    await exportSessionPreviewPng(ansi, sessionName, cols, rows);
   };
 
   return (
@@ -163,7 +181,14 @@ export function SessionPreviewDialog({
             </Button>
           </div>
           <div className="flex-1 min-h-0 border rounded bg-black/50">
-            <StatusContent status={status} ansi={ansi} error={error} onRefresh={handleRefresh} />
+            <StatusContent
+              status={status}
+              ansi={ansi}
+              cols={cols}
+              rows={rows}
+              error={error}
+              onRefresh={handleRefresh}
+            />
           </div>
         </div>
         <DialogFooter>
