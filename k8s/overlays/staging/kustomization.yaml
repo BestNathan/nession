@@ -14,13 +14,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-9aa9c9f
+  newTag: agent-c4f1bf1
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-9aa9c9f
+  newTag: server-c4f1bf1
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-9aa9c9f
+  newTag: ui-c4f1bf1
 
 # Isolate staging data on shared PVC via subPath.
 patchesStrategicMerge:
