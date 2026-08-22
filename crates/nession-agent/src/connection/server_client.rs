@@ -923,9 +923,11 @@ impl ServerClient {
                     session_name, lines
                 );
 
-                let (success, ansi_b64, error) = if lines == 0 {
+                let (success, ansi_b64, cols, rows, error) = if lines == 0 {
                     (
                         false,
+                        None,
+                        None,
                         None,
                         Some("invalid_lines: lines must be > 0".to_string()),
                     )
@@ -933,33 +935,37 @@ impl ServerClient {
                     (
                         false,
                         None,
+                        None,
+                        None,
                         Some("lines_too_large: lines exceeds 100000 ceiling".to_string()),
                     )
                 } else {
                     match crate::tmux::util::capture_scrollback(&session_name, lines).await {
-                        Ok(Some(bytes)) => {
+                        Ok(Some((bytes, c, r))) => {
                             use base64::Engine;
                             let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
                             info!(
-                                "capture_preview success: session_name={}, ansi_b64 length={}",
+                                "capture_preview success: session_name={}, ansi_b64 length={}, cols={}, rows={}",
                                 session_name,
-                                ansi_b64.len()
+                                ansi_b64.len(),
+                                c,
+                                r
                             );
-                            (true, Some(ansi_b64), None)
+                            (true, Some(ansi_b64), Some(c), Some(r), None)
                         }
                         Ok(None) => {
                             info!(
                                 "capture_preview success but empty (no scrollback): session_name={}",
                                 session_name
                             );
-                            (true, Some(String::new()), None)
+                            (true, Some(String::new()), Some(80), Some(24), None)
                         }
                         Err(e) => {
                             warn!(
                                 "capture_preview failed: session_name={}, error={}",
                                 session_name, e
                             );
-                            (false, None, Some(e.to_string()))
+                            (false, None, None, None, Some(e.to_string()))
                         }
                     }
                 };
@@ -973,6 +979,8 @@ impl ServerClient {
                         "command": "session.capture_preview",
                         "success": success,
                         "ansi_b64": ansi_b64,
+                        "cols": cols,
+                        "rows": rows,
                         "error": error,
                     }
                 });

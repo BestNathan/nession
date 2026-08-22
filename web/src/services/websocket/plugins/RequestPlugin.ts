@@ -102,17 +102,22 @@ export class RequestPlugin implements WebSocketPlugin {
    * Capture tmux session scrollback as ANSI text.
    * @param sessionId — "agentId:sessionName"
    * @param lines — number of lines to capture (must be > 0)
-   * @returns decoded UTF-8 ANSI string (may be empty if session has no history)
+   * @returns object with decoded UTF-8 ANSI string and optional cols/rows (may be empty if session has no history)
    */
-  async capturePreview(sessionId: string, lines: number): Promise<string> {
+  async capturePreview(
+    sessionId: string,
+    lines: number,
+  ): Promise<{ ansi: string; cols?: number; rows?: number }> {
     this.requireAuth();
     if (!Number.isInteger(lines) || lines <= 0) {
       throw new Error(`Invalid lines: ${lines}`);
     }
-    const response = await this.core.request<{ ansi_b64?: string; error?: string }>(
-      'client.session.capture_preview',
-      { session_id: sessionId, lines },
-    );
+    const response = await this.core.request<{
+      ansi_b64?: string;
+      cols?: number;
+      rows?: number;
+      error?: string;
+    }>('client.session.capture_preview', { session_id: sessionId, lines });
     if (response.error) {
       throw new Error(response.error);
     }
@@ -120,7 +125,11 @@ export class RequestPlugin implements WebSocketPlugin {
       throw new Error('Capture failed: no data returned');
     }
     const { decodeBase64Utf8 } = await import('@/lib/encoding');
-    return decodeBase64Utf8(response.ansi_b64);
+    return {
+      ansi: decodeBase64Utf8(response.ansi_b64),
+      cols: response.cols,
+      rows: response.rows,
+    };
   }
 
   // ── Sessions ──────────────────────────────────────────────────

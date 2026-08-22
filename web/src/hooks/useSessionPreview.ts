@@ -4,6 +4,12 @@ import { toast } from 'sonner';
 
 export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+interface PreviewResult {
+  ansi: string;
+  cols?: number;
+  rows?: number;
+}
+
 function isVersionError(error: string): boolean {
   return (
     error.toLowerCase().includes('unsupported message type') ||
@@ -27,7 +33,7 @@ function localizeError(error: string): string {
 export function useSessionPreview() {
   const ws = useWebSocket();
   const [status, setStatus] = useState<PreviewStatus>('idle');
-  const [ansi, setAnsi] = useState<string>('');
+  const [result, setResult] = useState<PreviewResult>({ ansi: '' });
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -39,12 +45,12 @@ export function useSessionPreview() {
       setStatus('loading');
       setError(null);
       try {
-        const result = await ws.capturePreview(sessionId, lines);
+        const previewResult = await ws.capturePreview(sessionId, lines);
         if (ctrl.signal.aborted) {
           return;
         }
-        setAnsi(result);
-        setStatus(result === '' ? 'idle' : 'ready');
+        setResult(previewResult);
+        setStatus(previewResult.ansi === '' ? 'idle' : 'ready');
       } catch (e) {
         if (ctrl.signal.aborted) {
           return;
@@ -63,9 +69,9 @@ export function useSessionPreview() {
   const reset = useCallback(() => {
     abortRef.current?.abort();
     setStatus('idle');
-    setAnsi('');
+    setResult({ ansi: '' });
     setError(null);
   }, []);
 
-  return { status, ansi, error, capture, reset };
+  return { status, ansi: result.ansi, cols: result.cols, rows: result.rows, error, capture, reset };
 }

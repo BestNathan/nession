@@ -221,6 +221,10 @@ pub struct SessionCapturePreviewPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewResponse {
     pub ansi_b64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
 }
 
 fn default_width() -> u16 {
@@ -1050,14 +1054,20 @@ impl AgentServer {
                 match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
                     .await
                 {
-                    Ok(Some(bytes)) => {
+                    Ok(Some((bytes, cols, rows))) => {
                         use base64::Engine;
                         let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
                         info!(
-                            "agent: capture_preview success, ansi_b64 length={}",
-                            ansi_b64.len()
+                            "agent: capture_preview success, ansi_b64 length={}, cols={}, rows={}",
+                            ansi_b64.len(),
+                            cols,
+                            rows
                         );
-                        let resp = SessionCapturePreviewResponse { ansi_b64 };
+                        let resp = SessionCapturePreviewResponse {
+                            ansi_b64,
+                            cols: Some(cols),
+                            rows: Some(rows),
+                        };
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
@@ -1065,6 +1075,8 @@ impl AgentServer {
                         info!("agent: capture_preview success but empty (no scrollback)");
                         let resp = SessionCapturePreviewResponse {
                             ansi_b64: String::new(),
+                            cols: Some(80),
+                            rows: Some(24),
                         };
                         serde_json::to_string(&make_response(&id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -1238,7 +1250,7 @@ impl AgentServer {
                                 match crate::tmux::util::capture_scrollback(&session_name, 2000)
                                     .await
                                 {
-                                    Ok(Some(bytes)) => bytes,
+                                    Ok(Some((bytes, _cols, _rows))) => bytes,
                                     Ok(None) | Err(_) => Vec::new(),
                                 };
 
