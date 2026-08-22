@@ -53,8 +53,8 @@ const CollapsedShortcuts = memo(function CollapsedShortcuts({ disabled, onComman
       <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
       <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
       <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
-      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\t')} disabled={disabled} aria-label="Tab"><span className="text-[11px] font-mono font-bold">⇥</span></Button>
-      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x1b')} disabled={disabled} aria-label="Esc"><span className="text-[11px] font-mono font-bold">⎋</span></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\t')} disabled={disabled} aria-label="Tab"><span className="text-[11px] font-semibold">Tab</span></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x1b')} disabled={disabled} aria-label="Esc"><span className="text-[11px] font-semibold">Esc</span></Button>
       <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
       <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
     </div>
