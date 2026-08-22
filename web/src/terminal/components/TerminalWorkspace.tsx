@@ -58,6 +58,9 @@ function TerminalHeader({
   sessions, sessionsLoading, sessionsError, onRetrySessions,
   onPreview,
 }: TerminalHeaderProps & { onPreview: () => void }) {
+  // Detect mobile viewport (sm breakpoint = 640px)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -84,8 +87,8 @@ function TerminalHeader({
       <Tooltip>
         <TooltipTrigger render={
           <Button variant="outline" size="sm" onClick={onPreview}>
-            <Eye className="w-4 h-4 mr-1" />
-            Preview
+            <Eye className="w-4 h-4 sm:mr-1" />
+            {!isMobile && 'Preview'}
           </Button>
         }>
           Preview recent scrollback

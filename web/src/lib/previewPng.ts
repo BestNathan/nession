@@ -35,7 +35,21 @@ export async function exportSessionPreviewPng(
   offscreen.loadAddon(new CanvasAddon());
   offscreen.open(container);
   offscreen.write(ansi);
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  // Wait for terminal to fully render (multiple frames for canvas addon)
+  await new Promise<void>((resolve) => {
+    let frames = 0;
+    const waitForRender = () => {
+      requestAnimationFrame(() => {
+        frames++;
+        if (frames >= 3) {
+          resolve();
+        } else {
+          waitForRender();
+        }
+      });
+    };
+    waitForRender();
+  });
   const canvas = container.querySelector('canvas');
   if (!canvas) {
     offscreen.dispose();
@@ -49,19 +63,67 @@ export async function exportSessionPreviewPng(
         return;
       }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
       // Filename: {session}_{YYYY-MM-DD_HH-mm-ss}.png
       const timestamp = new Date()
         .toISOString()
         .replace(/[:.]/g, '-')
         .slice(0, 19);
-      a.download = `${sessionName}_${timestamp}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-      offscreen.dispose();
-      document.body.removeChild(container);
-      resolve();
+
+      // Detect mobile device
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile && navigator.share && navigator.canShare) {
+        // Mobile: use Web Share API to save to photo album
+        const file = new File([blob], `${sessionName}_${timestamp}.png`, {
+          type: 'image/png',
+        });
+        if (navigator.canShare({ files: [file] })) {
+          navigator
+            .share({
+              files: [file],
+              title: 'Terminal Preview',
+              text: `Preview of ${sessionName}`,
+            })
+            .then(() => {
+              URL.revokeObjectURL(url);
+              offscreen.dispose();
+              document.body.removeChild(container);
+              resolve();
+            })
+            .catch((err) => {
+              // Fallback to download if share fails
+              console.warn('Share failed, falling back to download:', err);
+              triggerDownload(url, sessionName, timestamp);
+              URL.revokeObjectURL(url);
+              offscreen.dispose();
+              document.body.removeChild(container);
+              resolve();
+            });
+        } else {
+          // Fallback to download if can't share files
+          triggerDownload(url, sessionName, timestamp);
+          URL.revokeObjectURL(url);
+          offscreen.dispose();
+          document.body.removeChild(container);
+          resolve();
+        }
+      } else {
+        // Web: trigger download
+        triggerDownload(url, sessionName, timestamp);
+        URL.revokeObjectURL(url);
+        offscreen.dispose();
+        document.body.removeChild(container);
+        resolve();
+      }
     });
   });
+}
+
+function triggerDownload(url: string, sessionName: string, timestamp: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${sessionName}_${timestamp}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
