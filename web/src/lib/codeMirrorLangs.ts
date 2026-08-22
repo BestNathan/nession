@@ -2,6 +2,8 @@ import type { Extension } from '@codemirror/state';
 import { LanguageSupport, StreamLanguage } from '@codemirror/language';
 import type { LanguageName } from '@uiw/codemirror-extensions-langs';
 import { getLangKey, parseBasename, parseExt } from './viewerRegistry';
+import { detectLanguage, type LanguageId } from './languageId';
+import { languageIdToCodeMirrorKey } from './languageIdToCodeMirror';
 
 type LangsModule = typeof import('@uiw/codemirror-extensions-langs');
 
@@ -9,6 +11,7 @@ type LangsModule = typeof import('@uiw/codemirror-extensions-langs');
 const LANG_KEY_ALIASES: Record<string, string> = {
   env: 'properties',
   zsh: 'sh',
+  fish: 'sh',
   kotlin: 'kt',
   javascript: 'js',
   typescript: 'ts',
@@ -18,13 +21,10 @@ const LANG_KEY_ALIASES: Record<string, string> = {
   python: 'py',
   markdown: 'md',
   dockerfile: '__dockerfile__',
-  makefile: 'sh',
 };
 
 const BASENAME_LANG_KEYS: Record<string, string> = {
   Dockerfile: '__dockerfile__',
-  Makefile: 'sh',
-  GNUmakefile: 'sh',
   Jenkinsfile: 'groovy',
   Gemfile: 'rb',
   Rakefile: 'rb',
@@ -42,6 +42,46 @@ async function loadDockerfileExtension(): Promise<Extension> {
 
 function normalizeLangKey(key: string): string {
   return LANG_KEY_ALIASES[key] ?? key;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// New LanguageId-based API
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Collect unique LanguageIds present in a directory listing. */
+export function scanLanguageIdsFromPaths(paths: string[]): LanguageId[] {
+  const seen = new Set<LanguageId>();
+  for (const path of paths) {
+    const id = detectLanguage(path);
+    if (id !== 'plaintext') {
+      seen.add(id);
+    }
+  }
+  return [...seen];
+}
+
+/** Load syntax highlighting extension for a LanguageId. */
+export async function loadLangExtensionForLanguageId(
+  languageId: LanguageId,
+): Promise<Extension | null> {
+  const key = languageIdToCodeMirrorKey(languageId);
+  if (!key) {
+    return null;
+  }
+  return extensionForLangKey(key);
+}
+
+/** Register LanguageIds seen in FileBrowser; prefetches langs module when non-empty. */
+export function registerSeenLanguageIds(ids: Iterable<LanguageId>): void {
+  for (const id of ids) {
+    const key = languageIdToCodeMirrorKey(id);
+    if (key) {
+      sessionSeenLangKeys.add(key);
+    }
+  }
+  if (sessionSeenLangKeys.size > 0) {
+    void ensureLangsModule();
+  }
 }
 
 /** Resolve a UIW langs key from a file path or explicit language prop. */
@@ -73,7 +113,8 @@ export function resolveLangKey(path: string, language?: string): string | null {
   return normalizeLangKey(mapped);
 }
 
-/** Collect unique UIW lang keys present in a directory listing. */
+/** Collect unique UIW lang keys present in a directory listing.
+ * @deprecated Use scanLanguageIdsFromPaths() instead. */
 export function scanLangKeysFromPaths(paths: string[]): string[] {
   const seen = new Set<string>();
   for (const path of paths) {
@@ -97,7 +138,8 @@ export function ensureLangsModule(): Promise<LangsModule> {
   return langsPromise;
 }
 
-/** Register lang keys seen in FileBrowser; prefetches langs module when non-empty. */
+/** Register lang keys seen in FileBrowser; prefetches langs module when non-empty.
+ * @deprecated Use registerSeenLanguageIds() instead. */
 export function registerSeenLangKeys(keys: Iterable<string>): void {
   for (const key of keys) {
     sessionSeenLangKeys.add(key);
@@ -133,9 +175,12 @@ export async function loadLangExtensionForFile(
   path: string,
   language?: string,
 ): Promise<Extension | null> {
-  const key = resolveLangKey(path, language);
-  if (!key) {
-    return null;
+  // Explicit override
+  if (language) {
+    const languageId = language as LanguageId;
+    return loadLangExtensionForLanguageId(languageId);
   }
-  return extensionForLangKey(key);
+
+  const languageId = detectLanguage(path);
+  return loadLangExtensionForLanguageId(languageId);
 }
