@@ -1,7 +1,7 @@
 // Legacy manager classes (kept for backward compatibility)
 export { AddonManager } from './AddonManager';
 export { Renderer } from './Renderer';
-export { ThemeManager } from './ThemeManager';
+export { ThemeManager, CATPPUCCIN_MOCHA } from './ThemeManager';
 export { ConnectionManager } from './ConnectionManager';
 export { MouseIntentResolver } from './MouseIntentResolver';
 export { FontSizeManager } from './FontSizeManager';

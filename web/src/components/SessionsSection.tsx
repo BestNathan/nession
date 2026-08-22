@@ -7,7 +7,7 @@ import type { SortField, SortDirection } from '../hooks/useDashboard';
 
 export function SessionsSection({
   agents, filteredSessions, loadingSessions, staleAgents,
-  onCreate, fetchSessions, onAttach, onKill,
+  onCreate, fetchSessions, onAttach, onKill, onPreview,
   sortField, sortDirection, toggleSort, isSearchActive,
 }: {
   agents: Agent[];
@@ -20,6 +20,7 @@ export function SessionsSection({
   fetchSessions: (opts?: { force?: boolean }) => void;
   onAttach: (s: Session) => void;
   onKill: (s: Session) => void;
+  onPreview: (s: Session) => void;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (f: SortField) => void;
@@ -50,6 +51,7 @@ export function SessionsSection({
         staleAgents={staleAgents}
         onAttach={onAttach}
         onKill={onKill}
+        onPreview={onPreview}
         sortField={sortField}
         sortDirection={sortDirection}
         toggleSort={toggleSort}
