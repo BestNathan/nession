@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, SearchX } from 'lucide-react';
+import { ArrowUp, ArrowDown, SearchX, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -15,6 +15,7 @@ interface SessionListProps {
   staleAgents?: string[];
   onAttach: (session: Session) => void;
   onKill: (session: Session) => void;
+  onPreview: (session: Session) => void;
   sortField: SortField;
   sortDirection: SortDirection;
   toggleSort: (field: SortField) => void;
@@ -47,11 +48,13 @@ function SessionRow({
   isStale,
   onAttach,
   onKill,
+  onPreview,
 }: {
   session: Session;
   isStale: boolean;
   onAttach: (session: Session) => void;
   onKill: (session: Session) => void;
+  onPreview: (session: Session) => void;
 }) {
   return (
     <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 py-2.5 px-3 hover:bg-accent/50 transition-colors">
@@ -100,6 +103,25 @@ function SessionRow({
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => onPreview(session)}
+                className="flex-1 md:flex-none min-h-11 md:min-h-7"
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+            }
+          >
+            Preview scrollback
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Preview scrollback</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => onKill(session)}
                 className="flex-1 md:flex-none min-h-11 md:min-h-7 text-destructive border-destructive hover:bg-destructive/10"
               />
@@ -122,6 +144,7 @@ export function SessionList({
   staleAgents,
   onAttach,
   onKill,
+  onPreview,
   sortField,
   sortDirection,
   toggleSort,
@@ -181,6 +204,7 @@ export function SessionList({
               isStale={staleSet.has(session.agent_id)}
               onAttach={onAttach}
               onKill={onKill}
+              onPreview={onPreview}
             />
           ))}
         </div>

@@ -171,6 +171,9 @@ impl ConnectionHandler {
             "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
             "client.session.create" => self.handle_client_session_create(msg).await,
             "client.session.kill" => self.handle_client_session_kill(msg).await,
+            "client.session.capture_preview" => {
+                self.handle_client_session_capture_preview(msg).await
+            }
             "client.env.list" => self.handle_client_env_list(msg).await,
             "client.env.get" => self.handle_client_env_get(msg).await,
             "client.env.write" => self.handle_client_env_write(msg).await,
@@ -2039,6 +2042,91 @@ impl ConnectionHandler {
                     .to_string(),
                 ))))
             }
+        }
+    }
+
+    /// Handle `client.session.capture_preview` — capture tmux scrollback from
+    /// a session on its agent and relay the base64-encoded ANSI back to the client.
+    async fn handle_client_session_capture_preview(
+        &mut self,
+        msg: ProtocolMessage<serde_json::Value>,
+    ) -> anyhow::Result<HandlerAction> {
+        if !self.authenticated_client {
+            return Ok(reply_json(
+                &msg.id,
+                "client.session.capture_preview.response",
+                json!({ "error": "Not authenticated" }),
+            ));
+        }
+
+        let session_id = msg
+            .payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let lines_raw = msg
+            .payload
+            .get("lines")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(2000);
+        let lines: u32 = u32::try_from(lines_raw).unwrap_or(u32::MAX);
+
+        let (agent_id, session_name) = match session_id.split_once(':') {
+            Some((aid, sname)) => (aid.to_string(), sname.to_string()),
+            None => {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": "Invalid session_id format. Expected 'agent_id:session_name'" }),
+                ));
+            }
+        };
+
+        // Check agent is online
+        let agent = self.agent_registry.get(&agent_id).await;
+        match agent {
+            Some(a) if a.status != AgentStatus::Online => {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": format!("Agent '{}' is offline", agent_id) }),
+                ));
+            }
+            None => {
+                return Ok(reply_json(
+                    &msg.id,
+                    "client.session.capture_preview.response",
+                    json!({ "error": format!("Agent '{}' not found", agent_id) }),
+                ));
+            }
+            _ => {}
+        }
+
+        // Relay to agent with 15s timeout (capture can be slow for large lines)
+        let payload = json!({
+            "session_name": session_name,
+            "lines": lines,
+        });
+        match self
+            .agent_command_with_timeout(
+                &agent_id,
+                "session.capture_preview",
+                payload,
+                Duration::from_secs(15),
+            )
+            .await
+        {
+            Ok(response) => Ok(reply_json(
+                &msg.id,
+                "client.session.capture_preview.response",
+                response,
+            )),
+            Err(e) => Ok(reply_json(
+                &msg.id,
+                "client.session.capture_preview.response",
+                json!({ "error": e }),
+            )),
         }
     }
 

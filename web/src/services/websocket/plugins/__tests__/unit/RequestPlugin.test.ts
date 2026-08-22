@@ -405,4 +405,44 @@ describe('RequestPlugin', () => {
       });
     });
   });
+
+  // ── Capture Preview ─────────────────────────────────────────
+
+  describe('capturePreview', () => {
+    it('throws when not authenticated', async () => {
+      const unauthCore = createMockCore(false);
+      plugin.install(unauthCore);
+      await expect(plugin.capturePreview('a:b', 100)).rejects.toThrow('Not authenticated');
+    });
+
+    it('throws on invalid lines', async () => {
+      await expect(plugin.capturePreview('a:b', 0)).rejects.toThrow('Invalid lines');
+      await expect(plugin.capturePreview('a:b', -1)).rejects.toThrow('Invalid lines');
+      await expect(plugin.capturePreview('a:b', 1.5)).rejects.toThrow('Invalid lines');
+    });
+
+    it('sends correct msg_type + payload and decodes base64', async () => {
+      const ansi = 'hello world';
+      const b64 = btoa(ansi);
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({ ansi_b64: b64 });
+      const result = await plugin.capturePreview('agent1:sess1', 500);
+      expect(core.request).toHaveBeenCalledWith('client.session.capture_preview', {
+        session_id: 'agent1:sess1',
+        lines: 500,
+      });
+      expect(result).toBe(ansi);
+    });
+
+    it('throws on error response', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({
+        error: 'Agent offline',
+      });
+      await expect(plugin.capturePreview('a:b', 100)).rejects.toThrow('Agent offline');
+    });
+
+    it('throws when no data returned', async () => {
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      await expect(plugin.capturePreview('a:b', 100)).rejects.toThrow('no data returned');
+    });
+  });
 });

@@ -129,6 +129,11 @@ export class WebSocketService {
     return this.requests.serverInfo();
   }
 
+  /** Capture tmux scrollback as decoded UTF-8 ANSI text. */
+  async capturePreview(sessionId: string, lines: number): Promise<string> {
+    return this.requests.capturePreview(sessionId, lines);
+  }
+
   async listSessions(agentId?: string): Promise<Session[]> {
     return this.requests.listSessions(agentId);
   }

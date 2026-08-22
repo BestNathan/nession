@@ -22,6 +22,7 @@ const defaultProps = {
   sortDirection: 'asc' as const,
   toggleSort: vi.fn(),
   isSearchActive: false,
+  onPreview: vi.fn(),
 };
 
 describe('SessionList', () => {
@@ -212,6 +213,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -233,6 +235,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={toggleSort}
@@ -251,6 +254,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -268,6 +272,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -295,6 +300,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
@@ -313,6 +319,7 @@ describe('SessionList', () => {
         loading={false}
         onAttach={vi.fn()}
         onKill={vi.fn()}
+        onPreview={vi.fn()}
         sortField="name"
         sortDirection="asc"
         toggleSort={vi.fn()}
