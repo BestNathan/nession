@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { ChevronUp, ChevronDown, Square, Trash2, Search, CornerDownLeft, X } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
@@ -40,6 +40,26 @@ interface TerminalInputBarProps {
   onReveal?: () => void;
   controller?: TerminalController | null;
 }
+
+interface CollapsedShortcutsProps {
+  disabled: boolean;
+  onCommand: (text: string) => void;
+}
+
+/** Fixed-width touch targets in a horizontally scrollable row. */
+const CollapsedShortcuts = memo(function CollapsedShortcuts({ disabled, onCommand }: CollapsedShortcutsProps) {
+  return (
+    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\t')} disabled={disabled} aria-label="Tab"><span className="text-[11px] font-mono font-bold">⇥</span></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x1b')} disabled={disabled} aria-label="Esc"><span className="text-[11px] font-mono font-bold">⎋</span></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
+      <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" onClick={() => onCommand('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
+    </div>
+  );
+});
 
 /**
  * Mobile terminal input bar redesigned for touch:
@@ -112,12 +132,7 @@ function TerminalInputBar({
               </span>
               <div className="flex-1" />
 
-              {/* Quick-action buttons — 5 equal-size touch targets */}
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\x03')} disabled={disabled} aria-label="Ctrl-C"><Square className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand(' ')} disabled={disabled} aria-label="Space"><span className="text-[11px] font-mono font-bold">⎵</span></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\r')} disabled={disabled} aria-label="Enter"><CornerDownLeft className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('clear\n')} disabled={disabled} aria-label="Clear"><Trash2 className="size-4" data-icon /></Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => handleQuickCommand('\x12')} disabled={disabled} aria-label="Ctrl-R"><Search className="size-4" data-icon /></Button>
+              <CollapsedShortcuts disabled={disabled} onCommand={handleQuickCommand} />
             </>
           ) : (
             <>
