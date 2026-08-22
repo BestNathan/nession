@@ -445,4 +445,28 @@ describe('RequestPlugin', () => {
       await expect(plugin.capturePreview('a:b', 100)).rejects.toThrow('no data returned');
     });
   });
+
+  // ── Claude Code Extension ───────────────────────────────────
+
+  describe('claudeCodeList', () => {
+    it('sends extension.claude_code.list request', async () => {
+      const req = { agent_id: 'a1', scope: 'global' as const };
+      const resp = { available: true, categories: [] };
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue(resp);
+      const result = await plugin.claudeCodeList(req);
+      expect(result).toEqual(resp);
+      expect(core.request).toHaveBeenCalledWith('extension.claude_code.list', req);
+    });
+  });
+
+  describe('claudeCodeRead', () => {
+    it('sends extension.claude_code.read request', async () => {
+      const req = { agent_id: 'a1', scope: 'global' as const, path: '/test.txt' };
+      const resp = { content: 'test', content_type: 'text/plain', total_size: 4, offset: 0, has_more: false };
+      (core.request as ReturnType<typeof vi.fn>).mockResolvedValue(resp);
+      const result = await plugin.claudeCodeRead(req);
+      expect(result).toEqual(resp);
+      expect(core.request).toHaveBeenCalledWith('extension.claude_code.read', req);
+    });
+  });
 });
