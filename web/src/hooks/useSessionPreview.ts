@@ -1,7 +1,28 @@
 import { useState, useRef, useCallback } from 'react';
 import { useWebSocket } from './useWebSocket';
+import { toast } from 'sonner';
 
 export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+function isVersionError(error: string): boolean {
+  return (
+    error.toLowerCase().includes('unsupported message type') ||
+    error.toLowerCase().includes('unknown message type')
+  );
+}
+
+function localizeError(error: string): string {
+  if (isVersionError(error)) {
+    return 'Preview not supported by this agent version. Please upgrade the agent.';
+  }
+  if (error.includes('session not found')) {
+    return 'Session not found. It may have been killed.';
+  }
+  if (error.includes('capture_failed')) {
+    return 'Failed to capture terminal output.';
+  }
+  return error;
+}
 
 export function useSessionPreview() {
   const ws = useWebSocket();
@@ -28,8 +49,12 @@ export function useSessionPreview() {
         if (ctrl.signal.aborted) {
           return;
         }
-        setError((e as Error).message);
+        const errorMessage = localizeError((e as Error).message);
+        setError(errorMessage);
         setStatus('error');
+        toast.error('Failed to capture preview', {
+          description: errorMessage,
+        });
       }
     },
     [ws],

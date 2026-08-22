@@ -10,19 +10,26 @@ export async function exportSessionPreviewPng(
   ansi: string,
   sessionName: string,
 ): Promise<void> {
+  // Calculate cols from actual max line width, capped at 300
+  const lines = ansi.split('\n');
+  const maxLineWidth = Math.max(1, ...lines.map((l) => l.length));
+  const cols = Math.min(maxLineWidth, 300);
+  const lineCount = Math.max(1, lines.length);
+
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.left = '-99999px';
-  container.style.width = '1600px'; // 200 cols × 8px per char
+  // Approximate width: cols * 8px per char (monospace at 14px)
+  container.style.width = `${cols * 8}px`;
   document.body.appendChild(container);
-  const lineCount = Math.max(1, ansi.split('\n').length);
+
   const offscreen = new Terminal({
-    cols: 200,
+    cols,
     rows: lineCount,
     convertEol: true,
     disableStdin: true,
     fontFamily: 'JetBrains Mono, monospace',
-    fontSize: 13,
+    fontSize: 14, // Match live terminal font size
     theme: CATPPUCCIN_MOCHA,
   });
   offscreen.loadAddon(new CanvasAddon());
@@ -33,19 +40,28 @@ export async function exportSessionPreviewPng(
   if (!canvas) {
     offscreen.dispose();
     document.body.removeChild(container);
-    return;
+    throw new Error('Canvas not found after render');
   }
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `preview-${sessionName}-${Date.now()}.png`;
-    a.click();
-    URL.revokeObjectURL(url);
-    offscreen.dispose();
-    document.body.removeChild(container);
+  await new Promise<void>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('toBlob failed'));
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Filename: {session}_{YYYY-MM-DD_HH-mm-ss}.png
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .slice(0, 19);
+      a.download = `${sessionName}_${timestamp}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      offscreen.dispose();
+      document.body.removeChild(container);
+      resolve();
+    });
   });
 }

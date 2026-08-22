@@ -197,14 +197,21 @@ Dialog (max-w-4xl, h-[80vh])
 - Dispose on Dialog close.
 
 **Save PNG flow:**
-1. Create a hidden container (`position: fixed; left: -99999px; width: <cols*chWidth>px`).
-2. Instantiate a **second** `Terminal` with identical options but **explicit `CanvasAddon`** (not WebGL), and explicit dimensions: `cols = 200` (or measured max line width from ANSI, capped at 200), `rows = lineCount`.
-3. Write the same ANSI, wait one rAF for render.
-4. Find the `<canvas>` inside `term.element`, call `canvas.toBlob(blob => ...)`.
-5. Trigger download via a temporary `<a download="preview-{sessionName}-{timestamp}.png">`.
-6. Dispose the offscreen terminal + container.
+1. Create a hidden container (`position: fixed; left: -99999px`).
+2. Calculate `cols` from actual max line width in ANSI content, capped at 300 columns.
+3. Instantiate a **second** `Terminal` with identical options but **explicit `CanvasAddon`** (not WebGL), `fontSize: 14` (matches live terminal), and explicit dimensions: `cols = calculated width`, `rows = lineCount`.
+4. Write the same ANSI, wait one rAF for render.
+5. Find the `<canvas>` inside `term.element`, call `canvas.toBlob(blob => ...)`.
+6. Trigger download via a temporary `<a download="{sessionName}_{YYYY-MM-DD_HH-mm-ss}.png">`.
+7. Dispose the offscreen terminal + container.
 
-**Width choice:** fixed 200 columns. Rationale: tmux sessions are typically 80–200 cols; a fixed width keeps the PNG readable and avoids parsing ANSI to measure. The UI shows a note if any line is wider ("content may be truncated").
+**Width choice:** Dynamic sizing based on actual content. Calculate max line width from ANSI, cap at 300 columns to prevent excessively wide PNGs. This ensures narrow content produces narrow PNGs and wide content (up to 300 cols) produces appropriately wide PNGs.
+
+**Font size:** 14px to match the live terminal font size, ensuring visual consistency between preview and exported PNG.
+
+**Filename format:** `{sessionName}_{YYYY-MM-DD_HH-mm-ss}.png` (e.g., `myapp_2026-08-22_14-30-45.png`) for clear identification.
+
+**Error handling:** If canvas is not found after render or toBlob fails, throw an error. Caller (SessionPreviewDialog) catches and shows toast notification.
 
 **Lines input cap:** UI max 10000 (agent hard cap 100000 for safety). Input uses `Input type=number min=1 max=10000 step=100`. Values outside range → clamp + toast.
 
@@ -229,12 +236,36 @@ Add a Preview button to the QuickCommandsPanel toolbar area (or next to it). The
 
 ### Web: Hook — `web/src/hooks/useSessionPreview.ts`
 
-Encapsulates the RPC + state:
+Encapsulates the RPC + state + error localization:
 
 ```ts
+import { toast } from 'sonner';
+
+export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+function isVersionError(error: string): boolean {
+  return (
+    error.toLowerCase().includes('unsupported message type') ||
+    error.toLowerCase().includes('unknown message type')
+  );
+}
+
+function localizeError(error: string): string {
+  if (isVersionError(error)) {
+    return 'Preview not supported by this agent version. Please upgrade the agent.';
+  }
+  if (error.includes('session not found')) {
+    return 'Session not found. It may have been killed.';
+  }
+  if (error.includes('capture_failed')) {
+    return 'Failed to capture terminal output.';
+  }
+  return error;
+}
+
 export function useSessionPreview() {
   const ws = useWebSocket();
-  const [status, setStatus] = useState<'idle'|'loading'|'ready'|'error'>('idle');
+  const [status, setStatus] = useState<PreviewStatus>('idle');
   const [ansi, setAnsi] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const inflight = useRef<AbortController | null>(null);
@@ -252,8 +283,12 @@ export function useSessionPreview() {
       setStatus(result === '' ? 'idle' : 'ready');  // empty → show empty-state
     } catch (e) {
       if (ctrl.signal.aborted) return;
-      setError((e as Error).message);
+      const errorMessage = localizeError((e as Error).message);
+      setError(errorMessage);
       setStatus('error');
+      toast.error('Failed to capture preview', {
+        description: errorMessage,
+      });
     }
   }, [ws]);
 
@@ -268,22 +303,27 @@ export function useSessionPreview() {
 }
 ```
 
+**Version compatibility:** Detects "unsupported message type" errors from old agents and shows user-friendly message: "Preview not supported by this agent version. Please upgrade the agent."
+
+**Toast notifications:** All capture failures trigger a Sonner toast with localized error message, ensuring users are notified even if they don't notice the inline error state.
+
 Aborts in-flight request on re-capture or Dialog close.
 
 ## Edge Cases
 
 | Case | Handling |
 |------|----------|
-| Session killed between click and capture | Agent returns error → toast via Sonner |
-| tmux capture fails (no pane) | Agent returns error → toast |
-| Empty scrollback (new session) | `ansi_b64: ""` → Dialog shows "No content yet" empty state |
+| Session killed between click and capture | Agent returns error → toast via Sonner + inline error with retry |
+| tmux capture fails (no pane) | Agent returns error → toast via Sonner + inline error |
+| Empty scrollback (new session) | `ansi_b64: ""` → Dialog shows "No content captured" empty state |
 | `lines = 0` | Agent rejects with `invalid_lines`; UI input also prevents 0 |
 | `lines` > tmux history-limit | tmux returns whatever it has; no error |
-| Very long lines | xterm wraps naturally; no truncation needed |
+| Very long lines | xterm wraps naturally; PNG caps at 300 cols |
 | Rapid re-clicks | `useSessionPreview` aborts prior in-flight request |
-| Alt-screen TUI (vim/less) | `capture-pane` captures current screen; Dialog shows a small info callout: "Fullscreen apps show the current screen, not history" |
+| Alt-screen TUI (vim/less) | `capture-pane` captures current screen; Dialog shows current content |
 | PNG export fails (memory / offscreen canvas limit) | Toast error; ANSI preview stays visible |
 | Dialog unmount during export | AbortController cancels; no orphan download |
+| Old agent version (doesn't support preview) | Error detected → toast: "Preview not supported by this agent version. Please upgrade the agent." |
 
 ## Tests
 
