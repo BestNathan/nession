@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { useP2PConnection } from '../../hooks/useP2PConnection';
 import { createFileOps } from '../../services/fileOps';
 import { AddressSelector } from '../../components/AddressSelector';
@@ -11,6 +12,7 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { useTerminalSessions } from '../../hooks/useTerminalSessions';
 import { SessionDropdown } from '../../components/SessionDropdown';
 import { TerminalLayout } from '../../components/TerminalLayout';
+import { SessionPreviewDialog } from '../../components/SessionPreviewDialog';
 import {
   sessionIdAtom,
   sessionNameAtom,
@@ -54,7 +56,8 @@ function TerminalHeader({
   onBack, sessionName, effectiveMode,
   attachInfo, forcedRelay, latencies,
   sessions, sessionsLoading, sessionsError, onRetrySessions,
-}: TerminalHeaderProps) {
+  onPreview,
+}: TerminalHeaderProps & { onPreview: () => void }) {
   return (
     <header className="border-b px-2 sm:px-4 py-2 flex items-center gap-2 sm:gap-4 flex-shrink-0 flex-wrap">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -78,6 +81,19 @@ function TerminalHeader({
           effectiveMode={effectiveMode}
         />
       ) : null}
+      <Tooltip>
+        <TooltipTrigger render={
+          <Button variant="outline" size="sm" onClick={onPreview}>
+            <Eye className="w-4 h-4 mr-1" />
+            Preview
+          </Button>
+        }>
+          Preview recent scrollback
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>View recent terminal output</p>
+        </TooltipContent>
+      </Tooltip>
     </header>
   );
 }
@@ -133,6 +149,9 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const [latencies] = useAtom(currentAgentLatenciesAtom);
 
   const isP2P = effectiveMode === 'p2p';
+
+  // Preview dialog state
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Drive the P2P WebSocket. useP2PConnection writes p2pConnectionAtom +
   // p2pStateAtom from its ws events, and we read them back below. The options
@@ -338,6 +357,14 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
         onRetrySessions={refetchSessions}
+        onPreview={() => setPreviewOpen(true)}
+      />
+
+      <SessionPreviewDialog
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        sessionId={sessionId}
+        sessionName={sessionName}
       />
 
       <div className="flex-1 min-h-0 flex flex-col relative">
