@@ -77,9 +77,7 @@ function App() {
 
       return service.connect();
     } catch (error) {
-      if (auto) {
-        clearToken();
-      } else {
+      if (auto) { clearToken(); } else {
         toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         setConnectionStatus('disconnected');
       }
@@ -91,7 +89,9 @@ function App() {
     connectInternal(remember, false).catch(() => { /* error already toasted */ });
   }, [connectInternal]);
 
-  // Auto-connect on mount when stored credentials or URL token present (StrictMode safe).
+  // Auto-connect on mount when stored credentials or URL token present.
+  // StrictMode safety: reset the dedup flag in cleanup so the second mount
+  // re-runs the connect (the wsService cleanup effect destroyed the first).
   useEffect(() => {
     if (!hasAutoConnected.current && autoConnect) {
       hasAutoConnected.current = true;
@@ -100,6 +100,9 @@ function App() {
         setConnectionStatus('disconnected');
       });
     }
+    return () => {
+      hasAutoConnected.current = false;
+    };
   }, [autoConnect, connectInternal]);
 
   // Mobile / background-tab recovery: when the user returns to the tab,
