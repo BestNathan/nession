@@ -33,20 +33,23 @@ const MAX_LINES = 10000;
 function ReadonlyTerminal({
   ansi,
   cols,
-  rows,
 }: {
   ansi: string;
   cols?: number;
-  rows?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  // Calculate actual line count from ANSI content
+  // This ensures the terminal height matches the content, not the tmux session visible rows
+  const actualRows = ansi.split('\n').length;
 
   useEffect(() => {
     if (!ref.current) {
       return;
     }
     // Use actual tmux dimensions if available, otherwise fit to container
+    // Use actualRows (from content) instead of rows (from tmux session) for height
     const term = new Terminal({
       convertEol: true,
       disableStdin: true,
@@ -55,12 +58,12 @@ function ReadonlyTerminal({
       fontSize: 13,
       theme: CATPPUCCIN_MOCHA,
       cols: cols,
-      rows: rows,
+      rows: actualRows,
     });
     term.loadAddon(new CanvasAddon());
     term.open(ref.current);
     // Only use FitAddon if we don't have explicit dimensions
-    if (!cols || !rows) {
+    if (!cols) {
       const fit = new FitAddon();
       term.loadAddon(fit);
       fit.fit();
@@ -75,11 +78,11 @@ function ReadonlyTerminal({
     }
     term.write(ansi);
     return () => term.dispose();
-  }, [ansi, cols, rows]);
+  }, [ansi, cols, actualRows]);
 
   // When we have explicit dimensions, set container to exact size
   // Otherwise, fill the parent container
-  if (cols && rows && dimensions) {
+  if (cols && dimensions) {
     return (
       <div
         ref={ref}
@@ -97,14 +100,12 @@ function StatusContent({
   status,
   ansi,
   cols,
-  rows,
   error,
   onRefresh,
 }: {
   status: PreviewStatus;
   ansi: string;
   cols?: number;
-  rows?: number;
   error: string | null;
   onRefresh: () => void;
 }) {
@@ -118,7 +119,7 @@ function StatusContent({
     );
   }
   if (status === 'ready') {
-    return <ReadonlyTerminal ansi={ansi} cols={cols} rows={rows} />;
+    return <ReadonlyTerminal ansi={ansi} cols={cols} />;
   }
   if (status === 'error') {
     return (
@@ -144,7 +145,7 @@ export function SessionPreviewDialog({
   sessionName,
 }: SessionPreviewDialogProps) {
   const [lines, setLines] = useState(DEFAULT_LINES);
-  const { status, ansi, cols, rows, error, capture, reset } = useSessionPreview();
+  const { status, ansi, cols, error, capture, reset } = useSessionPreview();
 
   useDialogReset(isOpen, () => {
     setLines(DEFAULT_LINES);
@@ -169,7 +170,7 @@ export function SessionPreviewDialog({
     if (status !== 'ready' || !ansi) {
       return;
     }
-    await exportSessionPreviewPng(ansi, sessionName, cols, rows);
+    await exportSessionPreviewPng(ansi, sessionName, cols);
   };
 
   return (
@@ -209,7 +210,6 @@ export function SessionPreviewDialog({
               status={status}
               ansi={ansi}
               cols={cols}
-              rows={rows}
               error={error}
               onRefresh={handleRefresh}
             />
