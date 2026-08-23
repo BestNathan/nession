@@ -40,6 +40,8 @@ function ReadonlyTerminal({
   rows?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+
   useEffect(() => {
     if (!ref.current) {
       return;
@@ -62,19 +64,33 @@ function ReadonlyTerminal({
       const fit = new FitAddon();
       term.loadAddon(fit);
       fit.fit();
+    } else {
+      // Measure the actual rendered size and set container dimensions
+      // This ensures the container matches the terminal exactly, no gray areas
+      const element = term.element;
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        setDimensions({ width: rect.width, height: rect.height });
+      }
     }
     term.write(ansi);
     return () => term.dispose();
   }, [ansi, cols, rows]);
-  // When we have explicit dimensions, don't constrain width - let terminal size naturally
-  // and allow the parent container to scroll
-  return (
-    <div
-      ref={ref}
-      className={cols && rows ? 'h-full' : 'h-full w-full'}
-      style={cols && rows ? { minWidth: 'fit-content' } : undefined}
-    />
-  );
+
+  // When we have explicit dimensions, set container to exact size
+  // Otherwise, fill the parent container
+  if (cols && rows && dimensions) {
+    return (
+      <div
+        ref={ref}
+        style={{
+          width: `${dimensions.width}px`,
+          height: `${dimensions.height}px`,
+        }}
+      />
+    );
+  }
+  return <div ref={ref} className="h-full w-full" />;
 }
 
 function StatusContent({
