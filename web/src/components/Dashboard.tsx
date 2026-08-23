@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
@@ -127,13 +127,12 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   } = useTerminalAttach(navigate, location, sessions, loadingSessions);
 
   const {
-    serverRefreshKey,
-    agentToDelete,
-    setAgentToDelete,
-    handleTerminalDisconnect,
-    handleTerminalError,
-    incrementServerRefreshKey,
+    serverRefreshKey, agentToDelete, setAgentToDelete,
+    handleTerminalDisconnect, handleTerminalError, incrementServerRefreshKey,
   } = useDashboardDialogs();
+
+  // Preselected agent for Create Session dialog (opened from detail panel).
+  const [createSessionAgentId, setCreateSessionAgentId] = useState<string | null>(null);
 
   // App-level address probing — fire-and-forget, writes probeResultsAtom.
   useProbePolling(agents);
@@ -209,25 +208,32 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           sessions={sessions.filter((s) => s.agent_id === selectedAgent.agent_id)}
           onClose={() => setSelectedAgent(null)}
           onRefresh={fetchSessions}
+          onRename={() => {
+            document.getElementById(`rename-${selectedAgent.agent_id}`)?.click();
+          }}
+          onDelete={() => setAgentToDelete(selectedAgent)}
+          onCreateSession={() => {
+            setCreateSessionAgentId(selectedAgent.agent_id);
+            setShowCreateModal(true);
+          }}
         />
       )}
 
       <DashboardDialogs
         showCreateModal={showCreateModal}
-        setShowCreateModal={setShowCreateModal}
+        setShowCreateModal={(show) => {
+          setShowCreateModal(show);
+          if (!show) {setCreateSessionAgentId(null);}
+        }}
         agents={agents}
         onCreated={() => { handleSessionCreated(); incrementServerRefreshKey(); }}
-        sessionToKill={sessionToKill}
-        setSessionToKill={setSessionToKill}
-        onKilled={handleSessionKilled}
-        agentToDelete={agentToDelete}
-        setAgentToDelete={setAgentToDelete}
+        preselectedAgentId={createSessionAgentId}
+        sessionToKill={sessionToKill} setSessionToKill={setSessionToKill} onKilled={handleSessionKilled}
+        agentToDelete={agentToDelete} setAgentToDelete={setAgentToDelete}
         onDeleted={() => { incrementServerRefreshKey(); fetchSessions(); }}
-        attachDialogSession={attachDialogSession}
-        setAttachDialogSession={setAttachDialogSession}
+        attachDialogSession={attachDialogSession} setAttachDialogSession={setAttachDialogSession}
         onConfirm={confirmAttach}
-        previewSession={previewSession}
-        setPreviewSession={setPreviewSession}
+        previewSession={previewSession} setPreviewSession={setPreviewSession}
       />
     </div>
   );

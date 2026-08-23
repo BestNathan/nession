@@ -9,7 +9,7 @@ import { createWebSocketService, destroyWebSocketService, WebSocketService } fro
 import { ConnectionStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
-import { getToken, setToken } from './lib/auth';
+import { getToken, setToken, clearToken, getRememberPreference } from './lib/auth';
 import { WebSocketContext } from './hooks/useWebSocket';
 import { useVisibilityReconnect } from './hooks/useVisibilityReconnect';
 
@@ -17,7 +17,9 @@ const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'w
 
 function App() {
   const params = new URLSearchParams(window.location.search);
-  const autoConnect = params.get('token') !== null;
+  // Auto-connect when URL provides a token OR storage holds credentials
+  // (including an empty string from a previous no-auth connect).
+  const autoConnect = params.get('token') !== null || getToken() !== null;
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
     () => autoConnect ? 'connecting' : 'disconnected'
   );
@@ -28,11 +30,8 @@ function App() {
   // Only a deliberate logout or exhausted reconnect attempts clear this.
   const [wasEverAuthed, setWasEverAuthed] = useState(false);
   const [authToken, setAuthToken] = useState(() => {
-    const urlToken = params.get('token');
-    if (urlToken) {
-      setToken(urlToken, false);
-      return urlToken;
-    }
+    const t = params.get('token');
+    if (t !== null) { setToken(t, false); return t; }
     return getToken() || '';
   });
   const [serverUrl, setServerUrl] = useState(
@@ -58,7 +57,9 @@ function App() {
     };
   }, []);
 
-  const handleConnect = useCallback(async (remember: boolean) => {
+  // Internal connect logic, shared between manual and auto-connect paths.
+  // `auto` = true: silent failure (no toast), only token cleared on error.
+  const connectInternal = useCallback((remember: boolean, auto: boolean) => {
     setToken(authToken, remember);
     localStorage.setItem('nession_server_url', serverUrl);
 
@@ -74,21 +75,32 @@ function App() {
         setConnectionStatus(status);
       });
 
-      await service.connect();
+      return service.connect();
     } catch (error) {
-      toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setConnectionStatus('disconnected');
+      if (auto) {
+        clearToken();
+      } else {
+        toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        setConnectionStatus('disconnected');
+      }
+      return Promise.reject(error);
     }
   }, [authToken, serverUrl]);
 
-  // Auto-connect on mount when auth token is provided via URL parameter.
-  // hasAutoConnected ref ensures this only fires once per mount.
+  const handleConnect = useCallback((remember: boolean) => {
+    connectInternal(remember, false).catch(() => { /* error already toasted */ });
+  }, [connectInternal]);
+
+  // Auto-connect on mount when stored credentials or URL token present (StrictMode safe).
   useEffect(() => {
-    if (!hasAutoConnected.current && autoConnect && authToken) {
+    if (!hasAutoConnected.current && autoConnect) {
       hasAutoConnected.current = true;
-      handleConnect(false);
+      connectInternal(getRememberPreference(), true).catch(() => {
+        clearToken();
+        setConnectionStatus('disconnected');
+      });
     }
-  }, [autoConnect, authToken, handleConnect]);
+  }, [autoConnect, connectInternal]);
 
   // Mobile / background-tab recovery: when the user returns to the tab,
   // trigger an immediate reconnect if the WebSocket died while suspended.

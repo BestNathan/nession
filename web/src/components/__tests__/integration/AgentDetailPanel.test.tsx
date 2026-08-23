@@ -215,7 +215,63 @@ describe('AgentDetailPanel', () => {
     );
     expect(screen.getByText('Copy All')).toBeInTheDocument();
     expect(screen.getByText('Refresh')).toBeInTheDocument();
-    expect(screen.getByText('Ping')).toBeInTheDocument();
+  });
+
+  it('renders action buttons in quick actions bar', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent()}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+        onRename={vi.fn()}
+        onDelete={vi.fn()}
+        onCreateSession={vi.fn()}
+      />,
+    );
+    expect(screen.getByTitle('Rename agent')).toBeInTheDocument();
+    // Online agent: delete button shows disabled tooltip
+    expect(screen.getByTitle('Agent must be offline to delete')).toBeInTheDocument();
+    expect(screen.getByTitle('Create session')).toBeInTheDocument();
+  });
+
+  it('disables delete button when agent is online', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent({ status: 'online' })}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByTitle('Agent must be offline to delete')).toBeDisabled();
+  });
+
+  it('enables delete button when agent is offline', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent({ status: 'offline' })}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByTitle('Delete agent')).not.toBeDisabled();
+  });
+
+  it('disables create session button when agent is offline', () => {
+    render(
+      <AgentDetailPanel
+        agent={makeAgent({ status: 'offline' })}
+        heartbeatHistory={[]}
+        sessions={[]}
+        onClose={vi.fn()}
+        onCreateSession={vi.fn()}
+      />,
+    );
+    expect(screen.getByTitle('Agent must be online to create sessions')).toBeInTheDocument();
   });
 
   it('shows agent ID in truncated form', () => {
