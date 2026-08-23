@@ -66,7 +66,15 @@ function ReadonlyTerminal({
     term.write(ansi);
     return () => term.dispose();
   }, [ansi, cols, rows]);
-  return <div ref={ref} className="h-full w-full" />;
+  // When we have explicit dimensions, don't constrain width - let terminal size naturally
+  // and allow the parent container to scroll
+  return (
+    <div
+      ref={ref}
+      className={cols && rows ? 'h-full' : 'h-full w-full'}
+      style={cols && rows ? { minWidth: 'fit-content' } : undefined}
+    />
+  );
 }
 
 function StatusContent({
@@ -180,7 +188,7 @@ export function SessionPreviewDialog({
               Save PNG
             </Button>
           </div>
-          <div className="flex-1 min-h-0 border rounded bg-black/50 overflow-hidden">
+          <div className="flex-1 min-h-0 border rounded bg-black/50 overflow-auto">
             <StatusContent
               status={status}
               ansi={ansi}
