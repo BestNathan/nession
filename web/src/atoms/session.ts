@@ -84,15 +84,23 @@ export const switchAddressAtom = atom(
   null,
   (get, set, url: string | null) => {
     // No-op when the user re-selects the route they're already on — same
-    // manualOverride and same resolved activeUrl.  Without this guard the
-    // unconditional disconnect/reconnect cycle below would flash a spinner
-    // (isSwitching becomes true while p2pState catches up) for what is
-    // logically a no-op, and needlessly tear down a live P2P socket.
+    // manualOverride source.  Without this guard the unconditional
+    // disconnect/reconnect cycle below would flash a spinner (isSwitching
+    // becomes true while p2pState catches up) for what is logically a no-op,
+    // and needlessly tear down a live P2P socket.
+    //
+    // Two no-op cases:
+    //   1. Explicit URL re-selected (url === currentOverride !== null)
+    //   2. Auto re-selected (url === null && currentOverride === null)
+    //
     // The Auto → explicit-same-URL case is intentionally NOT short-circuited:
     // there manualOverride changes (null → url) so the source of the URL
     // changed and the epoch bump / rebuild still has to fire.
+    // Re-probe latency changes also don't come through here (they update
+    // fastestProbedUrlAtom directly), so a same-source Auto selection truly
+    // means "no state change needed".
     const currentOverride = get(manualOverrideAtom);
-    if (url !== null && url === currentOverride) {
+    if (url === currentOverride) {
       return;
     }
 
