@@ -141,4 +141,24 @@ describe('action atoms', () => {
     expect(store.get(manualOverrideAtom)).toBe('ws://auto-resolved/ws');
     expect(store.get(p2pEpochAtom)).toBe(1);
   });
+
+  it('switchAddressAtom is a no-op when re-selecting Auto (null → null)', () => {
+    const store = createStore();
+    // Start in Auto mode (manualOverride is null).
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    const epochInitial = store.get(p2pEpochAtom);
+    expect(epochInitial).toBe(0);
+
+    // Simulate connection having come up.
+    store.set(terminalSessionStateAtom, 'attached');
+
+    // Re-selecting Auto must NOT tear down the connection — would otherwise
+    // flash a spinner every time the user clicks the Auto entry they're
+    // already on, and is the reported cause of "selecting auto multiple
+    // times → no content".
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(p2pEpochAtom)).toBe(epochInitial); // epoch unchanged
+    expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
+  });
 });
