@@ -38,7 +38,6 @@ function ReadonlyTerminal({
   cols?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
 
   // Calculate actual line count from ANSI content
   // This ensures the terminal height matches the content, not the tmux session visible rows
@@ -67,33 +66,12 @@ function ReadonlyTerminal({
       const fit = new FitAddon();
       term.loadAddon(fit);
       fit.fit();
-    } else {
-      // Measure the actual rendered size and set container dimensions
-      // This ensures the container matches the terminal exactly, no gray areas
-      const element = term.element;
-      if (element) {
-        const rect = element.getBoundingClientRect();
-        setDimensions({ width: rect.width, height: rect.height });
-      }
     }
     term.write(ansi);
     return () => term.dispose();
   }, [ansi, cols, actualRows]);
 
-  // When we have explicit dimensions, set container to exact size
-  // Otherwise, fill the parent container
-  if (cols && dimensions) {
-    return (
-      <div
-        ref={ref}
-        style={{
-          width: `${dimensions.width}px`,
-          height: `${dimensions.height}px`,
-        }}
-      />
-    );
-  }
-  return <div ref={ref} className="h-full w-full" />;
+  return <div ref={ref} className="w-full" />;
 }
 
 function StatusContent({
@@ -180,40 +158,38 @@ export function SessionPreviewDialog({
           <DialogTitle>Preview — {sessionName}</DialogTitle>
           <DialogDescription>Last {lines} lines. Refresh to update.</DialogDescription>
         </DialogHeader>
-        <div className="flex-1 flex flex-col gap-3 min-h-0">
-          <div className="flex items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="preview-lines">Lines</Label>
-              <Input
-                id="preview-lines"
-                type="number"
-                min={1}
-                max={MAX_LINES}
-                step={100}
-                value={lines}
-                onChange={(e) => setLines(Number(e.target.value))}
-                className="w-32"
-                disabled={status === 'loading'}
-              />
-            </div>
-            <Button onClick={handleRefresh} disabled={status === 'loading'} size="sm">
-              <RefreshCw className="h-4 w-4 mr-1" />
-              Refresh
-            </Button>
-            <Button onClick={handleSavePng} disabled={status !== 'ready'} variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-1" />
-              Save PNG
-            </Button>
-          </div>
-          <div className="flex-1 min-h-0 border rounded bg-black/50 overflow-auto">
-            <StatusContent
-              status={status}
-              ansi={ansi}
-              cols={cols}
-              error={error}
-              onRefresh={handleRefresh}
+        <div className="flex items-end gap-3 flex-shrink-0">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="preview-lines">Lines</Label>
+            <Input
+              id="preview-lines"
+              type="number"
+              min={1}
+              max={MAX_LINES}
+              step={100}
+              value={lines}
+              onChange={(e) => setLines(Number(e.target.value))}
+              className="w-32"
+              disabled={status === 'loading'}
             />
           </div>
+          <Button onClick={handleRefresh} disabled={status === 'loading'} size="sm">
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Refresh
+          </Button>
+          <Button onClick={handleSavePng} disabled={status !== 'ready'} variant="outline" size="sm">
+            <Download className="h-4 w-4 mr-1" />
+            Save PNG
+          </Button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto border rounded bg-black/50">
+          <StatusContent
+            status={status}
+            ansi={ansi}
+            cols={cols}
+            error={error}
+            onRefresh={handleRefresh}
+          />
         </div>
         <DialogFooter>
           <Button onClick={onClose} variant="outline">
