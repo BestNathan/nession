@@ -88,9 +88,27 @@ describe('AgentCard', () => {
     expect(card?.className).not.toContain('ring-2');
   });
 
-  it('shows edit button on hover (desktop)', () => {
+  it('shows edit button always visible (no hover-only classes)', () => {
     render(<AgentCard agent={makeAgent()} onClick={vi.fn()} />);
     const btn = screen.getByTitle('Rename agent');
     expect(btn).toBeInTheDocument();
+    expect(btn.className).not.toContain('opacity-0');
+    expect(btn.className).not.toContain('group-hover');
+  });
+
+  it('shows delete button always visible for offline agent', () => {
+    render(<AgentCard agent={makeAgent({ status: 'offline' })} onClick={vi.fn()} onDelete={vi.fn()} />);
+    const btn = screen.getByTitle('Delete agent');
+    expect(btn).toBeInTheDocument();
+    expect(btn.className).not.toContain('opacity-0');
+    expect(btn.className).not.toContain('group-hover');
+  });
+
+  it('shows reset button always visible when display name is set', () => {
+    render(<AgentCard agent={makeAgent({ display_name: 'prod-box' })} onClick={vi.fn()} />);
+    const btn = screen.getByTitle('Reset to hostname');
+    expect(btn).toBeInTheDocument();
+    expect(btn.className).not.toContain('opacity-0');
+    expect(btn.className).not.toContain('group-hover');
   });
 });
