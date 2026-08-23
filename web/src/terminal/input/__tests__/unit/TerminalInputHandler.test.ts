@@ -8,6 +8,8 @@ function makeTransport() {
     send: vi.fn<(data: string) => void>(),
     sendResize: vi.fn<(cols: number, rows: number) => void>(),
     flushInputBuffer: vi.fn<() => void>(),
+    flushPendingResize: vi.fn<() => void>(),
+    flushAllOutbound: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
     onStateChange: null,

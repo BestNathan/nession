@@ -265,6 +265,15 @@ export class TerminalController {
     this.transport?.flushInputBuffer();
   }
 
+  /**
+   * Flush every outbound buffer (input FIFO + coalesced resize) in one call.
+   * Wired to the terminalState === 'attached' transition so queued I/O leaves
+   * the browser as soon as the agent has acked client.attach.
+   */
+  flushAllOutbound(): void {
+    this.transport?.flushAllOutbound();
+  }
+
   // ── Terminal actions ────────────────────────────────────────────────────
 
   /** Resize the local xterm grid optimistically and notify the transport. */

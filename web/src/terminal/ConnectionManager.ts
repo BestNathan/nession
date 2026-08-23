@@ -45,6 +45,13 @@ export class ConnectionManager {
   private disposed = false;
   /** Input typed before client.attach is acked — flushed once attached. */
   private inputBuffer: string[] = [];
+  /**
+   * Resize pending while state !== 'attached'. Coalesced — only the latest
+   * {cols, rows} survives; intermediate sizes during the connect/reconnect
+   * window are dropped. Flushed (as a single terminal.resize) by
+   * flushAllOutbound once the agent acks client.attach.
+   */
+  private pendingResize: { cols: number; rows: number } | null = null;
 
   onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
@@ -101,9 +108,55 @@ export class ConnectionManager {
     }
   }
 
-  /** Send a terminal resize to the agent (client → tmux direction). */
+  /**
+   * Send a terminal resize to the agent (client → tmux direction).
+   *
+   * Gated on `terminalSessionStateAtom === 'attached'` — while the transport is
+   * up but client.attach has not yet been acknowledged (state 'connected', or
+   * 'reconnecting' during P2P failover), the size is stashed in
+   * `pendingResize` (coalesced: only the latest value survives). The stashed
+   * size is flushed as a single terminal.resize by flushAllOutbound once the
+   * agent acks attach. This avoids the `not_attached` toast the agent would
+   * otherwise return for a resize that arrives before its session map has an
+   * entry — a race that is trivially triggered on mobile by viewport churn
+   * during attach/reconnect (virtual keyboard, input panel, rotation).
+   */
   sendResize(cols: number, rows: number): void {
     if (this.disposed) { return; }
+    const state = getDefaultStore().get(terminalSessionStateAtom);
+    if (state !== 'attached') {
+      this.pendingResize = { cols, rows };
+      return;
+    }
+    this.sendResizeRaw(cols, rows);
+  }
+
+  /**
+   * Flush any resize buffered before the session was attached.  Coalesced —
+   * only the latest value is sent, so a burst of ResizeObserver fires during
+   * the connect window collapses to one terminal.resize on the wire.
+   */
+  flushPendingResize(): void {
+    if (this.disposed || this.pendingResize === null) { return; }
+    const { cols, rows } = this.pendingResize;
+    this.pendingResize = null;
+    this.sendResizeRaw(cols, rows);
+  }
+
+  /**
+   * Flush every outbound buffer (input FIFO, then coalesced resize) in one
+   * call.  Wired to the terminalState === 'attached' transition in
+   * TerminalWorkspace so queued I/O leaves the browser as soon as the agent
+   * has acked client.attach.  Order matters: input first, then resize — the
+   * agent expects a live session before accepting terminal.* I/O, and a
+   * resize immediately after attach is the correct PTY size update.
+   */
+  flushAllOutbound(): void {
+    this.flushInputBuffer();
+    this.flushPendingResize();
+  }
+
+  private sendResizeRaw(cols: number, rows: number): void {
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.p2pConnection.sendMessage({
         msg_type: 'terminal.resize',
@@ -158,9 +211,20 @@ export class ConnectionManager {
           break;
         case 'error':
           if (msg.id?.startsWith('ka-')) { break; }
-          this.onError?.(new Error(
-            ((msg.payload as Record<string, unknown>)?.message as string) || 'Remote error',
-          ));
+          // Belt-and-suspenders: the outbound gate should make `not_attached`
+          // unreachable, but if a race slips through (e.g. a stale message
+          // already on the wire before the gate landed) we swallow it here
+          // rather than surface a transient timing race as a user-visible
+          // toast.  Real agent errors (session actually missing) surface via
+          // the client.attach error path instead.
+          {
+            const errMsg = ((msg.payload as Record<string, unknown>)?.message as string) || '';
+            const state = getDefaultStore().get(terminalSessionStateAtom);
+            if (state !== 'attached' && /not attached/i.test(errMsg)) {
+              break;
+            }
+            this.onError?.(new Error(errMsg || 'Remote error'));
+          }
           break;
         case 'keepalive.pong':
           break;

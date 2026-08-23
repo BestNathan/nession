@@ -8,6 +8,10 @@ export interface TerminalTransport {
   sendResize(cols: number, rows: number): void;
   /** Flush any input buffered before the session was attached. */
   flushInputBuffer(): void;
+  /** Flush the coalesced resize buffered before the session was attached. */
+  flushPendingResize(): void;
+  /** Flush every outbound buffer (input + coalesced resize) in order. */
+  flushAllOutbound(): void;
 
   onOutput: ((data: Uint8Array) => void) | null;
   onResize: ((cols: number, rows: number) => void) | null;

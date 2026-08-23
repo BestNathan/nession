@@ -24,6 +24,8 @@ interface MockTransport extends TerminalTransport {
   send: ReturnType<typeof vi.fn<(data: string) => void>>;
   sendResize: ReturnType<typeof vi.fn<(cols: number, rows: number) => void>>;
   flushInputBuffer: ReturnType<typeof vi.fn<() => void>>;
+  flushPendingResize: ReturnType<typeof vi.fn<() => void>>;
+  flushAllOutbound: ReturnType<typeof vi.fn<() => void>>;
   dispose: ReturnType<typeof vi.fn<() => void>>;
 }
 
@@ -33,6 +35,8 @@ function makeTransport(): MockTransport {
     send: vi.fn<(data: string) => void>(),
     sendResize: vi.fn<(cols: number, rows: number) => void>(),
     flushInputBuffer: vi.fn<() => void>(),
+    flushPendingResize: vi.fn<() => void>(),
+    flushAllOutbound: vi.fn<() => void>(),
     onOutput: null,
     onResize: null,
     onStateChange: null,
@@ -184,6 +188,16 @@ describe('TerminalController', () => {
     controller.flushInputBuffer();
 
     expect(transport.flushInputBuffer).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushAllOutbound delegates to the transport', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    controller.flushAllOutbound();
+
+    expect(transport.flushAllOutbound).toHaveBeenCalledTimes(1);
   });
 
   it('write writes to the xterm display', () => {

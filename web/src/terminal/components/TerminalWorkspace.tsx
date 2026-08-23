@@ -331,13 +331,16 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     controller.onDisconnect = onDisconnect;
   }, [controller, onBack, onError, onDisconnect]);
 
-  // Flush keystrokes typed during the connect window once the session attaches.
-  // The transport exists by the time 'attached' fires (TerminalViewport's mount
-  // effect creates it — child effects run before this parent effect), so this
-  // delivers buffered input without waiting for the next user action.
+  // Flush I/O buffered during the connect window once the session attaches.
+  // The transport exists by the time 'attached' fires (TerminalViewport's
+  // mount effect creates it — child effects run before this parent effect),
+  // so this delivers queued input AND the coalesced resize without waiting
+  // for the next user action or ResizeObserver fire.  flushAllOutbound sends
+  // input first, then the single latest resize — the agent expects a live
+  // session before accepting terminal.* I/O, and this ordering matches.
   useEffect(() => {
     if (terminalState === 'attached') {
-      controller?.flushInputBuffer();
+      controller?.flushAllOutbound();
     }
   }, [terminalState, controller]);
 

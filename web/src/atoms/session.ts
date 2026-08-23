@@ -83,6 +83,19 @@ export const disconnectAtom = atom(
 export const switchAddressAtom = atom(
   null,
   (get, set, url: string | null) => {
+    // No-op when the user re-selects the route they're already on — same
+    // manualOverride and same resolved activeUrl.  Without this guard the
+    // unconditional disconnect/reconnect cycle below would flash a spinner
+    // (isSwitching becomes true while p2pState catches up) for what is
+    // logically a no-op, and needlessly tear down a live P2P socket.
+    // The Auto → explicit-same-URL case is intentionally NOT short-circuited:
+    // there manualOverride changes (null → url) so the source of the URL
+    // changed and the epoch bump / rebuild still has to fire.
+    const currentOverride = get(manualOverrideAtom);
+    if (url !== null && url === currentOverride) {
+      return;
+    }
+
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
     // Bump the epoch so useP2PConnection's connection object changes identity
