@@ -85,19 +85,30 @@ impl CommandBroker {
         request_id: &str,
         payload: serde_json::Value,
     ) -> oneshot::Receiver<serde_json::Value> {
+        info!(
+            "CommandBroker: send_command called for agent {} msg_type {} req {}",
+            agent_id, msg_type, request_id
+        );
         let (tx, rx) = oneshot::channel();
 
         let mut agents = self.agents.write().await;
         let agent = match agents.get_mut(agent_id) {
-            Some(a) => a,
+            Some(a) => {
+                info!("CommandBroker: found agent {} in registry", agent_id);
+                a
+            }
             None => {
-                warn!("CommandBroker: agent {} not found", agent_id);
+                warn!("CommandBroker: agent {} not found in registry", agent_id);
                 drop(tx);
                 return rx;
             }
         };
 
         agent.pending_commands.insert(request_id.to_string(), tx);
+        info!(
+            "CommandBroker: inserted pending_command for agent {} req {}",
+            agent_id, request_id
+        );
 
         let msg = nession_common::protocol::Message {
             msg_type: msg_type.to_string(),
@@ -128,7 +139,7 @@ impl CommandBroker {
         // Send the command through the channel
         match sender.send(WsMessage::Text(json)) {
             Ok(_) => {
-                debug!(
+                info!(
                     "CommandBroker: sent {} to agent {} (req: {})",
                     mt, aid, req_id
                 );

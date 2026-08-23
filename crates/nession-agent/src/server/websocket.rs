@@ -121,6 +121,7 @@ pub mod msg_types {
     pub const SESSION_LIST: &str = "session.list";
     pub const SESSION_CREATE: &str = "session.create";
     pub const SESSION_KILL: &str = "session.kill";
+    pub const SESSION_CAPTURE_PREVIEW: &str = "session.capture_preview";
     pub const CLIENT_ATTACH: &str = "client.attach";
     pub const CLIENT_DETACH: &str = "client.detach";
     pub const TERMINAL_INPUT: &str = "terminal.input";
@@ -209,6 +210,21 @@ pub struct TerminalResizePayload {
     pub session_name: String,
     pub cols: u16,
     pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCapturePreviewPayload {
+    pub session_name: String,
+    pub lines: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCapturePreviewResponse {
+    pub ansi_b64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
 }
 
 fn default_width() -> u16 {
@@ -1013,6 +1029,65 @@ impl AgentServer {
                 }
             }
 
+            msg_types::SESSION_CAPTURE_PREVIEW => {
+                info!("agent: received session.capture_preview request id={}", id);
+                let payload: SessionCapturePreviewPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!("agent: failed to parse SessionCapturePreviewPayload: {}", e);
+                            return err("parse_error", &e.to_string());
+                        }
+                    };
+                info!(
+                    "agent: capture_preview session_name={} lines={}",
+                    payload.session_name, payload.lines
+                );
+                if payload.lines == 0 {
+                    warn!("agent: capture_preview invalid lines=0");
+                    return err("invalid_lines", "lines must be > 0");
+                }
+                if payload.lines > 100_000 {
+                    warn!("agent: capture_preview lines too large: {}", payload.lines);
+                    return err("lines_too_large", "lines exceeds 100000 ceiling");
+                }
+                match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
+                    .await
+                {
+                    Ok(Some((bytes, cols, rows))) => {
+                        use base64::Engine;
+                        let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        info!(
+                            "agent: capture_preview success, ansi_b64 length={}, cols={}, rows={}",
+                            ansi_b64.len(),
+                            cols,
+                            rows
+                        );
+                        let resp = SessionCapturePreviewResponse {
+                            ansi_b64,
+                            cols: Some(cols),
+                            rows: Some(rows),
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Ok(None) => {
+                        info!("agent: capture_preview success but empty (no scrollback)");
+                        let resp = SessionCapturePreviewResponse {
+                            ansi_b64: String::new(),
+                            cols: Some(80),
+                            rows: Some(24),
+                        };
+                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        warn!("agent: capture_preview failed: {}", e);
+                        err("capture_failed", &e.to_string())
+                    }
+                }
+            }
+
             msg_types::CLIENT_ATTACH => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
@@ -1172,13 +1247,18 @@ impl AgentServer {
                             // Done synchronously (not spawned) to guarantee it arrives
                             // before any live output from the control-mode attach.
                             let scrollback_bytes =
-                                crate::tmux::util::capture_scrollback(&session_name, 2000).await;
+                                match crate::tmux::util::capture_scrollback(&session_name, 2000)
+                                    .await
+                                {
+                                    Ok(Some((bytes, _cols, _rows))) => bytes,
+                                    Ok(None) | Err(_) => Vec::new(),
+                                };
 
                             // Send captured scrollback so xterm.js can pre-fill its buffer.
-                            if let Some(bytes) = scrollback_bytes {
+                            if !scrollback_bytes.is_empty() {
                                 use base64::Engine;
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                let encoded = base64::engine::general_purpose::STANDARD
+                                    .encode(&scrollback_bytes);
                                 let output = TerminalOutputPayload {
                                     session_name: session_name.clone(),
                                     data: encoded,
@@ -2071,6 +2151,101 @@ mod tests {
         assert_eq!(resp.id, "test-unknown");
         assert_eq!(resp.payload.code, "unknown_message_type");
 
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_capture_preview_lines_zero_rejected() {
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let payload = SessionCapturePreviewPayload {
+            session_name: "any".to_string(),
+            lines: 0,
+        };
+        let req = new_message(msg_types::SESSION_CAPTURE_PREVIEW, payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "invalid_lines");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_capture_preview_lines_too_large_rejected() {
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let payload = SessionCapturePreviewPayload {
+            session_name: "any".to_string(),
+            lines: 200_000,
+        };
+        let req = new_message(msg_types::SESSION_CAPTURE_PREVIEW, payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "lines_too_large");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_capture_preview_unknown_session_returns_error() {
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let payload = SessionCapturePreviewPayload {
+            session_name: "nession-test-does-not-exist-xyz".to_string(),
+            lines: 100,
+        };
+        let req = new_message(msg_types::SESSION_CAPTURE_PREVIEW, payload);
+        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::ERROR);
+        assert_eq!(resp.payload.code, "capture_failed");
+
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_capture_preview_valid_request_returns_base64() {
+        let (addr, handle) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(addr).await;
+
+        let tmux = SessionManager::new();
+        let session = TestSession::new("srv-preview");
+        let session_name = session.name().to_string();
+        tmux.kill_session(&session_name).await.ok();
+        tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+            .await
+            .unwrap();
+        crate::tmux::util::send_keys(&session_name, "echo hello-from-preview")
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let payload = SessionCapturePreviewPayload {
+            session_name: session_name.clone(),
+            lines: 100,
+        };
+        let req = new_message(msg_types::SESSION_CAPTURE_PREVIEW, payload);
+        let resp: Message<SessionCapturePreviewResponse> =
+            send_and_receive(&mut sink, &mut stream, &req).await;
+
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert!(!resp.payload.ansi_b64.is_empty());
+        // Decode and check for the marker text.
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&resp.payload.ansi_b64)
+            .expect("valid base64");
+        let text = String::from_utf8_lossy(&decoded);
+        assert!(
+            text.contains("hello-from-preview"),
+            "expected decoded output to contain marker, got: {text:?}"
+        );
+
+        tmux.kill_session(&session_name).await.ok();
         handle.shutdown().await.ok();
     }
 

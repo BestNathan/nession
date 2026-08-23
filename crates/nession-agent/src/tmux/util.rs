@@ -61,9 +61,43 @@ pub async fn check_tmux_available() -> Result<bool> {
 /// Capture the last `lines` lines of scrollback for a session's active pane,
 /// including ANSI escape sequences so xterm.js can render formatting.
 ///
-/// Returns the raw ANSI bytes on success, or `None` if the capture fails
-/// (e.g. session has no panes, tmux not available).
-pub async fn capture_scrollback(session: &str, lines: u16) -> Option<Vec<u8>> {
+/// Returns:
+/// - `Ok(Some((bytes, cols, rows)))` — tmux exited 0 and stdout is non-empty.
+/// - `Ok(None)` — tmux exited 0 but stdout is empty (session exists, no history yet).
+/// - `Err(e)` — tmux binary missing, failed to spawn, or exited non-zero.
+pub async fn capture_scrollback(
+    session: &str,
+    lines: u32,
+) -> Result<Option<(Vec<u8>, u16, u16)>, std::io::Error> {
+    // First, get the session dimensions
+    let dims_output = Command::new("tmux")
+        .args([
+            "display-message",
+            "-t",
+            session,
+            "-p",
+            "#{window_width} #{window_height}",
+        ])
+        .output()
+        .await?;
+
+    let (cols, rows) = if dims_output.status.success() {
+        let dims_str = String::from_utf8_lossy(&dims_output.stdout);
+        let mut parts = dims_str.split_whitespace();
+        let cols = parts
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(80);
+        let rows = parts
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(24);
+        (cols, rows)
+    } else {
+        (80, 24) // Default fallback
+    };
+
+    // Then capture the scrollback
     let lines_str = lines.to_string();
     let output = Command::new("tmux")
         .args([
@@ -78,11 +112,72 @@ pub async fn capture_scrollback(session: &str, lines: u16) -> Option<Vec<u8>> {
             "-e",
         ])
         .output()
-        .await
-        .ok()?;
-    if output.status.success() && !output.stdout.is_empty() {
-        Some(output.stdout)
+        .await?;
+    if output.status.success() {
+        if output.stdout.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some((output.stdout, cols, rows)))
+        }
     } else {
-        None
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(std::io::Error::other(format!(
+            "tmux capture-pane failed: {stderr}"
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestSession;
+    use crate::tmux::manager::SessionManager;
+
+    #[tokio::test]
+    async fn capture_scrollback_fresh_session_returns_ok() {
+        // A brand-new tmux session still has *some* content (shell prompt /
+        // status bar), so the result is Ok(Some(…)), not Ok(None). This test
+        // pins the 3-state contract: tmux success → Ok(_).
+        if !check_tmux_available().await.unwrap_or(false) {
+            return;
+        }
+        let ts = TestSession::new("preview-fresh");
+        let mgr = SessionManager::new();
+        mgr.create_session(ts.name(), 80, 24, "/tmp", &[])
+            .await
+            .expect("create session");
+        let result = capture_scrollback(ts.name(), 100).await;
+        assert!(
+            result.is_ok(),
+            "expected Ok(_) for fresh session, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_scrollback_with_output_returns_some() {
+        if !check_tmux_available().await.unwrap_or(false) {
+            return;
+        }
+        let ts = TestSession::new("preview-output");
+        let mgr = SessionManager::new();
+        mgr.create_session(ts.name(), 80, 24, "/tmp", &[])
+            .await
+            .expect("create session");
+        send_keys(ts.name(), "echo hello").await.expect("send keys");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let result = capture_scrollback(ts.name(), 100).await;
+        assert!(
+            matches!(result, Ok(Some(_))),
+            "expected Ok(Some(_)) after output, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_scrollback_nonexistent_session_returns_error() {
+        if !check_tmux_available().await.unwrap_or(false) {
+            return;
+        }
+        let result = capture_scrollback("nession-test-does-not-exist-xyz", 100).await;
+        assert!(result.is_err(), "expected error for nonexistent session");
     }
 }

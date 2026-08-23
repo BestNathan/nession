@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
-import { toast } from 'sonner';
 import { useAtom, useSetAtom } from 'jotai';
-import type { Agent, ConnectionStatus, Session } from '../types';
+import type { ConnectionStatus, Session } from '../types';
+import { useDashboardDialogs } from '../hooks/useDashboardDialogs';
 import { useDashboard } from '../hooks/useDashboard';
 import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
@@ -11,16 +11,14 @@ import {
   attachToSessionAtom, disconnectAtom, attachDialogSessionAtom,
 } from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
-import { AttachDialog, type AttachChoice } from './env/AttachDialog';
+import { type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
 import { DashboardHeader } from './DashboardHeader';
 import { RenderTerminal } from './RenderTerminal';
 import { EnvManager } from './env/EnvManager';
 import { SessionsSection } from './SessionsSection';
 import { AgentDetailPanel } from './AgentDetailPanel';
-import { CreateSessionDialog } from './CreateSessionDialog';
-import { KillConfirmDialog } from './KillConfirmDialog';
-import { DeleteAgentConfirmDialog } from './DeleteAgentConfirmDialog';
+import { DashboardDialogs } from './DashboardDialogs';
 export { AgentSection };
 
 interface DashboardProps {
@@ -116,10 +114,11 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
 
   const {
     agents, sessions, loadingSessions, loadingAgents, error, filteredAgents, filteredSessions,
-    showCreateModal, sessionToKill, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
-    isSearchActive, sortField, sortDirection, toggleSort, selectedAgent, setSelectedAgent,
-    getHeartbeatHistory, setShowCreateModal, setSessionToKill, handleSessionKilled,
-    handleSessionCreated, fetchSessions, clearError, updateAgent, staleAgents,
+    showCreateModal, sessionToKill, previewSession, searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter, isSearchActive, sortField, sortDirection, toggleSort,
+    selectedAgent, setSelectedAgent, getHeartbeatHistory, setShowCreateModal, setSessionToKill,
+    setPreviewSession, handleSessionKilled, handleSessionCreated, fetchSessions, clearError,
+    updateAgent, staleAgents,
   } = useDashboard();
 
   const {
@@ -127,14 +126,17 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
   } = useTerminalAttach(navigate, location, sessions, loadingSessions);
 
+  const {
+    serverRefreshKey,
+    agentToDelete,
+    setAgentToDelete,
+    handleTerminalDisconnect,
+    handleTerminalError,
+    incrementServerRefreshKey,
+  } = useDashboardDialogs();
+
   // App-level address probing — fire-and-forget, writes probeResultsAtom.
   useProbePolling(agents);
-  const handleTerminalDisconnect = useCallback(() => { toast.error('Terminal connection lost'); doDisconnect(navigate); }, [doDisconnect, navigate]);
-  const handleTerminalError = useCallback((err: Error) => { toast.error(`Terminal error: ${err.message}`); }, []);
-
-  // Incremented after session create/kill to trigger server info refresh.
-  const [serverRefreshKey, setServerRefreshKey] = useState(0);
-  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
 
   const onlineCount = agents.filter((a) => a.status === 'online').length;
   const offlineCount = agents.filter((a) => a.status !== 'online').length;
@@ -192,6 +194,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
           fetchSessions={fetchSessions}
           onAttach={onAttach}
           onKill={setSessionToKill}
+          onPreview={setPreviewSession}
           sortField={sortField}
           sortDirection={sortDirection}
           toggleSort={toggleSort}
@@ -209,30 +212,22 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
         />
       )}
 
-      <CreateSessionDialog
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+      <DashboardDialogs
+        showCreateModal={showCreateModal}
+        setShowCreateModal={setShowCreateModal}
         agents={agents}
-        preselectedAgentId={null}
-        onCreated={() => { handleSessionCreated(); setServerRefreshKey((n) => n + 1); }}
-      />
-      <KillConfirmDialog
-        isOpen={sessionToKill !== null}
-        onClose={() => setSessionToKill(null)}
-        session={sessionToKill}
+        onCreated={() => { handleSessionCreated(); incrementServerRefreshKey(); }}
+        sessionToKill={sessionToKill}
+        setSessionToKill={setSessionToKill}
         onKilled={handleSessionKilled}
-      />
-      <DeleteAgentConfirmDialog
-        isOpen={agentToDelete !== null}
-        onClose={() => setAgentToDelete(null)}
-        agent={agentToDelete}
-        onDeleted={() => { setServerRefreshKey((n) => n + 1); fetchSessions(); }}
-      />
-      <AttachDialog
-        isOpen={attachDialogSession !== null}
-        onClose={() => setAttachDialogSession(null)}
-        session={attachDialogSession}
+        agentToDelete={agentToDelete}
+        setAgentToDelete={setAgentToDelete}
+        onDeleted={() => { incrementServerRefreshKey(); fetchSessions(); }}
+        attachDialogSession={attachDialogSession}
+        setAttachDialogSession={setAttachDialogSession}
         onConfirm={confirmAttach}
+        previewSession={previewSession}
+        setPreviewSession={setPreviewSession}
       />
     </div>
   );

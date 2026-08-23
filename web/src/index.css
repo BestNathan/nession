@@ -171,3 +171,12 @@ html {
     @apply font-sans;
   }
 }
+
+/* Hide scrollbar for horizontally-scrollable shortcut rows */
+.scrollbar-none {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
