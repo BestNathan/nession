@@ -25,7 +25,7 @@ export function AgentCard({ agent, onClick, onRename, onDelete }: AgentCardProps
   return (
     <Card
       className={cn(
-        'cursor-pointer transition-all hover:border-primary/50 group',
+        'cursor-pointer transition-all hover:border-primary/50',
         agent.status === 'online' && 'border-green-500/30',
       )}
       onClick={onClick}
@@ -61,39 +61,44 @@ export function AgentCard({ agent, onClick, onRename, onDelete }: AgentCardProps
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              id={`rename-${agent.agent_id}`}
+              className="h-7 w-7 shrink-0"
               onClick={startEdit}
               title="Rename agent"
             >
-              <Pencil className="h-3 w-3 text-muted-foreground" />
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
             {agent.status === 'offline' && onDelete && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="h-7 w-7 shrink-0"
                 onClick={(e) => { e.stopPropagation(); onDelete(agent); }}
                 title="Delete agent"
               >
-                <Trash2 className="h-3 w-3 text-destructive" />
+                <Trash2 className="h-3.5 w-3.5 text-destructive" />
               </Button>
             )}
           </div>
         )}
 
         {/* Row 3: Hostname + reset */}
-        <p className="text-xs text-muted-foreground/70 truncate font-mono">
-          {agent.hostname}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <p className="text-xs text-muted-foreground/70 truncate font-mono">
+            {agent.hostname}
+          </p>
           {isCustomName && (
-            <button
-              className="ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] hover:text-foreground"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
               onClick={clearName}
               title="Reset to hostname"
             >
               × reset
-            </button>
+            </Button>
           )}
-        </p>
+        </div>
 
         {/* Row 4: Sessions · Version · Uptime — compact info row */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground pt-0.5">
