@@ -129,6 +129,18 @@ enum AgentAction {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    /// Install a user-level OS service to start the agent at boot
+    InstallService {
+        /// Path to configuration file (default: ~/.nession/agent-config.toml)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Path to PID file (used to skip start if agent is already running)
+        #[arg(long)]
+        pid_file: Option<String>,
+    },
+    /// Remove the boot autostart service (does not stop a running agent)
+    UninstallService,
 }
 
 #[derive(Subcommand)]
@@ -366,7 +378,14 @@ async fn main() -> Result<()> {
                         .to_string_lossy()
                         .into_owned()
                 });
-                commands::agent::status(pid_file).await?
+                commands::agent::status(pid_file).await?;
+                println!("Autostart: {}", commands::service::service_status());
+            }
+            AgentAction::InstallService { config, pid_file } => {
+                commands::service::install_service(config, pid_file)?;
+            }
+            AgentAction::UninstallService => {
+                commands::service::uninstall_service()?;
             }
         },
         Commands::Server { action } => match action {
