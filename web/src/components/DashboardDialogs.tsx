@@ -11,6 +11,7 @@ interface DashboardDialogsProps {
   setShowCreateModal: (show: boolean) => void;
   agents: Agent[];
   onCreated: () => void;
+  preselectedAgentId?: string | null;
 
   // Kill session
   sessionToKill: Session | null;
@@ -37,6 +38,7 @@ export function DashboardDialogs({
   setShowCreateModal,
   agents,
   onCreated,
+  preselectedAgentId,
   sessionToKill,
   setSessionToKill,
   onKilled,
@@ -55,7 +57,7 @@ export function DashboardDialogs({
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         agents={agents}
-        preselectedAgentId={null}
+        preselectedAgentId={preselectedAgentId ?? null}
         onCreated={onCreated}
       />
       <KillConfirmDialog

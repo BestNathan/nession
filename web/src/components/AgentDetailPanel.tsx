@@ -1,6 +1,6 @@
 import {
   Server, Clock, Activity, Monitor, Copy, Check, FolderOpen,
-  Cpu, Globe, Wifi, RefreshCw, Zap,
+  Cpu, Globe, Wifi, RefreshCw, Zap, Pencil, Trash2, Plus,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -14,6 +14,7 @@ import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent } from './ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
 import { copyToClipboard } from '../lib/clipboard';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
@@ -28,6 +29,9 @@ interface AgentDetailPanelProps {
   sessions: Session[];         // sessions filtered for this agent
   onClose: () => void;
   onRefresh?: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
+  onCreateSession?: () => void;
 }
 
 // ── Heartbeat helpers ──────────────────────────────────────────────────────
@@ -404,9 +408,17 @@ function OverviewTab({
 function QuickActionsBar({
   onCopyAll,
   onRefresh,
+  onRename,
+  onDelete,
+  onCreateSession,
+  isAgentOffline,
 }: {
   onCopyAll: () => void;
   onRefresh?: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onCreateSession: () => void;
+  isAgentOffline: boolean;
 }) {
   return (
     <div className="flex items-center gap-1 p-2 border-t border-border bg-card/50">
@@ -430,16 +442,71 @@ function QuickActionsBar({
           Refresh
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 text-xs gap-1.5 flex-1"
-        disabled
-        title="Not yet available"
-      >
-        <Zap className="w-3 h-3" />
-        Ping
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Rename agent"
+              onClick={onRename}
+            />
+          }
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </TooltipTrigger>
+        <TooltipContent>Rename agent</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title={isAgentOffline ? 'Delete agent' : 'Agent must be offline to delete'}
+              disabled={!isAgentOffline}
+              onClick={onDelete}
+            />
+          }
+        >
+          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+        </TooltipTrigger>
+        <TooltipContent>{isAgentOffline ? 'Delete agent' : 'Agent must be offline to delete'}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title={isAgentOffline ? 'Agent must be online to create sessions' : 'Create session'}
+              disabled={isAgentOffline}
+              onClick={onCreateSession}
+            />
+          }
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </TooltipTrigger>
+        <TooltipContent>{isAgentOffline ? 'Agent must be online to create sessions' : 'Create session'}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              disabled
+            />
+          }
+        >
+          <Zap className="w-3.5 h-3.5" />
+        </TooltipTrigger>
+        <TooltipContent>Not yet available</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -452,6 +519,9 @@ export function AgentDetailPanel({
   sessions,
   onClose,
   onRefresh,
+  onRename,
+  onDelete,
+  onCreateSession,
 }: AgentDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   // Tick every second so relative timestamps stay live.
@@ -561,7 +631,12 @@ export function AgentDetailPanel({
 
         {/* ── Quick Actions Bar (sticky bottom) ── */}
         <div className="flex-shrink-0 sticky bottom-0">
-          <QuickActionsBar onCopyAll={handleCopyAll} onRefresh={onRefresh} />
+          <QuickActionsBar
+            onCopyAll={handleCopyAll} onRefresh={onRefresh}
+            onRename={() => onRename?.()} onDelete={() => onDelete?.()}
+            onCreateSession={() => onCreateSession?.()}
+            isAgentOffline={agent.status === 'offline'}
+          />
         </div>
       </SheetContent>
     </Sheet>
