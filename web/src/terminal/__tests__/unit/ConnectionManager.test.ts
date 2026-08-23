@@ -163,6 +163,93 @@ describe('ConnectionManager', () => {
       );
       manager.dispose();
     });
+
+    it('buffers sendResize until attached and coalesces to the latest size', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+
+      // Not attached yet → resize is stashed, nothing is sent (would race
+      // ahead of client.attach and hit the agent's not_attached error).
+      getDefaultStore().set(terminalSessionStateAtom, 'connected');
+      cm.sendResize(80, 24);
+      cm.sendResize(100, 30);
+      cm.sendResize(120, 40);
+      expect(p2p.sendMessage).not.toHaveBeenCalled();
+
+      // Once attached, flushPendingResize sends exactly ONE resize — the
+      // latest coalesced value — collapsing the burst to a single message.
+      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      cm.flushPendingResize();
+      const resizeCalls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => c[0].msg_type === 'terminal.resize',
+      );
+      expect(resizeCalls).toHaveLength(1);
+      expect(resizeCalls[0][0]).toMatchObject({
+        msg_type: 'terminal.resize',
+        payload: { session_name: 'test', cols: 120, rows: 40 },
+      });
+      cm.dispose();
+    });
+
+    it('flushAllOutbound sends buffered input first, then coalesced resize', () => {
+      const p2p = makeMockP2P();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+
+      getDefaultStore().set(terminalSessionStateAtom, 'connected');
+      cm.send('hello');
+      cm.sendResize(120, 40);
+      expect(p2p.sendMessage).not.toHaveBeenCalled();
+
+      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      cm.flushAllOutbound();
+
+      const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      // Input first, then resize — agent expects a live session before
+      // accepting terminal.* I/O.
+      expect(calls).toHaveLength(2);
+      expect(calls[0][0].msg_type).toBe('terminal.input');
+      expect(calls[1][0].msg_type).toBe('terminal.resize');
+      cm.dispose();
+    });
+
+    it('suppresses not_attached errors while state !== attached', () => {
+      const onError = vi.fn();
+      let messageHandler: (msg: P2PMessage) => void = () => {};
+      const p2p = makeMockP2P();
+      p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
+
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+      });
+      cm.onError = onError;
+
+      // State is still 'connected' (attach not yet acked) — a not_attached
+      // error from a stale in-flight resize should be swallowed, not surfaced
+      // as a user-visible toast.
+      getDefaultStore().set(terminalSessionStateAtom, 'connected');
+      messageHandler({
+        msg_type: 'error',
+        id: 'some-id',
+        timestamp: Date.now(),
+        payload: { message: 'not attached to session: test' },
+      } as P2PMessage);
+      expect(onError).not.toHaveBeenCalled();
+
+      // Same error after attached is a real problem — surfaces normally.
+      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      messageHandler({
+        msg_type: 'error',
+        id: 'some-id',
+        timestamp: Date.now(),
+        payload: { message: 'not attached to session: test' },
+      } as P2PMessage);
+      expect(onError).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
   });
 
   describe('Relay mode', () => {
@@ -243,6 +330,24 @@ describe('ConnectionManager', () => {
       resizeHandler(120, 40);
 
       expect(onResize).toHaveBeenCalledWith(120, 40);
+      cm.dispose();
+    });
+
+    it('buffers sendResize until attached in relay mode too (same outbound gate)', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+      });
+
+      // Not attached yet → resize is stashed, nothing is sent.
+      getDefaultStore().set(terminalSessionStateAtom, 'connected');
+      cm.sendResize(120, 40);
+      expect(ws.sendRelayResize).not.toHaveBeenCalled();
+
+      // Once attached, flush sends the coalesced value.
+      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      cm.flushPendingResize();
+      expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();
     });
   });
