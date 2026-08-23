@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
 import type { AttachChoice } from '@/components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
+import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from '@/atoms/connection';
 import type { P2PConnection } from '@/hooks/useP2PConnection';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
@@ -12,6 +12,7 @@ import {
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom,
 } from '@/atoms/session';
+import { terminalSessionStateAtom } from '@/terminal/state/session';
 
 const navigate = () => {};
 
@@ -109,5 +110,55 @@ describe('action atoms', () => {
     store.set(switchAddressAtom, 'ws://b/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://b/ws');
     expect(store.get(forcedRelayAtom)).toBe(false);
+  });
+
+  it('switchAddressAtom is a no-op when re-selecting the current override', () => {
+    const store = createStore();
+    // First switch sets the override.
+    store.set(switchAddressAtom, 'ws://same/ws');
+    const epochAfterFirst = store.get(p2pEpochAtom);
+    expect(epochAfterFirst).toBe(1);
+
+    // Simulate connection having come up since the first switch — so the
+    // second switch has a non-idle state to preserve.
+    store.set(terminalSessionStateAtom, 'attached');
+
+    // Second switch with the same URL must NOT tear down the connection
+    // (would otherwise flash a spinner for a logical no-op).
+    store.set(switchAddressAtom, 'ws://same/ws');
+    expect(store.get(manualOverrideAtom)).toBe('ws://same/ws');
+    expect(store.get(p2pEpochAtom)).toBe(epochAfterFirst); // epoch unchanged
+    expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
+  });
+
+  it('switchAddressAtom fires when override changes (null → url, even to same URL Auto resolved to)', () => {
+    const store = createStore();
+    // manualOverride starts null (Auto mode).  Selecting an explicit URL
+    // must still bump the epoch / trigger the switch, because the *source*
+    // of the URL changed even if the resolved URL happens to match.
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    store.set(switchAddressAtom, 'ws://auto-resolved/ws');
+    expect(store.get(manualOverrideAtom)).toBe('ws://auto-resolved/ws');
+    expect(store.get(p2pEpochAtom)).toBe(1);
+  });
+
+  it('switchAddressAtom is a no-op when re-selecting Auto (null → null)', () => {
+    const store = createStore();
+    // Start in Auto mode (manualOverride is null).
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    const epochInitial = store.get(p2pEpochAtom);
+    expect(epochInitial).toBe(0);
+
+    // Simulate connection having come up.
+    store.set(terminalSessionStateAtom, 'attached');
+
+    // Re-selecting Auto must NOT tear down the connection — would otherwise
+    // flash a spinner every time the user clicks the Auto entry they're
+    // already on, and is the reported cause of "selecting auto multiple
+    // times → no content".
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(p2pEpochAtom)).toBe(epochInitial); // epoch unchanged
+    expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
 });

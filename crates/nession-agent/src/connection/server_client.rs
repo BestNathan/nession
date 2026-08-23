@@ -907,6 +907,85 @@ impl ServerClient {
                 });
                 responses.send(WsMessage::Text(response.to_string()))?;
             }
+            "session.capture_preview" => {
+                let request_id = str_field(&msg.payload, "request_id");
+                let session_name = str_field(&msg.payload, "session_name");
+                let lines = u32::try_from(
+                    msg.payload
+                        .get("lines")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(2000),
+                )
+                .unwrap_or(u32::MAX);
+
+                info!(
+                    "Server requested session capture_preview: session_name={}, lines={}",
+                    session_name, lines
+                );
+
+                let (success, ansi_b64, cols, rows, error) = if lines == 0 {
+                    (
+                        false,
+                        None,
+                        None,
+                        None,
+                        Some("invalid_lines: lines must be > 0".to_string()),
+                    )
+                } else if lines > 100_000 {
+                    (
+                        false,
+                        None,
+                        None,
+                        None,
+                        Some("lines_too_large: lines exceeds 100000 ceiling".to_string()),
+                    )
+                } else {
+                    match crate::tmux::util::capture_scrollback(&session_name, lines).await {
+                        Ok(Some((bytes, c, r))) => {
+                            use base64::Engine;
+                            let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            info!(
+                                "capture_preview success: session_name={}, ansi_b64 length={}, cols={}, rows={}",
+                                session_name,
+                                ansi_b64.len(),
+                                c,
+                                r
+                            );
+                            (true, Some(ansi_b64), Some(c), Some(r), None)
+                        }
+                        Ok(None) => {
+                            info!(
+                                "capture_preview success but empty (no scrollback): session_name={}",
+                                session_name
+                            );
+                            (true, Some(String::new()), Some(80), Some(24), None)
+                        }
+                        Err(e) => {
+                            warn!(
+                                "capture_preview failed: session_name={}, error={}",
+                                session_name, e
+                            );
+                            (false, None, None, None, Some(e.to_string()))
+                        }
+                    }
+                };
+
+                let response = serde_json::json!({
+                    "msg_type": "agent.session.command.response",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                    "payload": {
+                        "request_id": request_id,
+                        "command": "session.capture_preview",
+                        "success": success,
+                        "ansi_b64": ansi_b64,
+                        "cols": cols,
+                        "rows": rows,
+                        "error": error,
+                    }
+                });
+                responses.send(WsMessage::Text(response.to_string()))?;
+            }
             msg_types::SERVER_SESSIONS_LIST => {
                 let request_id = str_field(&msg.payload, "request_id");
 

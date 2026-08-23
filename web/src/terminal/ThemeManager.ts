@@ -1,6 +1,6 @@
 import type { Terminal, ITheme } from '@xterm/xterm';
 
-const CATPPUCCIN_MOCHA: ITheme = {
+export const CATPPUCCIN_MOCHA: ITheme = {
   background: '#1e1e2e',
   foreground: '#cdd6f4',
   cursor: '#f5e0dc',

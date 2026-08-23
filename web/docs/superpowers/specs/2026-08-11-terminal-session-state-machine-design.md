@@ -97,8 +97,8 @@ Replace `ConnectionManager`'s private flags (`p2pAttachSent`, `relayInitiallyAtt
 ### 1. Input buffering (connected → attached)
 User keystrokes in `connected` state are queued. On transition to `attached`, the queue is flushed. This eliminates the `not_attached` race entirely — no user input reaches the agent before `client.attach` is acknowledged.
 
-### 2. Resize passthrough (all states except idle)
-`terminal.resize` does not wait for `attached`. The agent can pre-set PTY size once the socket is open. ResizeObserver events in `connecting`/`connected`/`attached`/`reconnecting` are forwarded directly.
+### 2. Resize buffering (connected → attached)
+`terminal.resize` is gated on `terminalSessionStateAtom === 'attached'`, matching input. While the transport is up but client.attach has not yet been acknowledged (`connected`, `reconnecting`), resize events are **coalesced** — only the latest `{cols, rows}` survives, stored in `ConnectionManager.pendingResize`. The single coalesced value is flushed as one `terminal.resize` by `flushAllOutbound` once the agent acks attach. This prevents the `not_attached` error the agent would otherwise return for a resize that arrives before its per-connection session map has an entry — a race easily triggered on mobile by viewport churn during attach/reconnect (virtual keyboard, input panel, rotation). Initial PTY size still rides on `client.attach` `width`/`height` from `lastResizeAtom`; the post-attach flush only covers viewport changes during the `connected` window.
 
 ### 3. Attach error (agent-side)
 If `client.attach` receives `{ msg_type: "error" }` instead of `ok`, the session doesn't exist on the agent. This is unrecoverable by retry — transition directly to `failed`.
