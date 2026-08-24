@@ -27,7 +27,8 @@ function App() {
     setServerUrl,
     handleConnect,
     handleDisconnect,
-    isAuthed,
+    isAuthenticated,
+    isRestoringSession,
   } = useAppConnection();
 
   const loginRouter = useMemo(
@@ -70,11 +71,11 @@ function App() {
     [connectionStatus, wsService],
   );
 
-  if (isAuthed && !wsService) {
+  if (isRestoringSession || (isAuthenticated && !wsService)) {
     return <ReconnectingShell />;
   }
 
-  return <RouterProvider router={isAuthed ? appRouter : loginRouter} />;
+  return <RouterProvider router={isAuthenticated ? appRouter : loginRouter} />;
 }
 
 export default App;
