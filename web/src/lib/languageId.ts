@@ -1,7 +1,14 @@
 /**
  * LanguageId detection - VS Code-style language identifiers
  * This module provides unified language detection decoupled from CodeMirror grammar loading.
+ *
+ * Markdown is not decided here: it is delegated to `@/markdown`, which ranks
+ * extension / MIME / basename signals above content and caps content-only
+ * guesses. This module owns everything else — basenames, shebangs, extensions.
  */
+
+import { detectMarkdownLanguage } from '@/markdown/detect';
+import { AUTO_APPLY_CONFIDENCE, type LanguageDetection } from '@/markdown/types';
 
 // 66 VS Code-style language identifiers
 export type LanguageId =
@@ -88,11 +95,29 @@ export const BASENAME_RULES: Record<string, LanguageId> = {
   GNUmakefile: 'makefile',
   makefile: 'makefile',
 
+  // just — no CodeMirror grammar exists for it; makefile is the closest match
+  // (tab-indented recipes under `target:` headers). Listing it here is what
+  // keeps justfiles out of content sniffing, which used to read their `#`
+  // comments as markdown headings.
+  justfile: 'makefile',
+  Justfile: 'makefile',
+  '.justfile': 'makefile',
+
   // README files
   README: 'markdown',
   'README.md': 'markdown',
   'README.txt': 'markdown',
   'README.rst': 'markdown',
+
+  // Conventionally plain text, and prone to misdetection: licences are full of
+  // numbered lists and `---` rules. Pinning them blocks content sniffing.
+  LICENSE: 'plaintext',
+  LICENCE: 'plaintext',
+  'LICENSE.txt': 'plaintext',
+  COPYING: 'plaintext',
+  NOTICE: 'plaintext',
+  AUTHORS: 'plaintext',
+  TODO: 'plaintext',
 
   // Ruby
   Gemfile: 'ruby',
@@ -351,51 +376,17 @@ export function detectShebang(content: string): LanguageId | null {
 }
 
 /**
- * Detect markdown from content by checking first 10 lines for common patterns.
+ * Detect language from filename alone (no content sniffing).
  *
- * Patterns checked:
- *   - Headings: `^#{1,6}\s+`
- *   - Bold/italic: `\*\*[^*]+\*\*`
- *   - Links: `\[[^\]]+\]\([^)]+\)`
- *   - Unordered lists: `^[-*+]\s+`
- *   - Ordered lists: `^\d+\.\s+`
+ * Runs the filename-only rules in priority order:
+ *   1. Basename matching (exact filename, e.g. "Makefile" -> 'makefile')
+ *   2. Double extension matching (e.g. "foo.d.ts" -> 'typescript')
+ *   3. Pattern rules (regex on basename, e.g. ".env.local" -> 'plaintext')
+ *   4. Extension matching (e.g. ".ts" -> 'typescript')
  *
- * @param content - File content to analyze
- * @returns `true` if markdown patterns are detected, `false` otherwise
+ * Returns `null` when nothing matched, so callers can decide what to try next.
  */
-function detectMarkdownFromContent(content: string): boolean {
-  const lines = content.split('\n').slice(0, 10);
-  const text = lines.join('\n');
-
-  const patterns = [
-    /^#{1,6}\s+/m,           // Headings: # Title
-    /\*\*[^*]+\*\*/,          // Bold: **text**
-    /\[[^\]]+\]\([^)]+\)/,   // Links: [text](url)
-    /^[-*+]\s+/m,            // Unordered lists: - item, * item, + item
-    /^\d+\.\s+/m,            // Ordered lists: 1. item
-  ];
-
-  return patterns.some(pattern => pattern.test(text));
-}
-
-/**
- * Detect language from filename
- *
- * Detection priority (execution order):
- *   1. Basename matching (exact filename matches, e.g., "Makefile" -> 'makefile')
- *   2. Double extension matching (e.g., "foo.d.ts" -> 'typescript')
- *   3. Pattern rules (regex on basename, e.g., ".env.local" -> 'plaintext')
- *   4. Extension matching (e.g., ".ts" -> 'typescript')
- *   5. Shebang detection (requires `content`, only reached when no extension matched)
- *   6. Content-based detection (requires `content`, only markdown heuristic currently)
- *   7. Fallback to 'plaintext'
- *
- * @param filename - File path or basename
- * @param content  - Optional file content; when provided, shebang and content-based
- *                   detection run as fallbacks when filename-based checks miss.
- * @returns Detected LanguageId, defaults to 'plaintext'
- */
-export function detectLanguage(filename: string, content?: string): LanguageId {
+function detectLanguageFromFilename(filename: string): LanguageId | null {
   // Priority 1: Basename matching
   const basename = parseLangBasename(filename);
   if (basename in BASENAME_RULES) {
@@ -420,21 +411,95 @@ export function detectLanguage(filename: string, content?: string): LanguageId {
     return EXTENSION_RULES[ext];
   }
 
-  // Priority 5: Shebang detection (only when content is provided)
+  return null;
+}
+
+/**
+ * Unified language detection with a confidence score.
+ *
+ * Signals are consulted in descending trustworthiness:
+ *   1. Markdown extension or `text/markdown` MIME type      → 0.95
+ *   2. Filename rules — basename, double extension, pattern, extension → 0.9
+ *   3. Conventional markdown basenames (CHANGELOG, CONTRIBUTING) → 0.9
+ *   4. Shebang line                                          → 0.9
+ *   5. Markdown content structures                            → 0.5 – 0.75
+ *   6. Nothing                                                → plaintext, 0.0
+ *
+ * Content is last and capped: a content-derived result never reaches
+ * AUTO_APPLY_CONFIDENCE, so callers cannot silently change how a file is
+ * presented based on a guess. Step 2 runs before step 3 so a specific extension
+ * wins over the basename convention — `readme.json` is JSON, not markdown.
+ */
+export function detectLanguageForFile(
+  filename: string,
+  content?: string,
+  mimeType?: string,
+): LanguageDetection {
+  // Step 1: markdown by extension or MIME — the only signals strong enough to
+  // outrank the generic filename tables.
+  const markdownByMetadata = detectMarkdownLanguage(filename, undefined, mimeType);
+  if (markdownByMetadata && markdownByMetadata.source !== 'filename') {
+    return markdownByMetadata;
+  }
+
+  // Step 2: filename rules.
+  const fromFilename = detectLanguageFromFilename(filename);
+  if (fromFilename !== null) {
+    return {
+      language: fromFilename,
+      confidence: 0.9,
+      source: 'filename',
+      reasons: ['filenameRule'],
+    };
+  }
+
+  // Step 3: conventional markdown basenames (README, CHANGELOG, ...).
+  if (markdownByMetadata) {
+    return markdownByMetadata;
+  }
+
   if (content !== undefined) {
+    // Step 4: shebang — an executable script, whatever its comments look like.
     const shebangLang = detectShebang(content);
     if (shebangLang !== null) {
-      return shebangLang;
+      return {
+        language: shebangLang,
+        confidence: 0.9,
+        source: 'content',
+        reasons: ['shebang'],
+      };
+    }
+
+    // Step 5: markdown content structures, capped below auto-apply.
+    const markdownByContent = detectMarkdownLanguage(filename, content, mimeType);
+    if (markdownByContent) {
+      return markdownByContent;
     }
   }
 
-  // Priority 6: Content-based detection (only when content is provided)
-  if (content !== undefined) {
-    if (detectMarkdownFromContent(content)) {
-      return 'markdown';
-    }
-  }
-
-  // Priority 7: Fallback
-  return 'plaintext';
+  // Step 6: nothing usable.
+  return { language: 'plaintext', confidence: 0, source: 'fallback', reasons: [] };
 }
+
+/**
+ * Detect language from filename, with optional content as a fallback signal.
+ *
+ * Thin wrapper over {@link detectLanguageForFile} that keeps only results
+ * confident enough to act on. Content-derived markdown is deliberately dropped
+ * here: it never clears AUTO_APPLY_CONFIDENCE, so an extensionless file is
+ * loaded as plaintext rather than having a markdown grammar guessed for it.
+ * Callers that want to *offer* markdown should use `detectLanguageForFile` and
+ * read the confidence themselves.
+ *
+ * @param filename - File path or basename
+ * @param content  - Optional file content; enables shebang detection.
+ * @returns Detected LanguageId, defaults to 'plaintext'
+ */
+export function detectLanguage(filename: string, content?: string): LanguageId {
+  const detection = detectLanguageForFile(filename, content);
+  if (detection.confidence < AUTO_APPLY_CONFIDENCE) {
+    return 'plaintext';
+  }
+  return detection.language as LanguageId;
+}
+

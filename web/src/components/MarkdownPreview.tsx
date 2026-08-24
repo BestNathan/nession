@@ -2,12 +2,8 @@ import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark-dimmed.css';
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeHighlight from 'rehype-highlight';
-import rehypeKatex from 'rehype-katex';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Info } from 'lucide-react';
+import { getRehypePlugins, getRemarkPlugins } from '@/markdown';
 
 /** Props for MarkdownPreview */
 interface MarkdownPreviewProps {
@@ -57,24 +53,8 @@ export class MarkdownErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 const LARGE_FILE_THRESHOLD = 1_048_576; // 1MB
 
 /**
- * Sanitize schema for markdown previews.
- *
- * Extends the default GitHub-style schema so the raw markdown HTML can be
- * sanitized *before* KaTeX and highlight.js run (they generate trusted HTML of
- * their own afterwards). remark-math marks math spans with
- * `math-inline` / `math-display` on `<code>`, so those class names must survive
- * the sanitize pass for rehype-katex to pick them up.
- */
-const markdownSanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...(defaultSchema.attributes ?? {}),
-    code: [['className', /^language-./, 'math-inline', 'math-display']],
-  },
-};
-
-/**
- * Renders markdown content with GFM, LaTeX math, and syntax highlighting.
+ * Renders markdown content with GFM, LaTeX math, YAML/TOML frontmatter, and
+ * syntax highlighting. The plugin chain lives in `@/markdown/previewPlugins`.
  * Code blocks use highlight.js github-dark-dimmed theme.
  */
 export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
@@ -111,12 +91,8 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           prose-strong:text-foreground/90
         ">
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[
-              [rehypeSanitize, markdownSanitizeSchema],
-              rehypeHighlight,
-              rehypeKatex,
-            ]}
+            remarkPlugins={getRemarkPlugins()}
+            rehypePlugins={getRehypePlugins()}
           >
             {content}
           </ReactMarkdown>

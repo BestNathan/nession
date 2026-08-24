@@ -70,11 +70,12 @@ describe('FileViewer markdown integration', () => {
   });
 
   it('dismisses suggestion banner and hides preview UI after dismiss', async () => {
-    const content = `# Just a comment
+    const content = `# Release notes
 
-echo "hello world"
+- first item
+- second item
 
-# Another comment
+See the [docs](https://example.com).
 `;
     const ops = mockFileOps({
       readFile: vi.fn().mockResolvedValue({
@@ -145,7 +146,38 @@ npm start
     });
   });
 
-  it('shows suggestion banner for medium confidence detection', async () => {
+  it('suggests markdown without switching to preview for content-only detection', async () => {
+    const content = `# Release notes
+
+- first item
+- second item
+
+See the [docs](https://example.com).
+`;
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes',
+        content: btoa(content),
+        mime_type: 'text/plain',
+      }),
+    });
+    const onClose = vi.fn();
+    render(<FileViewer fileOps={ops} path="/test/notes" filename="notes" onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/looks like Markdown/i)).toBeInTheDocument();
+    });
+
+    // Content sniffing is capped below the auto-apply band, so the file must
+    // still be showing raw — the Raw toggle is the active one. Scoped by
+    // `pressed`, since the suggestion banner has a Preview button of its own.
+    expect(screen.getByRole('button', { name: 'Raw', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview', pressed: false })).toBeInTheDocument();
+  });
+
+  it('does NOT suggest markdown for a shell script with # comments', async () => {
+    // The `#` comment used to score as a markdown heading, and three such weak
+    // signals were enough to silently switch the file into preview.
     const content = `# Just a comment
 
 echo "hello world"
@@ -163,8 +195,65 @@ echo "hello world"
     render(<FileViewer fileOps={ops} path="/test/script" filename="script" onClose={onClose} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/looks like Markdown/i)).toBeInTheDocument();
+      expect(screen.getByText('script')).toBeInTheDocument();
     });
+    expect(screen.queryByText(/looks like Markdown/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it('does NOT suggest markdown for a Dockerfile', async () => {
+    const content = `FROM node:20
+
+# Install dependencies
+COPY package.json .
+RUN npm ci
+
+CMD ["node", "index.js"]
+`;
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/Dockerfile',
+        content: btoa(content),
+        mime_type: 'text/plain',
+      }),
+    });
+    const onClose = vi.fn();
+    render(<FileViewer fileOps={ops} path="/test/Dockerfile" filename="Dockerfile" onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Dockerfile')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/looks like Markdown/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it('renders frontmatter-prefixed markdown without showing the frontmatter', async () => {
+    const content = `---
+title: Deploy guide
+tags: [ops, deploy]
+---
+
+# Deploy guide
+
+Run the deploy script.
+`;
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/guide.md',
+        content: btoa(content),
+        mime_type: 'text/markdown',
+      }),
+    });
+    const onClose = vi.fn();
+    render(<FileViewer fileOps={ops} path="/test/guide.md" filename="guide.md" onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Run the deploy script.')).toBeInTheDocument();
+    });
+    // The frontmatter block is consumed by remark-frontmatter, not rendered as
+    // a horizontal rule followed by stray `title:` text.
+    expect(screen.queryByText(/title: Deploy guide/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/tags:/)).not.toBeInTheDocument();
   });
 
   it('hides Edit button when in preview mode', async () => {

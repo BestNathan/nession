@@ -136,8 +136,7 @@ export function parseExt(path: string): string {
   return filename.slice(dot + 1).toLowerCase();
 }
 
-/** Return true if the extension indicates a markdown file. */
-export function isMarkdownExt(ext: string): boolean {
-  const key = ext.toLowerCase();
-  return key === 'md' || key === 'markdown' || key === 'mkd';
-}
+/** Return true if the extension indicates a markdown file.
+ * @deprecated Import from `@/markdown` instead — this is a compatibility re-export. */
+export { isMarkdownExt } from '@/markdown/extensions';
+
