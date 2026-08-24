@@ -39,6 +39,7 @@ describe('useSessionData', () => {
 
     expect(result.current.sessions).toHaveLength(1);
     expect(result.current.staleAgents).toEqual([]);
+    expect(result.current.sessionsLoaded).toBe(true);
   });
 
   /** The refresh button relies on this: `force` must reach the service, or the

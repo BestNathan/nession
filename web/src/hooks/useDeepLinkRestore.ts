@@ -13,13 +13,14 @@ import type { AttachChoice } from '../components/env/AttachDialog';
 export function useDeepLinkRestore(opts: {
   pendingSessionId: string | null;
   attachedSession: AttachedSession | null;
+  sessionsLoaded: boolean;
   loadingSessions: boolean;
   sessions: Session[];
   confirmAttach: (session: Session, choice: AttachChoice) => void;
   navigate: NavigateFunction;
 }) {
   const {
-    pendingSessionId, attachedSession, loadingSessions,
+    pendingSessionId, attachedSession, sessionsLoaded, loadingSessions,
     sessions, confirmAttach, navigate,
   } = opts;
 
@@ -37,7 +38,7 @@ export function useDeepLinkRestore(opts: {
   useEffect(() => {
     if (!pendingSessionId) { return; }
     if (attachedSession) { return; }
-    if (loadingSessions) { return; } // still loading, wait
+    if (!sessionsLoaded || loadingSessions) { return; }
     // Prevent duplicate confirmAttach calls when sessions array reference changes
     if (confirmedRef.current === pendingSessionId) { return; }
 
@@ -59,5 +60,5 @@ export function useDeepLinkRestore(opts: {
       // Sessions loaded but the requested one doesn't exist — back to dashboard.
       navigate('/', { replace: true });
     }
-  }, [pendingSessionId, attachedSession, loadingSessions, sessions, confirmAttach, navigate]);
+  }, [pendingSessionId, attachedSession, sessionsLoaded, loadingSessions, sessions, confirmAttach, navigate]);
 }
