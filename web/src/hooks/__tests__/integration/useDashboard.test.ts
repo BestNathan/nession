@@ -44,6 +44,8 @@ interface MockWsService {
   fetchSessions: ReturnType<typeof vi.fn>;
   onAgentsChanged: ReturnType<typeof vi.fn>;
   onSessionsChanged: ReturnType<typeof vi.fn>;
+  isAuthenticated: ReturnType<typeof vi.fn>;
+  onConnectionChange: ReturnType<typeof vi.fn>;
 }
 
 function createMockWsService(): MockWsService {
@@ -53,6 +55,8 @@ function createMockWsService(): MockWsService {
     fetchSessions: vi.fn(() => new Promise<{ sessions: Session[] }>(() => {})),
     onAgentsChanged: vi.fn().mockReturnValue(() => {}),
     onSessionsChanged: vi.fn().mockReturnValue(() => {}),
+    isAuthenticated: vi.fn(() => true),
+    onConnectionChange: vi.fn().mockReturnValue(() => {}),
   };
 }
 
