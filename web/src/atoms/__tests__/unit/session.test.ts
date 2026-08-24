@@ -161,4 +161,32 @@ describe('action atoms', () => {
     expect(store.get(p2pEpochAtom)).toBe(epochInitial); // epoch unchanged
     expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
+
+  it('switchAddressAtom is a no-op when explicit → Auto resolves to same URL', () => {
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    store.set(switchAddressAtom, 'ws://a/ws');
+    const epochAfterExplicit = store.get(p2pEpochAtom);
+    store.set(terminalSessionStateAtom, 'attached');
+
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit);
+    expect(store.get(terminalSessionStateAtom)).toBe('attached');
+  });
+
+  it('switchAddressAtom reconnects when explicit → Auto picks a different URL', () => {
+    const store = createStore();
+    const session = makeSession();
+    const choice = makeChoice(session);
+    choice.orderedUrls = ['ws://best/ws'];
+    store.set(attachToSessionAtom, { session, choice, navigate });
+    store.set(switchAddressAtom, 'ws://slow/ws');
+    const epochAfterExplicit = store.get(p2pEpochAtom);
+
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit + 1);
+  });
 });

@@ -5,6 +5,7 @@ import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
 import { probeResultsAtom } from './probe';
+import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 
 // ── Base ────────────────────────────────────────────────────────
 
@@ -20,13 +21,6 @@ export const p2pEpochAtom = atom(0);
 
 // ── Derived ─────────────────────────────────────────────────────
 
-/** Fastest reachable URL from the probe cache for the current agent. */
-const fastestProbedUrlAtom = atom<string | null>((get) => {
-  const probe = get(probeResultsAtom).get(get(agentIdAtom) ?? '');
-  if (!probe?.orderedUrls.length) { return null; }
-  return probe.orderedUrls[0] ?? null;
-});
-
 /** Currently active P2P URL.
  *  1. manualOverride (user explicitly picked a route)
  *  2. orderedUrls from attach choice (dialog / deep-link restore)
@@ -37,17 +31,12 @@ export const activeUrlAtom = atom<string | null>((get) => {
   if (get(forcedRelayAtom)) { return null; }
   const manual = get(manualOverrideAtom);
   if (manual) { return manual; }
-  const fromAttach = get(orderedUrlsAtom)[0];
-  if (fromAttach) { return fromAttach; }
-  const probeUrl = get(fastestProbedUrlAtom);
-  if (probeUrl) { return probeUrl; }
-  const info = get(attachInfoAtom);
-  if (info?.mode === 'p2p') {
-    if (info.agent_address) { return info.agent_address; }
-    const addrs = info.addresses ?? [];
-    if (addrs.length > 0) { return addrs[0].url; }
-  }
-  return null;
+  const probe = get(probeResultsAtom).get(get(agentIdAtom) ?? '');
+  return resolveAutoP2pUrl(
+    get(orderedUrlsAtom),
+    probe?.orderedUrls ?? [],
+    get(attachInfoAtom),
+  );
 });
 
 export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {

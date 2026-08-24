@@ -4,6 +4,7 @@ import type { WebSocketService } from './websocket';
 import type { AgentProbe } from '../atoms/probe';
 import { loadAttachPrefs } from './attachPrefs';
 import { detectWebGLSupport } from '../terminal/Renderer';
+import { orderByLatency, testAddresses } from './addressSelection';
 
 /**
  * Build the same attach choice AttachDialog would produce for Auto mode,
@@ -19,9 +20,20 @@ export async function resolveDeepLinkAttachChoice(
   const requestedMode = mode === 'auto' ? 'p2p' : mode;
   const attachInfo = await wsService.requestAttach(session.session_id, requestedMode);
   const cached = probeResults.get(session.agent_id);
-  const orderedUrls = cached?.orderedUrls ?? [];
-  const latencies = cached?.latencies ?? [];
+  let orderedUrls = cached?.orderedUrls ?? [];
+  let latencies = cached?.latencies ?? [];
   const webglSupported = detectWebGLSupport();
+
+  if (orderedUrls.length === 0 && attachInfo.mode === 'p2p') {
+    const candidates = attachInfo.addresses ?? [];
+    if (candidates.length > 0) {
+      const results = await testAddresses(candidates);
+      latencies = results;
+      orderedUrls = orderByLatency(results);
+    } else if (attachInfo.agent_address) {
+      orderedUrls = [attachInfo.agent_address];
+    }
+  }
 
   return {
     mode,
