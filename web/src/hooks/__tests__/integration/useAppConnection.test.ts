@@ -33,7 +33,7 @@ describe('useAppConnection', () => {
     vi.restoreAllMocks();
   });
 
-  it('treats stored credentials as session restore (isAuthed while connecting)', () => {
+  it('treats stored credentials as session restore (restoring shell while connecting)', () => {
     vi.mocked(auth.getToken).mockReturnValue('stored-token');
     const mockService = createMockService();
     vi.mocked(websocket.createWebSocketService).mockReturnValue(mockService);
@@ -41,7 +41,8 @@ describe('useAppConnection', () => {
     const { result } = renderHook(() => useAppConnection());
 
     expect(result.current.connectionStatus).toBe('connecting');
-    expect(result.current.isAuthed).toBe(true);
+    expect(result.current.isRestoringSession).toBe(true);
+    expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.authToken).toBe('stored-token');
   });
 
@@ -51,7 +52,8 @@ describe('useAppConnection', () => {
     const { result } = renderHook(() => useAppConnection());
 
     expect(result.current.connectionStatus).toBe('disconnected');
-    expect(result.current.isAuthed).toBe(false);
+    expect(result.current.isRestoringSession).toBe(false);
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
   it('auto-connects when stored token exists', async () => {
@@ -78,7 +80,8 @@ describe('useAppConnection', () => {
 
     await waitFor(() => {
       expect(result.current.connectionStatus).toBe('disconnected');
-      expect(result.current.isAuthed).toBe(false);
+      expect(result.current.isRestoringSession).toBe(false);
+      expect(result.current.isAuthenticated).toBe(false);
     });
     expect(auth.clearToken).toHaveBeenCalled();
   });
@@ -96,7 +99,8 @@ describe('useAppConnection', () => {
       result.current.handleDisconnect();
     });
 
-    expect(result.current.isAuthed).toBe(false);
+    expect(result.current.isRestoringSession).toBe(false);
+    expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.connectionStatus).toBe('disconnected');
     expect(websocket.destroyWebSocketService).toHaveBeenCalled();
   });

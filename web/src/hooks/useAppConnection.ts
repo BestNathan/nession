@@ -96,9 +96,11 @@ export function useAppConnection() {
     }
   }, [wsService]);
 
-  const isAuthed = wasEverAuthed
-    ? connectionStatus !== 'disconnected'
-    : connectionStatus === 'authenticated' && wsService !== null;
+  // App shell is ready only after client.auth succeeds — never while connecting/connected.
+  const isAuthenticated = connectionStatus === 'authenticated' && wsService !== null;
+  // Stored credentials or a prior session: hold reconnecting UI instead of LoginPage (#424).
+  const isRestoringSession =
+    wasEverAuthed && connectionStatus !== 'disconnected' && !isAuthenticated;
 
   return {
     connectionStatus,
@@ -109,6 +111,7 @@ export function useAppConnection() {
     setServerUrl,
     handleConnect,
     handleDisconnect,
-    isAuthed,
+    isAuthenticated,
+    isRestoringSession,
   };
 }
