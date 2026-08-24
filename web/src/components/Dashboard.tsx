@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
 import { useDashboardDialogs } from '../hooks/useDashboardDialogs';
@@ -41,6 +42,15 @@ function resolveRouteView(opts: {
       handleBackToDashboard={handleBackToDashboard}
       handleTerminalDisconnect={handleTerminalDisconnect}
       handleTerminalError={handleTerminalError} />);
+  }
+
+  if (terminalMatch && !hasActiveSession) {
+    return (
+      <div className="h-[100dvh] flex flex-col items-center justify-center bg-background gap-3">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Restoring terminal session…</p>
+      </div>
+    );
   }
 
   if (envMatch) {

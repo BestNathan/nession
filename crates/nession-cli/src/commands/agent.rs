@@ -281,7 +281,20 @@ fn load_agent_config(
         config.auth_token = token.clone();
     }
 
+    finalize_agent_identity(&mut config)?;
+
     Ok(config)
+}
+
+/// Resolve stable agent identity (config + persisted `~/.nession/agent/identity`),
+/// matching `nession-agent` binary startup.
+fn finalize_agent_identity(config: &mut AgentConfig) -> Result<()> {
+    if config.agent_id.is_empty() {
+        config.agent_id = nession_common::system::get_hostname();
+    }
+    let identity_path = nession_common::paths::agent_identity_path()?;
+    config.agent_id = nession_agent::identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+    Ok(())
 }
 
 /// Run the agent in foreground mode (blocks until shutdown).
@@ -313,11 +326,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         .file_root
         .as_deref()
         .unwrap_or(&config.default_working_dir);
-    let agent_id = if config.agent_id.is_empty() {
-        nession_common::system::get_hostname()
-    } else {
-        config.agent_id.clone()
-    };
+    let agent_id = config.agent_id.clone();
     // Resize forwarding channel: the P2P AgentServer publishes tmux
     // `%window-resize` events here, and the forwarder spawned below drains
     // them into the central server once a live ServerClientHandle exists.
@@ -363,7 +372,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     let server_client = ServerClient::new(
         &config.server_url,
         &config.auth_token,
-        &config.agent_id,
+        &agent_id,
         &hostname,
         &ip_address,
         port,
