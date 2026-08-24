@@ -15,6 +15,8 @@ export interface FetchSessionsOptions {
 export function useSessionData(wsService: WebSocketService) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  /** False until the first fetch attempt finishes (success or failure). */
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   /** Agents that failed to answer the last force refresh. Their sessions are
    *  still shown, flagged as possibly out of date. */
   const [staleAgents, setStaleAgents] = useState<string[]>([]);
@@ -38,12 +40,14 @@ export function useSessionData(wsService: WebSocketService) {
       toast.error(msg);
     } finally {
       setLoadingSessions(false);
+      setSessionsLoaded(true);
     }
   }, []);
 
   return {
     sessions, setSessions,
     loadingSessions,
+    sessionsLoaded,
     staleAgents,
     fetchSessions,
   };
