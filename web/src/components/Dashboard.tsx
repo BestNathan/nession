@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Navigate, useNavigate, useLocation, useMatch } from 'react-router-dom';
+import { useNavigate, useMatch } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
@@ -58,7 +58,7 @@ function resolveRouteView(opts: {
   }
 
   if (connectionStatus === 'disconnected') {
-    return <Navigate to="/login" replace />;
+    return null;
   }
 
   return null;
@@ -70,8 +70,9 @@ function resolveRouteView(opts: {
  */
 function useTerminalAttach(
   navigate: ReturnType<typeof useNavigate>,
-  location: ReturnType<typeof useLocation>,
+  terminalMatch: ReturnType<typeof useMatch>,
   sessions: Session[],
+  sessionsLoaded: boolean,
   loadingSessions: boolean,
 ) {
   const [hasActiveSession] = useAtom(hasActiveSessionAtom);
@@ -82,10 +83,11 @@ function useTerminalAttach(
   const doAttach = useSetAtom(attachToSessionAtom);
   const doDisconnect = useSetAtom(disconnectAtom);
 
-  // Deep-link restore: parse session ID from URL.
+  // Deep-link restore: session id from hash route /terminal/:sessionId.
   useEffect(() => {
-    setSessionIdFromUrl(location.pathname.match(/^\/terminal\/(.+)$/)?.[1] ?? null);
-  }, [location.pathname, setSessionIdFromUrl]);
+    const raw = terminalMatch?.params?.sessionId;
+    setSessionIdFromUrl(raw ? decodeURIComponent(raw) : null);
+  }, [terminalMatch?.params?.sessionId, setSessionIdFromUrl]);
 
   const [attachDialogSession, setAttachDialogSession] = useAtom(attachDialogSessionAtom);
 
@@ -104,6 +106,7 @@ function useTerminalAttach(
   useDeepLinkRestore({
     pendingSessionId: sessionIdFromUrl,
     attachedSession: hasActiveSession && attachInfo ? { sessionId, sessionName, attachInfo } : null,
+    sessionsLoaded,
     loadingSessions,
     sessions,
     confirmAttach,
@@ -118,12 +121,11 @@ function useTerminalAttach(
 
 export function Dashboard({ connectionStatus }: DashboardProps) {
   const navigate = useNavigate();
-  const location = useLocation();
   const terminalMatch = useMatch('/terminal/:sessionId');
   const envMatch = useMatch('/env');
 
   const {
-    agents, sessions, loadingSessions, loadingAgents, error, filteredAgents, filteredSessions,
+    agents, sessions, loadingSessions, sessionsLoaded, loadingAgents, error, filteredAgents, filteredSessions,
     showCreateModal, sessionToKill, previewSession, searchQuery, setSearchQuery,
     statusFilter, setStatusFilter, isSearchActive, sortField, sortDirection, toggleSort,
     selectedAgent, setSelectedAgent, getHeartbeatHistory, setShowCreateModal, setSessionToKill,
@@ -134,7 +136,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const {
     hasActiveSession, sessionId, doDisconnect,
     attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
-  } = useTerminalAttach(navigate, location, sessions, loadingSessions);
+  } = useTerminalAttach(navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions);
 
   const {
     serverRefreshKey, agentToDelete, setAgentToDelete,

@@ -15,6 +15,7 @@ export interface DashboardState {
   sessions: Session[];
   loadingAgents: boolean;
   loadingSessions: boolean;
+  sessionsLoaded: boolean;
   error: string | null;
   selectedAgent: Agent | null;
   filteredAgents: Agent[];
@@ -155,6 +156,7 @@ export function useDashboard(_wsService?: WebSocketService): DashboardState {
     sessions: sessionData.sessions,
     loadingAgents: agentData.loadingAgents,
     loadingSessions: sessionData.loadingSessions,
+    sessionsLoaded: sessionData.sessionsLoaded,
     error: agentData.error,
     selectedAgent,
     filteredAgents,

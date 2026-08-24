@@ -54,6 +54,7 @@ function App() {
   const appRouter = useMemo(
     () => createHashRouter([
       {
+        path: '/',
         element: (
           <WebSocketContext.Provider value={wsService!}>
             <Dashboard connectionStatus={connectionStatus} />
@@ -63,7 +64,6 @@ function App() {
           { index: true, element: null },
           { path: 'terminal/:sessionId', element: null },
           { path: 'env', element: null },
-          { path: 'login', element: <Navigate to="/" replace /> },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },
