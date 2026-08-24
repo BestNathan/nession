@@ -2,7 +2,6 @@ import { useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Agent, ConnectionStatus, Session } from '../types';
 import type { useDashboard } from '../hooks/useDashboard';
-import { useProbePolling } from '../hooks/useProbePolling';
 import { type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
 import { DashboardHeader } from './DashboardHeader';
@@ -40,7 +39,6 @@ export function DashboardMainView({
   incrementServerRefreshKey,
 }: DashboardMainViewProps) {
   const [createSessionAgentId, setCreateSessionAgentId] = useState<string | null>(null);
-  useProbePolling(data.agents);
 
   const onlineCount = data.agents.filter((a) => a.status === 'online').length;
   const offlineCount = data.agents.filter((a) => a.status !== 'online').length;

@@ -3,11 +3,13 @@ import type { NavigateFunction } from 'react-router-dom';
 import type { Session } from '../types';
 import type { AttachedSession } from '../components/TerminalView';
 import type { AttachChoice } from '../components/env/AttachDialog';
+import type { WebSocketService } from '../services/websocket';
+import type { AgentProbe } from '../atoms/probe';
+import { resolveDeepLinkAttachChoice } from '../services/deepLinkAttach';
 
 /**
  * When the user lands on /terminal/:sessionId with no active attach, wait for
- * sessions to load and create a shell AttachedSession so the terminal view
- * renders. The connection layer then resolves the transport.
+ * sessions to load and auto-attach with a real client.session.attach response.
  * If the session doesn't exist after loading, navigate back to the dashboard.
  */
 export function useDeepLinkRestore(opts: {
@@ -16,19 +18,20 @@ export function useDeepLinkRestore(opts: {
   sessionsLoaded: boolean;
   loadingSessions: boolean;
   sessions: Session[];
+  wsService: WebSocketService;
+  probeResults: Map<string, AgentProbe>;
   confirmAttach: (session: Session, choice: AttachChoice) => void;
   navigate: NavigateFunction;
 }) {
   const {
     pendingSessionId, attachedSession, sessionsLoaded, loadingSessions,
-    sessions, confirmAttach, navigate,
+    sessions, wsService, probeResults, confirmAttach, navigate,
   } = opts;
 
   const confirmedRef = useRef<string | null>(null);
+  const probeResultsRef = useRef(probeResults);
+  probeResultsRef.current = probeResults;
 
-  // Reset the guard when the user navigates away (pendingSessionId clears).
-  // Without this, a second visit to the same /terminal/:id URL would be
-  // blocked by the stale ref, preventing legitimate re-attachment. (#71 #1)
   useEffect(() => {
     if (!pendingSessionId) {
       confirmedRef.current = null;
@@ -39,26 +42,32 @@ export function useDeepLinkRestore(opts: {
     if (!pendingSessionId) { return; }
     if (attachedSession) { return; }
     if (!sessionsLoaded || loadingSessions) { return; }
-    // Prevent duplicate confirmAttach calls when sessions array reference changes
     if (confirmedRef.current === pendingSessionId) { return; }
 
     const session = sessions.find((s) => s.session_id === pendingSessionId);
-    if (session) {
-      confirmAttach(session, {
-        mode: 'auto',
-        attachInfo: { mode: 'p2p', session_id: session.session_id, agent_address: '', connection_token: '' },
-        orderedUrls: [],
-        latencies: [],
-        selectedUrl: null,
-        relayUrl: null,
-        renderer: 'webgl',
-        envRefs: [],
-      });
-      // Mark only after a successful (synchronous) confirm. (#71 #5)
-      confirmedRef.current = pendingSessionId;
-    } else {
-      // Sessions loaded but the requested one doesn't exist — back to dashboard.
+    if (!session) {
       navigate('/', { replace: true });
+      return;
     }
-  }, [pendingSessionId, attachedSession, sessionsLoaded, loadingSessions, sessions, confirmAttach, navigate]);
+
+    let cancelled = false;
+    void resolveDeepLinkAttachChoice(wsService, session, probeResultsRef.current)
+      .then((choice) => {
+        if (cancelled) { return; }
+        confirmAttach(session, choice);
+        confirmedRef.current = pendingSessionId;
+      })
+      .catch(() => {
+        if (!cancelled) {
+          navigate('/', { replace: true });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingSessionId, attachedSession, sessionsLoaded, loadingSessions,
+    sessions, wsService, confirmAttach, navigate,
+  ]);
 }
