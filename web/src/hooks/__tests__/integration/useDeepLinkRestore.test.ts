@@ -1,8 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
 import type { Session } from '@/types';
 import type { AttachedSession } from '@/components/TerminalView';
+import type { WebSocketService } from '@/services/websocket';
+
+vi.mock('@/services/deepLinkAttach', () => ({
+  resolveDeepLinkAttachChoice: vi.fn(),
+}));
+
+import { resolveDeepLinkAttachChoice } from '@/services/deepLinkAttach';
 
 function makeSession(id = 'agent-1:s1'): Session {
   return {
@@ -16,9 +23,14 @@ function makeSession(id = 'agent-1:s1'): Session {
   };
 }
 
+function makeWs(): WebSocketService {
+  return { requestAttach: vi.fn() } as unknown as WebSocketService;
+}
+
 describe('useDeepLinkRestore', () => {
   const navigate = vi.fn();
   const confirmAttach = vi.fn();
+  const wsService = makeWs();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -31,29 +43,46 @@ describe('useDeepLinkRestore', () => {
       sessionsLoaded: false,
       loadingSessions: false,
       sessions: [],
+      wsService,
+      probeResults: new Map(),
       confirmAttach,
       navigate,
     }));
 
     expect(navigate).not.toHaveBeenCalled();
-    expect(confirmAttach).not.toHaveBeenCalled();
+    expect(resolveDeepLinkAttachChoice).not.toHaveBeenCalled();
   });
 
-  it('auto-attaches once sessions are loaded', () => {
+  it('auto-attaches via requestAttach once sessions are loaded', async () => {
     const session = makeSession();
+    const choice = {
+      mode: 'auto' as const,
+      attachInfo: { mode: 'p2p' as const, session_id: session.session_id, connection_token: 'tok' },
+      orderedUrls: ['ws://a/ws'],
+      latencies: [],
+      selectedUrl: null,
+      relayUrl: null,
+      renderer: 'webgl' as const,
+      envRefs: [],
+    };
+    vi.mocked(resolveDeepLinkAttachChoice).mockResolvedValue(choice);
+
     renderHook(() => useDeepLinkRestore({
       pendingSessionId: session.session_id,
       attachedSession: null,
       sessionsLoaded: true,
       loadingSessions: false,
       sessions: [session],
+      wsService,
+      probeResults: new Map(),
       confirmAttach,
       navigate,
     }));
 
-    expect(confirmAttach).toHaveBeenCalledWith(session, expect.objectContaining({
-      mode: 'auto',
-    }));
+    await waitFor(() => {
+      expect(resolveDeepLinkAttachChoice).toHaveBeenCalledWith(wsService, session, new Map());
+      expect(confirmAttach).toHaveBeenCalledWith(session, choice);
+    });
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -64,6 +93,8 @@ describe('useDeepLinkRestore', () => {
       sessionsLoaded: true,
       loadingSessions: false,
       sessions: [makeSession()],
+      wsService,
+      probeResults: new Map(),
       confirmAttach,
       navigate,
     }));
@@ -83,11 +114,13 @@ describe('useDeepLinkRestore', () => {
       sessionsLoaded: true,
       loadingSessions: false,
       sessions: [makeSession()],
+      wsService,
+      probeResults: new Map(),
       confirmAttach,
       navigate,
     }));
 
+    expect(resolveDeepLinkAttachChoice).not.toHaveBeenCalled();
     expect(confirmAttach).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
   });
 });

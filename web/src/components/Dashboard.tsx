@@ -1,11 +1,14 @@
 import { useCallback, useEffect, type ReactNode } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
 import { useDashboardDialogs } from '../hooks/useDashboardDialogs';
 import { useDashboard } from '../hooks/useDashboard';
+import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { probeResultsAtom, type AgentProbe } from '../atoms/probe';
 import {
   hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
   attachToSessionAtom, disconnectAtom, attachDialogSessionAtom,
@@ -66,8 +69,10 @@ function useTerminalAttach(opts: {
   sessions: Session[];
   sessionsLoaded: boolean;
   loadingSessions: boolean;
+  wsService: ReturnType<typeof useWebSocket>;
+  probeResults: Map<string, AgentProbe>;
 }) {
-  const { navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions } = opts;
+  const { navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions, wsService, probeResults } = opts;
   const [hasActiveSession] = useAtom(hasActiveSessionAtom);
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
@@ -100,6 +105,8 @@ function useTerminalAttach(opts: {
     sessionsLoaded,
     loadingSessions,
     sessions,
+    wsService,
+    probeResults,
     confirmAttach,
     navigate,
   });
@@ -114,7 +121,10 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const navigate = useNavigate();
   const terminalMatch = useMatch('/terminal/:sessionId');
   const envMatch = useMatch('/env');
+  const wsService = useWebSocket();
+  const probeResults = useAtomValue(probeResultsAtom);
   const dashboardData = useDashboard();
+  useProbePolling(dashboardData.agents);
 
   const {
     hasActiveSession, sessionId, doDisconnect,
@@ -125,6 +135,8 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
     sessions: dashboardData.sessions,
     sessionsLoaded: dashboardData.sessionsLoaded,
     loadingSessions: dashboardData.loadingSessions,
+    wsService,
+    probeResults,
   });
 
   const {
