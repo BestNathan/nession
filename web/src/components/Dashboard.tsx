@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { ConnectionStatus, Session } from '../types';
 import { useDashboardDialogs } from '../hooks/useDashboardDialogs';
 import { useDashboard } from '../hooks/useDashboard';
-import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
 import {
   hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
@@ -14,12 +13,9 @@ import {
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
-import { DashboardHeader } from './DashboardHeader';
 import { RenderTerminal } from './RenderTerminal';
 import { EnvManager } from './env/EnvManager';
-import { SessionsSection } from './SessionsSection';
-import { AgentDetailPanel } from './AgentDetailPanel';
-import { DashboardDialogs } from './DashboardDialogs';
+import { DashboardMainView } from './DashboardMainView';
 export { AgentSection };
 
 interface DashboardProps {
@@ -64,17 +60,14 @@ function resolveRouteView(opts: {
   return null;
 }
 
-/**
- * Owns the attach-dialog state and wires the attach/back actions to the jotai
- * atoms. Also handles deep-link restoration for /terminal/:sessionId.
- */
-function useTerminalAttach(
-  navigate: ReturnType<typeof useNavigate>,
-  terminalMatch: ReturnType<typeof useMatch>,
-  sessions: Session[],
-  sessionsLoaded: boolean,
-  loadingSessions: boolean,
-) {
+function useTerminalAttach(opts: {
+  navigate: ReturnType<typeof useNavigate>;
+  terminalMatch: ReturnType<typeof useMatch>;
+  sessions: Session[];
+  sessionsLoaded: boolean;
+  loadingSessions: boolean;
+}) {
+  const { navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions } = opts;
   const [hasActiveSession] = useAtom(hasActiveSessionAtom);
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
@@ -83,7 +76,6 @@ function useTerminalAttach(
   const doAttach = useSetAtom(attachToSessionAtom);
   const doDisconnect = useSetAtom(disconnectAtom);
 
-  // Deep-link restore: session id from hash route /terminal/:sessionId.
   useEffect(() => {
     const raw = terminalMatch?.params?.sessionId;
     setSessionIdFromUrl(raw ? decodeURIComponent(raw) : null);
@@ -102,7 +94,6 @@ function useTerminalAttach(
     doAttach({ session, choice, navigate });
   }, [doAttach, navigate, setAttachDialogSession]);
 
-  // Deep-link restoration: on /terminal/:sessionId, auto-attach the session.
   useDeepLinkRestore({
     pendingSessionId: sessionIdFromUrl,
     attachedSession: hasActiveSession && attachInfo ? { sessionId, sessionName, attachInfo } : null,
@@ -123,130 +114,45 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
   const navigate = useNavigate();
   const terminalMatch = useMatch('/terminal/:sessionId');
   const envMatch = useMatch('/env');
-
-  const {
-    agents, sessions, loadingSessions, sessionsLoaded, loadingAgents, error, filteredAgents, filteredSessions,
-    showCreateModal, sessionToKill, previewSession, searchQuery, setSearchQuery,
-    statusFilter, setStatusFilter, isSearchActive, sortField, sortDirection, toggleSort,
-    selectedAgent, setSelectedAgent, getHeartbeatHistory, setShowCreateModal, setSessionToKill,
-    setPreviewSession, handleSessionKilled, handleSessionCreated, fetchSessions, clearError,
-    updateAgent, staleAgents,
-  } = useDashboard();
+  const dashboardData = useDashboard();
 
   const {
     hasActiveSession, sessionId, doDisconnect,
     attachDialogSession, setAttachDialogSession, onAttach, confirmAttach,
-  } = useTerminalAttach(navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions);
+  } = useTerminalAttach({
+    navigate,
+    terminalMatch,
+    sessions: dashboardData.sessions,
+    sessionsLoaded: dashboardData.sessionsLoaded,
+    loadingSessions: dashboardData.loadingSessions,
+  });
 
   const {
     serverRefreshKey, agentToDelete, setAgentToDelete,
     handleTerminalDisconnect, handleTerminalError, incrementServerRefreshKey,
   } = useDashboardDialogs();
 
-  // Preselected agent for Create Session dialog (opened from detail panel).
-  const [createSessionAgentId, setCreateSessionAgentId] = useState<string | null>(null);
-
-  // App-level address probing — fire-and-forget, writes probeResultsAtom.
-  useProbePolling(agents);
-
-  const onlineCount = agents.filter((a) => a.status === 'online').length;
-  const offlineCount = agents.filter((a) => a.status !== 'online').length;
-
   const routeView = resolveRouteView({
     terminalMatch, envMatch, connectionStatus, hasActiveSession, sessionId,
     handleBackToDashboard: () => doDisconnect(navigate),
     handleTerminalDisconnect,
-    handleTerminalError, agents, navigate,
+    handleTerminalError, agents: dashboardData.agents, navigate,
   });
   if (routeView !== null) { return routeView; }
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background">
-      <DashboardHeader
-        connectionStatus={connectionStatus}
-        searchProps={{
-          query: searchQuery,
-          setQuery: setSearchQuery,
-          statusFilter,
-          setStatusFilter,
-          onlineCount,
-          offlineCount,
-        }}
-        actionsProps={{
-          fetchSessions,
-          onOpenEnv: () => navigate('/env'),
-          loadingAgents,
-          clearError,
-        }}
-        error={error}
-        serverRefreshKey={serverRefreshKey}
-      />
-
-      <div className="flex-1 min-h-0 flex flex-col p-3 gap-4 md:p-4 lg:p-6 lg:gap-6 pb-[env(safe-area-inset-bottom)] w-full max-w-[1920px] mx-auto">
-        <AgentSection
-          loadingAgents={loadingAgents}
-          agents={agents}
-          filteredAgents={filteredAgents}
-          isSearchActive={isSearchActive}
-          setSelectedAgent={setSelectedAgent}
-          onlineCount={onlineCount}
-          offlineCount={offlineCount}
-          onAgentRename={updateAgent}
-          onAgentDelete={setAgentToDelete}
-        />
-
-        {/* Sessions */}
-        <SessionsSection
-          agents={agents}
-          filteredSessions={filteredSessions}
-          loadingSessions={loadingSessions}
-          staleAgents={staleAgents}
-          onCreate={() => setShowCreateModal(true)}
-          fetchSessions={fetchSessions}
-          onAttach={onAttach}
-          onKill={setSessionToKill}
-          onPreview={setPreviewSession}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          toggleSort={toggleSort}
-          isSearchActive={isSearchActive}
-        />
-      </div>
-
-      {selectedAgent && (
-        <AgentDetailPanel
-          agent={selectedAgent}
-          heartbeatHistory={getHeartbeatHistory(selectedAgent.agent_id)}
-          sessions={sessions.filter((s) => s.agent_id === selectedAgent.agent_id)}
-          onClose={() => setSelectedAgent(null)}
-          onRefresh={fetchSessions}
-          onRename={() => {
-            document.getElementById(`rename-${selectedAgent.agent_id}`)?.click();
-          }}
-          onDelete={() => setAgentToDelete(selectedAgent)}
-          onCreateSession={() => {
-            setCreateSessionAgentId(selectedAgent.agent_id);
-            setShowCreateModal(true);
-          }}
-        />
-      )}
-
-      <DashboardDialogs
-        showCreateModal={showCreateModal}
-        setShowCreateModal={(show) => {
-          setShowCreateModal(show);
-          if (!show) {setCreateSessionAgentId(null);}
-        }}
-        agents={agents}
-        onCreated={() => { handleSessionCreated(); incrementServerRefreshKey(); }}
-        preselectedAgentId={createSessionAgentId}
-        sessionToKill={sessionToKill} setSessionToKill={setSessionToKill} onKilled={handleSessionKilled}
-        agentToDelete={agentToDelete} setAgentToDelete={setAgentToDelete}
-        onDeleted={() => { incrementServerRefreshKey(); fetchSessions(); }}
-        attachDialogSession={attachDialogSession} setAttachDialogSession={setAttachDialogSession}
-        onConfirm={confirmAttach}
-        previewSession={previewSession} setPreviewSession={setPreviewSession}
-      />
-    </div>
+    <DashboardMainView
+      connectionStatus={connectionStatus}
+      navigate={navigate}
+      data={dashboardData}
+      attachDialogSession={attachDialogSession}
+      setAttachDialogSession={setAttachDialogSession}
+      onAttach={onAttach}
+      confirmAttach={confirmAttach}
+      serverRefreshKey={serverRefreshKey}
+      agentToDelete={agentToDelete}
+      setAgentToDelete={setAgentToDelete}
+      incrementServerRefreshKey={incrementServerRefreshKey}
+    />
   );
 }
