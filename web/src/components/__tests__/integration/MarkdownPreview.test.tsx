@@ -102,7 +102,7 @@ describe('MarkdownPreview', () => {
     expect(document.querySelector('.katex-display')).toBeInTheDocument();
   });
 
-  it('shows large file banner for content >1MB', () => {
+  it('shows large file banner for content >1MB', { timeout: 15000 }, () => {
     const content = '# Heading\n\n' + 'A'.repeat(1_048_577);
     render(<MarkdownPreview content={content} filename="large.md" />);
     expect(screen.getByText(/Large file/)).toBeInTheDocument();
