@@ -5,6 +5,7 @@ import App from './App.tsx'
 import { initExtensions } from './extensions/registry'
 import './index.css'
 import { useMediaQuery } from './hooks/useMediaQuery'
+import { normalizeHashRouterLocation } from './lib/hashRouterUrl'
 
 function Root() {
   // Mobile browser bottom bar + terminal BottomBar sheet can cover a
@@ -17,6 +18,8 @@ function Root() {
     </>
   )
 }
+
+normalizeHashRouterLocation();
 
 // Initialize extensions before first render.
 // Extensions are discovered from web/src/extensions/*/

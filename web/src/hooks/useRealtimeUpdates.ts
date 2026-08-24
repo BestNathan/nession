@@ -25,9 +25,21 @@ export function useRealtimeUpdates(
   }, [wsService, applyAgentUpdate, setSessions]);
 
   useEffect(() => {
-    fetchAgents();
-    fetchSessions();
-  }, [fetchAgents, fetchSessions]);
+    const fetchIfAuthed = () => {
+      if (!wsService.isAuthenticated()) {
+        return;
+      }
+      fetchAgents();
+      fetchSessions();
+    };
+
+    fetchIfAuthed();
+    return wsService.onConnectionChange((status) => {
+      if (status === 'authenticated') {
+        fetchIfAuthed();
+      }
+    });
+  }, [wsService, fetchAgents, fetchSessions]);
 
   const clearError = useCallback(() => agentData.setError(null), [agentData]);
 

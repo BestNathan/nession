@@ -4,6 +4,8 @@ import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
 import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from './connection';
 import { terminalSessionStateAtom } from '../terminal/state/session';
+import { probeResultsAtom } from './probe';
+import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 
 // ── Base atoms ──────────────────────────────────────────────────
 
@@ -97,11 +99,26 @@ export const switchAddressAtom = atom(
     // there manualOverride changes (null → url) so the source of the URL
     // changed and the epoch bump / rebuild still has to fire.
     // Re-probe latency changes also don't come through here (they update
-    // fastestProbedUrlAtom directly), so a same-source Auto selection truly
+    // probeResultsAtom directly), so a same-source Auto selection truly
     // means "no state change needed".
     const currentOverride = get(manualOverrideAtom);
     if (url === currentOverride) {
       return;
+    }
+
+    // Explicit → Auto when Auto would resolve to the same URL: clear override only.
+    // Skips disconnect/reconnect and useAddressPlan async re-probe (orderedUrls already set).
+    if (url === null && currentOverride !== null) {
+      const probe = get(probeResultsAtom).get(get(agentIdAtom) ?? '');
+      const autoUrl = resolveAutoP2pUrl(
+        get(orderedUrlsAtom),
+        probe?.orderedUrls ?? [],
+        get(attachInfoAtom),
+      );
+      if (autoUrl === currentOverride) {
+        set(manualOverrideAtom, null);
+        return;
+      }
     }
 
     set(manualOverrideAtom, url);

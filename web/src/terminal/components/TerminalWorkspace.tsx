@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { useP2PConnection } from '../../hooks/useP2PConnection';
+import { useAddressPlan } from '../../hooks/useAddressPlan';
 import { createFileOps } from '../../services/fileOps';
 import { AddressSelector } from '../../components/AddressSelector';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -18,13 +19,13 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   manualOverrideAtom,
+  orderedUrlsAtom,
   forcedRelayAtom,
   rendererAtom,
   envRefsAtom,
 } from '../../atoms/session';
 import { currentAgentLatenciesAtom } from '../../atoms/probe';
 import {
-  activeUrlAtom,
   effectiveModeAtom,
   isSwitchingAtom,
   p2pConnectionAtom,
@@ -131,9 +132,9 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const [sessionName] = useAtom(sessionNameAtom);
   const [attachInfo] = useAtom(attachInfoAtom);
   const [effectiveMode] = useAtom(effectiveModeAtom);
-  const [activeUrl] = useAtom(activeUrlAtom);
   const [forcedRelay] = useAtom(forcedRelayAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
+  const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [isSwitching] = useAtom(isSwitchingAtom);
   const [renderer] = useAtom(rendererAtom);
   const [envRefs] = useAtom(envRefsAtom);
@@ -153,6 +154,12 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   const isP2P = effectiveMode === 'p2p';
 
+  const addressPlan = useAddressPlan(attachInfo, {
+    orderedUrls,
+    manualUrl: manualOverride,
+  });
+  const activeUrl = addressPlan.ready ? addressPlan.urls[0] ?? null : null;
+
   // Preview dialog state
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -162,7 +169,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // is the endpoint, forcedRelay flips effectiveMode to relay which nulls
   // activeUrl.
   useP2PConnection(
-    isP2P && activeUrl && attachInfo
+    isP2P && activeUrl && attachInfo && addressPlan.ready
       ? {
           agentUrl: activeUrl,
           connectionToken: attachInfo.connection_token,
@@ -283,6 +290,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // created without a live p2pConnection would be inert forever (the transport
   // is built once at attach). Relay mode is always safe to mount.
   const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
+  const waitingForAddressPlan = isP2P && !addressPlan.ready;
 
   // ── Relay-mode server-ws lifecycle ───────────────────────────────────
   // The state machine's P2P bridge covers socket drops only; in relay mode the
@@ -344,7 +352,11 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     }
   }, [terminalState, controller]);
 
-  const terminalElement = modeGateOk ? (
+  const terminalElement = waitingForAddressPlan ? (
+    <div className="flex-1 min-h-0 flex items-center justify-center">
+      <Loader2 className="size-8 animate-spin text-muted-foreground" />
+    </div>
+  ) : modeGateOk ? (
     <TerminalPane sessionId={sessionId} controller={controller} reconnectAttempt={reconnectCount} />
   ) : (
     <div className="flex-1 min-h-0" />
