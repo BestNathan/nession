@@ -11,6 +11,14 @@ vi.mock('@/terminal/Renderer', () => ({
   detectWebGLSupport: () => true,
 }));
 
+vi.mock('@/services/addressSelection', () => ({
+  testAddresses: vi.fn().mockResolvedValue([
+    { url: 'ws://fast/ws', latencyMs: 10 },
+    { url: 'ws://slow/ws', latencyMs: 100 },
+  ]),
+  orderByLatency: vi.fn((results: { url: string }[]) => results.map((r) => r.url)),
+}));
+
 describe('resolveDeepLinkAttachChoice', () => {
   const session: Session = {
     session_id: 'agent-1:s1',
@@ -46,5 +54,25 @@ describe('resolveDeepLinkAttachChoice', () => {
     expect(choice.attachInfo).toEqual(attachInfo);
     expect(choice.orderedUrls).toEqual(['ws://fast/ws']);
     expect(choice.mode).toBe('auto');
+  });
+
+  it('browser-probes addresses when probe cache is empty', async () => {
+    const attachInfo = {
+      mode: 'p2p' as const,
+      session_id: session.session_id,
+      connection_token: 'secret',
+      addresses: [
+        { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+        { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
+      ],
+    };
+    const wsService = {
+      requestAttach: vi.fn().mockResolvedValue(attachInfo),
+    } as unknown as WebSocketService;
+
+    const choice = await resolveDeepLinkAttachChoice(wsService, session, new Map());
+
+    expect(choice.orderedUrls).toEqual(['ws://fast/ws', 'ws://slow/ws']);
+    expect(choice.latencies).toHaveLength(2);
   });
 });
