@@ -1865,7 +1865,7 @@ dependencies = [
 
 [[package]]
 name = "nession-agent"
-version = "0.34.2"
+version = "0.34.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "nession-claude-code"
-version = "0.34.2"
+version = "0.34.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1912,7 +1912,7 @@ dependencies = [
 
 [[package]]
 name = "nession-cli"
-version = "0.34.2"
+version = "0.34.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1947,7 +1947,7 @@ dependencies = [
 
 [[package]]
 name = "nession-common"
-version = "0.34.2"
+version = "0.34.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1967,7 +1967,7 @@ dependencies = [
 
 [[package]]
 name = "nession-server"
-version = "0.34.2"
+version = "0.34.3"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
