@@ -3,7 +3,7 @@ import 'highlight.js/styles/github-dark-dimmed.css';
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Info } from 'lucide-react';
-import { getRehypePlugins, getRemarkPlugins } from '@/markdown';
+import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/markdown';
 
 /** Props for MarkdownPreview */
 interface MarkdownPreviewProps {
@@ -93,6 +93,7 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           <ReactMarkdown
             remarkPlugins={getRemarkPlugins()}
             rehypePlugins={getRehypePlugins()}
+            remarkRehypeOptions={getRemarkRehypeOptions()}
           >
             {content}
           </ReactMarkdown>

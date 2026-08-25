@@ -31,8 +31,16 @@ export {
 export {
   getRehypePlugins,
   getRemarkPlugins,
+  getRemarkRehypeOptions,
   markdownSanitizeSchema,
 } from './previewPlugins';
+
+export {
+  frontmatterToHast,
+  parseFrontmatterEntries,
+  type FrontmatterEntry,
+  type FrontmatterFlavor,
+} from './frontmatterTable';
 
 export {
   AUTO_APPLY_CONFIDENCE,

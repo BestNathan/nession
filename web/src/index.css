@@ -180,3 +180,76 @@ html {
 .scrollbar-none::-webkit-scrollbar {
   display: none; /* Chrome/Safari/Opera */
 }
+
+/* ── Markdown frontmatter panel ──────────────────────────────────────────
+ * Frontmatter is metadata about the document, not part of it, so it must not
+ * look like one of the document's own tables. These rules deliberately undo the
+ * `prose-table:` / `prose-th:` / `prose-td:` styling that would otherwise apply
+ * and replace it with a denser, recessed panel.
+ *
+ * The separation is carried by the border, the left accent bar and the caption
+ * rather than by a tinted fill: `--muted` sits only ~3% off `--background` in
+ * the light palette, so a translucent fill alone would be nearly invisible.
+ * Everything here resolves through theme tokens, so it holds under both
+ * palettes.
+ *
+ * Emitted by `markdown/frontmatterTable.ts`; the class is the only `className`
+ * value the sanitize schema permits on a table.
+ */
+.markdown-preview table.nession-frontmatter {
+  display: table;
+  width: 100%;
+  margin: 0 0 1.25rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  border-collapse: collapse;
+  overflow: hidden;
+  background: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.markdown-preview table.nession-frontmatter caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.4rem 0.625rem 0.3rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-preview table.nession-frontmatter tr + tr > * {
+  border-top: 1px solid var(--border);
+}
+
+/* Keys hug their content so values get the remaining width. */
+.markdown-preview table.nession-frontmatter th[scope='row'] {
+  width: 1%;
+  white-space: nowrap;
+  vertical-align: top;
+  padding: 0.3rem 0.75rem 0.3rem 0.625rem;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+.markdown-preview table.nession-frontmatter td {
+  vertical-align: top;
+  padding: 0.3rem 0.625rem 0.3rem 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}

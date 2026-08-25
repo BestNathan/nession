@@ -1,56 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
-import { getRehypePlugins, getRemarkPlugins } from '@/markdown/previewPlugins';
+import {
+  getRehypePlugins,
+  getRemarkPlugins,
+  getRemarkRehypeOptions,
+} from '@/markdown/previewPlugins';
 
 /**
- * These render through the real plugin chain rather than asserting on the plugin
- * array: the array shape proves nothing about whether frontmatter is actually
- * stripped or a table actually becomes a table.
+ * These render through the real plugin chain — including `remarkRehypeOptions`,
+ * which is what MarkdownPreview passes — rather than asserting on the plugin
+ * array: the array shape proves nothing about what reaches the DOM.
+ *
+ * Frontmatter rendering itself is covered in `frontmatterTable.test.tsx`; what
+ * matters here is that adding it did not disturb the rest of the chain.
  */
 function renderMarkdown(content: string) {
   return render(
-    <ReactMarkdown remarkPlugins={getRemarkPlugins()} rehypePlugins={getRehypePlugins()}>
+    <ReactMarkdown
+      remarkPlugins={getRemarkPlugins()}
+      rehypePlugins={getRehypePlugins()}
+      remarkRehypeOptions={getRemarkRehypeOptions()}
+    >
       {content}
     </ReactMarkdown>,
   );
 }
 
 describe('preview plugins — frontmatter', () => {
-  it('strips a YAML frontmatter block from the rendered output', () => {
-    const { container } = renderMarkdown(`---
-title: Deploy guide
-tags: [ops, deploy]
----
-
-# Deploy guide
-
-Body text.
-`);
-    expect(screen.getByText('Deploy guide', { selector: 'h1' })).toBeInTheDocument();
-    expect(screen.getByText('Body text.')).toBeInTheDocument();
-    expect(container.textContent).not.toContain('title:');
-    expect(container.textContent).not.toContain('tags:');
-  });
-
-  it('strips a TOML frontmatter block from the rendered output', () => {
-    const { container } = renderMarkdown(`+++
-title = "Notes"
-draft = true
-+++
-
-# Notes
-`);
-    expect(screen.getByText('Notes', { selector: 'h1' })).toBeInTheDocument();
-    expect(container.textContent).not.toContain('title =');
-    expect(container.textContent).not.toContain('draft');
-  });
-
-  it('does not render frontmatter as a horizontal rule', () => {
-    // The old chain had no frontmatter plugin, so `---` opened a thematic break
-    // and the metadata leaked into the body as a setext heading plus text.
+  it('consumes the delimiters instead of emitting a horizontal rule', () => {
+    // The original bug: `---` opened a thematic break and the metadata leaked
+    // into the body as a setext heading plus text.
     const { container } = renderMarkdown('---\ntitle: x\n---\n\nBody.\n');
     expect(container.querySelector('hr')).toBeNull();
+    expect(screen.getByText('Body.')).toBeInTheDocument();
+  });
+
+  it('still renders the document body after a frontmatter block', () => {
+    renderMarkdown('---\ntitle: Deploy guide\n---\n\n# Deploy guide\n\nBody text.\n');
+    expect(screen.getByText('Deploy guide', { selector: 'h1' })).toBeInTheDocument();
+    expect(screen.getByText('Body text.')).toBeInTheDocument();
   });
 
   it('still treats a mid-document --- as a horizontal rule', () => {
