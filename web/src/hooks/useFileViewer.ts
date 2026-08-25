@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/lib/errorHelpers';
-import { getViewerType, parseExt, isMarkdownExt, type ViewerType } from '@/lib/viewerRegistry';
-import { detectMarkdown } from '@/lib/contentDetector';
+import { getViewerType, parseExt, type ViewerType } from '@/lib/viewerRegistry';
+import {
+  AUTO_APPLY_CONFIDENCE,
+  SUGGEST_CONFIDENCE,
+  detectLanguageForFile,
+  isMarkdownExt,
+} from '@/markdown';
 import { readFileChunked, type FileOps } from '../services/fileOps';
 export type ViewMode = 'preview' | 'raw';
 
@@ -60,7 +65,9 @@ interface FileLoaderResult {
 /**
  * Read-file state: decodes text content or builds a media blob URL, tracks
  * loading/error, and calls `onDecoded` after a text file is decoded so the
- * caller can run content-based markdown detection. For files above the chunked
+ * caller can run content-based markdown detection. The server-reported MIME
+ * type is passed along, since `text/markdown` is a far stronger signal than
+ * anything the content itself can offer. For files above the chunked
  * threshold, falls back to progressive chunked reads so the UI can render a
  * progress bar instead of a frozen skeleton.
  */
@@ -68,7 +75,7 @@ function useFileLoader(
   fileOps: FileOps,
   path: string,
   fileSize: number | undefined,
-  onDecoded: (decoded: string) => void,
+  onDecoded: (decoded: string, mimeType?: string) => void,
 ): FileLoaderResult {
   const onDecodedRef = useRef(onDecoded);
   useEffect(() => {
@@ -167,7 +174,7 @@ function useFileLoader(
       const decoded = fileOps.base64Decode(data.content);
       setContent(decoded);
       setOriginalContent(decoded);
-      onDecodedRef.current(decoded);
+      onDecodedRef.current(decoded, data.mime_type);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read file');
     } finally {
@@ -217,22 +224,31 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   const [saving, setSaving] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
-  const handleDecoded = useCallback((decoded: string) => {
-    // Content-based markdown detection for extensionless files
-    if (!isMarkdownByExt && !ext && !suggestionDismissedRef.current) {
-      const detection = detectMarkdown(decoded);
-
-      if (detection.confidence === 'high') {
-        setIsMarkdown(true);
-        setViewMode('preview');
-      } else if (detection.confidence === 'medium') {
-        setIsMarkdown(true);
-        setViewMode('raw');
-        setShowSuggestion(true);
-      }
-      // low → do nothing, stays as plain text
+  const handleDecoded = useCallback((decoded: string, mimeType?: string) => {
+    // The extension already settled it, or the user has dismissed the offer.
+    if (isMarkdownByExt || suggestionDismissedRef.current) {
+      return;
     }
-  }, [isMarkdownByExt, ext]);
+
+    const detection = detectLanguageForFile(path, decoded, mimeType);
+    if (detection.language !== 'markdown') {
+      return;
+    }
+
+    if (detection.confidence >= AUTO_APPLY_CONFIDENCE) {
+      // Trustworthy metadata (MIME type or a conventional basename such as
+      // CHANGELOG) — safe to open in preview.
+      setIsMarkdown(true);
+      setViewMode('preview');
+    } else if (detection.confidence >= SUGGEST_CONFIDENCE) {
+      // Content sniffing only, which is capped below the auto-apply band. Stay
+      // in raw and offer a dismissible suggestion instead of silently changing
+      // how the file is rendered.
+      setIsMarkdown(true);
+      setViewMode('raw');
+      setShowSuggestion(true);
+    }
+  }, [isMarkdownByExt, path]);
 
   const {
     viewerType, content, originalContent, mediaBlobUrl, loading, error,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectLanguage, parseLangBasename, parseLangExt } from '@/lib/languageId';
+import { detectLanguage, detectLanguageForFile, parseLangBasename, parseLangExt } from '@/lib/languageId';
+import { AUTO_APPLY_CONFIDENCE, SUGGEST_CONFIDENCE } from '@/markdown';
 
 describe('parseLangBasename', () => {
   it('extracts basename from absolute path', () => {
@@ -226,9 +227,22 @@ describe('detectLanguage', () => {
   });
 
   describe('content heuristic priority', () => {
-    it('detects markdown from content when basename/extension miss', () => {
-      const content = '# Title\n\nSome paragraph with **bold**.';
-      expect(detectLanguage('NOTES', content)).toBe('markdown');
+    // Content sniffing can never auto-apply a language: markdown has no magic
+    // bytes and every plain-text file is valid markdown, so a content guess is
+    // capped below the auto-apply confidence and detectLanguage() drops it.
+    // Callers that want to *offer* markdown use detectLanguageForFile().
+    it('does not resolve markdown from content alone', () => {
+      const content = '# Notes\n\n- first item\n- second item\n\nSee the [docs](https://example.com).';
+      expect(detectLanguage('NOTES', content)).toBe('plaintext');
+    });
+
+    it('reports content-detected markdown below the auto-apply band', () => {
+      const content = '# Notes\n\n- first item\n- second item\n\nSee the [docs](https://example.com).';
+      const detection = detectLanguageForFile('NOTES', content);
+      expect(detection.language).toBe('markdown');
+      expect(detection.source).toBe('content');
+      expect(detection.confidence).toBeGreaterThanOrEqual(SUGGEST_CONFIDENCE);
+      expect(detection.confidence).toBeLessThan(AUTO_APPLY_CONFIDENCE);
     });
 
     it('does not override basename with content heuristic', () => {
@@ -244,6 +258,63 @@ describe('detectLanguage', () => {
     it('falls back to plaintext when no heuristic matches', () => {
       const content = 'random text without structure';
       expect(detectLanguage('unknown', content)).toBe('plaintext');
+    });
+  });
+
+  describe('detectLanguageForFile', () => {
+    it('trusts a markdown extension above everything else', () => {
+      const detection = detectLanguageForFile('notes.md', 'plain prose, no structure');
+      expect(detection.language).toBe('markdown');
+      expect(detection.source).toBe('extension');
+      expect(detection.confidence).toBeGreaterThanOrEqual(AUTO_APPLY_CONFIDENCE);
+    });
+
+    it('trusts text/markdown MIME type', () => {
+      const detection = detectLanguageForFile('notes', 'plain prose', 'text/markdown');
+      expect(detection.language).toBe('markdown');
+      expect(detection.source).toBe('mime');
+      expect(detection.confidence).toBeGreaterThanOrEqual(AUTO_APPLY_CONFIDENCE);
+    });
+
+    it('lets a specific extension win over the markdown basename convention', () => {
+      // readme.json is JSON. Stripping the extension would make it "readme".
+      const detection = detectLanguageForFile('readme.json', '{"a": 1}');
+      expect(detection.language).toBe('json');
+    });
+
+    it('resolves conventional markdown basenames without an extension', () => {
+      const detection = detectLanguageForFile('CHANGELOG', 'plain prose, no structure');
+      expect(detection.language).toBe('markdown');
+      expect(detection.source).toBe('filename');
+      expect(detection.confidence).toBeGreaterThanOrEqual(AUTO_APPLY_CONFIDENCE);
+    });
+
+    it('keeps justfile out of content sniffing', () => {
+      const content = '# Run tests\ntest:\n    cargo test\n\n# Lint\nlint:\n    cargo clippy\n';
+      const detection = detectLanguageForFile('justfile', content);
+      expect(detection.language).toBe('makefile');
+    });
+
+    it('keeps LICENSE as plaintext despite list-heavy content', () => {
+      const content = '---\n\n1. Redistribution is permitted\n2. No warranty\n\n---\n';
+      expect(detectLanguageForFile('LICENSE', content).language).toBe('plaintext');
+    });
+
+    it('reports plaintext with zero confidence when nothing matches', () => {
+      const detection = detectLanguageForFile('mystery', 'nothing structured here');
+      expect(detection.language).toBe('plaintext');
+      expect(detection.confidence).toBe(0);
+      expect(detection.source).toBe('fallback');
+    });
+
+    it('detects a shebang ahead of markdown content signals', () => {
+      const content = '#!/bin/bash\n# Heading-looking comment\n- not a list\n- really\n';
+      const detection = detectLanguageForFile('deploy', content);
+      expect(detection.language).toBe('shellscript');
+    });
+
+    it('works without content', () => {
+      expect(detectLanguageForFile('main.rs').language).toBe('rust');
     });
   });
 });
