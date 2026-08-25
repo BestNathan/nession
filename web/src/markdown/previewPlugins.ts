@@ -5,6 +5,9 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { PluggableList } from 'unified';
+import type { Literal } from 'mdast';
+import type { Options as RemarkRehypeOptions } from 'remark-rehype';
+import { frontmatterToHast } from './frontmatterTable';
 
 /**
  * The remark/rehype plugin chain used to render markdown previews.
@@ -34,10 +37,10 @@ export const markdownSanitizeSchema = {
  * Frontmatter formats recognised at the top of a document.
  *
  * `yaml` covers `---` delimited blocks, `toml` covers `+++`. remark-frontmatter
- * parses them into dedicated `yaml` / `toml` nodes; react-markdown has no
- * handler for those node types, so the block is dropped from the rendered HTML
- * rather than shown as a horizontal rule followed by stray text — matching how
- * GitHub presents frontmatter.
+ * parses them into dedicated `yaml` / `toml` nodes, which keeps the opening
+ * `---` from being read as a horizontal rule with the metadata leaking out as
+ * body text. Those nodes are then rendered as a key/value table — see
+ * `getRemarkRehypeOptions`.
  */
 const FRONTMATTER_FORMATS = ['yaml', 'toml'] as const;
 
@@ -49,4 +52,21 @@ export function getRemarkPlugins(): PluggableList {
 /** Rehype plugins: sanitize before the trusted HTML generators run. */
 export function getRehypePlugins(): PluggableList {
   return [[rehypeSanitize, markdownSanitizeSchema], rehypeHighlight, rehypeKatex];
+}
+
+/**
+ * mdast → hast options, used to render frontmatter instead of discarding it.
+ *
+ * `mdast-util-to-hast` ships `yaml` and `toml` mapped to its `ignore` handler,
+ * so without this the block would not appear in the preview at all. Replacing
+ * the handlers is the only hook that works: `ignore` returns before
+ * `applyData`, so the usual `data.hName` route is unavailable.
+ */
+export function getRemarkRehypeOptions(): RemarkRehypeOptions {
+  return {
+    handlers: {
+      yaml: (_state: unknown, node: Literal) => frontmatterToHast(node.value, 'yaml'),
+      toml: (_state: unknown, node: Literal) => frontmatterToHast(node.value, 'toml'),
+    },
+  };
 }

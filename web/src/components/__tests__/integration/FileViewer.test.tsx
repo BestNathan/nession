@@ -227,7 +227,7 @@ CMD ["node", "index.js"]
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
   });
 
-  it('renders frontmatter-prefixed markdown without showing the frontmatter', async () => {
+  it('renders frontmatter as a key/value table above the document', async () => {
     const content = `---
 title: Deploy guide
 tags: [ops, deploy]
@@ -245,15 +245,20 @@ Run the deploy script.
       }),
     });
     const onClose = vi.fn();
-    render(<FileViewer fileOps={ops} path="/test/guide.md" filename="guide.md" onClose={onClose} />);
+    const { container } = render(
+      <FileViewer fileOps={ops} path="/test/guide.md" filename="guide.md" onClose={onClose} />,
+    );
 
     await waitFor(() => {
       expect(screen.getByText('Run the deploy script.')).toBeInTheDocument();
     });
-    // The frontmatter block is consumed by remark-frontmatter, not rendered as
-    // a horizontal rule followed by stray `title:` text.
-    expect(screen.queryByText(/title: Deploy guide/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/tags:/)).not.toBeInTheDocument();
+
+    // Metadata is visible as a table rather than leaking into the body as a
+    // horizontal rule followed by stray `title:` text.
+    const keyCell = container.querySelector('th[scope="row"]');
+    expect(keyCell?.textContent).toBe('title');
+    expect(keyCell?.closest('tr')?.querySelector('td')?.textContent).toBe('Deploy guide');
+    expect(container.querySelector('.markdown-preview hr')).toBeNull();
   });
 
   it('hides Edit button when in preview mode', async () => {
