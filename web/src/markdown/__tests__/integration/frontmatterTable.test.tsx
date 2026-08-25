@@ -5,7 +5,9 @@ import {
   getRehypePlugins,
   getRemarkPlugins,
   getRemarkRehypeOptions,
+  markdownSanitizeSchema,
 } from '@/markdown/previewPlugins';
+import { FRONTMATTER_TABLE_CLASS } from '@/markdown/frontmatterTable';
 
 /**
  * Renders through the real plugin chain — the point is what reaches the DOM, not
@@ -176,5 +178,44 @@ describe('frontmatter rendering — not confused with content', () => {
     const rows = rowsOf(frontmatterTable(container) as HTMLTableElement);
     expect(rows[0][1]).toContain('<img');
     expect(container.querySelector('img')).toBeNull();
+  });
+});
+
+describe('frontmatter panel — styling hook', () => {
+  it('carries the frontmatter class through sanitization', () => {
+    const { container } = renderMarkdown('---\ntitle: x\n---\n\nBody.\n');
+    const table = container.querySelector('table');
+    expect(table?.classList.contains(FRONTMATTER_TABLE_CLASS)).toBe(true);
+  });
+
+  it('labels the panel with a caption', () => {
+    const { container } = renderMarkdown('---\ntitle: x\n---\n\nBody.\n');
+    expect(container.querySelector('table > caption')?.textContent).toBe('Frontmatter');
+  });
+
+  it('does not put the class on a normal content table', () => {
+    const { container } = renderMarkdown('| a | b |\n|---|---|\n| 1 | 2 |\n');
+    const table = container.querySelector('table');
+    expect(table).not.toBeNull();
+    expect(table?.classList.contains(FRONTMATTER_TABLE_CLASS)).toBe(false);
+  });
+
+  it('drops a raw HTML table from a document entirely', () => {
+    // Measured: this chain has no rehype-raw, so `raw` nodes never become
+    // elements and raw HTML renders as nothing. That — not the className
+    // restriction — is what stops a document from reaching the panel styling.
+    // The restriction is defence in depth if raw HTML is ever enabled.
+    const { container } = renderMarkdown(
+      '<table class="fixed inset-0 z-50"><tbody><tr><td>x</td></tr></tbody></table>\n',
+    );
+    expect(container.querySelector('table')).toBeNull();
+  });
+
+  it('keeps the frontmatter class as the only permitted table class', () => {
+    // Guards the schema entry itself: the frontmatter value survives, and the
+    // arbitrary one does not. Asserted against the schema rather than through
+    // markdown, since markdown cannot deliver either.
+    const tableRule = markdownSanitizeSchema.attributes.table;
+    expect(tableRule).toEqual([['className', FRONTMATTER_TABLE_CLASS]]);
   });
 });
