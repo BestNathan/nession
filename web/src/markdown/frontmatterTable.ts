@@ -126,11 +126,26 @@ function textCell(tagName: 'th' | 'td', value: string, isKey: boolean): Element 
 }
 
 /**
+ * Class that styles the frontmatter panel, defined in `index.css`.
+ *
+ * The sanitize schema allows `className` on `<table>` only when it is exactly
+ * this string, so a document cannot borrow the styling — or any other class —
+ * by writing raw `<table class="...">`. See `markdownSanitizeSchema`.
+ */
+export const FRONTMATTER_TABLE_CLASS = 'nession-frontmatter';
+
+/** Label shown above the keys, so the block reads as metadata rather than content. */
+const FRONTMATTER_CAPTION = 'Frontmatter';
+
+/**
  * Build the hast table for a frontmatter block.
  *
- * Keys become `<th scope="row">` so the existing prose table styling renders
- * them as a distinguishable left column, and screen readers announce each row's
- * key as its header. Returns `undefined` when there is nothing to show, which
+ * Keys become `<th scope="row">` so screen readers announce each row's key as
+ * its header, and a `<caption>` names the block. Styling comes from
+ * FRONTMATTER_TABLE_CLASS rather than the prose table rules — metadata should
+ * not look like one of the document's own tables.
+ *
+ * Returns `undefined` when there is nothing to show, which
  * `mdast-util-to-hast` treats the same way it treated `ignore`.
  */
 export function frontmatterToHast(
@@ -155,8 +170,14 @@ export function frontmatterToHast(
   return {
     type: 'element',
     tagName: 'table',
-    properties: {},
+    properties: { className: [FRONTMATTER_TABLE_CLASS] },
     children: [
+      {
+        type: 'element',
+        tagName: 'caption',
+        properties: {},
+        children: [{ type: 'text', value: FRONTMATTER_CAPTION }],
+      },
       {
         type: 'element',
         tagName: 'tbody',
