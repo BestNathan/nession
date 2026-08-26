@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, SearchX, Eye } from 'lucide-react';
+import { ArrowUp, ArrowDown, SearchX, Eye, ArrowUpRight, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -87,11 +87,15 @@ function SessionRow({
               <Button
                 size="sm"
                 onClick={() => onAttach(session)}
-                className="flex-1 md:flex-none min-h-11 md:min-h-7"
-              />
+                aria-label="Attach"
+                className="min-h-11 min-w-11 md:min-h-7 md:min-w-0"
+              >
+                <ArrowUpRight className="h-4 w-4 md:hidden" />
+                <span className="hidden md:inline">Attach</span>
+              </Button>
             }
           >
-            Attach
+            Attach to session
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p>Attach to session</p>
@@ -104,9 +108,11 @@ function SessionRow({
                 size="sm"
                 variant="outline"
                 onClick={() => onPreview(session)}
-                className="flex-1 md:flex-none min-h-11 md:min-h-7"
+                aria-label="Preview scrollback"
+                className="min-h-11 min-w-11 md:min-h-7 md:min-w-0"
               >
                 <Eye className="h-4 w-4" />
+                <span className="hidden md:inline">Preview</span>
               </Button>
             }
           >
@@ -123,11 +129,15 @@ function SessionRow({
                 size="sm"
                 variant="outline"
                 onClick={() => onKill(session)}
-                className="flex-1 md:flex-none min-h-11 md:min-h-7 text-destructive border-destructive hover:bg-destructive/10"
-              />
+                aria-label="Kill"
+                className="min-h-11 min-w-11 md:min-h-7 md:min-w-0 text-destructive border-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="h-4 w-4 md:hidden" />
+                <span className="hidden md:inline">Kill</span>
+              </Button>
             }
           >
-            Kill
+            Kill session
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p>Kill session</p>
