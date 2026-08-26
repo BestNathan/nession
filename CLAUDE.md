@@ -1,5 +1,7 @@
 # Nession — Distributed tmux Agent
 
+**AI路径：** [`.claude/skills/`](.claude/skills/)
+
 ## 1. Project Structure
 
 ```
