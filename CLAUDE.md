@@ -1,11 +1,17 @@
 # Nession — Distributed tmux Agent
 
-**AI路径：** [`.claude/skills/`](.claude/skills/)
-
 ## 1. Project Structure
+
+> **AI路径：** [`.claude/skills/`](.claude/skills/) — 根据任务选择对应 Skill，并完整读取其 `SKILL.md`。
 
 ```
 nession/
+├── .claude/
+│   └── skills/                         # AI路径：任务型项目规范
+│       ├── nession-development/        # 开发、测试与 PR 流程
+│       ├── nession-cicd/               # CI/CD、发布与分支合并
+│       ├── nession-env/                # 环境配置与诊断
+│       └── nession-writing-requirements/ # 需求与 Bug Issue
 ├── crates/                   # Rust workspace (5 crates)
 │   ├── nession-common/       # Shared types, protocol, config, error definitions
 │   │   └── src/
