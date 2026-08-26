@@ -33,7 +33,7 @@ export function SessionsSection({
           Sessions
         </h2>
         <div className="flex gap-2">
-          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-11 md:min-h-7">
+          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-9 md:min-h-7">
             <Plus className="w-3.5 h-3.5 mr-1" /> Create
           </Button>
           <RefreshButton
