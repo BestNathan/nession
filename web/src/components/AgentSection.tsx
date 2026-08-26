@@ -36,13 +36,14 @@ export function AgentSection({
         <p className="text-sm text-muted-foreground py-8 text-center">No agents match your search</p>
       ) : (
         <>
-          {/* Mobile: always-visible horizontal strip — swipe through agents (issue #452). */}
+          {/* Mobile: always-visible horizontal strip — swipe through agents (issue #452).
+              py-1 keeps the card ring (box-shadow) inside the overflow container. */}
           <div
             data-testid="agent-strip"
-            className="flex gap-3 overflow-x-auto scrollbar-none -mx-3 px-3 pb-1 md:hidden"
+            className="flex gap-3 overflow-x-auto scrollbar-none -mx-3 px-3 py-1 md:hidden"
           >
             {filteredAgents.map((a) => (
-              <div key={a.agent_id} className="w-64 flex-shrink-0">
+              <div key={a.agent_id} className="w-72 flex-shrink-0">
                 <AgentCard
                   agent={a}
                   onClick={() => setSelectedAgent(a)}

@@ -332,7 +332,7 @@ describe('SessionList', () => {
   });
 
   describe('compact action buttons on mobile', () => {
-    it('keeps buttons compact — no flex-1 stretch, square 44px touch targets', () => {
+    it('keeps buttons compact — no flex-1 stretch, square 36px touch targets', () => {
       render(
         <SessionList
           sessions={[makeSession()]}
@@ -346,10 +346,27 @@ describe('SessionList', () => {
       for (const name of ['Attach', 'Preview scrollback', 'Kill']) {
         const btn = screen.getByRole('button', { name });
         expect(btn.className).not.toContain('flex-1');
-        expect(btn.className).toContain('min-h-11');
-        expect(btn.className).toContain('min-w-11');
+        expect(btn.className).toContain('min-h-9');
+        expect(btn.className).toContain('min-w-9');
         expect(btn.className).toContain('md:min-h-7');
       }
+    });
+
+    it('keeps name and actions on one line on mobile (no flex-col wrap)', () => {
+      const { container } = render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      const row = container.querySelector('.divide-y > div');
+      expect(row?.className).toContain('flex');
+      expect(row?.className).toContain('items-center');
+      expect(row?.className).not.toContain('flex-col');
     });
 
     it('hides the text label below md so mobile buttons are icon-only', () => {
