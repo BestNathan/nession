@@ -2,7 +2,7 @@
 
 > Distributed tmux session management — attach to any node's terminal from your browser or CLI.
 
-**AI路径：** [CLAUDE.md](CLAUDE.md)
+**AI path:** [CLAUDE.md](CLAUDE.md)
 
 Nession lets you run and control `tmux` sessions across many machines from one place. A central **server** tracks every **agent** (one per node), and you attach to a live session either from a **web dashboard** or the **CLI** — over a relay through the server, or peer-to-peer straight to the agent for lower latency.
 
