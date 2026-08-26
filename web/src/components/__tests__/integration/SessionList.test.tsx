@@ -330,4 +330,44 @@ describe('SessionList', () => {
     expect(activity.className).toContain('hidden');
     expect(activity.className).toContain('md:flex');
   });
+
+  describe('compact action buttons on mobile', () => {
+    it('keeps buttons compact — no flex-1 stretch, square 44px touch targets', () => {
+      render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      for (const name of ['Attach', 'Preview scrollback', 'Kill']) {
+        const btn = screen.getByRole('button', { name });
+        expect(btn.className).not.toContain('flex-1');
+        expect(btn.className).toContain('min-h-11');
+        expect(btn.className).toContain('min-w-11');
+        expect(btn.className).toContain('md:min-h-7');
+      }
+    });
+
+    it('hides the text label below md so mobile buttons are icon-only', () => {
+      render(
+        <SessionList
+          sessions={[makeSession()]}
+          loading={false}
+          onAttach={vi.fn()}
+          onKill={vi.fn()}
+          {...defaultProps}
+        />,
+      );
+
+      const attach = screen.getByRole('button', { name: 'Attach' });
+      const label = attach.querySelector('span');
+      expect(label).toBeTruthy();
+      expect(label?.className).toContain('hidden');
+      expect(label?.className).toContain('md:inline');
+    });
+  });
 });
