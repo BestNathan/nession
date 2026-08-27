@@ -63,6 +63,6 @@ Do not introduce a permanent full-width inner sidebar at the Workspace level in 
 
 ## Relationship to Terminal
 
-Terminal and Workspace are peer surfaces of the Active Session. Only one is normally visible. Switching surfaces does not change which Session is active, and does not nest Workspace inside the terminal (or the reverse).
+Terminal and Workspace are peer surfaces of the Active Session (same slot; Terminal is the default). Only one is visible. Switching surfaces does not change which Session is active, and does not nest Workspace inside the terminal (or the reverse).
 
 See [information-architecture.md](information-architecture.md) for the IA tree.
