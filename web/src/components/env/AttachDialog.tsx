@@ -372,9 +372,9 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
       {reachable === undefined ? (
         <span className="w-3.5 shrink-0" />
       ) : reachable ? (
-        <Wifi className="w-3.5 h-3.5 text-green-500 shrink-0" />
+        <Wifi className="w-3.5 h-3.5 text-success shrink-0" />
       ) : (
-        <WifiOff className="w-3.5 h-3.5 text-red-500 shrink-0" />
+        <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0" />
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
@@ -393,7 +393,7 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, lat
       {statusLabel ? (
         <span className={cn(
           'text-[10px] shrink-0',
-          statusLabel === 'reachable' ? 'text-green-500' : 'text-red-500',
+          statusLabel === 'reachable' ? 'text-success' : 'text-destructive',
         )}>{statusLabel}</span>
       ) : null}
     </button>

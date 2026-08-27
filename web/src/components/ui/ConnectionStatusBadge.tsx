@@ -9,10 +9,10 @@ interface ConnectionStatusBadgeProps {
 }
 
 const STATUS_CONFIG: Record<ConnectionStatus, { color: string; text: string }> = {
-  disconnected: { color: 'bg-red-500', text: 'Disconnected' },
-  connecting: { color: 'bg-amber-500', text: 'Connecting...' },
-  connected: { color: 'bg-green-500', text: 'Connected' },
-  authenticated: { color: 'bg-blue-500', text: 'Authenticated' },
+  disconnected: { color: 'bg-destructive', text: 'Disconnected' },
+  connecting: { color: 'bg-warning', text: 'Connecting...' },
+  connected: { color: 'bg-success', text: 'Connected' },
+  authenticated: { color: 'bg-info', text: 'Authenticated' },
 };
 
 export function ConnectionStatusBadge({ status, showPulse = true, className }: ConnectionStatusBadgeProps) {

@@ -17,7 +17,7 @@ describe('cn (classname merge)', () => {
   it('handles conditional classes', () => {
     const active = true;
     const disabled = false;
-    expect(cn('btn', active && 'bg-blue-500', disabled && 'opacity-50')).toBe('btn bg-blue-500');
+    expect(cn('btn', active && 'btn-primary', disabled && 'opacity-50')).toBe('btn btn-primary');
   });
 
   it('returns empty string for no inputs', () => {

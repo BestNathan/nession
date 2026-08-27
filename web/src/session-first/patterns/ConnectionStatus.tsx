@@ -24,7 +24,7 @@ function sessionValueClass(channel: SessionChannel): string {
     case 'exited':
       return 'text-session-exited';
     case 'unknown':
-      return 'text-muted-foreground';
+      return 'text-session-unknown';
   }
 }
 
@@ -35,8 +35,9 @@ function attachmentValueClass(channel: AttachmentChannel): string {
     case 'failed':
       return 'text-attachment-failed';
     case 'attaching':
+      return 'text-attachment-attaching';
     case 'detached':
-      return 'text-muted-foreground';
+      return 'text-attachment-detached';
   }
 }
 

@@ -50,9 +50,9 @@ function SessionRow({
       <span
         className={cn(
           'w-2 h-2 rounded-full flex-shrink-0',
-          session.status === 'active' ? 'bg-green-500' :
-          session.status === 'detached' ? 'bg-emerald-500/60' :
-          'bg-gray-400',
+          session.status === 'active' ? 'bg-session-active' :
+          session.status === 'detached' ? 'bg-session-active/60' :
+          'bg-session-unknown',
         )}
       />
       <div className="flex-1 min-w-0">

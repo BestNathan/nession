@@ -127,7 +127,7 @@ export function LoginPage({
           <ul className="gap-2 text-sm">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-start gap-2">
-                <span className="text-green-500 flex-shrink-0">&#10003;</span>
+                <span className="text-success flex-shrink-0">&#10003;</span>
                 {f}
               </li>
             ))}

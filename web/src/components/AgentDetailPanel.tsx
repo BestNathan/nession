@@ -38,14 +38,14 @@ interface AgentDetailPanelProps {
 
 function getHealthStatus(heartbeatHistory: string[]): { label: string; color: string; bg: string } {
   if (heartbeatHistory.length === 0) {
-    return { label: 'No Data', color: 'text-gray-400', bg: 'bg-gray-500/10' };
+    return { label: 'No Data', color: 'text-muted-foreground', bg: 'bg-muted/10' };
   }
   const latest = heartbeatHistory[heartbeatHistory.length - 1];
   const diffMs = Date.now() - new Date(latest).getTime();
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 30) {return { label: 'Healthy', color: 'text-green-400', bg: 'bg-green-500/10' };}
-  if (seconds < 120) {return { label: 'Fair', color: 'text-amber-400', bg: 'bg-amber-500/10' };}
-  return { label: 'Poor', color: 'text-red-400', bg: 'bg-red-500/10' };
+  if (seconds < 30) {return { label: 'Healthy', color: 'text-success', bg: 'bg-success/10' };}
+  if (seconds < 120) {return { label: 'Fair', color: 'text-warning', bg: 'bg-warning/10' };}
+  return { label: 'Poor', color: 'text-destructive', bg: 'bg-destructive/10' };
 }
 
 // ── Copy helpers ────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
       title={`Copy ${label || text}`}
     >
       {copied
-        ? <Check className="w-3 h-3 text-green-500" />
+        ? <Check className="w-3 h-3 text-success" />
         : <Copy className="w-3 h-3" />}
     </Button>
   );
@@ -136,11 +136,11 @@ function PulseDot({ className }: { className?: string }) {
     <span className="relative flex h-2.5 w-2.5">
       <span className={cn(
         'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-        className || 'bg-green-400',
+        className || 'bg-agent-online',
       )} />
       <span className={cn(
         'relative inline-flex rounded-full h-2.5 w-2.5',
-        className || 'bg-green-500',
+        className || 'bg-agent-online',
       )} />
     </span>
   );
@@ -193,7 +193,7 @@ function HeartbeatTimeline({ history }: { history: string[] }) {
               <div
                 className={cn(
                   'h-2.5 w-2.5 rounded-full shrink-0',
-                  seconds < 60 ? 'bg-green-500' : seconds < 180 ? 'bg-amber-500' : 'bg-gray-500',
+                  seconds < 60 ? 'bg-success' : seconds < 180 ? 'bg-warning' : 'bg-muted-foreground',
                 )}
                 title={formatAbsoluteTime(iso)}
               />
@@ -296,7 +296,7 @@ function RecentSessions({ sessions }: { sessions: Session[] }) {
         >
           <div className={cn(
             'w-1.5 h-1.5 rounded-full shrink-0',
-            s.status === 'active' ? 'bg-green-500' : s.status === 'detached' ? 'bg-amber-500' : 'bg-gray-500',
+            s.status === 'active' ? 'bg-session-active' : s.status === 'detached' ? 'bg-session-active/60' : 'bg-session-unknown',
           )} />
           <span className="text-sm font-mono truncate flex-1 min-w-0">{s.session_name}</span>
           <span className="text-[11px] text-muted-foreground shrink-0">{formatSessionDuration(s.last_activity)}</span>

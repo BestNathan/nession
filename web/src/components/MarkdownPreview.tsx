@@ -69,7 +69,7 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
     <MarkdownErrorBoundary onFallback={handleErrorFallback}>
       <div className="markdown-preview overflow-y-auto h-full p-4 text-sm leading-relaxed">
         {isLargeFile && (
-          <div className="flex items-center gap-2 px-3 py-2 mb-3 text-xs rounded border bg-blue-950/50 border-blue-800 text-blue-200">
+          <div className="flex items-center gap-2 px-3 py-2 mb-3 text-xs rounded border bg-info/10 border-info/30 text-info-foreground">
             <Info className="h-3.5 w-3.5 shrink-0" />
             <span>Large file — rendering may be slow</span>
           </div>
@@ -78,7 +78,7 @@ export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
           prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight
           prose-h1:text-lg prose-h2:text-base prose-h3:text-sm
           prose-p:text-foreground/85 prose-p:leading-relaxed
-          prose-a:text-blue-300/80 prose-a:no-underline hover:prose-a:text-blue-300 hover:prose-a:underline
+          prose-a:text-info/80 prose-a:no-underline hover:prose-a:text-info hover:prose-a:underline
           prose-code:text-foreground/80 prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-normal
           prose-pre:bg-muted/70 prose-pre:rounded-lg prose-pre:shadow-sm
           prose-blockquote:border-l-2 prose-blockquote:border-border prose-blockquote:pl-3 prose-blockquote:text-muted-foreground prose-blockquote:not-italic

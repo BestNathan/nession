@@ -24,7 +24,7 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
         </span>
         <span className="text-xs text-muted-foreground">{Math.round(scale * 100)}%</span>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center bg-black/20">
+      <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center bg-inverse/20">
         <img
           src={blobUrl}
           alt={filename}
