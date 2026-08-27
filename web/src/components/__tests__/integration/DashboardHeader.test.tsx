@@ -89,6 +89,17 @@ describe('DashboardHeader', () => {
       expect(within(details).getByText('5')).toBeInTheDocument();
     });
 
+    it('sizes the dropdown wide enough for full version rows', async () => {
+      const user = userEvent.setup();
+      renderHeader();
+
+      await user.click(await screen.findByRole('button', { name: 'Server info' }));
+
+      const popup = (await screen.findByTestId('server-info-details'))
+        .closest('[data-slot="dropdown-menu-content"]');
+      expect(popup?.className).toContain('min-w-60');
+    });
+
     it('omits the built row when the server has no build time', async () => {
       const user = userEvent.setup();
       const ws = makeWsService({

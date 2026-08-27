@@ -33,15 +33,21 @@ export function SessionsSection({
           Sessions
         </h2>
         <div className="flex gap-2">
-          <Button size="sm" onClick={onCreate} disabled={agents.every((a) => a.status !== 'online')} className="min-h-9 md:min-h-7">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Create
+          <Button
+            size="sm"
+            onClick={onCreate}
+            disabled={agents.every((a) => a.status !== 'online')}
+            aria-label="Create session"
+            className="min-h-9 min-w-9 md:min-h-7 md:min-w-0"
+          >
+            <Plus className="h-4 w-4 md:mr-1" />
+            <span className="hidden md:inline">Create</span>
           </Button>
           <RefreshButton
             onClick={() => fetchSessions({ force: true })}
             loading={loadingSessions}
             variant="ghost"
             ariaLabel="Refresh sessions"
-            iconClassName="w-3.5 h-3.5"
           />
         </div>
       </div>
