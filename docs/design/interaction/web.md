@@ -52,4 +52,4 @@ Workspace owns its own secondary navigation. Do **not** create another permanent
 
 ## Patterns involved
 
-Web composition is expected to use SessionList, SessionHeader / AgentContext, SurfaceSwitcher, and WorkspaceNavigation. Those are patterns, not primitives — [design-system/patterns.md](../design-system/patterns.md).
+Web composition is expected to use SessionList, SessionHeader / AgentContext, SurfaceSwitcher, and WorkspaceNavigation. Specs: [design-system/patterns.md](../design-system/patterns.md).

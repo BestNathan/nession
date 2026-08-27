@@ -1,38 +1,60 @@
 # Patterns
 
-Nession-specific composition is documented as **patterns**: assemblies of [primitives](components.md) that encode product IA and interaction.
+Nession-specific composition: assemblies of [primitives](components.md) that encode product IA and interaction. Product identity lives here, not in a custom button kit.
 
-Full interaction specifications for each pattern are [#470](https://github.com/BestNathan/nession/issues/470). This document names the pattern layer and its relationship to the architecture.
+**Spec issue:** [#470](https://github.com/BestNathan/nession/issues/470)
+**Architecture:** [product-model.md](../product-model.md), [information-architecture.md](../information-architecture.md), [workspace.md](../workspace.md)
+**Tokens:** [tokens.md](tokens.md) — patterns consume Semantic / Domain / Experience only. Executable tokens: [#467](https://github.com/BestNathan/nession/issues/467).
+**Implementation:** vertical slice [#471](https://github.com/BestNathan/nession/issues/471); Web [#472](https://github.com/BestNathan/nession/issues/472); App [#473](https://github.com/BestNathan/nession/issues/473). These specs do **not** implement React.
 
-## Pattern catalog
+## Catalog
+
+| Pattern | Spec | Role |
+|---------|------|------|
+| [SessionList](patterns/session-list.md) | container | Flat primary navigation |
+| [SessionItem](patterns/session-item.md) | row | Workload hint, Agent identity, recency, selection, reachability |
+| [SessionHeader](patterns/session-header.md) | chrome | Explicit connection context for the active Session |
+| [AgentContext](patterns/agent-context.md) | chrome | Always available; quiet when healthy; prominent when not |
+| [SurfaceSwitcher](patterns/surface-switcher.md) | Web chrome | Terminal \| Workspace peer-surface toggle |
+| [WorkspaceNavigation](patterns/workspace-navigation.md) | tool chrome | Files \| Session \| Agent \| …; registry; no default inner sidebar |
+| [ConnectionStatus](patterns/connection-status.md) | atom | Independent Agent / Session / attachment presentation |
+| [FileWorkspace](patterns/file-workspace.md) | tool | Files master/detail; not the Workspace shell |
+| [AgentDetail](patterns/agent-detail.md) | tool | Agent/connection details; single detail layout |
+
+App spatial navigation (`Sessions ← Terminal → Workspace`) is an [interaction model](../interaction/app.md), not a tenth pattern. Patterns that appear on App must respect that model and visible non-gesture alternatives ([#473](https://github.com/BestNathan/nession/issues/473)).
+
+## Spec contract
+
+Every pattern spec includes:
+
+1. **Purpose** — what user job it serves; what it must not become.
+2. **Anatomy** — named parts (ASCII is enough).
+3. **States** — mapped to the three domain dimensions in [product-model.md](../product-model.md) where the pattern shows them. Unused dimensions are called out, not silently merged.
+4. **Tokens** — Semantic / Domain / Experience names. No Primitive palette classes (`text-green-500`, `bg-zinc-900`, hex literals).
+5. **Web vs App** — where chrome or density diverges. “Same on both” is an explicit statement.
+6. **Acceptance** — visual/interaction checks for the vertical slice and later migration.
+
+## Shared rules
+
+- Patterns may know Session, Agent, and attachment. [Primitives](components.md) may not.
+- A pattern must not collapse Agent connection, Session lifecycle, and attachment into one status. Use [ConnectionStatus](patterns/connection-status.md) or compose its three channels.
+- Adding a future Workspace tool registers with [WorkspaceNavigation](patterns/workspace-navigation.md). It does not require a new top-level pattern unless the tool introduces a new composition (Files does, via FileWorkspace).
+- Shipping components (`web/src/components/SessionList.tsx`, `AgentCard.tsx`, `AgentDetailPanel.tsx`, `ModeBar.tsx`, `FileBrowser.tsx`) are **predecessors**, not these specs. Specs describe the Session-first target.
+
+## How patterns compose (Web)
 
 ```text
-SessionList
-SessionItem
-SessionHeader
-AgentContext
-SurfaceSwitcher
-WorkspaceNavigation
-ConnectionStatus
-FileWorkspace
-AgentDetail
+┌─ SessionList ──────────────────────────────────┬─ Active Session ─────────────┐
+│ SessionItem                                     │ SessionHeader                 │
+│ SessionItem  ← selected                         │   AgentContext                │
+│ SessionItem                                     │   ConnectionStatus            │
+│                                                 │   SurfaceSwitcher             │
+│                                                 │ ┌─ Active surface ──────────┐ │
+│                                                 │ │ Terminal  XOR  Workspace  │ │
+│                                                 │ │   WorkspaceNavigation     │ │
+│                                                 │ │   FileWorkspace | …       │ │
+│                                                 │ └───────────────────────────┘ │
+└─────────────────────────────────────────────────┴───────────────────────────────┘
 ```
 
-| Pattern | Architecture role |
-|---------|-------------------|
-| SessionList / SessionItem | Flat primary navigation; Agent as compact secondary metadata ([information-architecture.md](../information-architecture.md)) |
-| SessionHeader / AgentContext | Always-available connection context; quiet when healthy, prominent when not |
-| SurfaceSwitcher | Terminal \| Workspace peer surfaces; one visible at a time (Web: [interaction/web.md](../interaction/web.md)) |
-| WorkspaceNavigation | Tool-level nav (Files \| Session \| Agent \| …) without a permanent inner sidebar ([workspace.md](../workspace.md)) |
-| ConnectionStatus | Renders **Agent connection** independently of Session lifecycle and attachment ([product-model.md](../product-model.md)) |
-| FileWorkspace | Files tool master/detail; not the Workspace shell |
-| AgentDetail | Workspace → Agent complete details |
-
-App spatial navigation (`Sessions ← Terminal → Workspace`) is an interaction model ([interaction/app.md](../interaction/app.md)), realized with native layers plus these patterns — not a separate primitive.
-
-## Rules
-
-- Patterns may know domain concepts (Session, Agent, attachment). Primitives may not.
-- Patterns consume Domain / Semantic / Experience tokens, never Primitive palettes ([tokens.md](tokens.md)).
-- A pattern must not collapse Agent connection, Session state, and attachment into one status display.
-- Adding a future Workspace tool should register with WorkspaceNavigation, not require a new top-level pattern unless the tool introduces a new composition (as Files does with FileWorkspace).
+App uses the same SessionList / SessionItem / SessionHeader / AgentContext / ConnectionStatus / WorkspaceNavigation / FileWorkspace / AgentDetail semantics, with SessionList and Workspace as spatial layers instead of a persistent sidebar + SurfaceSwitcher. See each spec’s **Web vs App**.
