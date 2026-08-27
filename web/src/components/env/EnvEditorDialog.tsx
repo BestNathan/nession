@@ -230,14 +230,14 @@ function ParsePreview({ content }: { content: string }) {
       <summary className="cursor-pointer text-xs text-muted-foreground font-medium select-none">
         Parsed Variables ({parsed.vars.length})
         {hasWarnings && (
-          <span className="ml-2 text-amber-500">
+          <span className="ml-2 text-warning">
             {parsed.warnings.length} warning{parsed.warnings.length !== 1 ? 's' : ''}
           </span>
         )}
       </summary>
       <div className="mt-1.5 rounded-md border max-h-40 overflow-y-auto">
         {parsed.warnings.map((w, i) => (
-          <p key={`w-${i}`} className="text-[11px] text-amber-600 dark:text-amber-400 px-2 py-0.5 font-mono">
+          <p key={`w-${i}`} className="text-[11px] text-warning px-2 py-0.5 font-mono">
             ⚠️ {w}
           </p>
         ))}

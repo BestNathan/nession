@@ -144,7 +144,7 @@ describe('AddressSelector', () => {
     it('shows amber WifiOff when in relay fallback mode', () => {
       renderSelector({ effectiveMode: 'relay' });
       const btn = screen.getByLabelText('P2P route');
-      expect(btn.querySelector('.text-amber-500')).toBeTruthy();
+      expect(btn.querySelector('.text-warning')).toBeTruthy();
     });
   });
 });

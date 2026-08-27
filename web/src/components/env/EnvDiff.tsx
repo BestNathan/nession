@@ -67,8 +67,8 @@ export function EnvDiff({ original, modified }: EnvDiffProps) {
           key={i}
           className={cn(
             'flex px-2 py-0.5',
-            line.type === 'added' && 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-            line.type === 'removed' && 'bg-red-500/10 text-red-700 dark:text-red-400',
+            line.type === 'added' && 'bg-file-created/10 text-file-created',
+            line.type === 'removed' && 'bg-file-deleted/10 text-file-deleted',
             line.type === 'unchanged' && 'text-muted-foreground',
           )}
         >

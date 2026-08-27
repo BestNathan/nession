@@ -120,7 +120,7 @@ export function ConfigViewer({
                   {hasMore && <Button variant="outline" size="sm" onClick={handleNextPage}>Load more</Button>}
                 </div>
                 <Separator className="mb-2" />
-                <pre className={cn('text-xs whitespace-pre-wrap font-mono', contentType === 'json' && 'text-amber-400')}>
+                <pre className={cn('text-xs whitespace-pre-wrap font-mono', contentType === 'json' && 'text-warning')}>
                   {content || '(empty)'}
                 </pre>
               </div>

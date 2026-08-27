@@ -371,7 +371,7 @@ function FileEntryRow({ entry, onClick, onCopyPath, onRenameStart, onDelete }: F
         className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default"
       >
         {entry.is_dir ? (
-          <Folder className="h-3.5 w-3.5 mr-1.5 text-blue-400 flex-shrink-0" />
+          <Folder className="h-3.5 w-3.5 mr-1.5 text-info flex-shrink-0" />
         ) : (
           <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
         )}
@@ -412,7 +412,7 @@ function FileEntryRenameRow({ entry, renameState, onRenameSubmit, onCancel }: Fi
   return (
     <div className="flex items-center gap-1 w-full px-2 py-0.5">
       {entry.is_dir ? (
-        <Folder className="h-3.5 w-3.5 mr-1 text-blue-400 flex-shrink-0" />
+        <Folder className="h-3.5 w-3.5 mr-1 text-info flex-shrink-0" />
       ) : (
         <File className="h-3.5 w-3.5 mr-1 text-muted-foreground flex-shrink-0" />
       )}
