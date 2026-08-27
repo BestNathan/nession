@@ -84,9 +84,12 @@ export function SessionFirstShell({ onLegacy }: SessionFirstShellProps) {
   const p2pConnection = useAtomValue(p2pConnectionAtom);
   const { attachInFlightId, attachFailedId, attach } = useSessionFirstAttach();
 
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<WorkspaceToolId>('files');
+  const selectedSession = selectedId
+    ? sessions.find((session) => session.session_id === selectedId) ?? null
+    : null;
 
   const sendMessage = p2pConnection?.sendMessage;
   const onMessage = p2pConnection?.onMessage;
@@ -120,12 +123,12 @@ export function SessionFirstShell({ onLegacy }: SessionFirstShellProps) {
           sessions={sessions}
           agents={agents}
           staleAgentIds={staleAgents}
-          selectedId={selectedSession?.session_id ?? null}
+          selectedId={selectedId}
           clientSessionId={clientSessionId}
           attachInFlightId={attachInFlightId}
           attachFailedId={attachFailedId}
           onSelect={(s) => {
-            setSelectedSession(s);
+            setSelectedId(s.session_id);
             setSurface('terminal');
             setTool('files');
             void attach(s);
