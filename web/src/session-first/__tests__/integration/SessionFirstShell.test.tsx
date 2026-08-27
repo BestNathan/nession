@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/session-first/SessionFirstShell';
+import { sessionIdAtom } from '@/atoms/session';
 import type { Agent, Session } from '@/types';
 
 const agent: Agent = {
@@ -46,31 +47,44 @@ vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({ requestAttach: vi.fn() }),
 }));
 vi.mock('@/services/deepLinkAttach', () => ({
-  resolveDeepLinkAttachChoice: vi.fn().mockResolvedValue({
-    mode: 'auto',
-    attachInfo: { mode: 'relay' },
-    orderedUrls: [],
-    latencies: [],
-    selectedUrl: null,
-    relayUrl: null,
-    renderer: 'canvas',
-    envRefs: [],
-  }),
+  resolveDeepLinkAttachChoice: vi.fn(),
 }));
+
+import { resolveDeepLinkAttachChoice } from '@/services/deepLinkAttach';
+
+const attachChoice = {
+  mode: 'auto' as const,
+  attachInfo: { mode: 'relay' as const, session_id: 'a1:fix' },
+  orderedUrls: [] as string[],
+  latencies: [] as never[],
+  selectedUrl: null,
+  relayUrl: null,
+  renderer: 'canvas' as const,
+  envRefs: [],
+};
 
 function renderShell() {
   const store = createStore();
-  return render(
+  const view = render(
     <Provider store={store}>
       <MemoryRouter>
         <SessionFirstShell onLegacy={vi.fn()} />
       </MemoryRouter>
     </Provider>,
   );
+  return { store, ...view };
 }
+
+const sessB: Session = {
+  ...sess,
+  session_id: 'a1:other',
+  session_name: 'Other session',
+};
 
 describe('SessionFirstShell', () => {
   beforeEach(() => {
+    vi.mocked(resolveDeepLinkAttachChoice).mockReset();
+    vi.mocked(resolveDeepLinkAttachChoice).mockResolvedValue(attachChoice);
     dashboard.current = {
       ...dashboard.current,
       agents: [agent],
@@ -100,5 +114,58 @@ describe('SessionFirstShell', () => {
     dashboard.current = { ...dashboard.current, agents: [], sessions: [] };
     renderShell();
     expect(screen.getByText(/No sessions/i)).toBeInTheDocument();
+  });
+
+  it('attaches via resolveDeepLinkAttachChoice and writes sessionIdAtom', async () => {
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await waitFor(() => {
+      expect(resolveDeepLinkAttachChoice).toHaveBeenCalledWith(
+        expect.anything(),
+        sess,
+        expect.any(Map),
+      );
+    });
+    await waitFor(() => {
+      expect(store.get(sessionIdAtom)).toBe('a1:fix');
+    });
+  });
+
+  it('shows Attach failed and does not write sessionIdAtom when resolve throws', async () => {
+    vi.mocked(resolveDeepLinkAttachChoice).mockRejectedValueOnce(new Error('nope'));
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await waitFor(() => {
+      expect(screen.getByText('Attach failed')).toBeInTheDocument();
+    });
+    expect(store.get(sessionIdAtom)).toBe('');
+  });
+
+  it('ignores a slower first attach after a later selection', async () => {
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [agent],
+      sessions: [sess, sessB],
+    };
+    let resolveA: (value: typeof attachChoice) => void = () => undefined;
+    const promiseA = new Promise<typeof attachChoice>((resolve) => {
+      resolveA = resolve;
+    });
+    vi.mocked(resolveDeepLinkAttachChoice)
+      .mockReturnValueOnce(promiseA)
+      .mockResolvedValueOnce(attachChoice);
+
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await userEvent.click(screen.getByTestId('session-item-a1:other'));
+    await waitFor(() => {
+      expect(store.get(sessionIdAtom)).toBe('a1:other');
+    });
+    resolveA(attachChoice);
+    await promiseA;
+    await waitFor(() => {
+      expect(store.get(sessionIdAtom)).toBe('a1:other');
+    });
+    expect(store.get(sessionIdAtom)).not.toBe('a1:fix');
   });
 });
