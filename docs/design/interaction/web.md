@@ -20,8 +20,8 @@ Web shares the [product model](../product-model.md) and [information architectur
 
 - Session navigation remains available on the left (Sessions sidebar).
 - Terminal is the default active surface.
-- Terminal and Workspace are top-level **peer** surfaces within the active Session.
-- Only one of Terminal / Workspace is normally shown at a time.
+- Terminal and Workspace are top-level **peer** surfaces within the active Session: they occupy the same surface slot. Terminal remains the default; Workspace is auxiliary, not a permanent split.
+- Only one of Terminal / Workspace is shown at a time.
 - A compact top-level surface switcher/toggle changes the active surface.
 - This preserves maximum horizontal and vertical space for xterm.js during normal work.
 

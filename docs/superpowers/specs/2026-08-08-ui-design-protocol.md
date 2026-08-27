@@ -3,6 +3,8 @@
 **Date:** 2026-08-08
 **Status:** superseded for product model / IA / interaction — see [`docs/design/`](../../design/README.md) (UI Architecture v2, [#468](https://github.com/BestNathan/nession/issues/468) / [#469](https://github.com/BestNathan/nession/issues/469)). Visual-direction notes below remain useful until [#467](https://github.com/BestNathan/nession/issues/467) lands executable tokens; where they conflict, `docs/design/` and #467 win.
 
+**Do not implement the layout in §3 or the mobile pager from this file.** Those sections describe the shipping Agent-first / Terminal+Files shell. New IA and interaction work follows `docs/design/`.
+
 ---
 
 ## 1. Design Discovery
