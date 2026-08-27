@@ -45,6 +45,13 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-agent-online: var(--agent-online);
+  --color-agent-offline: var(--agent-offline);
+  --color-agent-error: var(--agent-error);
+  --color-session-active: var(--session-active);
+  --color-session-exited: var(--session-exited);
+  --color-attachment-attached: var(--attachment-attached);
+  --color-attachment-failed: var(--attachment-failed);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
@@ -87,6 +94,13 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --agent-online: oklch(0.63 0.17 145);
+  --agent-offline: var(--muted-foreground);
+  --agent-error: var(--destructive);
+  --session-active: var(--foreground);
+  --session-exited: var(--muted-foreground);
+  --attachment-attached: var(--agent-online);
+  --attachment-failed: var(--destructive);
 }
 
 .dark {
@@ -122,6 +136,13 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --agent-online: oklch(0.72 0.17 145);
+  --agent-offline: var(--muted-foreground);
+  --agent-error: var(--destructive);
+  --session-active: var(--foreground);
+  --session-exited: var(--muted-foreground);
+  --attachment-attached: var(--agent-online);
+  --attachment-failed: var(--destructive);
 }
 
 @layer base {
