@@ -155,7 +155,7 @@ function ServerInfo({ refreshKey }: { refreshKey: number }) {
           >
             <Info className="h-4 w-4" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-44">
+          <DropdownMenuContent align="start" className="min-w-60">
             <div data-testid="server-info-details" className="px-2 py-1.5 space-y-1.5 text-xs">
               {details.map(({ icon, label, value }) => (
                 <p key={label} className="flex items-center gap-2 text-muted-foreground">
@@ -194,7 +194,7 @@ export function DashboardHeader({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-11 md:min-h-7" />
+                <Button size="sm" variant="outline" onClick={onOpenEnv} className="min-h-9 md:min-h-7" />
               }
             >
               <FileCog className="w-4 h-4 md:mr-1" /> <span className="hidden md:inline">Env Files</span>
