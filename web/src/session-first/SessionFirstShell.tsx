@@ -127,6 +127,7 @@ export function SessionFirstShell({ onLegacy }: SessionFirstShellProps) {
           onSelect={(s) => {
             setSelectedSession(s);
             setSurface('terminal');
+            setTool('files');
             void attach(s);
           }}
         />
