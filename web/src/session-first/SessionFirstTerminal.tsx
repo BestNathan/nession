@@ -107,6 +107,10 @@ function useReconnectBanner(opts: {
   const [relayLost, setRelayLost] = useState(false);
 
   useEffect(() => {
+    setRelayLost(false);
+  }, [sessionId, effectiveMode]);
+
+  useEffect(() => {
     if (effectiveMode !== 'relay' || !wsService) { return; }
     return wsService.onConnectionChange((status) => {
       if (status === 'authenticated') {
