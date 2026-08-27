@@ -38,4 +38,17 @@ describe('FileWorkspace', () => {
     await userEvent.click(await screen.findByText('f.txt'));
     expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
   });
+
+  it('clears selection when fileOps detaches then reattaches', async () => {
+    const { rerender } = render(<FileWorkspace fileOps={makeFileOps()} />);
+    await userEvent.click(await screen.findByText('f.txt'));
+    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
+
+    rerender(<FileWorkspace fileOps={null} />);
+    expect(screen.getByText(/attach/i)).toBeInTheDocument();
+
+    rerender(<FileWorkspace fileOps={makeFileOps()} />);
+    expect(screen.getByText('Select a file')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+  });
 });
