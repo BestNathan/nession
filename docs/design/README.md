@@ -42,7 +42,7 @@ Implementation
 | [interaction/app.md](interaction/app.md) | Spatial model `Sessions ← Terminal → Workspace`; gestures as accelerators; not a shrunk Web layout |
 | [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
 | [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
-| [design-system/patterns.md](design-system/patterns.md) | Nession composition patterns (SessionList, SurfaceSwitcher, …); full specs: [#470](https://github.com/BestNathan/nession/issues/470) |
+| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [nine specs](design-system/patterns.md#catalog) ([#470](https://github.com/BestNathan/nession/issues/470)) |
 | [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
 
 ## Related issues

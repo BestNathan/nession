@@ -22,4 +22,4 @@ This list is illustrative, not an install inventory. Web continues to prefer sha
 - Primitives consume Semantic (and platform Experience) tokens, never Primitive palette tokens directly ([tokens.md](tokens.md)).
 - If a control needs domain behavior (connection status, session row, surface switch), it is a **pattern**, not a new primitive.
 
-Do not fork Button, Input, or Tabs into Nession-branded variants in order to express product identity. Express identity in SessionList, SurfaceSwitcher, WorkspaceNavigation, and related patterns ([#470](https://github.com/BestNathan/nession/issues/470)).
+Do not fork Button, Input, or Tabs into Nession-branded variants in order to express product identity. Express identity in [SessionList](patterns/session-list.md), [SurfaceSwitcher](patterns/surface-switcher.md), [WorkspaceNavigation](patterns/workspace-navigation.md), and related [patterns](patterns.md).
