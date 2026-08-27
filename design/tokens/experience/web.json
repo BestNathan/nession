@@ -1,0 +1,20 @@
+{
+  "$description": "Web experience density. Emitted as CSS variables in generated web.css.",
+  "control": {
+    "sm": { "value": "28px" },
+    "md": { "value": "32px" },
+    "lg": { "value": "36px" }
+  },
+  "row": {
+    "sm": { "value": "28px" },
+    "md": { "value": "36px" },
+    "lg": { "value": "40px" }
+  },
+  "icon": {
+    "sm": { "value": "14px" },
+    "md": { "value": "16px" }
+  },
+  "panel": {
+    "padding": { "value": "12px" }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$description": "App experience density. Not imported by Web CSS.",
+  "control": {
+    "sm": { "value": "36px" },
+    "md": { "value": "44px" },
+    "lg": { "value": "52px" }
+  },
+  "row": {
+    "sm": { "value": "40px" },
+    "md": { "value": "48px" },
+    "lg": { "value": "56px" }
+  },
+  "icon": {
+    "sm": { "value": "18px" },
+    "md": { "value": "20px" }
+  },
+  "panel": {
+    "padding": { "value": "16px" }
+  },
+  "touchTarget": {
+    "min": { "value": 44 }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "$description": "Primitive palette and radii. Product components must not consume these directly.",
+  "color": {
+    "white": { "value": "oklch(1 0 0)" },
+    "black": { "value": "oklch(0 0 0)" },
+    "white-alpha": {
+      "10": { "value": "oklch(1 0 0 / 10%)" },
+      "15": { "value": "oklch(1 0 0 / 15%)" }
+    },
+    "zinc": {
+      "50": { "value": "oklch(0.985 0 0)" },
+      "100": { "value": "oklch(0.97 0 0)" },
+      "200": { "value": "oklch(0.922 0 0)" },
+      "300": { "value": "oklch(0.87 0 0)" },
+      "400": { "value": "oklch(0.708 0 0)" },
+      "500": { "value": "oklch(0.556 0 0)" },
+      "600": { "value": "oklch(0.439 0 0)" },
+      "700": { "value": "oklch(0.371 0 0)" },
+      "800": { "value": "oklch(0.269 0 0)" },
+      "900": { "value": "oklch(0.205 0 0)" },
+      "950": { "value": "oklch(0.145 0 0)" }
+    },
+    "green": {
+      "400": { "value": "oklch(0.72 0.17 145)" },
+      "500": { "value": "oklch(0.63 0.17 145)" }
+    },
+    "emerald": {
+      "500": { "value": "oklch(0.696 0.17 162.48)" }
+    },
+    "amber": {
+      "400": { "value": "oklch(0.828 0.189 84.429)" },
+      "500": { "value": "oklch(0.769 0.188 70.08)" },
+      "600": { "value": "oklch(0.666 0.179 58.318)" }
+    },
+    "yellow": {
+      "600": { "value": "oklch(0.681 0.162 75.834)" }
+    },
+    "red": {
+      "400": { "value": "oklch(0.704 0.191 22.216)" },
+      "500": { "value": "oklch(0.577 0.245 27.325)" },
+      "600": { "value": "oklch(0.577 0.245 27.325)" }
+    },
+    "blue": {
+      "100": { "value": "oklch(0.932 0.032 255.585)" },
+      "200": { "value": "oklch(0.882 0.059 254.128)" },
+      "300": { "value": "oklch(0.809 0.105 251.813)" },
+      "400": { "value": "oklch(0.707 0.165 254.624)" },
+      "500": { "value": "oklch(0.623 0.214 259.815)" },
+      "700": { "value": "oklch(0.488 0.243 264.376)" },
+      "800": { "value": "oklch(0.424 0.199 265.638)" }
+    },
+    "gray": {
+      "400": { "value": "oklch(0.707 0.022 261.325)" },
+      "500": { "value": "oklch(0.551 0.027 264.364)" }
+    }
+  },
+  "radius": { "value": "0.625rem" }
+}

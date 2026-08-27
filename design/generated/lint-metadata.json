@@ -1,0 +1,165 @@
+{
+  "green-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "success",
+      "agent-online"
+    ]
+  },
+  "green-400": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "success",
+      "agent-online"
+    ]
+  },
+  "emerald-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "success",
+      "session-active"
+    ]
+  },
+  "amber-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "warning",
+      "file-modified"
+    ]
+  },
+  "amber-400": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "warning"
+    ]
+  },
+  "amber-600": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "warning"
+    ]
+  },
+  "yellow-600": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "warning"
+    ]
+  },
+  "red-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "destructive",
+      "danger",
+      "agent-error",
+      "file-deleted"
+    ]
+  },
+  "red-400": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "destructive",
+      "danger"
+    ]
+  },
+  "red-600": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "destructive"
+    ]
+  },
+  "blue-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-400": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-300": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-800": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-700": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-100": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "blue-200": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "info"
+    ]
+  },
+  "gray-400": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "muted-foreground",
+      "session-unknown"
+    ]
+  },
+  "gray-500": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "muted-foreground"
+    ]
+  },
+  "black": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "overlay",
+      "inverse"
+    ]
+  },
+  "white": {
+    "layer": "primitive",
+    "allowedInComponent": false,
+    "suggestions": [
+      "primary-foreground"
+    ]
+  },
+  "experienceAppClasses": [
+    "touch-target-min",
+    "control-app-sm",
+    "control-app-md",
+    "control-app-lg"
+  ]
+}
