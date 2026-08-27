@@ -32,7 +32,7 @@ export function RefreshButton({
             onClick={() => onClick()}
             disabled={disabled || loading}
             aria-label={ariaLabel}
-            className={cn('min-h-11 min-w-11 md:min-h-7 md:min-w-0', className)}
+            className={cn('min-h-9 min-w-9 md:min-h-7 md:min-w-0', className)}
           />
         }
       >

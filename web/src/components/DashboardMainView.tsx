@@ -72,8 +72,6 @@ export function DashboardMainView({
           filteredAgents={data.filteredAgents}
           isSearchActive={data.isSearchActive}
           setSelectedAgent={data.setSelectedAgent}
-          onlineCount={onlineCount}
-          offlineCount={offlineCount}
           onAgentRename={data.updateAgent}
           onAgentDelete={setAgentToDelete}
         />
