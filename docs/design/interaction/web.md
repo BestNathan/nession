@@ -1,0 +1,55 @@
+# Web Interaction Model
+
+Web shares the [product model](../product-model.md) and [information architecture](../information-architecture.md) with App. It does **not** permanently show Terminal and Workspace side-by-side.
+
+## Top-level layout
+
+```text
+┌──────────────────┬───────────────────────────────────────────────┐
+│                  │                                               │
+│ Sessions         │ Active Session                                │
+│                  │                                               │
+│                  │       [ Terminal ] [ Workspace ]              │
+│                  │                                               │
+│                  │            Active Surface                     │
+│                  │                                               │
+└──────────────────┴───────────────────────────────────────────────┘
+```
+
+## Rules
+
+- Session navigation remains available on the left (Sessions sidebar).
+- Terminal is the default active surface.
+- Terminal and Workspace are top-level **peer** surfaces within the active Session.
+- Only one of Terminal / Workspace is normally shown at a time.
+- A compact top-level surface switcher/toggle changes the active surface.
+- This preserves maximum horizontal and vertical space for xterm.js during normal work.
+
+Do not treat a persistent Terminal | Files split as the Web shell. Files lives inside Workspace; see [workspace.md](../workspace.md).
+
+## Surface vs tool navigation
+
+Two levels, not one merged tab strip:
+
+```text
+Surface level:
+
+Terminal | Workspace
+
+Workspace tool level:
+
+Files | Session | Agent | ...
+```
+
+Workspace owns its own secondary navigation. Do **not** create another permanent full-width sidebar inside Workspace by default. Prefer compact top navigation / tool switching. Individual tools define their own internal layout (Files may use master/detail; Agent need not).
+
+## What Web must not do
+
+- Permanently display Terminal and Workspace at the same time as the default layout.
+- Group the primary Session list by Agent (see [information-architecture.md](../information-architecture.md)).
+- Implement Web as a large-canvas copy of the App spatial pager.
+- Encode Workspace tool hierarchy as visual tokens ([design-system/tokens.md](../design-system/tokens.md)); that belongs here and in pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)).
+
+## Patterns involved
+
+Web composition is expected to use SessionList, SessionHeader / AgentContext, SurfaceSwitcher, and WorkspaceNavigation. Those are patterns, not primitives — [design-system/patterns.md](../design-system/patterns.md).
