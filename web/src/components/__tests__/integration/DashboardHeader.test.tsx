@@ -26,7 +26,10 @@ function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketServ
   } as unknown as WebSocketService;
 }
 
-function renderHeader(ws?: WebSocketService) {
+function renderHeader(
+  ws?: WebSocketService,
+  extra?: { onSessionFirst?: () => void },
+) {
   return render(
     <WebSocketContext.Provider value={ws ?? makeWsService()}>
       <DashboardHeader
@@ -46,6 +49,7 @@ function renderHeader(ws?: WebSocketService) {
           clearError: vi.fn(),
         }}
         error={null}
+        onSessionFirst={extra?.onSessionFirst}
       />
     </WebSocketContext.Provider>,
   );
@@ -113,6 +117,21 @@ describe('DashboardHeader', () => {
 
       await screen.findByTestId('server-info-details');
       expect(screen.queryByText('Built')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('session-first preview', () => {
+    it('renders the preview button and clicking calls onSessionFirst', async () => {
+      const onSessionFirst = vi.fn();
+      const user = userEvent.setup();
+      renderHeader(undefined, { onSessionFirst });
+
+      const button = screen.getByTestId('use-session-first');
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveTextContent('Session-first preview');
+
+      await user.click(button);
+      expect(onSessionFirst).toHaveBeenCalledTimes(1);
     });
   });
 });

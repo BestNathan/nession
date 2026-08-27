@@ -23,6 +23,7 @@ export { AgentSection };
 
 interface DashboardProps {
   connectionStatus: ConnectionStatus;
+  onSessionFirst?: () => void;
 }
 
 /** Route guard: returns the correct view or null to continue to main dashboard. */
@@ -117,7 +118,7 @@ function useTerminalAttach(opts: {
   };
 }
 
-export function Dashboard({ connectionStatus }: DashboardProps) {
+export function Dashboard({ connectionStatus, onSessionFirst }: DashboardProps) {
   const navigate = useNavigate();
   const terminalMatch = useMatch('/terminal/:sessionId');
   const envMatch = useMatch('/env');
@@ -165,6 +166,7 @@ export function Dashboard({ connectionStatus }: DashboardProps) {
       agentToDelete={agentToDelete}
       setAgentToDelete={setAgentToDelete}
       incrementServerRefreshKey={incrementServerRefreshKey}
+      onSessionFirst={onSessionFirst}
     />
   );
 }

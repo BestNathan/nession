@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   createHashRouter,
   RouterProvider,
@@ -8,6 +8,8 @@ import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
 import { WebSocketContext } from './hooks/useWebSocket';
 import { useAppConnection } from './hooks/useAppConnection';
+import { isSessionFirst, setSessionFirst } from './lib/sessionFirst';
+import { SessionFirstShell } from './session-first/SessionFirstShell';
 
 function ReconnectingShell() {
   return (
@@ -30,6 +32,8 @@ function App() {
     isAuthenticated,
     isRestoringSession,
   } = useAppConnection();
+
+  const [sessionFirst, setSessionFirstOn] = useState(() => isSessionFirst());
 
   const loginRouter = useMemo(
     () => createHashRouter([
@@ -57,18 +61,33 @@ function App() {
         path: '/',
         element: (
           <WebSocketContext.Provider value={wsService!}>
-            <Dashboard connectionStatus={connectionStatus} />
+            {sessionFirst ? (
+              <SessionFirstShell
+                onLegacy={() => {
+                  setSessionFirst(false);
+                  setSessionFirstOn(false);
+                }}
+              />
+            ) : (
+              <Dashboard
+                connectionStatus={connectionStatus}
+                onSessionFirst={() => {
+                  setSessionFirst(true);
+                  setSessionFirstOn(true);
+                }}
+              />
+            )}
           </WebSocketContext.Provider>
         ),
         children: [
           { index: true, element: null },
           { path: 'terminal/:sessionId', element: null },
-          { path: 'env', element: null },
+          { path: 'env', element: sessionFirst ? <Navigate to="/" replace /> : null },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },
     ]),
-    [connectionStatus, wsService],
+    [connectionStatus, wsService, sessionFirst],
   );
 
   if (isRestoringSession || (isAuthenticated && !wsService)) {

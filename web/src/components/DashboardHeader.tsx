@@ -12,6 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dro
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useWebSocket } from '../hooks/useWebSocket';
 import pkg from '../../package.json';
+import { setSessionFirst } from '../lib/sessionFirst';
 
 export interface SearchProps {
   query: string;
@@ -35,6 +36,7 @@ export interface DashboardHeaderProps {
   searchProps: SearchProps;
   actionsProps: HeaderActionsProps;
   error: string | null;
+  onSessionFirst?: () => void;
 }
 
 function formatUptimeCompact(seconds: number): string {
@@ -178,6 +180,7 @@ export function DashboardHeader({
   actionsProps,
   error,
   serverRefreshKey,
+  onSessionFirst,
 }: DashboardHeaderProps & { serverRefreshKey?: number }) {
   const { fetchSessions, onOpenEnv, loadingAgents, clearError } = actionsProps;
   return (
@@ -191,6 +194,22 @@ export function DashboardHeader({
           <ServerInfo refreshKey={serverRefreshKey ?? 0} />
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="use-session-first"
+            className="min-h-9 md:min-h-7"
+            onClick={() => {
+              if (onSessionFirst) {
+                onSessionFirst();
+              } else {
+                setSessionFirst(true);
+              }
+            }}
+          >
+            Session-first preview
+          </Button>
           <Tooltip>
             <TooltipTrigger
               render={
