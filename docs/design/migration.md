@@ -8,7 +8,7 @@ This architecture is documentation only until later phases implement it. [#469](
 |-------|-------|------------|
 | 1 — Architecture docs | [#469](https://github.com/BestNathan/nession/issues/469) | This directory |
 | 2 — Design tokens | [#467](https://github.com/BestNathan/nession/issues/467) | Executable Primitive / Semantic / Domain / Experience tokens + lint |
-| 2 — UI patterns | [#470](https://github.com/BestNathan/nession/issues/470) | SessionList, SurfaceSwitcher, WorkspaceNavigation, and related specs |
+| 2 — UI patterns | [#470](https://github.com/BestNathan/nession/issues/470) | [Pattern specs](design-system/patterns.md) |
 | 3 — Vertical slice | [#471](https://github.com/BestNathan/nession/issues/471) | One complete Session-first path before broad migration |
 | 4 — Web | [#472](https://github.com/BestNathan/nession/issues/472) | Remaining Web flows into the new IA; remove obsolete Agent-first navigation |
 | 4 — App | [#473](https://github.com/BestNathan/nession/issues/473) | Spatial `Sessions ← Terminal → Workspace` without copying Web layout |
