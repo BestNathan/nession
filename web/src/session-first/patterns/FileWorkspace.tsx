@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileBrowser } from '@/components/FileBrowser';
 import { FileViewer } from '@/components/FileViewer';
 import type { FileEntry, FileOps } from '@/services/fileOps';
@@ -15,6 +15,10 @@ interface SelectedFile {
 
 export function FileWorkspace({ fileOps }: FileWorkspaceProps) {
   const [selected, setSelected] = useState<SelectedFile | null>(null);
+
+  useEffect(() => {
+    setSelected(null);
+  }, [fileOps]);
 
   if (!fileOps) {
     return (
@@ -47,6 +51,7 @@ export function FileWorkspace({ fileOps }: FileWorkspaceProps) {
       <div className="h-full min-h-0 overflow-hidden">
         {selected ? (
           <FileViewer
+            key={selected.path}
             fileOps={fileOps}
             path={selected.path}
             filename={selected.filename}
