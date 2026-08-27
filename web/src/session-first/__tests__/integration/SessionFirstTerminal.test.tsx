@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
-import { sessionIdAtom } from '@/atoms/session';
+import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
+import { bannerAtomFamily } from '@/terminal/state/ui';
+
+const { wsListeners } = vi.hoisted(() => ({
+  wsListeners: [] as Array<(status: string) => void>,
+}));
 
 vi.mock('@/hooks/useP2PConnection', () => ({ useP2PConnection: () => {} }));
 vi.mock('@/hooks/useAddressPlan', () => ({
@@ -14,7 +19,15 @@ vi.mock('@/terminal/hooks/useTerminalStateMachine', () => ({
 vi.mock('@/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({
-    onConnectionChange: () => () => {},
+    onConnectionChange: (cb: (status: string) => void) => {
+      wsListeners.push(cb);
+      return () => {
+        const i = wsListeners.indexOf(cb);
+        if (i >= 0) {
+          wsListeners.splice(i, 1);
+        }
+      };
+    },
     isConnected: () => false,
     endRelay: vi.fn(),
     applySessionEnv: vi.fn(),
@@ -48,6 +61,10 @@ function renderTerminal(hidden: boolean, store = createStore()) {
 }
 
 describe('SessionFirstTerminal', () => {
+  beforeEach(() => {
+    wsListeners.length = 0;
+  });
+
   it('toggles CSS hidden without unmounting the keep-alive root', () => {
     const { rerenderHidden } = renderTerminal(false);
     const el = screen.getByTestId('session-first-terminal');
@@ -77,5 +94,41 @@ describe('SessionFirstTerminal', () => {
     rerenderHidden(true);
     expect(screen.getByTestId('session-first-terminal').className).toMatch(/\bhidden\b/);
     expect(screen.getByTestId('terminal-pane')).toBe(pane);
+  });
+
+  it('clears a stuck failed banner when attaching a new session after relay drop', () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:old');
+    renderTerminal(false, store);
+
+    act(() => {
+      for (const cb of wsListeners) {
+        cb('disconnected');
+      }
+    });
+    expect(store.get(bannerAtomFamily('agent:old'))).toBe('failed');
+
+    act(() => {
+      store.set(sessionIdAtom, 'agent:new');
+    });
+    expect(store.get(bannerAtomFamily('agent:new'))).toBe('none');
+  });
+
+  it('clears a stuck failed banner when switching the same session to P2P', () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:sess');
+    renderTerminal(false, store);
+
+    act(() => {
+      for (const cb of wsListeners) {
+        cb('disconnected');
+      }
+    });
+    expect(store.get(bannerAtomFamily('agent:sess'))).toBe('failed');
+
+    act(() => {
+      store.set(attachInfoAtom, { mode: 'p2p', session_id: 'agent:sess' });
+    });
+    expect(store.get(bannerAtomFamily('agent:sess'))).toBe('none');
   });
 });
