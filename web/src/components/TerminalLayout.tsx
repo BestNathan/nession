@@ -6,6 +6,7 @@ import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { MobileTerminalLayout } from './MobileTerminalLayout';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { TerminalCapsule, type CapsuleMode } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
@@ -28,6 +29,106 @@ interface TerminalLayoutProps {
   controller?: TerminalController | null;
   /** Session-first mobile: skip Files/Env swipe panels (use Workspace instead). */
   terminalOnly?: boolean;
+  /** Desktop toolbar variant when fileOps is absent (session-first path). */
+  toolbar?: 'bottombar' | 'capsule';
+}
+
+interface DesktopToolbarLayoutProps {
+  toolbar: 'bottombar' | 'capsule';
+  isDesktop: boolean;
+  terminalElement: React.ReactNode;
+  toolbarDisabled: boolean;
+  envPanel: React.ReactNode;
+  inputPanel: React.ReactNode;
+  commandsPanel: React.ReactNode;
+  bottomTab: BottomTab;
+  onBottomTabChange: (tab: BottomTab) => void;
+  sheetOpen: boolean;
+  onSheetToggle: (open: boolean) => void;
+  capsuleMode: CapsuleMode;
+  onCapsuleModeChange: (mode: CapsuleMode) => void;
+  capsuleExpanded: boolean;
+  onCapsuleExpandedChange: (open: boolean) => void;
+}
+
+function DesktopToolbarLayout({
+  toolbar,
+  isDesktop,
+  terminalElement,
+  toolbarDisabled,
+  envPanel,
+  inputPanel,
+  commandsPanel,
+  bottomTab,
+  onBottomTabChange,
+  sheetOpen,
+  onSheetToggle,
+  capsuleMode,
+  onCapsuleModeChange,
+  capsuleExpanded,
+  onCapsuleExpandedChange,
+}: DesktopToolbarLayoutProps) {
+  if (toolbar === 'capsule') {
+    return (
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        {isDesktop && terminalElement}
+        {isDesktop ? (
+          <TerminalCapsule
+            mode={capsuleMode}
+            onModeChange={onCapsuleModeChange}
+            expanded={capsuleExpanded}
+            onExpandedChange={onCapsuleExpandedChange}
+            disabled={toolbarDisabled}
+            inputPanel={inputPanel}
+            commandsPanel={commandsPanel}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex-1 min-h-0 flex flex-col">
+        {isDesktop && terminalElement}
+      </div>
+      <BottomBar
+        activeTab={bottomTab}
+        onTabChange={onBottomTabChange}
+        showFilesTab={false}
+        sheetOpen={sheetOpen}
+        onSheetToggle={onSheetToggle}
+        envPanel={envPanel}
+        inputPanel={inputPanel}
+        commandsPanel={commandsPanel}
+      />
+    </>
+  );
+}
+
+function useDesktopKeyboardGuard(
+  isDesktop: boolean,
+  controller: TerminalController | null | undefined,
+) {
+  useEffect(() => {
+    if (!isDesktop || !controller) {
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDesktop, controller]);
 }
 
 /**
@@ -53,37 +154,15 @@ export function TerminalLayout({
   onGetTerminalPwd,
   controller,
   terminalOnly = false,
+  toolbar = 'bottombar',
 }: TerminalLayoutProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
+  const [capsuleExpanded, setCapsuleExpanded] = useState(false);
 
-  // Desktop keyboard input handling
-  useEffect(() => {
-    if (!isDesktop || !controller) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if target is an input/textarea (let native handling work)
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return;
-      }
-
-      // Ignore modifier-only keys
-      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
-        return;
-      }
-
-      // Let xterm handle the keyboard input via its own event system
-      // This useEffect is just to ensure the desktop layout is properly separated
-      // The actual keyboard handling happens in xterm's TerminalInputHandler
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDesktop, controller]);
+  useDesktopKeyboardGuard(isDesktop, controller);
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const inputPanel = <InputPanel sendText={(text) => {
@@ -127,21 +206,23 @@ export function TerminalLayout({
       }
     />
   ) : (
-    <>
-      <div className="flex-1 min-h-0 flex flex-col">
-        {isDesktop && terminalElement}
-      </div>
-      <BottomBar
-        activeTab={bottomTab}
-        onTabChange={setBottomTab}
-        showFilesTab={false}
-        sheetOpen={sheetOpen}
-        onSheetToggle={setSheetOpen}
-        envPanel={envPanel}
-        inputPanel={inputPanel}
-        commandsPanel={commandsPanel}
-      />
-    </>
+    <DesktopToolbarLayout
+      toolbar={toolbar}
+      isDesktop={isDesktop}
+      terminalElement={terminalElement}
+      toolbarDisabled={toolbarDisabled}
+      envPanel={envPanel}
+      inputPanel={inputPanel}
+      commandsPanel={commandsPanel}
+      bottomTab={bottomTab}
+      onBottomTabChange={setBottomTab}
+      sheetOpen={sheetOpen}
+      onSheetToggle={setSheetOpen}
+      capsuleMode={capsuleMode}
+      onCapsuleModeChange={setCapsuleMode}
+      capsuleExpanded={capsuleExpanded}
+      onCapsuleExpandedChange={setCapsuleExpanded}
+    />
   );
 
   // ── Layout containers always mounted, hidden with CSS ──────────────
