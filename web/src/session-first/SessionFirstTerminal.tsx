@@ -301,6 +301,7 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
           toolbarDisabled={toolbarDisabled}
           controller={controller}
           terminalOnly
+          toolbar="capsule"
         />
       )}
     </div>

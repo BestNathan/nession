@@ -41,9 +41,21 @@ vi.mock('@/terminal/components/TerminalPane', () => ({
 vi.mock('@/components/TerminalLayout', () => ({
   TerminalLayout: ({
     terminalElement,
+    terminalOnly,
+    toolbar,
   }: {
     terminalElement: React.ReactNode;
-  }) => <div data-testid="terminal-layout">{terminalElement}</div>,
+    terminalOnly?: boolean;
+    toolbar?: string;
+  }) => (
+    <div
+      data-testid="terminal-layout"
+      data-terminal-only={terminalOnly ? 'true' : 'false'}
+      data-toolbar={toolbar ?? 'bottombar'}
+    >
+      {terminalElement}
+    </div>
+  ),
 }));
 
 function renderTerminal(hidden: boolean, store = createStore()) {
@@ -90,11 +102,14 @@ describe('SessionFirstTerminal', () => {
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
   });
 
-  it('renders TerminalLayout when a session is attached', () => {
+  it('renders TerminalLayout with capsule toolbar when a session is attached', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');
     renderTerminal(false, store);
-    expect(screen.getByTestId('terminal-layout')).toBeInTheDocument();
+    const layout = screen.getByTestId('terminal-layout');
+    expect(layout).toBeInTheDocument();
+    expect(layout).toHaveAttribute('data-toolbar', 'capsule');
+    expect(layout).toHaveAttribute('data-terminal-only', 'true');
   });
 
   it('keeps TerminalPane mounted when hidden while a session is attached', () => {

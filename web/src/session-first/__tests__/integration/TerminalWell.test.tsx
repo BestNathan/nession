@@ -13,5 +13,6 @@ describe('TerminalWell', () => {
     expect(well).toContainElement(screen.getByTestId('child'));
     expect(well.className).toMatch(/rounded/);
     expect(well.className).toMatch(/overflow-hidden/);
+    expect(well.className).toMatch(/\brelative\b/);
   });
 });
