@@ -3,29 +3,18 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionFirstChrome } from '@/session-first/SessionFirstChrome';
 
-vi.mock('@/components/ServerInfoMenu', () => ({
-  ServerInfoMenu: () => <div data-testid="server-info-menu" />,
-}));
-
 describe('SessionFirstChrome', () => {
-  it('renders thin chrome with overflow for Env and Legacy', async () => {
-    const onOpenEnv = vi.fn();
-    const onLegacy = vi.fn();
+  it('renders brand and badge without overflow menu', () => {
     render(
       <SessionFirstChrome
         connectionStatus="authenticated"
         error={null}
         clearError={vi.fn()}
-        onOpenEnv={onOpenEnv}
-        onLegacy={onLegacy}
       />,
     );
     expect(screen.getByTestId('session-first-chrome')).toBeInTheDocument();
     expect(screen.getByText('Nession')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-env')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('session-first-overflow'));
-    await userEvent.click(await screen.findByTestId('session-first-env'));
-    expect(onOpenEnv).toHaveBeenCalled();
+    expect(screen.queryByTestId('session-first-overflow')).not.toBeInTheDocument();
   });
 
   it('shows dismissible error banner', async () => {
@@ -35,8 +24,6 @@ describe('SessionFirstChrome', () => {
         connectionStatus="authenticated"
         error="Something failed"
         clearError={clearError}
-        onOpenEnv={vi.fn()}
-        onLegacy={vi.fn()}
       />,
     );
 

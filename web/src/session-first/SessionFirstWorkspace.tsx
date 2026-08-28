@@ -39,6 +39,8 @@ export interface SessionFirstWorkspaceProps {
   showList: boolean;
   showDetail: boolean;
   onBackToSessions?: () => void;
+  onOpenEnv: () => void;
+  onLegacy: () => void;
 }
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
@@ -73,6 +75,8 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     showList,
     showDetail,
     onBackToSessions,
+    onOpenEnv,
+    onLegacy,
   } = props;
 
   return (
@@ -97,6 +101,8 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
         onRefresh={onRefresh}
         onSelect={onSelect}
         onKill={onKill}
+        onOpenEnv={onOpenEnv}
+        onLegacy={onLegacy}
       />
       <main className={cn('flex min-h-0 flex-1 flex-col', !showDetail && 'hidden lg:flex')}>
         <SessionFirstMain

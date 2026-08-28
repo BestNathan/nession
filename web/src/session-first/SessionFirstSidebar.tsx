@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 import { SessionList } from '@/session-first/patterns/SessionList';
 import { SessionListHeader } from '@/session-first/patterns/SessionListHeader';
+import { SessionFirstOverflowMenu } from '@/session-first/SessionFirstOverflowMenu';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { Agent, Session } from '@/types';
 
@@ -24,6 +25,8 @@ export interface SessionFirstSidebarProps {
   onRefresh: () => void;
   onSelect: (session: Session) => void;
   onKill: (session: Session) => void;
+  onOpenEnv: () => void;
+  onLegacy: () => void;
 }
 
 export function SessionFirstSidebar({
@@ -46,6 +49,8 @@ export function SessionFirstSidebar({
   onRefresh,
   onSelect,
   onKill,
+  onOpenEnv,
+  onLegacy,
 }: SessionFirstSidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const offlineCount = agents.filter((agent) => agent.status !== 'online').length;
@@ -73,17 +78,25 @@ export function SessionFirstSidebar({
         onRefresh={onRefresh}
         loadingSessions={loadingSessions}
       />
-      <SessionList
-        sessions={filteredSessions}
-        agents={agents}
-        staleAgentIds={staleAgents}
-        selectedId={selectedId}
-        clientSessionId={clientSessionId}
-        loading={loadingSessions}
-        isSearchActive={isSearchActive}
-        onSelect={onSelect}
-        onKill={onKill}
-      />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <SessionList
+          sessions={filteredSessions}
+          agents={agents}
+          staleAgentIds={staleAgents}
+          selectedId={selectedId}
+          clientSessionId={clientSessionId}
+          loading={loadingSessions}
+          isSearchActive={isSearchActive}
+          onSelect={onSelect}
+          onKill={onKill}
+        />
+      </div>
+      <div
+        data-testid="session-first-sidebar-footer"
+        className="flex shrink-0 items-center justify-end border-t px-2 py-2"
+      >
+        <SessionFirstOverflowMenu onOpenEnv={onOpenEnv} onLegacy={onLegacy} />
+      </div>
     </aside>
   );
 }

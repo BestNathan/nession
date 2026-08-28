@@ -56,8 +56,6 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
           connectionStatus={connectionStatus}
           error={data.error}
           clearError={data.clearError}
-          onOpenEnv={() => state.setShowEnv(true)}
-          onLegacy={onLegacy}
         />
         {state.isRestoringDeepLink ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
@@ -99,6 +97,8 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
+            onOpenEnv={() => state.setShowEnv(true)}
+            onLegacy={onLegacy}
           />
         )}
       </div>

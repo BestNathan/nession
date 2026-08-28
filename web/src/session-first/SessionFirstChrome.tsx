@@ -3,34 +3,26 @@ import type { ConnectionStatus } from '@/types';
 import { ConnectionStatusBadge } from '@/components/ui/ConnectionStatusBadge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { SessionFirstOverflowMenu } from '@/session-first/SessionFirstOverflowMenu';
 
 export interface SessionFirstChromeProps {
   connectionStatus: ConnectionStatus;
   error: string | null;
   clearError: () => void;
-  onOpenEnv: () => void;
-  onLegacy: () => void;
 }
 
 export function SessionFirstChrome({
   connectionStatus,
   error,
   clearError,
-  onOpenEnv,
-  onLegacy,
 }: SessionFirstChromeProps) {
   return (
     <>
       <header
         data-testid="session-first-chrome"
-        className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-background px-4 py-3"
+        className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-background px-4 py-2"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">Nession</h1>
-          <ConnectionStatusBadge status={connectionStatus} />
-        </div>
-        <SessionFirstOverflowMenu onOpenEnv={onOpenEnv} onLegacy={onLegacy} />
+        <h1 className="text-lg font-semibold tracking-tight">Nession</h1>
+        <ConnectionStatusBadge status={connectionStatus} />
       </header>
       {error ? (
         <div
