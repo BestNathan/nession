@@ -23,11 +23,26 @@ const dashboard = vi.hoisted(() => ({
     agents: [] as Agent[],
     sessions: [] as Session[],
     staleAgents: [] as string[],
+    filteredSessions: [] as Session[],
     loadingSessions: false,
     sessionsLoaded: true,
     error: null,
     fetchSessions: vi.fn(),
     clearError: vi.fn(),
+    searchQuery: '',
+    setSearchQuery: vi.fn(),
+    statusFilter: 'all' as const,
+    setStatusFilter: vi.fn(),
+    sortField: 'activity' as const,
+    sortDirection: 'desc' as const,
+    toggleSort: vi.fn(),
+    isSearchActive: false,
+    showCreateModal: false,
+    setShowCreateModal: vi.fn(),
+    sessionToKill: null as Session | null,
+    setSessionToKill: vi.fn(),
+    handleSessionCreated: vi.fn(),
+    handleSessionKilled: vi.fn(),
   },
 }));
 
@@ -42,6 +57,14 @@ vi.mock('@/session-first/SessionFirstTerminal', () => ({
 }));
 vi.mock('@/session-first/patterns/FileWorkspace', () => ({
   FileWorkspace: () => <div data-testid="file-workspace" />,
+}));
+vi.mock('@/components/CreateSessionDialog', () => ({
+  CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="create-session-dialog" /> : null,
+}));
+vi.mock('@/components/KillConfirmDialog', () => ({
+  KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
 vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({ requestAttach: vi.fn() }),
@@ -89,7 +112,10 @@ describe('SessionFirstShell', () => {
       ...dashboard.current,
       agents: [agent],
       sessions: [sess],
+      filteredSessions: [sess],
       staleAgents: [],
+      showCreateModal: false,
+      sessionToKill: null,
     };
   });
 
@@ -111,9 +137,41 @@ describe('SessionFirstShell', () => {
   });
 
   it('shows empty copy when there are no sessions', () => {
-    dashboard.current = { ...dashboard.current, agents: [], sessions: [] };
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [],
+      sessions: [],
+      filteredSessions: [],
+    };
     renderShell();
     expect(screen.getByText(/No sessions/i)).toBeInTheDocument();
+  });
+
+  it('opens create dialog from sidebar header', async () => {
+    dashboard.current = {
+      ...dashboard.current,
+      showCreateModal: true,
+    };
+    renderShell();
+    expect(screen.getByTestId('create-session-dialog')).toBeInTheDocument();
+  });
+
+  it('opens kill dialog when setSessionToKill is triggered', () => {
+    dashboard.current = {
+      ...dashboard.current,
+      sessionToKill: sess,
+    };
+    renderShell();
+    expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
+  });
+
+  it('disables create when no online agents', () => {
+    dashboard.current = {
+      ...dashboard.current,
+      agents: [{ ...agent, status: 'offline' }],
+    };
+    renderShell();
+    expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
 
   it('attaches via resolveDeepLinkAttachChoice and writes sessionIdAtom', async () => {
@@ -146,6 +204,7 @@ describe('SessionFirstShell', () => {
       ...dashboard.current,
       agents: [agent],
       sessions: [sess, sessB],
+      filteredSessions: [sess, sessB],
     };
     let resolveA: (value: typeof attachChoice) => void = () => undefined;
     const promiseA = new Promise<typeof attachChoice>((resolve) => {
