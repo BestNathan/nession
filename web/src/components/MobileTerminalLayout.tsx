@@ -31,6 +31,8 @@ interface MobileTerminalLayoutProps {
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
   controller?: TerminalController | null;
+  /** Session-first: terminal panel only — Files/Env live in Workspace surface. */
+  terminalOnly?: boolean;
 }
 
 interface TerminalInputBarProps {
@@ -376,12 +378,12 @@ export function MobileTerminalLayout({
   onTerminalReveal,
   onGetTerminalPwd,
   controller,
+  terminalOnly = false,
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
 
-  const panels = [
-    // Panel 0: Terminal
+  const terminalPanel = (
     <div key="terminal" className="h-full flex flex-col">
       {terminalElement ? (
         <div className="flex-1 min-h-0 relative flex flex-col">
@@ -401,7 +403,20 @@ export function MobileTerminalLayout({
         onReveal={onTerminalReveal}
         controller={controller}
       />
-    </div>,
+    </div>
+  );
+
+  if (terminalOnly) {
+    return (
+      <div data-testid="mobile-terminal-only" className="flex-1 min-h-0 flex flex-col">
+        {terminalPanel}
+      </div>
+    );
+  }
+
+  const panels = [
+    // Panel 0: Terminal
+    terminalPanel,
 
     // Panel 1: Files
     <div key="files" className="h-full flex flex-col">

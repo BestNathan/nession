@@ -131,6 +131,18 @@ vi.mock('@/hooks/useSessionFirstDeepLink', () => ({
   useSessionFirstDeepLink: () => deepLink,
 }));
 
+const mobileNav = vi.hoisted(() => ({
+  showList: true,
+  showDetail: true,
+  openDetail: vi.fn(),
+  openList: vi.fn(),
+  isWide: true,
+}));
+
+vi.mock('@/hooks/useSessionFirstMobileNav', () => ({
+  useSessionFirstMobileNav: () => mobileNav,
+}));
+
 function renderShell(initialEntry = '/') {
   const store = createStore();
   const view = render(
@@ -147,6 +159,10 @@ describe('SessionFirstShell', () => {
   beforeEach(() => {
     deepLink.isRestoringDeepLink = false;
     deepLink.sessionIdFromUrl = null;
+    mobileNav.showList = true;
+    mobileNav.showDetail = true;
+    mobileNav.openDetail.mockClear();
+    mobileNav.openList.mockClear();
     dashboard.current = {
       ...dashboard.current,
       agents: [agent],
@@ -250,5 +266,20 @@ describe('SessionFirstShell', () => {
     renderShell('/terminal/a1%3Afix');
     expect(screen.getByText(/Restoring terminal session/i)).toBeInTheDocument();
     expect(screen.queryByTestId('session-item-a1:fix')).not.toBeInTheDocument();
+  });
+
+  it('calls openDetail when a session is selected', async () => {
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    expect(mobileNav.openDetail).toHaveBeenCalled();
+  });
+
+  it('shows back control that returns to the session list on mobile detail', async () => {
+    mobileNav.showList = false;
+    mobileNav.showDetail = true;
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await userEvent.click(screen.getByTestId('session-first-back-to-list'));
+    expect(mobileNav.openList).toHaveBeenCalled();
   });
 });

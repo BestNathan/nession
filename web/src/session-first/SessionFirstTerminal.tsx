@@ -300,6 +300,7 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
           onScrollToBottom={() => controller?.scrollToBottom()}
           toolbarDisabled={toolbarDisabled}
           controller={controller}
+          terminalOnly
         />
       )}
     </div>

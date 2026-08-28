@@ -88,6 +88,9 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
               state.setSurface('workspace');
               state.setTool('agent');
             }}
+            showList={state.showList}
+            showDetail={state.showDetail}
+            onBackToSessions={state.openList}
           />
         )}
       </div>

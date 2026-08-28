@@ -1,9 +1,11 @@
+import { cn } from '@/lib/utils';
 import { SessionList } from '@/session-first/patterns/SessionList';
 import { SessionListHeader } from '@/session-first/patterns/SessionListHeader';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { Agent, Session } from '@/types';
 
 export interface SessionFirstSidebarProps {
+  className?: string;
   agents: Agent[];
   filteredSessions: Session[];
   staleAgents: string[];
@@ -25,6 +27,7 @@ export interface SessionFirstSidebarProps {
 }
 
 export function SessionFirstSidebar({
+  className,
   agents,
   filteredSessions,
   staleAgents,
@@ -49,7 +52,7 @@ export function SessionFirstSidebar({
   const createDisabled = agents.every((agent) => agent.status !== 'online');
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r">
+    <aside className={cn('flex h-full w-full shrink-0 flex-col border-r lg:w-72', className)}>
       <SessionListHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
