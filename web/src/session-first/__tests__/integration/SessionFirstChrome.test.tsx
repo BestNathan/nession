@@ -8,7 +8,7 @@ vi.mock('@/components/ServerInfoMenu', () => ({
 }));
 
 describe('SessionFirstChrome', () => {
-  it('renders title, env entry, and legacy toggle', async () => {
+  it('renders thin chrome with overflow for Env and Legacy', async () => {
     const onOpenEnv = vi.fn();
     const onLegacy = vi.fn();
     render(
@@ -20,16 +20,12 @@ describe('SessionFirstChrome', () => {
         onLegacy={onLegacy}
       />,
     );
-
     expect(screen.getByTestId('session-first-chrome')).toBeInTheDocument();
     expect(screen.getByText('Nession')).toBeInTheDocument();
-    expect(screen.getByTestId('server-info-menu')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId('session-first-env'));
-    expect(onOpenEnv).toHaveBeenCalledTimes(1);
-
-    await userEvent.click(screen.getByTestId('use-legacy-dashboard'));
-    expect(onLegacy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('session-first-env')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('session-first-overflow'));
+    await userEvent.click(await screen.findByTestId('session-first-env'));
+    expect(onOpenEnv).toHaveBeenCalled();
   });
 
   it('shows dismissible error banner', async () => {
