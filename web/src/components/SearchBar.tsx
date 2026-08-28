@@ -12,6 +12,7 @@ interface SearchBarProps {
   setStatusFilter: (f: StatusFilter) => void;
   onlineCount: number;
   offlineCount: number;
+  showStatusFilters?: boolean;
 }
 
 const FILTERS: { key: StatusFilter; label: string; countKey?: 'onlineCount' | 'offlineCount' }[] = [
@@ -27,6 +28,7 @@ export function SearchBar({
   setStatusFilter,
   onlineCount,
   offlineCount,
+  showStatusFilters = true,
 }: SearchBarProps) {
   const { value: localValue, setValue: setLocalValue, debouncedValue, syncValue } = useDebouncedInput(searchQuery, 200);
   const isFirstRender = useRef(true);
@@ -73,32 +75,34 @@ export function SearchBar({
           className="pl-8"
         />
       </div>
-      <div
-        data-testid="filter-row"
-        className="flex items-center gap-1 flex-wrap md:overflow-x-visible"
-      >
-        {FILTERS.map((filter) => {
-          const count = countForFilter(filter);
-          const isActive = statusFilter === filter.key;
-          return (
-            <Button
-              key={filter.key}
-              variant={isActive ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setStatusFilter(filter.key)}
-              aria-pressed={isActive}
-              className="min-h-11 md:min-h-7 flex-shrink-0"
-            >
-              {filter.label}
-              {count !== undefined && (
-                <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.5 text-xs">
-                  {count}
-                </span>
-              )}
-            </Button>
-          );
-        })}
-      </div>
+      {showStatusFilters ? (
+        <div
+          data-testid="filter-row"
+          className="flex items-center gap-1 flex-wrap md:overflow-x-visible"
+        >
+          {FILTERS.map((filter) => {
+            const count = countForFilter(filter);
+            const isActive = statusFilter === filter.key;
+            return (
+              <Button
+                key={filter.key}
+                variant={isActive ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setStatusFilter(filter.key)}
+                aria-pressed={isActive}
+                className="min-h-11 md:min-h-7 flex-shrink-0"
+              >
+                {filter.label}
+                {count !== undefined && (
+                  <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.5 text-xs">
+                    {count}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

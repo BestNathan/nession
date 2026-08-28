@@ -48,4 +48,20 @@ describe('SessionListHeader', () => {
     );
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
+
+  it('keeps search visible and hides filters until disclosure opens', async () => {
+    render(
+      <SessionListHeader
+        {...baseProps}
+        toggleSort={vi.fn()}
+        sortField="name"
+        sortDirection="asc"
+      />,
+    );
+    expect(screen.getByPlaceholderText('Search agents and sessions...')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Online' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('session-list-filters'));
+    expect(await screen.findByRole('button', { name: /Online/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Name/ })).toBeInTheDocument();
+  });
 });
