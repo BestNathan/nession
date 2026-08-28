@@ -37,6 +37,7 @@ describe('SessionItem', () => {
     expect(onSelect).toHaveBeenCalledWith(session);
   });
 
+  // jsdom does not apply group-hover; hover here exercises the row wrapper, click asserts behavior.
   it('calls onKill without selecting when kill is clicked', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -54,28 +55,6 @@ describe('SessionItem', () => {
     const row = screen.getByTestId('session-item-row');
     await user.hover(row);
     const kill = screen.getByTestId('session-kill-a1:fix');
-    await user.click(kill);
-    expect(onKill).toHaveBeenCalledWith(session);
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('reveals kill on hover and does not select when kill is clicked', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    const onKill = vi.fn();
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={onSelect}
-        onKill={onKill}
-      />,
-    );
-    const row = screen.getByTestId('session-item-row');
-    await user.hover(row);
-    const kill = await screen.findByTestId('session-kill-a1:fix');
     await user.click(kill);
     expect(onKill).toHaveBeenCalledWith(session);
     expect(onSelect).not.toHaveBeenCalled();
