@@ -89,7 +89,7 @@ Restyle and relocate within current session-first patterns. Do **not** introduce
 ## Acceptance
 
 - [ ] `?session_first=1`: history sidebar quieter; search visible; filters/sort collapsed by default  
-- [ ] Row `⋯` opens Kill; kill confirm still works  
+- [ ] Kill appears on row hover / focus-within (and when selected on touch); kill confirm still works  
 - [ ] Env / ServerInfo / Legacy reachable from **sidebar footer** only (not header)  
 - [ ] Header shows brand + badge only (plus error banner when present)  
 - [ ] Attach, Workspace, Agent (Claude Code), deep link unchanged  
