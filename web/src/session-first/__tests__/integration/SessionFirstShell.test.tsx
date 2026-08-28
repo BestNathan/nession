@@ -170,6 +170,13 @@ describe('SessionFirstShell', () => {
     );
   });
 
+  it('applies safe-area padding to sidebar footer', () => {
+    renderShell();
+    expect(screen.getByTestId('session-first-sidebar-footer').className).toMatch(
+      /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
+    );
+  });
+
   it('lists sessions without an Agent card grid', () => {
     renderShell();
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
