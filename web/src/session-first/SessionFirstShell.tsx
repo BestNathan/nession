@@ -1,27 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
+import { CreateSessionDialog } from '@/components/CreateSessionDialog';
+import { KillConfirmDialog } from '@/components/KillConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useProbePolling } from '@/hooks/useProbePolling';
 import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
 import { p2pConnectionAtom } from '@/atoms/connection';
 import { sessionIdAtom } from '@/atoms/session';
-import { agentDisplayName } from '@/lib/format';
 import { setSessionFirst } from '@/lib/sessionFirst';
-import { cn } from '@/lib/utils';
-import { createFileOps, type FileOps } from '@/services/fileOps';
-import { mapDomainState, type DomainState } from '@/session-first/domainState';
-import { AgentDetail } from '@/session-first/patterns/AgentDetail';
-import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
-import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
-import { SessionList } from '@/session-first/patterns/SessionList';
-import {
-  WorkspaceNavigation,
-  type WorkspaceToolId,
-} from '@/session-first/patterns/WorkspaceNavigation';
-import { SessionDetails } from '@/session-first/SessionDetails';
-import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
-import type { Agent, Session } from '@/types';
+import { createFileOps } from '@/services/fileOps';
+import { mapDomainState } from '@/session-first/domainState';
+import { SessionFirstMain } from '@/session-first/SessionFirstMain';
+import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
+import type { Surface } from '@/session-first/patterns/SessionHeader';
+import type { WorkspaceToolId } from '@/session-first/patterns/WorkspaceNavigation';
+import type { Session } from '@/types';
 
 export interface SessionFirstShellProps {
   onLegacy: () => void;
@@ -44,42 +38,45 @@ function LegacyToggle({ onLegacy }: { onLegacy: () => void }) {
   );
 }
 
-interface WorkspacePanelProps {
-  hidden: boolean;
-  tool: WorkspaceToolId;
-  onToolChange: (tool: WorkspaceToolId) => void;
-  fileOps: FileOps | null;
-  session: Session | null;
-  agent: Agent | undefined;
-  domain: DomainState | null;
-}
-
-function WorkspacePanel({
-  hidden, tool, onToolChange, fileOps, session, agent, domain,
-}: WorkspacePanelProps) {
+function SessionFirstDialogs({
+  showCreateModal,
+  setShowCreateModal,
+  agents,
+  handleSessionCreated,
+  sessionToKill,
+  setSessionToKill,
+  onKilled,
+}: {
+  showCreateModal: boolean;
+  setShowCreateModal: (show: boolean) => void;
+  agents: ReturnType<typeof useDashboard>['agents'];
+  handleSessionCreated: () => void;
+  sessionToKill: Session | null;
+  setSessionToKill: (session: Session | null) => void;
+  onKilled: () => void;
+}) {
   return (
-    <div className={cn('absolute inset-0 flex min-h-0 flex-col', hidden && 'hidden')}>
-      <WorkspaceNavigation
-        tool={tool}
-        onToolChange={onToolChange}
-        filesAvailable
+    <>
+      <CreateSessionDialog
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        agents={agents}
+        preselectedAgentId={null}
+        onCreated={handleSessionCreated}
       />
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tool === 'files' && <FileWorkspace fileOps={fileOps} />}
-        {tool === 'session' && session && domain && (
-          <SessionDetails session={session} state={domain} />
-        )}
-        {tool === 'agent' && agent && domain && (
-          <AgentDetail agent={agent} state={domain} />
-        )}
-      </div>
-    </div>
+      <KillConfirmDialog
+        isOpen={sessionToKill !== null}
+        onClose={() => setSessionToKill(null)}
+        session={sessionToKill}
+        onKilled={onKilled}
+      />
+    </>
   );
 }
 
 export function SessionFirstShell({ onLegacy }: SessionFirstShellProps) {
-  const { agents, sessions, staleAgents } = useDashboard();
-  useProbePolling(agents);
+  const data = useDashboard();
+  useProbePolling(data.agents);
   const clientSessionId = useAtomValue(sessionIdAtom);
   const p2pConnection = useAtomValue(p2pConnectionAtom);
   const { attachInFlightId, attachFailedId, attach } = useSessionFirstAttach();
@@ -87,90 +84,103 @@ export function SessionFirstShell({ onLegacy }: SessionFirstShellProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<WorkspaceToolId>('files');
+
   const selectedSession = selectedId
-    ? sessions.find((session) => session.session_id === selectedId) ?? null
+    ? data.sessions.find((session) => session.session_id === selectedId) ?? null
     : null;
-
-  const sendMessage = p2pConnection?.sendMessage;
-  const onMessage = p2pConnection?.onMessage;
-  const waitForConnection = p2pConnection?.waitForConnection;
-  const fileOps = useMemo(
-    () =>
-      sendMessage && onMessage && waitForConnection
-        ? createFileOps({ sendMessage, onMessage, waitForConnection })
-        : null,
-    [sendMessage, onMessage, waitForConnection],
-  );
-
   const selectedAgent = selectedSession
-    ? agents.find((a) => a.agent_id === selectedSession.agent_id)
+    ? data.agents.find((a) => a.agent_id === selectedSession.agent_id)
     : undefined;
   const domain = selectedSession
     ? mapDomainState({
         session: selectedSession,
         agent: selectedAgent,
-        staleAgentIds: staleAgents,
+        staleAgentIds: data.staleAgents,
         clientSessionId,
         attachInFlightId,
         attachFailedId,
       })
     : null;
 
+  const fileOps = useMemo(() => {
+    const sendMessage = p2pConnection?.sendMessage;
+    const onMessage = p2pConnection?.onMessage;
+    const waitForConnection = p2pConnection?.waitForConnection;
+    return sendMessage && onMessage && waitForConnection
+      ? createFileOps({ sendMessage, onMessage, waitForConnection })
+      : null;
+  }, [p2pConnection?.sendMessage, p2pConnection?.onMessage, p2pConnection?.waitForConnection]);
+
+  const onKilled = useCallback(() => {
+    if (data.sessionToKill && data.sessionToKill.session_id === selectedId) {
+      setSelectedId(null);
+    }
+    data.handleSessionKilled();
+  }, [data, selectedId]);
+
+  const handleSelect = useCallback((s: Session) => {
+    setSelectedId(s.session_id);
+    setSurface('terminal');
+    setTool('files');
+    void attach(s);
+  }, [attach]);
+
   return (
-    <div className="flex h-[100dvh]">
-      <aside className="flex h-full w-72 shrink-0 flex-col border-r">
-        <SessionList
-          sessions={sessions}
-          agents={agents}
-          staleAgentIds={staleAgents}
+    <>
+      <div className="flex h-[100dvh]">
+        <SessionFirstSidebar
+          agents={data.agents}
+          filteredSessions={data.filteredSessions}
+          staleAgents={data.staleAgents}
           selectedId={selectedId}
           clientSessionId={clientSessionId}
           attachInFlightId={attachInFlightId}
           attachFailedId={attachFailedId}
-          onSelect={(s) => {
-            setSelectedId(s.session_id);
-            setSurface('terminal');
-            setTool('files');
-            void attach(s);
+          loadingSessions={data.loadingSessions}
+          searchQuery={data.searchQuery}
+          setSearchQuery={data.setSearchQuery}
+          statusFilter={data.statusFilter}
+          setStatusFilter={data.setStatusFilter}
+          sortField={data.sortField}
+          sortDirection={data.sortDirection}
+          toggleSort={data.toggleSort}
+          isSearchActive={data.isSearchActive}
+          onCreate={() => data.setShowCreateModal(true)}
+          onRefresh={() => {
+            void data.fetchSessions({ force: true });
           }}
+          onSelect={handleSelect}
+          onKill={(s) => data.setSessionToKill(s)}
         />
-      </aside>
-      <main className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
-          <LegacyToggle onLegacy={onLegacy} />
-        </div>
-        {selectedSession && domain ? (
-          <SessionHeader
-            sessionName={selectedSession.session_name}
-            agentLabel={
-              selectedAgent ? agentDisplayName(selectedAgent) : selectedSession.agent_id
-            }
-            state={domain}
+        <main className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
+            <LegacyToggle onLegacy={onLegacy} />
+          </div>
+          <SessionFirstMain
+            selectedSession={selectedSession}
+            selectedAgent={selectedAgent}
+            domain={domain}
             surface={surface}
-            onSurfaceChange={(next) => setSurface(next)}
+            tool={tool}
+            fileOps={fileOps}
+            onSurfaceChange={setSurface}
+            onToolChange={setTool}
             onOpenAgent={() => {
               setSurface('workspace');
               setTool('agent');
             }}
           />
-        ) : null}
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <SessionFirstTerminal
-            hidden={surface !== 'terminal' || !selectedSession}
-            onDisconnect={() => undefined}
-            onError={() => undefined}
-          />
-          <WorkspacePanel
-            hidden={surface !== 'workspace'}
-            tool={tool}
-            onToolChange={(next) => setTool(next)}
-            fileOps={fileOps}
-            session={selectedSession}
-            agent={selectedAgent}
-            domain={domain}
-          />
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+      <SessionFirstDialogs
+        showCreateModal={data.showCreateModal}
+        setShowCreateModal={data.setShowCreateModal}
+        agents={data.agents}
+        handleSessionCreated={data.handleSessionCreated}
+        sessionToKill={data.sessionToKill}
+        setSessionToKill={data.setSessionToKill}
+        onKilled={onKilled}
+      />
+    </>
   );
 }
