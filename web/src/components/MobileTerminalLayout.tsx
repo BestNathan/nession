@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
+import { TerminalCapsule, type CapsuleMode } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
 
 interface MobileTerminalLayoutProps {
@@ -382,6 +383,35 @@ export function MobileTerminalLayout({
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
+  const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
+  const [capsuleExpanded, setCapsuleExpanded] = useState(false);
+
+  const inputPanel = (
+    <InputPanel
+      sendText={(text) => {
+        if (toolbarDisabled) { return; }
+        controller?.handleInput({
+          source: 'component-input',
+          data: text,
+          timestamp: Date.now(),
+        });
+      }}
+      disabled={toolbarDisabled}
+    />
+  );
+  const commandsPanel = (
+    <QuickCommandsPanel
+      sendText={(text) => {
+        if (toolbarDisabled) { return; }
+        controller?.handleInput({
+          source: 'component-quickcmd',
+          data: text,
+          timestamp: Date.now(),
+        });
+      }}
+      disabled={toolbarDisabled}
+    />
+  );
 
   const terminalPanel = (
     <div key="terminal" className="h-full flex flex-col">
@@ -392,17 +422,30 @@ export function MobileTerminalLayout({
             onScrollPages={onScrollPages}
             onScrollToBottom={onScrollToBottom}
           />
+          {terminalOnly ? (
+            <TerminalCapsule
+              mode={capsuleMode}
+              onModeChange={setCapsuleMode}
+              expanded={capsuleExpanded}
+              onExpandedChange={setCapsuleExpanded}
+              disabled={toolbarDisabled}
+              inputPanel={inputPanel}
+              commandsPanel={commandsPanel}
+            />
+          ) : null}
         </div>
       ) : (
         <div className="flex-1 min-h-0" />
       )}
-      <TerminalInputBar
-        disabled={toolbarDisabled}
-        collapsed={inputCollapsed}
-        onToggle={() => setInputCollapsed((prev) => !prev)}
-        onReveal={onTerminalReveal}
-        controller={controller}
-      />
+      {!terminalOnly ? (
+        <TerminalInputBar
+          disabled={toolbarDisabled}
+          collapsed={inputCollapsed}
+          onToggle={() => setInputCollapsed((prev) => !prev)}
+          onReveal={onTerminalReveal}
+          controller={controller}
+        />
+      ) : null}
     </div>
   );
 
