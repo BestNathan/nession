@@ -122,11 +122,20 @@ vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({ requestAttach: vi.fn() }),
 }));
 
-function renderShell() {
+const deepLink = vi.hoisted(() => ({
+  isRestoringDeepLink: false,
+  sessionIdFromUrl: null as string | null,
+}));
+
+vi.mock('@/hooks/useSessionFirstDeepLink', () => ({
+  useSessionFirstDeepLink: () => deepLink,
+}));
+
+function renderShell(initialEntry = '/') {
   const store = createStore();
   const view = render(
     <Provider store={store}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <SessionFirstShell connectionStatus="authenticated" onLegacy={vi.fn()} />
       </MemoryRouter>
     </Provider>,
@@ -136,6 +145,8 @@ function renderShell() {
 
 describe('SessionFirstShell', () => {
   beforeEach(() => {
+    deepLink.isRestoringDeepLink = false;
+    deepLink.sessionIdFromUrl = null;
     dashboard.current = {
       ...dashboard.current,
       agents: [agent],
@@ -232,5 +243,12 @@ describe('SessionFirstShell', () => {
     await waitFor(() => {
       expect(store.get(sessionIdAtom)).toBe('a1:fix');
     });
+  });
+
+  it('shows restoring copy while deep link attach is in progress', () => {
+    deepLink.isRestoringDeepLink = true;
+    renderShell('/terminal/a1%3Afix');
+    expect(screen.getByText(/Restoring terminal session/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('session-item-a1:fix')).not.toBeInTheDocument();
   });
 });

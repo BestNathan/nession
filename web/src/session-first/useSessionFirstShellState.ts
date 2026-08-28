@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
+import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
 import { p2pConnectionAtom } from '@/atoms/connection';
 import { sessionIdAtom } from '@/atoms/session';
 import { createFileOps } from '@/services/fileOps';
@@ -66,6 +67,20 @@ export function useSessionFirstShellState() {
     requestAttach(s);
   }, [requestAttach]);
 
+  const onRestoreSession = useCallback((s: Session) => {
+    setSelectedId(s.session_id);
+    setSurface('terminal');
+    setTool('files');
+  }, []);
+
+  const { isRestoringDeepLink } = useSessionFirstDeepLink({
+    sessions,
+    sessionsLoaded: data.sessionsLoaded,
+    loadingSessions: data.loadingSessions,
+    confirmAttach,
+    onRestoreSession,
+  });
+
   return {
     data,
     selectedId,
@@ -86,5 +101,6 @@ export function useSessionFirstShellState() {
     handleSelect,
     setSurface,
     setTool,
+    isRestoringDeepLink,
   };
 }

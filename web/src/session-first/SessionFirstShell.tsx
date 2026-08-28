@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react';
 import { EnvManager } from '@/components/env/EnvManager';
 import { useProbePolling } from '@/hooks/useProbePolling';
 import { SessionFirstChrome } from '@/session-first/SessionFirstChrome';
@@ -50,38 +51,45 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
           onOpenEnv={() => state.setShowEnv(true)}
           onLegacy={onLegacy}
         />
-        <SessionFirstWorkspace
-          agents={data.agents}
-          filteredSessions={data.filteredSessions}
-          staleAgents={data.staleAgents}
-          selectedId={state.selectedId}
-          clientSessionId={state.clientSessionId}
-          loadingSessions={data.loadingSessions}
-          searchQuery={data.searchQuery}
-          setSearchQuery={data.setSearchQuery}
-          statusFilter={data.statusFilter}
-          setStatusFilter={data.setStatusFilter}
-          sortField={data.sortField}
-          sortDirection={data.sortDirection}
-          toggleSort={data.toggleSort}
-          isSearchActive={data.isSearchActive}
-          selectedSession={state.selectedSession}
-          selectedAgent={state.selectedAgent}
-          domain={state.domain}
-          surface={state.surface}
-          tool={state.tool}
-          fileOps={state.fileOps}
-          onCreate={() => data.setShowCreateModal(true)}
-          onRefresh={() => { void data.fetchSessions({ force: true }); }}
-          onSelect={state.handleSelect}
-          onKill={(s) => data.setSessionToKill(s)}
-          onSurfaceChange={state.setSurface}
-          onToolChange={state.setTool}
-          onOpenAgent={() => {
-            state.setSurface('workspace');
-            state.setTool('agent');
-          }}
-        />
+        {state.isRestoringDeepLink ? (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
+            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Restoring terminal session…</p>
+          </div>
+        ) : (
+          <SessionFirstWorkspace
+            agents={data.agents}
+            filteredSessions={data.filteredSessions}
+            staleAgents={data.staleAgents}
+            selectedId={state.selectedId}
+            clientSessionId={state.clientSessionId}
+            loadingSessions={data.loadingSessions}
+            searchQuery={data.searchQuery}
+            setSearchQuery={data.setSearchQuery}
+            statusFilter={data.statusFilter}
+            setStatusFilter={data.setStatusFilter}
+            sortField={data.sortField}
+            sortDirection={data.sortDirection}
+            toggleSort={data.toggleSort}
+            isSearchActive={data.isSearchActive}
+            selectedSession={state.selectedSession}
+            selectedAgent={state.selectedAgent}
+            domain={state.domain}
+            surface={state.surface}
+            tool={state.tool}
+            fileOps={state.fileOps}
+            onCreate={() => data.setShowCreateModal(true)}
+            onRefresh={() => { void data.fetchSessions({ force: true }); }}
+            onSelect={state.handleSelect}
+            onKill={(s) => data.setSessionToKill(s)}
+            onSurfaceChange={state.setSurface}
+            onToolChange={state.setTool}
+            onOpenAgent={() => {
+              state.setSurface('workspace');
+              state.setTool('agent');
+            }}
+          />
+        )}
       </div>
       {dialogs}
     </>
