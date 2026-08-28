@@ -38,20 +38,6 @@ describe('SessionList', () => {
     expect(screen.getByText(/No sessions match your search/i)).toBeInTheDocument();
   });
 
-  it('toggles sort when header buttons are clicked', async () => {
-    const toggleSort = vi.fn();
-    render(
-      <SessionList
-        sessions={[sess]} agents={[agent]} staleAgentIds={[]} selectedId={null}
-        clientSessionId="" attachInFlightId={null} attachFailedId={null}
-        sortField="name" sortDirection="asc" toggleSort={toggleSort}
-        onSelect={vi.fn()} onKill={vi.fn()}
-      />,
-    );
-    await userEvent.click(screen.getByRole('button', { name: /Name/i }));
-    expect(toggleSort).toHaveBeenCalledWith('name');
-  });
-
   it('lists a session while Agent is offline with Agent copy, not Session offline', async () => {
     const onSelect = vi.fn();
     render(

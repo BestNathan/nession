@@ -65,6 +65,9 @@ export function SessionFirstSidebar({
         setStatusFilter={setStatusFilter}
         onlineCount={onlineCount}
         offlineCount={offlineCount}
+        sortField={sortField}
+        sortDirection={sortDirection}
+        toggleSort={toggleSort}
         onCreate={onCreate}
         createDisabled={createDisabled}
         onRefresh={onRefresh}
@@ -78,9 +81,6 @@ export function SessionFirstSidebar({
         clientSessionId={clientSessionId}
         loading={loadingSessions}
         isSearchActive={isSearchActive}
-        sortField={sortField}
-        sortDirection={sortDirection}
-        toggleSort={toggleSort}
         onSelect={onSelect}
         onKill={onKill}
       />
