@@ -84,7 +84,7 @@ export function SessionListHeader({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-b p-2">
+    <div className="flex shrink-0 flex-col gap-2 border-b p-3 max-lg:gap-2.5 lg:p-2">
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -96,7 +96,7 @@ export function SessionListHeader({
       />
       <Button
         type="button"
-        className="w-full rounded-lg"
+        className="w-full rounded-lg max-lg:min-h-11"
         data-testid="session-first-create"
         aria-label="Create session"
         disabled={createDisabled}
@@ -110,7 +110,7 @@ export function SessionListHeader({
           <CollapsibleTrigger
             data-testid="session-list-filters"
             render={
-              <Button type="button" variant="outline" size="sm" className="min-h-8">
+              <Button type="button" variant="outline" size="sm" className="min-h-8 max-lg:min-h-11">
                 <Filter className="size-4" />
                 Filters
               </Button>
