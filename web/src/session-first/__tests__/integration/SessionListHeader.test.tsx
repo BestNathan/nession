@@ -64,4 +64,9 @@ describe('SessionListHeader', () => {
     expect(await screen.findByRole('button', { name: /Online/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Name/ })).toBeInTheDocument();
   });
+
+  it('uses larger create control under max-lg', () => {
+    render(<SessionListHeader {...baseProps} />);
+    expect(screen.getByTestId('session-first-create').className).toMatch(/max-lg:min-h-11/);
+  });
 });

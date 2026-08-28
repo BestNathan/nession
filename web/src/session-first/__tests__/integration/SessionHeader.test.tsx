@@ -47,4 +47,20 @@ describe('SessionHeader', () => {
     );
     expect(screen.getByTestId('agent-context')).toHaveTextContent('Agent offline');
   });
+
+  it('uses a larger back control under max-lg', () => {
+    render(
+      <SessionHeader
+        sessionName="demo"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onBackToSessions={vi.fn()}
+      />,
+    );
+    const back = screen.getByTestId('session-first-back-to-list');
+    expect(back.className).toMatch(/max-lg:size-11/);
+  });
 });
