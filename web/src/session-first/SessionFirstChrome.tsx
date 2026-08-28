@@ -1,10 +1,9 @@
-import { FileCog, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { ConnectionStatus } from '@/types';
 import { ConnectionStatusBadge } from '@/components/ui/ConnectionStatusBadge';
-import { ServerInfoMenu } from '@/components/ServerInfoMenu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { setSessionFirst } from '@/lib/sessionFirst';
+import { SessionFirstOverflowMenu } from '@/session-first/SessionFirstOverflowMenu';
 
 export interface SessionFirstChromeProps {
   connectionStatus: ConnectionStatus;
@@ -25,48 +24,13 @@ export function SessionFirstChrome({
     <>
       <header
         data-testid="session-first-chrome"
-        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2"
+        className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-background px-4 py-3"
       >
-        <div className="flex items-center gap-2">
-          <h1 className="text-base font-bold">Nession</h1>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h1 className="text-lg font-semibold tracking-tight">Nession</h1>
           <ConnectionStatusBadge status={connectionStatus} />
         </div>
-        <div className="min-w-0 flex-1">
-          <ServerInfoMenu />
-        </div>
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  data-testid="session-first-env"
-                  aria-label="Environment files"
-                  className="min-h-9 min-w-9 md:min-h-7 md:min-w-0"
-                  onClick={() => onOpenEnv()}
-                />
-              }
-            >
-              <FileCog className="size-4 md:mr-1" />
-              <span className="hidden md:inline">Env Files</span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Environment Files</TooltipContent>
-          </Tooltip>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid="use-legacy-dashboard"
-            onClick={() => {
-              setSessionFirst(false);
-              onLegacy();
-            }}
-          >
-            Legacy
-          </Button>
-        </div>
+        <SessionFirstOverflowMenu onOpenEnv={onOpenEnv} onLegacy={onLegacy} />
       </header>
       {error ? (
         <div
