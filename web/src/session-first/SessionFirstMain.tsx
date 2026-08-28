@@ -56,6 +56,7 @@ export interface SessionFirstMainProps {
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
+  onBackToSessions?: () => void;
 }
 
 export function SessionFirstMain({
@@ -68,6 +69,7 @@ export function SessionFirstMain({
   onSurfaceChange,
   onToolChange,
   onOpenAgent,
+  onBackToSessions,
 }: SessionFirstMainProps) {
   return (
     <>
@@ -81,6 +83,7 @@ export function SessionFirstMain({
           surface={surface}
           onSurfaceChange={onSurfaceChange}
           onOpenAgent={onOpenAgent}
+          onBackToSessions={onBackToSessions}
         />
       ) : null}
       <div className="relative flex min-h-0 flex-1 flex-col">

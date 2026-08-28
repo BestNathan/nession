@@ -1,5 +1,6 @@
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
+import { cn } from '@/lib/utils';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { DomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
@@ -35,6 +36,9 @@ export interface SessionFirstWorkspaceProps {
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
+  showList: boolean;
+  showDetail: boolean;
+  onBackToSessions?: () => void;
 }
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
@@ -66,11 +70,15 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     onSurfaceChange,
     onToolChange,
     onOpenAgent,
+    showList,
+    showDetail,
+    onBackToSessions,
   } = props;
 
   return (
     <div className="flex min-h-0 flex-1">
       <SessionFirstSidebar
+        className={cn(!showList && 'hidden lg:flex')}
         agents={agents}
         filteredSessions={filteredSessions}
         staleAgents={staleAgents}
@@ -90,7 +98,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
         onSelect={onSelect}
         onKill={onKill}
       />
-      <main className="flex min-h-0 flex-1 flex-col">
+      <main className={cn('flex min-h-0 flex-1 flex-col', !showDetail && 'hidden lg:flex')}>
         <SessionFirstMain
           selectedSession={selectedSession}
           selectedAgent={selectedAgent}
@@ -101,6 +109,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
           onSurfaceChange={onSurfaceChange}
           onToolChange={onToolChange}
           onOpenAgent={onOpenAgent}
+          onBackToSessions={onBackToSessions}
         />
       </main>
     </div>

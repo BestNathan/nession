@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
 import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
+import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
 import { p2pConnectionAtom } from '@/atoms/connection';
 import { sessionIdAtom } from '@/atoms/session';
 import { createFileOps } from '@/services/fileOps';
@@ -28,6 +29,7 @@ export function useSessionFirstShellState() {
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<WorkspaceToolId>('files');
   const [showEnv, setShowEnv] = useState(false);
+  const { showList, showDetail, openDetail, openList } = useSessionFirstMobileNav(selectedId);
 
   const selectedSession = selectedId
     ? sessions.find((session) => session.session_id === selectedId) ?? null
@@ -64,14 +66,16 @@ export function useSessionFirstShellState() {
     setSelectedId(s.session_id);
     setSurface('terminal');
     setTool('files');
+    openDetail();
     requestAttach(s);
-  }, [requestAttach]);
+  }, [openDetail, requestAttach]);
 
   const onRestoreSession = useCallback((s: Session) => {
     setSelectedId(s.session_id);
     setSurface('terminal');
     setTool('files');
-  }, []);
+    openDetail();
+  }, [openDetail]);
 
   const { isRestoringDeepLink } = useSessionFirstDeepLink({
     sessions,
@@ -102,5 +106,8 @@ export function useSessionFirstShellState() {
     setSurface,
     setTool,
     isRestoringDeepLink,
+    showList,
+    showDetail,
+    openList,
   };
 }

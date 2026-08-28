@@ -26,6 +26,8 @@ interface TerminalLayoutProps {
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
   controller?: TerminalController | null;
+  /** Session-first mobile: skip Files/Env swipe panels (use Workspace instead). */
+  terminalOnly?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export function TerminalLayout({
   fontSizeManager,
   onGetTerminalPwd,
   controller,
+  terminalOnly = false,
 }: TerminalLayoutProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
@@ -160,6 +163,7 @@ export function TerminalLayout({
           fontSizeManager={fontSizeManager}
           onGetTerminalPwd={onGetTerminalPwd}
           controller={controller}
+          terminalOnly={terminalOnly}
         />
       </div>
 
