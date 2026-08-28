@@ -149,30 +149,26 @@ html {
   overflow-wrap: anywhere;
 }
 
-/* Session-first ChatGPT shell (V1) — light chrome + dark terminal well */
-.session-first-shell {
+/* Session-first ChatGPT shell (#492 V1) — Catppuccin Mocha base for the well */
+:root {
   --sf-terminal-well: #1e1e2e;
+}
+
+.session-first-shell {
+  /* Lock chrome to light semantic tokens even if a parent adds .dark later */
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  color-scheme: light;
-}
-
-.session-first-shell .terminal-well {
-  background-color: var(--sf-terminal-well);
-  color: oklch(0.985 0 0);
+  background-color: var(--background);
+  color: var(--foreground);
 }
