@@ -225,7 +225,7 @@ describe('SessionFirstShell', () => {
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
 
-  it('opens env manager from chrome and returns on back', async () => {
+  it('opens env manager from sidebar footer overflow and returns on back', async () => {
     renderShell();
     await userEvent.click(screen.getByTestId('session-first-overflow'));
     await userEvent.click(await screen.findByTestId('session-first-env'));
