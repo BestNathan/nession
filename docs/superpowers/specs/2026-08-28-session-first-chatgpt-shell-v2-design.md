@@ -20,7 +20,7 @@ Flag stays **off** until #472 PR7. Validate with `?session_first=1`.
 | Topic | Choice |
 |-------|--------|
 | Overflow placement | **Sidebar footer** — move `SessionFirstOverflowMenu` out of the header |
-| Row kill | Per-row **`⋯` menu** containing Kill (existing kill confirm dialog unchanged) |
+| Row kill | **Hover-reveal** Kill button on the row (no always-visible trash; no row `⋯`). Existing kill confirm dialog unchanged |
 | Search / filters / sort | **Search always visible**; All/Online/Offline + Name/Activity sort behind one compact disclosure |
 | Implementation | **Restyle-in-place** on existing `SessionList` / `SessionItem` / `SessionListHeader` / sidebar APIs |
 
@@ -57,8 +57,9 @@ Flag stays **off** until #472 PR7. Validate with `?session_first=1`.
 - Secondary: `shell · {agent} · {relative time}`  
 - Unhealthy agent: existing quiet copy / channel styling  
 - Selected: light muted background, `rounded-lg` (~8–12px), no left color rail  
-- Actions: `⋯` → **Kill** only (for V2). Tooltip / `aria-label` on the trigger  
-- Kill still calls the existing parent `onKill` → confirm dialog path
+- Actions: **Kill** icon button revealed on **row hover** (and `focus-within` / keyboard focus so it stays reachable without a pointer). Quiet ghost styling — not a permanent red outline control  
+- Touch / no-hover: also show actions when the row is **selected** (or via `focus-within`) so mobile is not stuck without Kill until V4 polish  
+- Kill still calls the existing parent `onKill` → confirm dialog path. Tooltip / `aria-label` on the button
 
 ### List chrome (`SessionList`)
 
