@@ -67,4 +67,37 @@ describe('TerminalCapsule', () => {
     );
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-disabled', 'true');
   });
+
+  it('applies safe-area and narrow sheet height classes', () => {
+    render(
+      <TerminalCapsule
+        mode="input"
+        onModeChange={vi.fn()}
+        expanded
+        onExpandedChange={vi.fn()}
+        inputPanel={<div data-testid="input-panel" />}
+        commandsPanel={<div />}
+      />,
+    );
+    const root = screen.getByTestId('terminal-capsule');
+    expect(root.className).toMatch(/bottom-\[max\(0\.75rem,env\(safe-area-inset-bottom\)\)\]/);
+    const sheet = screen.getByTestId('terminal-capsule-sheet');
+    expect(sheet.className).toMatch(/max-h-\[28vh\]/);
+    expect(sheet.className).toMatch(/lg:max-h-\[32vh\]/);
+  });
+
+  it('uses larger expand control on narrow viewports', () => {
+    render(
+      <TerminalCapsule
+        mode="input"
+        onModeChange={vi.fn()}
+        expanded={false}
+        onExpandedChange={vi.fn()}
+        inputPanel={<div />}
+        commandsPanel={<div />}
+      />,
+    );
+    const expand = screen.getByTestId('terminal-capsule-expand');
+    expect(expand.className).toMatch(/max-lg:size-11/);
+  });
 });

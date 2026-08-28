@@ -28,13 +28,13 @@ export function TerminalCapsule({
     <div
       data-testid="terminal-capsule"
       data-disabled={disabled ? 'true' : undefined}
-      className="absolute inset-x-3 bottom-3 z-10 flex flex-col gap-2"
+      className="absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-10 flex flex-col gap-2"
     >
       {expanded ? (
         <div
           data-testid="terminal-capsule-sheet"
           className={cn(
-            'max-h-[32vh] overflow-auto rounded-2xl',
+            'max-h-[28vh] overflow-auto rounded-2xl lg:max-h-[32vh]',
             'border border-border/60 bg-background/95 shadow-lg backdrop-blur-sm',
           )}
         >
@@ -46,12 +46,14 @@ export function TerminalCapsule({
         className={cn(
           'flex flex-row items-center gap-1 rounded-full',
           'border border-border/60 bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur-sm',
+          'max-lg:min-h-11 max-lg:py-2',
         )}
       >
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
+          className="max-lg:size-11"
           data-testid="terminal-capsule-expand"
           disabled={disabled}
           aria-label={expanded ? 'Collapse capsule' : 'Expand capsule'}
@@ -70,7 +72,7 @@ export function TerminalCapsule({
           type="button"
           variant={mode === 'input' ? 'secondary' : 'ghost'}
           size="sm"
-          className="rounded-full"
+          className="rounded-full max-lg:min-h-11 max-lg:px-3"
           data-testid="terminal-capsule-mode-input"
           disabled={disabled}
           onClick={() => onModeChange('input')}
@@ -81,7 +83,7 @@ export function TerminalCapsule({
           type="button"
           variant={mode === 'commands' ? 'secondary' : 'ghost'}
           size="sm"
-          className="rounded-full"
+          className="rounded-full max-lg:min-h-11 max-lg:px-3"
           data-testid="terminal-capsule-mode-commands"
           disabled={disabled}
           onClick={() => onModeChange('commands')}
