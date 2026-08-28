@@ -84,19 +84,8 @@ vi.mock('@/components/env/EnvManager', () => ({
     </div>
   ),
 }));
-vi.mock('@/session-first/SessionFirstChrome', () => ({
-  SessionFirstChrome: ({
-    onOpenEnv,
-    error,
-  }: {
-    onOpenEnv: () => void;
-    error: string | null;
-  }) => (
-    <div data-testid="session-first-chrome">
-      {error ? <div data-testid="session-first-error">{error}</div> : null}
-      <button type="button" data-testid="session-first-env" onClick={() => onOpenEnv()} />
-    </div>
-  ),
+vi.mock('@/components/ServerInfoMenu', () => ({
+  ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
 vi.mock('@/components/env/AttachDialog', () => ({
   AttachDialog: ({
@@ -174,6 +163,13 @@ describe('SessionFirstShell', () => {
     };
   });
 
+  it('applies session-first-shell class for light chrome lock', () => {
+    renderShell();
+    expect(screen.getByTestId('session-first-shell').className).toMatch(
+      /session-first-shell/,
+    );
+  });
+
   it('lists sessions without an Agent card grid', () => {
     renderShell();
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
@@ -231,7 +227,8 @@ describe('SessionFirstShell', () => {
 
   it('opens env manager from chrome and returns on back', async () => {
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-env'));
+    await userEvent.click(screen.getByTestId('session-first-overflow'));
+    await userEvent.click(await screen.findByTestId('session-first-env'));
     expect(screen.getByTestId('env-manager')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByTestId('env-manager')).not.toBeInTheDocument();

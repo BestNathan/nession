@@ -11,6 +11,7 @@ import {
 } from '@/session-first/patterns/WorkspaceNavigation';
 import { SessionDetails } from '@/session-first/SessionDetails';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
+import { TerminalWell } from '@/session-first/TerminalWell';
 import type { Agent, Session } from '@/types';
 
 function WorkspacePanel({
@@ -86,12 +87,19 @@ export function SessionFirstMain({
           onBackToSessions={onBackToSessions}
         />
       ) : null}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <SessionFirstTerminal
-          hidden={surface !== 'terminal' || !selectedSession}
-          onDisconnect={() => undefined}
-          onError={() => undefined}
-        />
+      <div className="relative flex min-h-0 flex-1 flex-col gap-0 p-3 pt-2">
+        <TerminalWell
+          className={cn(
+            'min-h-0',
+            (surface !== 'terminal' || !selectedSession) && 'hidden',
+          )}
+        >
+          <SessionFirstTerminal
+            hidden={surface !== 'terminal' || !selectedSession}
+            onDisconnect={() => undefined}
+            onError={() => undefined}
+          />
+        </TerminalWell>
         <WorkspacePanel
           hidden={surface !== 'workspace'}
           tool={tool}

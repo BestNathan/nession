@@ -30,7 +30,7 @@ export function SessionHeader({
   onBackToSessions,
 }: SessionHeaderProps) {
   return (
-    <header className="flex flex-row flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 lg:px-4">
+    <header className="flex flex-row flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
       {onBackToSessions ? (
         <Button
           type="button"
@@ -44,7 +44,7 @@ export function SessionHeader({
           <ChevronLeft className="size-5" />
         </Button>
       ) : null}
-      <h1 className="min-w-0 text-sm font-semibold">{sessionName}</h1>
+      <h1 className="min-w-0 text-base font-semibold">{sessionName}</h1>
       <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
       <div className="hidden text-xs sm:block [&_[data-testid^=channel-]]:gap-x-2">
         <ConnectionStatus state={state} />
