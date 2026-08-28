@@ -52,7 +52,12 @@ export function SessionFirstSidebar({
   const createDisabled = agents.every((agent) => agent.status !== 'online');
 
   return (
-    <aside className={cn('flex h-full w-full shrink-0 flex-col border-r lg:w-72', className)}>
+    <aside
+      className={cn(
+        'flex h-full w-full shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground lg:w-72',
+        className,
+      )}
+    >
       <SessionListHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}

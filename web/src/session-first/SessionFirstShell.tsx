@@ -35,7 +35,12 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
   if (state.showEnv) {
     return (
       <>
-        <EnvManager agents={data.agents} onBack={() => state.setShowEnv(false)} />
+        <div
+          data-testid="session-first-shell"
+          className="session-first-shell flex h-[100dvh] flex-col bg-background"
+        >
+          <EnvManager agents={data.agents} onBack={() => state.setShowEnv(false)} />
+        </div>
         {dialogs}
       </>
     );
@@ -43,7 +48,10 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
 
   return (
     <>
-      <div className="flex h-[100dvh] flex-col">
+      <div
+        data-testid="session-first-shell"
+        className="session-first-shell flex h-[100dvh] flex-col bg-background"
+      >
         <SessionFirstChrome
           connectionStatus={connectionStatus}
           error={data.error}
