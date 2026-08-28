@@ -129,7 +129,7 @@ Terminal surface only. Reuses InputPanel / QuickCommands semantics — **not** a
 | PR | Scope |
 |----|--------|
 | **V1** | Light shell tokens/chrome; thin header; dark Terminal well |
-| **V2** | SessionList / SessionItem history styling; sidebar footer overflow |
+| **V2** | SessionList / SessionItem history styling; sidebar footer overflow — see [`2026-08-28-session-first-chatgpt-shell-v2-design.md`](./2026-08-28-session-first-chatgpt-shell-v2-design.md) |
 | **V3** | Floating capsule; retire session-first BottomBar path |
 | **V4** | Narrow viewport polish (list XOR detail + capsule) |
 | **Then** | #472 **PR7** — `session_first` default on |
