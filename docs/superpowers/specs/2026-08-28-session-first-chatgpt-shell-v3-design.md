@@ -99,7 +99,7 @@ New `web/src/session-first/TerminalCapsule.tsx`. Session-first `TerminalLayout` 
 | PR | Scope |
 |----|--------|
 | **V3** (this doc) | Floating capsule; retire session-first BottomBar path |
-| V4 | Narrow viewport polish (list XOR detail + capsule) |
+| V4 | Narrow viewport polish — see [`2026-08-28-session-first-chatgpt-shell-v4-design.md`](./2026-08-28-session-first-chatgpt-shell-v4-design.md) |
 | Then | #472 PR7 |
 
 Worktree base: `origin/staging`. PR base: `staging`.
