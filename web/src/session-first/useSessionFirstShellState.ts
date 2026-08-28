@@ -21,7 +21,7 @@ export function useSessionFirstShellState() {
   } = data;
   const clientSessionId = useAtomValue(sessionIdAtom);
   const p2pConnection = useAtomValue(p2pConnectionAtom);
-  const { attachInFlightId, attachFailedId, attach } = useSessionFirstAttach();
+  const { attachDialogSession, requestAttach, confirmAttach, cancelAttach } = useSessionFirstAttach();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
@@ -40,8 +40,8 @@ export function useSessionFirstShellState() {
         agent: selectedAgent,
         staleAgentIds: staleAgents,
         clientSessionId,
-        attachInFlightId,
-        attachFailedId,
+        attachInFlightId: null,
+        attachFailedId: null,
       })
     : null;
 
@@ -63,8 +63,8 @@ export function useSessionFirstShellState() {
     setSelectedId(s.session_id);
     setSurface('terminal');
     setTool('files');
-    void attach(s);
-  }, [attach]);
+    requestAttach(s);
+  }, [requestAttach]);
 
   return {
     data,
@@ -78,8 +78,10 @@ export function useSessionFirstShellState() {
     domain,
     fileOps,
     clientSessionId,
-    attachInFlightId,
-    attachFailedId,
+    attachDialogSession,
+    requestAttach,
+    confirmAttach,
+    cancelAttach,
     onKilled,
     handleSelect,
     setSurface,

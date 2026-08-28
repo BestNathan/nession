@@ -25,6 +25,9 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
       sessionToKill={data.sessionToKill}
       setSessionToKill={data.setSessionToKill}
       onKilled={state.onKilled}
+      attachDialogSession={state.attachDialogSession}
+      onAttachConfirm={state.confirmAttach}
+      onAttachClose={state.cancelAttach}
     />
   );
 
@@ -53,8 +56,6 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
           staleAgents={data.staleAgents}
           selectedId={state.selectedId}
           clientSessionId={state.clientSessionId}
-          attachInFlightId={state.attachInFlightId}
-          attachFailedId={state.attachFailedId}
           loadingSessions={data.loadingSessions}
           searchQuery={data.searchQuery}
           setSearchQuery={data.setSearchQuery}

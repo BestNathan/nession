@@ -28,6 +28,7 @@ import { detectProfile, PROFILES } from '@/terminal/DeviceProfile';
 import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
 import { TerminalPane } from '@/terminal/components/TerminalPane';
+import { TerminalLayout } from '@/components/TerminalLayout';
 import { terminalSessionStateAtom, type TerminalStatus } from '@/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/terminal/state/ui';
 
@@ -99,7 +100,7 @@ function useReconnectBanner(opts: {
   reconnectCount: number;
   effectiveMode: 'p2p' | 'relay';
   wsService: WebSocketService;
-}) {
+}): ReconnectBanner {
   const { sessionId, terminalState, reconnectCount, effectiveMode, wsService } = opts;
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
   const setBanner = useSetAtom(bannerAtomFamily(sessionId));
@@ -132,6 +133,8 @@ function useReconnectBanner(opts: {
     setBanner(banner);
     setBannerAttempt(reconnectCount);
   }, [banner, reconnectCount, setBanner, setBannerAttempt]);
+
+  return banner;
 }
 
 function useEndRelayOnDisconnect(opts: {
@@ -246,7 +249,10 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
     deviceProfile,
   });
 
-  useReconnectBanner({ sessionId, terminalState, reconnectCount, effectiveMode, wsService });
+  const banner = useReconnectBanner({
+    sessionId, terminalState, reconnectCount, effectiveMode, wsService,
+  });
+  const toolbarDisabled = banner !== 'none' || isSwitching;
 
   useEffect(() => {
     if (!controller) { return; }
@@ -271,15 +277,30 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
           Select a session
         </div>
       ) : (
-        <KeepAliveSurface isSwitching={isSwitching}>
-          {terminalBody({
-            waitingForAddressPlan: isP2P && !addressPlan.ready,
-            modeGateOk: !(effectiveMode === 'p2p' && !p2pConnection),
-            sessionId,
-            controller,
-            reconnectCount,
-          })}
-        </KeepAliveSurface>
+        <TerminalLayout
+          terminalElement={(
+            <KeepAliveSurface isSwitching={isSwitching}>
+              {terminalBody({
+                waitingForAddressPlan: isP2P && !addressPlan.ready,
+                modeGateOk: !(effectiveMode === 'p2p' && !p2pConnection),
+                sessionId,
+                controller,
+                reconnectCount,
+              })}
+            </KeepAliveSurface>
+          )}
+          sessionId={sessionId}
+          sessionName={sessionName}
+          sendText={(text) => {
+            if (banner === 'none') {
+              controller?.send(text);
+            }
+          }}
+          onScrollPages={(pages) => controller?.scrollPages(pages)}
+          onScrollToBottom={() => controller?.scrollToBottom()}
+          toolbarDisabled={toolbarDisabled}
+          controller={controller}
+        />
       )}
     </div>
   );

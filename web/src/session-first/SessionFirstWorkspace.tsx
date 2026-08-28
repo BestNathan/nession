@@ -13,8 +13,6 @@ export interface SessionFirstWorkspaceProps {
   staleAgents: string[];
   selectedId: string | null;
   clientSessionId: string;
-  attachInFlightId: string | null;
-  attachFailedId: string | null;
   loadingSessions: boolean;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -46,8 +44,6 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     staleAgents,
     selectedId,
     clientSessionId,
-    attachInFlightId,
-    attachFailedId,
     loadingSessions,
     searchQuery,
     setSearchQuery,
@@ -80,8 +76,6 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
         staleAgents={staleAgents}
         selectedId={selectedId}
         clientSessionId={clientSessionId}
-        attachInFlightId={attachInFlightId}
-        attachFailedId={attachFailedId}
         loadingSessions={loadingSessions}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}

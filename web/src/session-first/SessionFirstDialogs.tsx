@@ -1,5 +1,6 @@
 import { CreateSessionDialog } from '@/components/CreateSessionDialog';
 import { KillConfirmDialog } from '@/components/KillConfirmDialog';
+import { AttachDialog, type AttachChoice } from '@/components/env/AttachDialog';
 import { useDashboard } from '@/hooks/useDashboard';
 import type { Session } from '@/types';
 
@@ -11,6 +12,9 @@ export function SessionFirstDialogs({
   sessionToKill,
   setSessionToKill,
   onKilled,
+  attachDialogSession,
+  onAttachConfirm,
+  onAttachClose,
 }: {
   showCreateModal: boolean;
   setShowCreateModal: (show: boolean) => void;
@@ -19,6 +23,9 @@ export function SessionFirstDialogs({
   sessionToKill: Session | null;
   setSessionToKill: (session: Session | null) => void;
   onKilled: () => void;
+  attachDialogSession: Session | null;
+  onAttachConfirm: (session: Session, choice: AttachChoice) => void;
+  onAttachClose: () => void;
 }) {
   return (
     <>
@@ -34,6 +41,12 @@ export function SessionFirstDialogs({
         onClose={() => setSessionToKill(null)}
         session={sessionToKill}
         onKilled={onKilled}
+      />
+      <AttachDialog
+        isOpen={attachDialogSession !== null}
+        onClose={onAttachClose}
+        session={attachDialogSession}
+        onConfirm={onAttachConfirm}
       />
     </>
   );
