@@ -36,9 +36,10 @@ export function SessionItem({
 }: SessionItemProps) {
   return (
     <div
+      data-testid="session-item-row"
       className={cn(
-        'flex items-start gap-1 px-2 py-1 transition-colors',
-        selected && 'bg-accent',
+        'group flex items-start gap-1 rounded-lg px-2 py-1.5 transition-colors',
+        selected && 'bg-muted',
       )}
     >
       <button
@@ -63,11 +64,16 @@ export function SessionItem({
             render={
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                size="icon"
+                variant="ghost"
                 data-testid={`session-kill-${session.session_id}`}
                 aria-label="Kill session"
-                className="mt-1 size-8 shrink-0 text-destructive border-destructive hover:bg-destructive/10"
+                className={cn(
+                  'mt-0.5 size-8 shrink-0 text-muted-foreground hover:text-destructive',
+                  'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
+                  'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                  selected && 'opacity-100 pointer-events-auto',
+                )}
                 onClick={(event) => {
                   event.stopPropagation();
                   onKill(session);

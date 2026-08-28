@@ -38,6 +38,7 @@ describe('SessionItem', () => {
   });
 
   it('calls onKill without selecting when kill is clicked', async () => {
+    const user = userEvent.setup();
     const onSelect = vi.fn();
     const onKill = vi.fn();
     render(
@@ -50,8 +51,67 @@ describe('SessionItem', () => {
         onKill={onKill}
       />,
     );
-    await userEvent.click(screen.getByTestId('session-kill-a1:fix'));
+    const row = screen.getByTestId('session-item-row');
+    await user.hover(row);
+    const kill = screen.getByTestId('session-kill-a1:fix');
+    await user.click(kill);
     expect(onKill).toHaveBeenCalledWith(session);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('reveals kill on hover and does not select when kill is clicked', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onKill = vi.fn();
+    render(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={onSelect}
+        onKill={onKill}
+      />,
+    );
+    const row = screen.getByTestId('session-item-row');
+    await user.hover(row);
+    const kill = await screen.findByTestId('session-kill-a1:fix');
+    await user.click(kill);
+    expect(onKill).toHaveBeenCalledWith(session);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('shows kill when selected even without hover', () => {
+    render(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected
+        onSelect={vi.fn()}
+        onKill={vi.fn()}
+      />,
+    );
+    const kill = screen.getByTestId('session-kill-a1:fix');
+    expect(kill).toBeInTheDocument();
+    expect(kill.className).toMatch(/opacity-100/);
+    expect(kill.className).toMatch(/pointer-events-auto/);
+  });
+
+  it('keeps kill in DOM when not selected or hovered', () => {
+    render(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+        onKill={vi.fn()}
+      />,
+    );
+    const kill = screen.getByTestId('session-kill-a1:fix');
+    expect(kill).toBeInTheDocument();
+    expect(kill.className).toMatch(/opacity-0/);
+    expect(kill.className).toMatch(/pointer-events-none/);
   });
 });
