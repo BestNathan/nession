@@ -25,13 +25,12 @@ export function SessionFirstOverflowMenu({
             variant="ghost"
             size="icon"
             className="size-9"
+            data-testid="session-first-overflow"
             aria-label="More"
           />
         }
       >
-        <span data-testid="session-first-overflow">
-          <Ellipsis className="size-4" />
-        </span>
+        <Ellipsis className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-48">
         <DropdownMenuItem
