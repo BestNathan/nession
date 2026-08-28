@@ -13,8 +13,8 @@ export interface SessionListProps {
   staleAgentIds: Iterable<string>;
   selectedId: string | null;
   clientSessionId: string;
-  attachInFlightId: string | null;
-  attachFailedId: string | null;
+  attachInFlightId?: string | null;
+  attachFailedId?: string | null;
   loading?: boolean;
   isSearchActive?: boolean;
   sortField?: SortField;
@@ -58,8 +58,8 @@ export function SessionList({
   staleAgentIds,
   selectedId,
   clientSessionId,
-  attachInFlightId,
-  attachFailedId,
+  attachInFlightId = null,
+  attachFailedId = null,
   loading = false,
   isSearchActive = false,
   sortField,

@@ -9,8 +9,6 @@ export interface SessionFirstSidebarProps {
   staleAgents: string[];
   selectedId: string | null;
   clientSessionId: string;
-  attachInFlightId: string | null;
-  attachFailedId: string | null;
   loadingSessions: boolean;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -32,8 +30,6 @@ export function SessionFirstSidebar({
   staleAgents,
   selectedId,
   clientSessionId,
-  attachInFlightId,
-  attachFailedId,
   loadingSessions,
   searchQuery,
   setSearchQuery,
@@ -72,8 +68,6 @@ export function SessionFirstSidebar({
         staleAgentIds={staleAgents}
         selectedId={selectedId}
         clientSessionId={clientSessionId}
-        attachInFlightId={attachInFlightId}
-        attachFailedId={attachFailedId}
         loading={loadingSessions}
         isSearchActive={isSearchActive}
         sortField={sortField}

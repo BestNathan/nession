@@ -38,6 +38,13 @@ vi.mock('@/terminal/components/TerminalPane', () => ({
     <div data-testid="terminal-pane">{sessionId}</div>
   ),
 }));
+vi.mock('@/components/TerminalLayout', () => ({
+  TerminalLayout: ({
+    terminalElement,
+  }: {
+    terminalElement: React.ReactNode;
+  }) => <div data-testid="terminal-layout">{terminalElement}</div>,
+}));
 
 function renderTerminal(hidden: boolean, store = createStore()) {
   const onDisconnect = vi.fn();
@@ -81,6 +88,13 @@ describe('SessionFirstTerminal', () => {
     const root = screen.getByTestId('session-first-terminal');
     expect(root).toHaveTextContent('Select a session');
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('renders TerminalLayout when a session is attached', () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'agent:sess');
+    renderTerminal(false, store);
+    expect(screen.getByTestId('terminal-layout')).toBeInTheDocument();
   });
 
   it('keeps TerminalPane mounted when hidden while a session is attached', () => {

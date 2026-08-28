@@ -46,6 +46,17 @@ const dashboard = vi.hoisted(() => ({
   },
 }));
 
+const attachChoice = vi.hoisted(() => ({
+  mode: 'auto' as const,
+  attachInfo: { mode: 'relay' as const, session_id: 'a1:fix' },
+  orderedUrls: [] as string[],
+  latencies: [] as never[],
+  selectedUrl: null,
+  relayUrl: null,
+  renderer: 'canvas' as const,
+  envRefs: [],
+}));
+
 vi.mock('@/hooks/useDashboard', () => ({
   useDashboard: () => dashboard.current,
 }));
@@ -87,25 +98,29 @@ vi.mock('@/session-first/SessionFirstChrome', () => ({
     </div>
   ),
 }));
+vi.mock('@/components/env/AttachDialog', () => ({
+  AttachDialog: ({
+    isOpen,
+    onConfirm,
+    session,
+  }: {
+    isOpen: boolean;
+    onConfirm: (s: Session, c: typeof attachChoice) => void;
+    session: Session | null;
+  }) =>
+    isOpen && session ? (
+      <div data-testid="attach-dialog">
+        <button
+          type="button"
+          data-testid="attach-confirm"
+          onClick={() => onConfirm(session, attachChoice)}
+        />
+      </div>
+    ) : null,
+}));
 vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({ requestAttach: vi.fn() }),
 }));
-vi.mock('@/services/deepLinkAttach', () => ({
-  resolveDeepLinkAttachChoice: vi.fn(),
-}));
-
-import { resolveDeepLinkAttachChoice } from '@/services/deepLinkAttach';
-
-const attachChoice = {
-  mode: 'auto' as const,
-  attachInfo: { mode: 'relay' as const, session_id: 'a1:fix' },
-  orderedUrls: [] as string[],
-  latencies: [] as never[],
-  selectedUrl: null,
-  relayUrl: null,
-  renderer: 'canvas' as const,
-  envRefs: [],
-};
 
 function renderShell() {
   const store = createStore();
@@ -119,16 +134,8 @@ function renderShell() {
   return { store, ...view };
 }
 
-const sessB: Session = {
-  ...sess,
-  session_id: 'a1:other',
-  session_name: 'Other session',
-};
-
 describe('SessionFirstShell', () => {
   beforeEach(() => {
-    vi.mocked(resolveDeepLinkAttachChoice).mockReset();
-    vi.mocked(resolveDeepLinkAttachChoice).mockResolvedValue(attachChoice);
     dashboard.current = {
       ...dashboard.current,
       agents: [agent],
@@ -212,57 +219,18 @@ describe('SessionFirstShell', () => {
     expect(screen.getByTestId('session-first-error')).toHaveTextContent('load failed');
   });
 
-  it('attaches via resolveDeepLinkAttachChoice and writes sessionIdAtom', async () => {
+  it('opens attach dialog when a session is selected', async () => {
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
+  });
+
+  it('writes sessionIdAtom when attach is confirmed', async () => {
     const { store } = renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await waitFor(() => {
-      expect(resolveDeepLinkAttachChoice).toHaveBeenCalledWith(
-        expect.anything(),
-        sess,
-        expect.any(Map),
-      );
-    });
+    await userEvent.click(screen.getByTestId('attach-confirm'));
     await waitFor(() => {
       expect(store.get(sessionIdAtom)).toBe('a1:fix');
     });
-  });
-
-  it('shows Attach failed and does not write sessionIdAtom when resolve throws', async () => {
-    vi.mocked(resolveDeepLinkAttachChoice).mockRejectedValueOnce(new Error('nope'));
-    const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await waitFor(() => {
-      expect(screen.getByText('Attach failed')).toBeInTheDocument();
-    });
-    expect(store.get(sessionIdAtom)).toBe('');
-  });
-
-  it('ignores a slower first attach after a later selection', async () => {
-    dashboard.current = {
-      ...dashboard.current,
-      agents: [agent],
-      sessions: [sess, sessB],
-      filteredSessions: [sess, sessB],
-    };
-    let resolveA: (value: typeof attachChoice) => void = () => undefined;
-    const promiseA = new Promise<typeof attachChoice>((resolve) => {
-      resolveA = resolve;
-    });
-    vi.mocked(resolveDeepLinkAttachChoice)
-      .mockReturnValueOnce(promiseA)
-      .mockResolvedValueOnce(attachChoice);
-
-    const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await userEvent.click(screen.getByTestId('session-item-a1:other'));
-    await waitFor(() => {
-      expect(store.get(sessionIdAtom)).toBe('a1:other');
-    });
-    resolveA(attachChoice);
-    await promiseA;
-    await waitFor(() => {
-      expect(store.get(sessionIdAtom)).toBe('a1:other');
-    });
-    expect(store.get(sessionIdAtom)).not.toBe('a1:fix');
   });
 });
