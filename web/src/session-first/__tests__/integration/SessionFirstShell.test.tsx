@@ -26,7 +26,7 @@ const dashboard = vi.hoisted(() => ({
     filteredSessions: [] as Session[],
     loadingSessions: false,
     sessionsLoaded: true,
-    error: null,
+    error: null as string | null,
     fetchSessions: vi.fn(),
     clearError: vi.fn(),
     searchQuery: '',
@@ -66,6 +66,27 @@ vi.mock('@/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
+vi.mock('@/components/env/EnvManager', () => ({
+  EnvManager: ({ onBack }: { onBack: () => void }) => (
+    <div data-testid="env-manager">
+      <button type="button" onClick={() => onBack()}>Back</button>
+    </div>
+  ),
+}));
+vi.mock('@/session-first/SessionFirstChrome', () => ({
+  SessionFirstChrome: ({
+    onOpenEnv,
+    error,
+  }: {
+    onOpenEnv: () => void;
+    error: string | null;
+  }) => (
+    <div data-testid="session-first-chrome">
+      {error ? <div data-testid="session-first-error">{error}</div> : null}
+      <button type="button" data-testid="session-first-env" onClick={() => onOpenEnv()} />
+    </div>
+  ),
+}));
 vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({ requestAttach: vi.fn() }),
 }));
@@ -91,7 +112,7 @@ function renderShell() {
   const view = render(
     <Provider store={store}>
       <MemoryRouter>
-        <SessionFirstShell onLegacy={vi.fn()} />
+        <SessionFirstShell connectionStatus="authenticated" onLegacy={vi.fn()} />
       </MemoryRouter>
     </Provider>,
   );
@@ -172,6 +193,23 @@ describe('SessionFirstShell', () => {
     };
     renderShell();
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
+  });
+
+  it('opens env manager from chrome and returns on back', async () => {
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-first-env'));
+    expect(screen.getByTestId('env-manager')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.queryByTestId('env-manager')).not.toBeInTheDocument();
+  });
+
+  it('shows dashboard error via chrome', () => {
+    dashboard.current = {
+      ...dashboard.current,
+      error: 'load failed',
+    };
+    renderShell();
+    expect(screen.getByTestId('session-first-error')).toHaveTextContent('load failed');
   });
 
   it('attaches via resolveDeepLinkAttachChoice and writes sessionIdAtom', async () => {

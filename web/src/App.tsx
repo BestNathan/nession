@@ -63,6 +63,7 @@ function App() {
           <WebSocketContext.Provider value={wsService!}>
             {sessionFirst ? (
               <SessionFirstShell
+                connectionStatus={connectionStatus}
                 onLegacy={() => {
                   setSessionFirst(false);
                   setSessionFirstOn(false);
