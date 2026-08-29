@@ -100,4 +100,25 @@ describe('TerminalCapsule', () => {
     const expand = screen.getByTestId('terminal-capsule-expand');
     expect(expand.className).toMatch(/max-lg:size-11/);
   });
+
+  it('applies motion tokens to expand and mode controls', () => {
+    render(
+      <TerminalCapsule
+        mode="input"
+        onModeChange={vi.fn()}
+        expanded={false}
+        onExpandedChange={vi.fn()}
+        inputPanel={<div />}
+        commandsPanel={<div />}
+      />,
+    );
+    const expand = screen.getByTestId('terminal-capsule-expand');
+    expect(expand.className).toMatch(/duration-\[var\(--sf-motion\)\]/);
+    expect(screen.getByTestId('terminal-capsule-mode-input').className).toMatch(
+      /duration-\[var\(--sf-motion\)\]/,
+    );
+    expect(screen.getByTestId('terminal-capsule-mode-commands').className).toMatch(
+      /duration-\[var\(--sf-motion\)\]/,
+    );
+  });
 });
