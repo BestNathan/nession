@@ -53,7 +53,7 @@ export function TerminalCapsule({
           type="button"
           variant="ghost"
           size="icon-sm"
-          className="max-lg:size-11"
+          className="max-lg:size-11 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
           data-testid="terminal-capsule-expand"
           disabled={disabled}
           aria-label={expanded ? 'Collapse capsule' : 'Expand capsule'}
@@ -72,7 +72,7 @@ export function TerminalCapsule({
           type="button"
           variant={mode === 'input' ? 'secondary' : 'ghost'}
           size="sm"
-          className="rounded-full max-lg:min-h-11 max-lg:px-3"
+          className="rounded-full max-lg:min-h-11 max-lg:px-3 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
           data-testid="terminal-capsule-mode-input"
           disabled={disabled}
           onClick={() => onModeChange('input')}
@@ -83,7 +83,7 @@ export function TerminalCapsule({
           type="button"
           variant={mode === 'commands' ? 'secondary' : 'ghost'}
           size="sm"
-          className="rounded-full max-lg:min-h-11 max-lg:px-3"
+          className="rounded-full max-lg:min-h-11 max-lg:px-3 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
           data-testid="terminal-capsule-mode-commands"
           disabled={disabled}
           onClick={() => onModeChange('commands')}

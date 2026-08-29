@@ -180,9 +180,11 @@ describe('SessionFirstShell', () => {
 
   it('applies safe-area padding to sidebar footer', () => {
     renderShell();
-    expect(screen.getByTestId('session-first-sidebar-footer').className).toMatch(
+    const footer = screen.getByTestId('session-first-sidebar-footer');
+    expect(footer.className).toMatch(
       /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
     );
+    expect(footer.className).toMatch(/sf-space|var\(--sf-space/);
   });
 
   it('lists sessions without an Agent card grid', () => {
