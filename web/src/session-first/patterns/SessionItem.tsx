@@ -38,7 +38,7 @@ export function SessionItem({
     <div
       data-testid="session-item-row"
       className={cn(
-        'group flex items-start gap-1 rounded-lg px-2 py-1.5 transition-colors',
+        'group flex items-start gap-1 rounded-lg px-[var(--sf-space-3)] py-[var(--sf-space-2)] transition-colors',
         selected && 'bg-muted',
       )}
     >

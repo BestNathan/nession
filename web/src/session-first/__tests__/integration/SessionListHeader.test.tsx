@@ -69,4 +69,14 @@ describe('SessionListHeader', () => {
     render(<SessionListHeader {...baseProps} />);
     expect(screen.getByTestId('session-first-create').className).toMatch(/max-lg:min-h-11/);
   });
+
+  it('uses design tokens for root spacing and create transition', () => {
+    const { container } = render(<SessionListHeader {...baseProps} />);
+    const root = container.firstElementChild;
+    expect(root).not.toBeNull();
+    expect(root!.className).toMatch(/sf-space|var\(--sf-space/);
+    expect(screen.getByTestId('session-first-create').className).toMatch(
+      /duration-\[var\(--sf-motion\)\]/,
+    );
+  });
 });
