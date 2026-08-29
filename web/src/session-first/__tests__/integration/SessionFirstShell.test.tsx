@@ -170,6 +170,14 @@ describe('SessionFirstShell', () => {
     );
   });
 
+  it('applies data-sf-design polish token overlay on shell root', () => {
+    renderShell();
+    expect(screen.getByTestId('session-first-shell')).toHaveAttribute(
+      'data-sf-design',
+      'polish',
+    );
+  });
+
   it('applies safe-area padding to sidebar footer', () => {
     renderShell();
     expect(screen.getByTestId('session-first-sidebar-footer').className).toMatch(
