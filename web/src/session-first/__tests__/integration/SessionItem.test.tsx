@@ -93,4 +93,18 @@ describe('SessionItem', () => {
     expect(kill.className).toMatch(/opacity-0/);
     expect(kill.className).toMatch(/pointer-events-none/);
   });
+
+  it('uses design tokens for row spacing', () => {
+    render(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    const row = screen.getByTestId('session-item-row');
+    expect(row.className).toMatch(/sf-space|var\(--sf-space/);
+  });
 });

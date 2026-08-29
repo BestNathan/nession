@@ -30,13 +30,13 @@ export function SessionHeader({
   onBackToSessions,
 }: SessionHeaderProps) {
   return (
-    <header className="flex flex-row flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2.5 max-lg:gap-x-2 lg:px-4 lg:py-3">
+    <header className="flex flex-row flex-wrap items-center gap-x-[var(--sf-space-3)] gap-y-[var(--sf-space-2)] border-b px-[var(--sf-space-3)] py-[var(--sf-space-3)] max-lg:gap-x-[var(--sf-space-2)] lg:px-[var(--sf-space-4)] lg:py-[var(--sf-space-3)]">
       {onBackToSessions ? (
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="size-9 shrink-0 max-lg:size-11 lg:hidden"
+          className="size-9 shrink-0 max-lg:size-11 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)] lg:hidden"
           aria-label="Back to sessions"
           data-testid="session-first-back-to-list"
           onClick={() => onBackToSessions()}

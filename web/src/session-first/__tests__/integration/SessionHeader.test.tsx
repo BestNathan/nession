@@ -63,4 +63,23 @@ describe('SessionHeader', () => {
     const back = screen.getByTestId('session-first-back-to-list');
     expect(back.className).toMatch(/max-lg:size-11/);
   });
+
+  it('uses design tokens for header spacing and back transition', () => {
+    render(
+      <SessionHeader
+        sessionName="demo"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onBackToSessions={vi.fn()}
+      />,
+    );
+    const header = screen.getByRole('banner');
+    expect(header.className).toMatch(/sf-space|var\(--sf-space/);
+    const back = screen.getByTestId('session-first-back-to-list');
+    expect(back.className).toMatch(/max-lg:size-11/);
+    expect(back.className).toMatch(/duration-\[var\(--sf-motion\)\]/);
+  });
 });
