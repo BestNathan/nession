@@ -1,5 +1,7 @@
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
+import { SessionFirstSpatialLayout } from '@/session-first/SessionFirstSpatialLayout';
+import { useAppSpatialIndex } from '@/session-first/app-spatial/useAppSpatialIndex';
 import { cn } from '@/lib/utils';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { DomainState } from '@/session-first/domainState';
@@ -36,6 +38,7 @@ export interface SessionFirstWorkspaceProps {
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
+  isWide: boolean;
   showList: boolean;
   showDetail: boolean;
   onBackToSessions?: () => void;
@@ -45,76 +48,58 @@ export interface SessionFirstWorkspaceProps {
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   const {
-    agents,
-    filteredSessions,
-    staleAgents,
-    selectedId,
-    clientSessionId,
-    loadingSessions,
-    searchQuery,
-    setSearchQuery,
-    statusFilter,
-    setStatusFilter,
-    sortField,
-    sortDirection,
-    toggleSort,
-    isSearchActive,
-    selectedSession,
-    selectedAgent,
-    domain,
-    surface,
-    tool,
-    fileOps,
-    onCreate,
-    onRefresh,
-    onSelect,
-    onKill,
-    onSurfaceChange,
-    onToolChange,
-    onOpenAgent,
-    showList,
-    showDetail,
-    onBackToSessions,
-    onOpenEnv,
-    onLegacy,
+    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
+    sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
+    selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
+    onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
+    showDetail, onBackToSessions, onOpenEnv, onLegacy,
   } = props;
+
+  const useSpatial = !isWide && selectedId !== null;
+  const { spatialIndex, onIndexChange, onSpatialSelect } = useAppSpatialIndex({
+    selectedId,
+    surface,
+    active: useSpatial,
+    onSurfaceChange,
+    onSelect,
+  });
+
+  const sidebarProps = {
+    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
+    sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
+    onKill, onOpenEnv, onLegacy,
+  };
+
+  const mainShared = {
+    selectedSession, selectedAgent, domain, tool, fileOps,
+    onSurfaceChange, onToolChange, onOpenAgent,
+  };
+
+  if (useSpatial) {
+    return (
+      <SessionFirstSpatialLayout
+        spatialIndex={spatialIndex}
+        onIndexChange={onIndexChange}
+        sidebarProps={sidebarProps}
+        onSpatialSelect={onSpatialSelect}
+        mainShared={mainShared}
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1">
       <SessionFirstSidebar
         className={cn(!showList && 'hidden lg:flex')}
-        agents={agents}
-        filteredSessions={filteredSessions}
-        staleAgents={staleAgents}
-        selectedId={selectedId}
-        clientSessionId={clientSessionId}
-        loadingSessions={loadingSessions}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        sortField={sortField}
-        sortDirection={sortDirection}
-        toggleSort={toggleSort}
-        isSearchActive={isSearchActive}
-        onCreate={onCreate}
-        onRefresh={onRefresh}
+        {...sidebarProps}
         onSelect={onSelect}
-        onKill={onKill}
-        onOpenEnv={onOpenEnv}
-        onLegacy={onLegacy}
       />
       <main className={cn('flex min-h-0 flex-1 flex-col', !showDetail && 'hidden lg:flex')}>
         <SessionFirstMain
-          selectedSession={selectedSession}
-          selectedAgent={selectedAgent}
-          domain={domain}
+          {...mainShared}
           surface={surface}
-          tool={tool}
-          fileOps={fileOps}
-          onSurfaceChange={onSurfaceChange}
-          onToolChange={onToolChange}
-          onOpenAgent={onOpenAgent}
           onBackToSessions={onBackToSessions}
         />
       </main>

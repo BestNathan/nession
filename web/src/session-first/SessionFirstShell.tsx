@@ -96,6 +96,7 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
               state.setSurface('workspace');
               state.setTool('agent');
             }}
+            isWide={state.isWide}
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}

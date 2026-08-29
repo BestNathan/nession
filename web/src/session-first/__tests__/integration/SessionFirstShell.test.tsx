@@ -150,6 +150,7 @@ describe('SessionFirstShell', () => {
     deepLink.sessionIdFromUrl = null;
     mobileNav.showList = true;
     mobileNav.showDetail = true;
+    mobileNav.isWide = true;
     mobileNav.openDetail.mockClear();
     mobileNav.openList.mockClear();
     dashboard.current = {
@@ -289,11 +290,33 @@ describe('SessionFirstShell', () => {
   });
 
   it('shows back control that returns to the session list on mobile detail', async () => {
+    mobileNav.isWide = true;
     mobileNav.showList = false;
     mobileNav.showDetail = true;
     renderShell();
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByTestId('session-first-back-to-list'));
     expect(mobileNav.openList).toHaveBeenCalled();
+  });
+
+  it('mounts AppSpatialShell on mobile when a session is selected (no XOR back)', async () => {
+    mobileNav.isWide = false;
+    mobileNav.showList = true;
+    mobileNav.showDetail = false;
+    renderShell();
+    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-first-back-to-list')).not.toBeInTheDocument();
+  });
+
+  it('does not mount AppSpatialShell on desktop after selecting a session', async () => {
+    mobileNav.isWide = true;
+    mobileNav.showList = true;
+    mobileNav.showDetail = true;
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
   });
 });
