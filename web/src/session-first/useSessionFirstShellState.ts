@@ -29,7 +29,8 @@ export function useSessionFirstShellState() {
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<WorkspaceToolId>('files');
   const [showEnv, setShowEnv] = useState(false);
-  const { showList, showDetail, openDetail, openList } = useSessionFirstMobileNav(selectedId);
+  const { isWide, showList, showDetail, openDetail, openList } =
+    useSessionFirstMobileNav(selectedId);
 
   const selectedSession = selectedId
     ? sessions.find((session) => session.session_id === selectedId) ?? null
@@ -106,6 +107,7 @@ export function useSessionFirstShellState() {
     setSurface,
     setTool,
     isRestoringDeepLink,
+    isWide,
     showList,
     showDetail,
     openList,

@@ -58,6 +58,10 @@ export interface SessionFirstMainProps {
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
+  /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
+  showTerminal?: boolean;
+  /** Spatial shell: omit workspace panel on the Terminal page. */
+  showWorkspace?: boolean;
 }
 
 export function SessionFirstMain({
@@ -71,6 +75,8 @@ export function SessionFirstMain({
   onToolChange,
   onOpenAgent,
   onBackToSessions,
+  showTerminal = true,
+  showWorkspace = true,
 }: SessionFirstMainProps) {
   return (
     <>
@@ -88,27 +94,31 @@ export function SessionFirstMain({
         />
       ) : null}
       <div className="relative flex min-h-0 flex-1 flex-col gap-0 p-3 pt-2">
-        <TerminalWell
-          className={cn(
-            'min-h-0',
-            (surface !== 'terminal' || !selectedSession) && 'hidden',
-          )}
-        >
-          <SessionFirstTerminal
-            hidden={surface !== 'terminal' || !selectedSession}
-            onDisconnect={() => undefined}
-            onError={() => undefined}
+        {showTerminal ? (
+          <TerminalWell
+            className={cn(
+              'min-h-0',
+              (surface !== 'terminal' || !selectedSession) && 'hidden',
+            )}
+          >
+            <SessionFirstTerminal
+              hidden={surface !== 'terminal' || !selectedSession}
+              onDisconnect={() => undefined}
+              onError={() => undefined}
+            />
+          </TerminalWell>
+        ) : null}
+        {showWorkspace ? (
+          <WorkspacePanel
+            hidden={surface !== 'workspace'}
+            tool={tool}
+            onToolChange={onToolChange}
+            fileOps={fileOps}
+            session={selectedSession}
+            agent={selectedAgent}
+            domain={domain}
           />
-        </TerminalWell>
-        <WorkspacePanel
-          hidden={surface !== 'workspace'}
-          tool={tool}
-          onToolChange={onToolChange}
-          fileOps={fileOps}
-          session={selectedSession}
-          agent={selectedAgent}
-          domain={domain}
-        />
+        ) : null}
       </div>
     </>
   );
