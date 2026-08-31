@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/session-first/capsule/TerminalCapsule';
 
@@ -97,5 +97,20 @@ describe('TerminalCapsule', () => {
     const input = screen.getByTestId('capsule-ghost-input');
     expect(input.className).toMatch(/focus-visible:outline-none/);
     expect(input.className).toMatch(/border-0/);
+  });
+
+  it('exposes flat layout by default and stacked on desktop multiline input', async () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    const root = screen.getByTestId('terminal-capsule');
+    expect(root).toHaveAttribute('data-layout', 'flat');
+    expect(root).toHaveAttribute('data-dock-height', 'single');
+
+    const input = screen.getByTestId('capsule-ghost-input');
+    await userEvent.type(input, 'line1{Shift>}{Enter}{/Shift}line2');
+
+    await waitFor(() => {
+      expect(root).toHaveAttribute('data-layout', 'stacked');
+    });
+    expect(root).toHaveAttribute('data-dock-height', 'multi');
   });
 });

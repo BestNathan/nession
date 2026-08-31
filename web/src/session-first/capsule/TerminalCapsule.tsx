@@ -8,7 +8,7 @@ import {
   type CapsuleMode,
   type CapsulePopoverId,
   type CapsuleVariant,
-  type DockHeight,
+  type ComposerLayout,
 } from '@/session-first/capsule/types';
 
 export interface TerminalCapsuleProps {
@@ -27,7 +27,7 @@ export function TerminalCapsule({
   onModeChange,
 }: TerminalCapsuleProps) {
   const [openPopover, setOpenPopover] = useState<CapsulePopoverId | null>(null);
-  const [dockHeight, setDockHeight] = useState<DockHeight>('single');
+  const [layout, setLayout] = useState<ComposerLayout>('flat');
 
   const historyOpen = openPopover === 'history';
   const commandsOpen = openPopover === 'commands';
@@ -45,13 +45,13 @@ export function TerminalCapsule({
   const activeMode = isMobile ? mode : 'input';
   const allowMultiLineGrowth = !isMobile || activeMode === 'input';
   const isCommandsMode = isMobile && activeMode === 'commands';
-  const isExpanded = allowMultiLineGrowth && dockHeight === 'multi';
 
   return (
     <div
       data-testid="terminal-capsule"
       data-disabled={disabled ? 'true' : undefined}
-      data-dock-height={isExpanded ? 'multi' : 'single'}
+      data-layout={isCommandsMode ? undefined : layout}
+      data-dock-height={isCommandsMode ? 'single' : dockHeightFromLayout(layout)}
       className={cn(
         'absolute z-10 flex flex-col',
         'bottom-[max(0.75rem,env(safe-area-inset-bottom))]',
@@ -67,7 +67,7 @@ export function TerminalCapsule({
           'bg-[var(--sf-capsule-surface)] text-foreground',
           // Always rounded-3xl — avoid pill↔rect snap that feels hard
           'rounded-3xl px-2 py-1.5',
-          isCommandsMode ? 'min-h-11 items-center gap-2' : 'items-end',
+          isCommandsMode ? 'min-h-11 items-center gap-2' : 'items-stretch',
         )}
       >
         {isCommandsMode && onModeChange ? (
@@ -95,11 +95,7 @@ export function TerminalCapsule({
                 <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
               ) : null
             }
-            onLayoutChange={
-              allowMultiLineGrowth
-                ? (nextLayout) => setDockHeight(dockHeightFromLayout(nextLayout))
-                : undefined
-            }
+            onLayoutChange={allowMultiLineGrowth ? setLayout : undefined}
           />
         )}
       </div>
