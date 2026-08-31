@@ -43,10 +43,51 @@ Replace the session-first **TerminalCapsule** interaction with a capsule-native 
 ## Visual language
 
 - Dock sits inside `TerminalWell`, `absolute` bottom, `inset-x` + safe-area (unchanged positioning tokens).
-- Background: dark glass on well — e.g. `bg-[var(--sf-terminal-well)]/95`, `border-t border-white/10`, **`rounded-t-2xl`** (top only; bottom flush with well).
+- Background: dark glass on well — see **Design tokens** below; **`rounded-t-2xl`** (top only; bottom flush with well).
 - Popovers: same dark family, max-height ~45vh, internal scroll — **not** legacy `bg-background/95` sheet.
-- Motion: 150–250ms height/opacity; respect `prefers-reduced-motion`.
-- Touch: primary controls ≥44px under `max-lg`.
+- Motion: `--sf-motion` / `--sf-ease`; respect `prefers-reduced-motion`.
+- Touch: primary controls ≥44px under `max-lg` (documented business override — see tokens table).
+
+---
+
+## Design tokens
+
+Capsule uses a **hybrid** token model: session-first overlay (`--sf-*`) for terminal-well chrome, codegen semantic/experience tokens where they fit, and capsule-specific surfaces where the business language differs from Dashboard Web controls. **Do not** force every class onto codegen; **do** avoid primitive Tailwind colors and arbitrary hex in TSX (`nession/no-primitive-tokens`).
+
+### Three layers
+
+| Layer | Source | Validated by | Capsule role |
+|-------|--------|--------------|--------------|
+| Codegen | `design/tokens/*.json` → `design/generated/web.css` | `just tokens-check`, ESLint | Shared semantics, reusable control sizing |
+| Session-first overlay | `.session-first-shell` in `web/src/index.css` (`--sf-*`) | Manual review | Shell rhythm, well color, motion |
+| Component Tailwind | TSX class strings | ESLint (no primitives) | Prefer `var(--…)` / semantic utilities |
+
+**Why not full codegen bind:** `domain.terminal.background` refs `semantic.background` (light in session-first). The well is Catppuccin Mocha (`--sf-terminal-well`) — a product decision outside JSON. The dock sits **on** the dark well, not on a Dashboard card surface.
+
+### Token mapping (implementation checklist)
+
+| Capsule element | Token / pattern | Layer | Notes |
+|-----------------|-----------------|-------|-------|
+| Well + dock base | `--sf-terminal-well` | SF overlay | e.g. `bg-[var(--sf-terminal-well)]/95` |
+| Dock top border | `border-border/60` or future `--sf-capsule-border` | Semantic / SF | **Not** `border-white/10` (primitive) |
+| Dock spacing | `--sf-space-*` | SF overlay | Padding/gap rhythm |
+| Dock motion | `--sf-motion`, `--sf-ease` | SF overlay | Height/opacity transitions |
+| Focus ring | `--sf-focus-ring`, `--sf-focus-offset`, `var(--ring)` | SF + semantic | Already in `.session-first-shell` |
+| Input / button text | `text-foreground`, `text-muted-foreground` | Semantic | Ghost suffix uses muted |
+| Popover surface (History/Commands) | shadcn Popover + semantic borders | Semantic | Align with shell chrome, not legacy sheet |
+| Popover list rows | `--row-md` min-height where applicable | Codegen experience | Optional alignment with Web lists |
+| Desktop single-row height | `min-h-[var(--control-md)]` (32px) | Codegen experience | Default dock row |
+| Mobile primary controls | `max-lg:min-h-11` (44px) | Business rule | Touch target; document as intentional override |
+| xterm canvas (well interior) | `--terminal-background`, `--terminal-foreground` | Codegen domain | Terminal area only, not dock chrome |
+| Disabled state | `opacity-50`, `pointer-events-none` on shell | Pattern | Same as today |
+
+### Rules
+
+1. **Bind codegen** for semantic colors and control sizing where the capsule behaves like generic Web UI (popover text, borders, focus).
+2. **Keep `--sf-*`** for well-attached chrome, motion, and spacing — capsule is session-first product language, not Dashboard.
+3. **Mobile 44px** is a capsule business rule; it may exceed `--control-lg` (36px) — comment in code if non-obvious.
+4. **No primitives** in TSX: no `white/10`, `zinc-*`, raw hex. Use semantic utilities or CSS variables.
+5. **Future (optional):** if dock tokens stabilize, add `domain.terminal.dock` or `--sf-capsule-*` aliases in `index.css`; migrate to JSON only when the visual spec stops moving.
 
 ---
 
