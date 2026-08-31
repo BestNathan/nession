@@ -96,6 +96,12 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
   ) {
     const isStacked = layout === 'stacked';
     const hasLeading = Boolean(leading);
+    // Keep the same column template in flat and stacked. If the field
+    // col-spans under the actions column when stacked, it widens, soft-wrap
+    // unwraps, layout flips back to flat, and useLayoutEffect loops (React #185).
+    const cols = hasLeading
+      ? 'grid-cols-[auto_minmax(0,1fr)_auto]'
+      : 'grid-cols-[minmax(0,1fr)_auto]';
 
     return (
       <div
@@ -103,15 +109,9 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
         data-testid="capsule-input-row"
         data-layout={layout}
         className={cn(
-          'grid min-w-0 flex-1 gap-2',
-          !isStacked &&
-            !hasLeading &&
-            'grid-cols-[minmax(0,1fr)_auto] grid-rows-1 items-center',
-          !isStacked &&
-            hasLeading &&
-            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-1 items-center',
-          isStacked &&
-            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-y-1.5',
+          'grid min-w-0 flex-1 items-center gap-2',
+          cols,
+          isStacked ? 'grid-rows-[auto_auto] gap-y-1.5' : 'grid-rows-1',
         )}
       >
         <div
@@ -129,9 +129,7 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
           data-testid="capsule-input-field"
           className={cn(
             'min-w-0',
-            isStacked && 'col-span-3 col-start-1 row-start-1',
-            !isStacked && hasLeading && 'col-start-2 row-start-1',
-            !isStacked && !hasLeading && 'col-start-1 row-start-1',
+            hasLeading ? 'col-start-2 row-start-1' : 'col-start-1 row-start-1',
           )}
         >
           <CapsuleGhostInput
@@ -148,9 +146,14 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
           data-flip-id="tools-actions"
           className={cn(
             'shrink-0',
-            isStacked && 'col-start-3 row-start-2 justify-self-end',
-            !isStacked && hasLeading && 'col-start-3 row-start-1',
-            !isStacked && !hasLeading && 'col-start-2 row-start-1',
+            hasLeading &&
+              (isStacked
+                ? 'col-start-3 row-start-2 justify-self-end'
+                : 'col-start-3 row-start-1'),
+            !hasLeading &&
+              (isStacked
+                ? 'col-start-2 row-start-2 justify-self-end'
+                : 'col-start-2 row-start-1'),
           )}
         >
           <CapsuleInputTrailingActions
@@ -192,6 +195,8 @@ export function CapsuleInputRow({
 }: CapsuleInputRowProps) {
   const [inputValue, setInputValue] = useState('');
   const [layout, setLayout] = useState<ComposerLayout>('flat');
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const rootRef = useRef<HTMLDivElement>(null);
   const { captureBeforeLayoutChange } = useCapsuleLayoutFlip(layout, rootRef);
   const { addEntry } = useCommandHistory();
@@ -199,13 +204,13 @@ export function CapsuleInputRow({
   const handleLineCountChange = useCallback(
     (lineCount: number) => {
       const next = layoutFromLineCount(lineCount);
-      if (next !== layout) {
+      if (next !== layoutRef.current) {
         captureBeforeLayoutChange();
         setLayout(next);
         onLayoutChange?.(next);
       }
     },
-    [layout, captureBeforeLayoutChange, onLayoutChange],
+    [captureBeforeLayoutChange, onLayoutChange],
   );
 
   const doSend = () => {

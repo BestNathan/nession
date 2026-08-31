@@ -70,7 +70,7 @@ export function CapsuleGhostInput({
       Math.max(measured, CAPSULE_SINGLE_HEIGHT_PX),
       CAPSULE_MAX_HEIGHT_PX,
     );
-    setHeight(nextHeight);
+    setHeight((prevHeight) => (prevHeight === nextHeight ? prevHeight : nextHeight));
   }, [value, onLineCountChange]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
