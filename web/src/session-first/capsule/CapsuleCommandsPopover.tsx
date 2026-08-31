@@ -22,7 +22,7 @@ interface CapsuleCommandsPopoverProps {
   sendText: (text: string) => void;
   disabled?: boolean;
   showPhysKeys: boolean;
-  trigger?: React.ReactNode;
+  trigger?: React.ReactElement;
 }
 
 export function CapsuleCommandsPopover({
