@@ -6,7 +6,7 @@ import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { MobileTerminalLayout } from './MobileTerminalLayout';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { TerminalCapsule, type CapsuleMode } from '@/session-first/TerminalCapsule';
+import { TerminalCapsule } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
@@ -45,10 +45,7 @@ interface DesktopToolbarLayoutProps {
   onBottomTabChange: (tab: BottomTab) => void;
   sheetOpen: boolean;
   onSheetToggle: (open: boolean) => void;
-  capsuleMode: CapsuleMode;
-  onCapsuleModeChange: (mode: CapsuleMode) => void;
-  capsuleExpanded: boolean;
-  onCapsuleExpandedChange: (open: boolean) => void;
+  sendText: (text: string) => void;
 }
 
 function DesktopToolbarLayout({
@@ -63,10 +60,7 @@ function DesktopToolbarLayout({
   onBottomTabChange,
   sheetOpen,
   onSheetToggle,
-  capsuleMode,
-  onCapsuleModeChange,
-  capsuleExpanded,
-  onCapsuleExpandedChange,
+  sendText,
 }: DesktopToolbarLayoutProps) {
   if (toolbar === 'capsule') {
     return (
@@ -74,13 +68,9 @@ function DesktopToolbarLayout({
         {isDesktop && terminalElement}
         {isDesktop ? (
           <TerminalCapsule
-            mode={capsuleMode}
-            onModeChange={onCapsuleModeChange}
-            expanded={capsuleExpanded}
-            onExpandedChange={onCapsuleExpandedChange}
+            variant="desktop"
+            sendText={sendText}
             disabled={toolbarDisabled}
-            inputPanel={inputPanel}
-            commandsPanel={commandsPanel}
           />
         ) : null}
       </div>
@@ -159,10 +149,18 @@ export function TerminalLayout({
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
-  const [capsuleExpanded, setCapsuleExpanded] = useState(false);
-
   useDesktopKeyboardGuard(isDesktop, controller);
+
+  const capsuleSendText = (text: string) => {
+    if (toolbarDisabled) {
+      return;
+    }
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  };
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const inputPanel = <InputPanel sendText={(text) => {
@@ -218,10 +216,7 @@ export function TerminalLayout({
       onBottomTabChange={setBottomTab}
       sheetOpen={sheetOpen}
       onSheetToggle={setSheetOpen}
-      capsuleMode={capsuleMode}
-      onCapsuleModeChange={setCapsuleMode}
-      capsuleExpanded={capsuleExpanded}
-      onCapsuleExpandedChange={setCapsuleExpanded}
+      sendText={capsuleSendText}
     />
   );
 

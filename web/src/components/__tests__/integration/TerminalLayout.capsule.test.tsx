@@ -6,6 +6,24 @@ vi.mock('@/hooks/useMediaQuery', () => ({
   useMediaQuery: () => true,
 }));
 
+vi.mock('@/hooks/useQuickCommands', () => ({
+  useQuickCommands: () => ({
+    userCommands: [],
+    addCommand: vi.fn().mockResolvedValue(undefined),
+    deleteCommand: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+vi.mock('@/hooks/useCommandHistory', () => ({
+  useCommandHistory: () => ({
+    addEntry: vi.fn(),
+    history: [],
+    removeEntry: vi.fn(),
+    clearHistory: vi.fn(),
+    filterHistory: vi.fn().mockReturnValue([]),
+  }),
+}));
+
 vi.mock('@/components/MobileTerminalLayout', () => ({
   MobileTerminalLayout: () => <div data-testid="mobile-terminal-layout" />,
 }));

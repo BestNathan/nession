@@ -384,34 +384,17 @@ export function MobileTerminalLayout({
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
   const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
-  const [capsuleExpanded, setCapsuleExpanded] = useState(false);
 
-  const inputPanel = (
-    <InputPanel
-      sendText={(text) => {
-        if (toolbarDisabled) { return; }
-        controller?.handleInput({
-          source: 'component-input',
-          data: text,
-          timestamp: Date.now(),
-        });
-      }}
-      disabled={toolbarDisabled}
-    />
-  );
-  const commandsPanel = (
-    <QuickCommandsPanel
-      sendText={(text) => {
-        if (toolbarDisabled) { return; }
-        controller?.handleInput({
-          source: 'component-quickcmd',
-          data: text,
-          timestamp: Date.now(),
-        });
-      }}
-      disabled={toolbarDisabled}
-    />
-  );
+  const capsuleSendText = (text: string) => {
+    if (toolbarDisabled) {
+      return;
+    }
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  };
 
   const terminalPanel = (
     <div key="terminal" className="h-full flex flex-col">
@@ -424,13 +407,11 @@ export function MobileTerminalLayout({
           />
           {terminalOnly ? (
             <TerminalCapsule
+              variant="mobile"
               mode={capsuleMode}
               onModeChange={setCapsuleMode}
-              expanded={capsuleExpanded}
-              onExpandedChange={setCapsuleExpanded}
+              sendText={capsuleSendText}
               disabled={toolbarDisabled}
-              inputPanel={inputPanel}
-              commandsPanel={commandsPanel}
             />
           ) : null}
         </div>
