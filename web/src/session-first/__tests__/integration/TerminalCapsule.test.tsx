@@ -64,6 +64,13 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-disabled', 'true');
   });
 
+  it('uses light elevated capsule surface over the terminal well', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    const shell = screen.getByTestId('terminal-capsule').firstElementChild;
+    expect(shell?.className).toMatch(/sf-capsule-surface/);
+    expect(shell?.className).toMatch(/rounded-full/);
+  });
+
   it('uses safe-area positioning classes', () => {
     render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');

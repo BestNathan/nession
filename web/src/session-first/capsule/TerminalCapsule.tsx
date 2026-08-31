@@ -44,12 +44,13 @@ export function TerminalCapsule({
   const activeMode = isMobile ? mode : 'input';
   const allowMultiLineGrowth = !isMobile || activeMode === 'input';
   const isCommandsMode = isMobile && activeMode === 'commands';
+  const isExpanded = allowMultiLineGrowth && dockHeight === 'multi';
 
   return (
     <div
       data-testid="terminal-capsule"
       data-disabled={disabled ? 'true' : undefined}
-      data-dock-height={allowMultiLineGrowth && dockHeight === 'multi' ? 'multi' : 'single'}
+      data-dock-height={isExpanded ? 'multi' : 'single'}
       className={cn(
         'absolute inset-x-3 z-10 flex flex-col',
         'bottom-[max(0.75rem,env(safe-area-inset-bottom))]',
@@ -57,9 +58,12 @@ export function TerminalCapsule({
     >
       <div
         className={cn(
-          'border border-border/60',
-          'rounded-2xl bg-[var(--sf-terminal-well)]/95 px-2 py-2 shadow-lg backdrop-blur-sm',
-          isCommandsMode ? 'flex min-h-11 items-center gap-2' : 'flex flex-col',
+          'border border-border shadow-lg backdrop-blur-sm',
+          'bg-[var(--sf-capsule-surface)] text-foreground',
+          'px-2 py-1.5',
+          'transition-[border-radius,padding] duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
+          isExpanded || isCommandsMode ? 'rounded-2xl py-2' : 'rounded-full',
+          isCommandsMode ? 'flex min-h-11 items-center gap-2' : 'flex',
         )}
       >
         {isCommandsMode && onModeChange ? (
