@@ -40,9 +40,10 @@ export function TerminalCapsule({
   };
 
   const isMobile = variant === 'mobile';
-  const showModeToggle = isMobile && onModeChange;
+  const showModeToggle = Boolean(isMobile && onModeChange);
   const activeMode = isMobile ? mode : 'input';
   const allowMultiLineGrowth = !isMobile || activeMode === 'input';
+  const isCommandsMode = isMobile && activeMode === 'commands';
 
   return (
     <div
@@ -56,17 +57,22 @@ export function TerminalCapsule({
     >
       <div
         className={cn(
-          'flex min-h-[var(--control-md)] items-center gap-2 border-t border-border/60',
-          'rounded-t-2xl bg-[var(--sf-terminal-well)]/95 px-2 py-1.5 shadow-lg backdrop-blur-sm',
-          'max-lg:min-h-11 max-lg:py-2',
-          allowMultiLineGrowth && dockHeight === 'multi' && 'items-end py-2',
+          'border border-border/60',
+          'rounded-2xl bg-[var(--sf-terminal-well)]/95 px-2 py-2 shadow-lg backdrop-blur-sm',
+          isCommandsMode ? 'flex min-h-11 items-center gap-2' : 'flex flex-col',
         )}
       >
-        {showModeToggle ? (
-          <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
-        ) : null}
-
-        {activeMode === 'input' || !isMobile ? (
+        {isCommandsMode && onModeChange ? (
+          <>
+            <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
+            <CapsuleCommandsRow
+              sendText={sendText}
+              disabled={disabled}
+              commandsOpen={commandsOpen}
+              onCommandsOpenChange={setCommandsOpen}
+            />
+          </>
+        ) : (
           <CapsuleInputRow
             sendText={sendText}
             disabled={disabled}
@@ -76,14 +82,12 @@ export function TerminalCapsule({
             onCommandsOpenChange={setCommandsOpen}
             showCommandsButton={!isMobile}
             showPasteCopy={!isMobile}
+            leading={
+              showModeToggle && onModeChange ? (
+                <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
+              ) : null
+            }
             onHeightChange={allowMultiLineGrowth ? setDockHeight : undefined}
-          />
-        ) : (
-          <CapsuleCommandsRow
-            sendText={sendText}
-            disabled={disabled}
-            commandsOpen={commandsOpen}
-            onCommandsOpenChange={setCommandsOpen}
           />
         )}
       </div>

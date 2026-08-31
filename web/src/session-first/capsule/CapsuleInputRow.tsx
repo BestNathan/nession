@@ -15,6 +15,7 @@ interface CapsuleInputRowProps {
   onCommandsOpenChange: (open: boolean) => void;
   showCommandsButton?: boolean;
   showPasteCopy?: boolean;
+  leading?: React.ReactNode;
   onHeightChange?: (height: DockHeight) => void;
 }
 
@@ -27,6 +28,7 @@ export function CapsuleInputRow({
   onCommandsOpenChange,
   showCommandsButton = true,
   showPasteCopy = true,
+  leading,
   onHeightChange,
 }: CapsuleInputRowProps) {
   const [inputValue, setInputValue] = useState('');
@@ -69,46 +71,60 @@ export function CapsuleInputRow({
   };
 
   return (
-    <div data-testid="capsule-input-row" className="flex min-w-0 flex-1 items-center gap-1">
+    <div
+      data-testid="capsule-input-row"
+      className="flex min-w-0 flex-1 flex-col gap-1"
+    >
       <CapsuleGhostInput
         value={inputValue}
         onChange={setInputValue}
         disabled={disabled}
         onEnter={doSend}
+        className="w-full"
       />
-      <CapsuleInputActionButtons
-        inputValue={inputValue}
-        disabled={disabled}
-        showPasteCopy={showPasteCopy}
-        onSend={doSend}
-        onPaste={handlePaste}
-        onCopy={handleCopy}
-      />
-      <CapsuleHistoryPopover
-        open={historyOpen}
-        onOpenChange={(open) => {
-          onHistoryOpenChange(open);
-          if (open) {
-            onCommandsOpenChange(false);
-          }
-        }}
-        disabled={disabled}
-        onSelect={setInputValue}
-      />
-      {showCommandsButton ? (
-        <CapsuleCommandsPopover
-          open={commandsOpen}
-          onOpenChange={(open) => {
-            onCommandsOpenChange(open);
-            if (open) {
-              onHistoryOpenChange(false);
-            }
-          }}
-          sendText={sendText}
-          disabled={disabled}
-          showPhysKeys={false}
-        />
-      ) : null}
+      <div
+        data-testid="capsule-input-toolbar"
+        className="flex items-center justify-between gap-1"
+      >
+        <div className="flex items-center gap-0.5">
+          {leading}
+          <CapsuleHistoryPopover
+            open={historyOpen}
+            onOpenChange={(open) => {
+              onHistoryOpenChange(open);
+              if (open) {
+                onCommandsOpenChange(false);
+              }
+            }}
+            disabled={disabled}
+            onSelect={setInputValue}
+          />
+          {showCommandsButton ? (
+            <CapsuleCommandsPopover
+              open={commandsOpen}
+              onOpenChange={(open) => {
+                onCommandsOpenChange(open);
+                if (open) {
+                  onHistoryOpenChange(false);
+                }
+              }}
+              sendText={sendText}
+              disabled={disabled}
+              showPhysKeys={false}
+            />
+          ) : null}
+        </div>
+        <div className="flex items-center gap-0.5">
+          <CapsuleInputActionButtons
+            inputValue={inputValue}
+            disabled={disabled}
+            showPasteCopy={showPasteCopy}
+            onSend={doSend}
+            onPaste={handlePaste}
+            onCopy={handleCopy}
+          />
+        </div>
+      </div>
     </div>
   );
 }
