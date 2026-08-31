@@ -15,10 +15,12 @@ vi.mock('@/hooks/useQuickCommands', () => ({
 vi.mock('@/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
-    history: [],
+    history: [{ id: '1', command: 'ls -la', timestamp: Date.now() }],
     removeEntry: vi.fn(),
     clearHistory: vi.fn(),
-    filterHistory: vi.fn().mockReturnValue([]),
+    filterHistory: vi.fn().mockReturnValue([
+      { id: '1', command: 'ls -la', timestamp: Date.now() },
+    ]),
   }),
 }));
 
@@ -36,6 +38,59 @@ function renderRow(onLayoutChange?: (layout: ComposerLayout) => void) {
 }
 
 describe('CapsuleInputRow', () => {
+  it('shows History + Send on the right by default (no paste/copy/commands)', () => {
+    renderRow();
+    expect(screen.getByTestId('capsule-history-trigger')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-send')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-paste')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-copy')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-commands-trigger')).not.toBeInTheDocument();
+    // Actions live in the trailing slot, not a left tools cluster
+    expect(screen.getByTestId('capsule-input-actions-slot')).toBeInTheDocument();
+  });
+
+  it('shows paste/copy when enabled (mobile)', () => {
+    render(
+      <CapsuleInputRow
+        sendText={vi.fn()}
+        historyOpen={false}
+        onHistoryOpenChange={vi.fn()}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+        showPasteCopy
+      />,
+    );
+    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
+  });
+
+  it('opens history popover from the trigger', async () => {
+    const onHistoryOpenChange = vi.fn();
+    const { rerender } = render(
+      <CapsuleInputRow
+        sendText={vi.fn()}
+        historyOpen={false}
+        onHistoryOpenChange={onHistoryOpenChange}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('capsule-history-trigger'));
+    expect(onHistoryOpenChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <CapsuleInputRow
+        sendText={vi.fn()}
+        historyOpen={true}
+        onHistoryOpenChange={onHistoryOpenChange}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-history-search')).toBeInTheDocument();
+    expect(screen.getByText('ls -la')).toBeInTheDocument();
+  });
+
   it('disables send when empty and sends trimmed input with carriage return', async () => {
     const sendText = vi.fn();
     render(
@@ -57,10 +112,7 @@ describe('CapsuleInputRow', () => {
     renderRow();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-layout', 'flat');
-    expect(row.className).toMatch(/grid/);
-    expect(screen.getByTestId('capsule-input-left').className).toMatch(/row-start-1/);
-    expect(screen.getByTestId('capsule-input-right')).toBeInTheDocument();
-    expect(screen.queryByTestId('capsule-input-toolbar')).not.toBeInTheDocument();
+    expect(row.className).toMatch(/grid-cols-\[minmax/);
   });
 
   it('switches to stacked layout for multi-line without dropping focus', async () => {
@@ -88,8 +140,9 @@ describe('CapsuleInputRow', () => {
     expect(onLayoutChange).toHaveBeenCalledWith('stacked');
     expect(document.activeElement).toBe(input);
     expect(screen.getByTestId('capsule-input-field').className).toMatch(/col-span-3/);
-    expect(screen.getByTestId('capsule-input-left').className).toMatch(/row-start-2/);
-    expect(screen.getByTestId('capsule-input-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-actions-slot').className).toMatch(
+      /row-start-2/,
+    );
   });
 
   it('returns to flat when content is single line again', async () => {

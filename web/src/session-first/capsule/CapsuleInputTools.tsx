@@ -2,7 +2,7 @@ import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsP
 import { CapsuleHistoryPopover } from '@/session-first/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/session-first/capsule/CapsuleInputActionButtons';
 
-interface CapsuleInputToolsProps {
+interface CapsuleInputActionsProps {
   leading?: React.ReactNode;
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
@@ -19,31 +19,42 @@ interface CapsuleInputToolsProps {
   onCopy: () => void;
 }
 
-export function CapsuleInputLeftTools({
-  leading,
+/** Optional leading slot (e.g. mobile mode toggle) — left side only. */
+export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) {
+  if (!leading) {
+    return null;
+  }
+  return (
+    <div data-testid="capsule-input-leading" className="flex shrink-0 items-center gap-0.5">
+      {leading}
+    </div>
+  );
+}
+
+/**
+ * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
+ * Kept as one cluster so FLIP can morph the whole group.
+ */
+export function CapsuleInputTrailingActions({
   historyOpen,
   onHistoryOpenChange,
   commandsOpen,
   onCommandsOpenChange,
   showCommandsButton,
+  showPasteCopy,
   disabled,
   sendText,
+  inputValue,
   onSelectHistory,
-}: Pick<
-  CapsuleInputToolsProps,
-  | 'leading'
-  | 'historyOpen'
-  | 'onHistoryOpenChange'
-  | 'commandsOpen'
-  | 'onCommandsOpenChange'
-  | 'showCommandsButton'
-  | 'disabled'
-  | 'sendText'
-  | 'onSelectHistory'
->) {
+  onSend,
+  onPaste,
+  onCopy,
+}: Omit<CapsuleInputActionsProps, 'leading'>) {
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
-      {leading}
+    <div
+      data-testid="capsule-input-actions"
+      className="flex shrink-0 items-center gap-0.5"
+    >
       <CapsuleHistoryPopover
         open={historyOpen}
         onOpenChange={(open) => {
@@ -69,23 +80,6 @@ export function CapsuleInputLeftTools({
           showPhysKeys={false}
         />
       ) : null}
-    </div>
-  );
-}
-
-export function CapsuleInputRightActions({
-  inputValue,
-  disabled,
-  showPasteCopy,
-  onSend,
-  onPaste,
-  onCopy,
-}: Pick<
-  CapsuleInputToolsProps,
-  'inputValue' | 'disabled' | 'showPasteCopy' | 'onSend' | 'onPaste' | 'onCopy'
->) {
-  return (
-    <div className="flex shrink-0 items-center gap-0.5">
       <CapsuleInputActionButtons
         inputValue={inputValue}
         disabled={disabled}

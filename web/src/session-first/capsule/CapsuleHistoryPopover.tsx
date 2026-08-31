@@ -50,7 +50,10 @@ export function CapsuleHistoryPopover({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
+      {/* nativeButton=false: render target is Base UI <Button>, not a raw <button> */}
       <PopoverTrigger
+        nativeButton={false}
+        disabled={disabled}
         render={
           <Button
             type="button"
@@ -68,7 +71,9 @@ export function CapsuleHistoryPopover({
       <PopoverContent
         align="end"
         side="top"
-        className="max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
+        sideOffset={8}
+        // Above terminal well chrome (z-10) and FLIP stacking contexts
+        className="z-[100] max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
       >
         <PopoverHeader className="gap-2 border-b border-border/60 p-2">
           <PopoverTitle>History</PopoverTitle>
