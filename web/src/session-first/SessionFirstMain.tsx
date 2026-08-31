@@ -93,7 +93,9 @@ export function SessionFirstMain({
           onBackToSessions={onBackToSessions}
         />
       ) : null}
-      <div className="relative flex min-h-0 flex-1 flex-col gap-0 p-3 pt-2">
+      <div
+        data-testid="session-first-main-content"
+        className="relative flex min-h-0 flex-1 flex-col gap-0">
         {showTerminal ? (
           <TerminalWell
             className={cn(
