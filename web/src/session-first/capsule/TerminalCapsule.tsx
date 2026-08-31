@@ -3,11 +3,12 @@ import { cn } from '@/lib/utils';
 import { CapsuleCommandsRow } from '@/session-first/capsule/CapsuleCommandsRow';
 import { CapsuleInputRow } from '@/session-first/capsule/CapsuleInputRow';
 import { CapsuleModeToggle } from '@/session-first/capsule/CapsuleModeToggle';
-import type {
-  CapsuleMode,
-  CapsulePopoverId,
-  CapsuleVariant,
-  DockHeight,
+import {
+  dockHeightFromLayout,
+  type CapsuleMode,
+  type CapsulePopoverId,
+  type CapsuleVariant,
+  type DockHeight,
 } from '@/session-first/capsule/types';
 
 export interface TerminalCapsuleProps {
@@ -94,7 +95,11 @@ export function TerminalCapsule({
                 <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
               ) : null
             }
-            onHeightChange={allowMultiLineGrowth ? setDockHeight : undefined}
+            onLayoutChange={
+              allowMultiLineGrowth
+                ? (nextLayout) => setDockHeight(dockHeightFromLayout(nextLayout))
+                : undefined
+            }
           />
         )}
       </div>
