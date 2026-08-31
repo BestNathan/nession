@@ -1,124 +1,72 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TerminalCapsule } from '@/session-first/TerminalCapsule';
+import { TerminalCapsule } from '@/session-first/capsule/TerminalCapsule';
+
+vi.mock('@/hooks/useQuickCommands', () => ({
+  useQuickCommands: () => ({
+    userCommands: [],
+    addCommand: vi.fn().mockResolvedValue(undefined),
+    deleteCommand: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+vi.mock('@/hooks/useCommandHistory', () => ({
+  useCommandHistory: () => ({
+    addEntry: vi.fn(),
+    history: [],
+    removeEntry: vi.fn(),
+    clearHistory: vi.fn(),
+    filterHistory: vi.fn().mockReturnValue([]),
+  }),
+}));
 
 describe('TerminalCapsule', () => {
-  it('renders collapsed pill and requests expand', async () => {
-    const onExpandedChange = vi.fn();
-    render(
-      <TerminalCapsule
-        mode="input"
-        onModeChange={vi.fn()}
-        expanded={false}
-        onExpandedChange={onExpandedChange}
-        inputPanel={<div data-testid="input-panel">input</div>}
-        commandsPanel={<div data-testid="commands-panel">cmds</div>}
-      />,
-    );
-    expect(screen.getByTestId('terminal-capsule')).toBeInTheDocument();
+  it('never renders legacy sheet', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     expect(screen.queryByTestId('terminal-capsule-sheet')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('terminal-capsule-expand'));
-    expect(onExpandedChange).toHaveBeenCalledWith(true);
   });
 
-  it('shows sheet content when expanded for active mode', () => {
-    render(
-      <TerminalCapsule
-        mode="commands"
-        onModeChange={vi.fn()}
-        expanded
-        onExpandedChange={vi.fn()}
-        inputPanel={<div data-testid="input-panel" />}
-        commandsPanel={<div data-testid="commands-panel" />}
-      />,
-    );
-    expect(screen.getByTestId('terminal-capsule-sheet')).toBeInTheDocument();
-    expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+  it('renders desktop input row with commands trigger', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    expect(screen.getByTestId('capsule-input-row')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-commands-trigger')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-mode-toggle')).not.toBeInTheDocument();
   });
 
-  it('switches mode via mode controls', async () => {
+  it('renders mobile mode toggle and switches body', async () => {
     const onModeChange = vi.fn();
-    render(
+    const { rerender } = render(
       <TerminalCapsule
+        variant="mobile"
         mode="input"
         onModeChange={onModeChange}
-        expanded={false}
-        onExpandedChange={vi.fn()}
-        inputPanel={<div />}
-        commandsPanel={<div />}
+        sendText={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByTestId('terminal-capsule-mode-commands'));
+    expect(screen.getByTestId('capsule-mode-toggle')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('capsule-mode-commands'));
     expect(onModeChange).toHaveBeenCalledWith('commands');
+
+    rerender(
+      <TerminalCapsule
+        variant="mobile"
+        mode="commands"
+        onModeChange={onModeChange}
+        sendText={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-commands-row')).toBeInTheDocument();
   });
 
   it('marks disabled state', () => {
-    render(
-      <TerminalCapsule
-        mode="input"
-        onModeChange={vi.fn()}
-        expanded={false}
-        onExpandedChange={vi.fn()}
-        disabled
-        inputPanel={<div />}
-        commandsPanel={<div />}
-      />,
-    );
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} disabled />);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-disabled', 'true');
   });
 
-  it('applies safe-area and narrow sheet height classes', () => {
-    render(
-      <TerminalCapsule
-        mode="input"
-        onModeChange={vi.fn()}
-        expanded
-        onExpandedChange={vi.fn()}
-        inputPanel={<div data-testid="input-panel" />}
-        commandsPanel={<div />}
-      />,
-    );
+  it('uses safe-area positioning classes', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root.className).toMatch(/bottom-\[max\(0\.75rem,env\(safe-area-inset-bottom\)\)\]/);
-    const sheet = screen.getByTestId('terminal-capsule-sheet');
-    expect(sheet.className).toMatch(/max-h-\[28vh\]/);
-    expect(sheet.className).toMatch(/lg:max-h-\[32vh\]/);
-  });
-
-  it('uses larger expand control on narrow viewports', () => {
-    render(
-      <TerminalCapsule
-        mode="input"
-        onModeChange={vi.fn()}
-        expanded={false}
-        onExpandedChange={vi.fn()}
-        inputPanel={<div />}
-        commandsPanel={<div />}
-      />,
-    );
-    const expand = screen.getByTestId('terminal-capsule-expand');
-    expect(expand.className).toMatch(/max-lg:size-11/);
-  });
-
-  it('applies motion tokens to expand and mode controls', () => {
-    render(
-      <TerminalCapsule
-        mode="input"
-        onModeChange={vi.fn()}
-        expanded={false}
-        onExpandedChange={vi.fn()}
-        inputPanel={<div />}
-        commandsPanel={<div />}
-      />,
-    );
-    const expand = screen.getByTestId('terminal-capsule-expand');
-    expect(expand.className).toMatch(/duration-\[var\(--sf-motion\)\]/);
-    expect(screen.getByTestId('terminal-capsule-mode-input').className).toMatch(
-      /duration-\[var\(--sf-motion\)\]/,
-    );
-    expect(screen.getByTestId('terminal-capsule-mode-commands').className).toMatch(
-      /duration-\[var\(--sf-motion\)\]/,
-    );
   });
 });
