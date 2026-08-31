@@ -53,14 +53,13 @@ export function CapsuleCommandsPopover({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="icon-sm"
       disabled={disabled}
       data-testid="capsule-commands-trigger"
-      className="max-lg:min-h-11"
+      className="max-lg:min-h-11 max-lg:min-w-11"
       aria-label="Quick commands"
     >
       <Terminal className="size-4" />
-      Commands
     </Button>
   );
 

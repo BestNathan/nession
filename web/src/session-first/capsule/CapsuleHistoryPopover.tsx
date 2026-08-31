@@ -55,14 +55,13 @@ export function CapsuleHistoryPopover({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             disabled={disabled}
             data-testid="capsule-history-trigger"
-            className={cn('max-lg:min-h-11', triggerClassName)}
+            className={cn('max-lg:min-h-11 max-lg:min-w-11', triggerClassName)}
             aria-label="Command history"
           >
             <History className="size-4" />
-            History
           </Button>
         }
       />

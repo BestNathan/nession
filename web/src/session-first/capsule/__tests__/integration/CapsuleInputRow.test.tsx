@@ -54,4 +54,20 @@ describe('CapsuleInputRow', () => {
     await userEvent.type(screen.getByTestId('capsule-ghost-input'), 'line1{Shift>}{Enter}{/Shift}line2');
     expect(onHeightChange).toHaveBeenCalledWith('multi');
   });
+
+  it('keeps actions in a bottom toolbar below the full-width input', () => {
+    render(
+      <CapsuleInputRow
+        sendText={vi.fn()}
+        historyOpen={false}
+        onHistoryOpenChange={vi.fn()}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+      />,
+    );
+    const row = screen.getByTestId('capsule-input-row');
+    expect(row.className).toMatch(/flex-col/);
+    expect(screen.getByTestId('capsule-input-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-ghost-input').parentElement?.className).toMatch(/w-full/);
+  });
 });

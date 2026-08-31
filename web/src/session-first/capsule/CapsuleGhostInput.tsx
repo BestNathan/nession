@@ -43,14 +43,14 @@ export function CapsuleGhostInput({
   };
 
   return (
-    <div className={cn('relative min-w-0 flex-1', className)}>
+    <div className={cn('relative w-full min-w-0', className)}>
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-2 py-1 text-sm"
+        className="pointer-events-none absolute inset-0 overflow-hidden px-2 py-1.5 text-sm leading-5"
       >
-        <span className="whitespace-pre text-transparent">{value}</span>
+        <span className="whitespace-pre-wrap break-words text-transparent">{value}</span>
         {showGhost ? (
-          <span data-testid="capsule-ghost-suffix" className="truncate text-muted-foreground">
+          <span data-testid="capsule-ghost-suffix" className="whitespace-pre-wrap break-words text-muted-foreground">
             {ghostSuffix}
           </span>
         ) : null}
@@ -63,8 +63,8 @@ export function CapsuleGhostInput({
         placeholder={placeholder}
         aria-autocomplete="inline"
         className={cn(
-          'w-full resize-none bg-transparent px-2 py-1 text-sm text-foreground outline-none',
-          'min-h-[var(--control-md)] field-sizing-content max-h-24',
+          'w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-5 text-foreground outline-none',
+          'min-h-[var(--control-md)] field-sizing-content max-h-40',
         )}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
