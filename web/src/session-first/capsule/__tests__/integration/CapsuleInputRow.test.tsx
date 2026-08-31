@@ -52,20 +52,20 @@ describe('CapsuleInputRow', () => {
     expect(sendText).toHaveBeenCalledWith('hello\r');
   });
 
-  it('stays compact for single-line input', () => {
+  it('keeps a stable row layout for single-line input', () => {
     renderRow();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-expanded', 'false');
-    expect(screen.getByTestId('capsule-input-left').className).toMatch(/row-start-1/);
-    expect(screen.getByTestId('capsule-input-left').className).not.toMatch(/row-start-2/);
+    expect(row.className).toMatch(/items-end/);
+    expect(screen.getByTestId('capsule-input-left')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-input-right')).toBeInTheDocument();
   });
 
-  it('expands toolbar row when content becomes multi-line without remounting input', async () => {
+  it('grows height for multi-line without moving tools or dropping focus', async () => {
     const onHeightChange = vi.fn();
     renderRow(onHeightChange);
     const input = screen.getByTestId('capsule-ghost-input');
     input.focus();
-    expect(document.activeElement).toBe(input);
 
     await userEvent.type(input, 'line1{Shift>}{Enter}{/Shift}line2');
 
@@ -73,10 +73,9 @@ describe('CapsuleInputRow', () => {
       expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-expanded', 'true');
     });
     expect(onHeightChange).toHaveBeenCalledWith('multi');
-    expect(screen.getByTestId('capsule-input-left').className).toMatch(/row-start-2/);
-    expect(screen.getByTestId('capsule-input-right').className).toMatch(/row-start-2/);
-    // Same textarea node must keep focus across expand
     expect(document.activeElement).toBe(input);
+    // Tools stay in the same row slots — no row-start teleport
+    expect(screen.getByTestId('capsule-input-row').className).toMatch(/items-end/);
   });
 
   it('keeps focus when collapsing back to single line', async () => {

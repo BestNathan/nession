@@ -22,8 +22,9 @@ interface CapsuleInputRowProps {
 }
 
 /**
- * Stable 3-slot CSS grid (left | input | right) so expand/collapse only
- * moves grid areas — the textarea node is never remounted (focus preserved).
+ * Fixed row layout: left tools | growing textarea | right actions.
+ * Tools stay bottom-aligned (`items-end`); only textarea height animates —
+ * no layout teleport between single/multi.
  */
 export function CapsuleInputRow({
   sendText,
@@ -85,21 +86,9 @@ export function CapsuleInputRow({
     <div
       data-testid="capsule-input-row"
       data-expanded={isMulti ? 'true' : 'false'}
-      className={cn(
-        'grid min-w-0 flex-1 gap-x-1 gap-y-1',
-        'transition-[gap] duration-300 ease-[var(--sf-ease)]',
-        isMulti
-          ? 'grid-cols-[auto_1fr_auto] grid-rows-[auto_auto]'
-          : 'grid-cols-[auto_1fr_auto] grid-rows-1 items-center',
-      )}
+      className={cn('flex min-w-0 flex-1 items-end gap-1')}
     >
-      <div
-        data-testid="capsule-input-left"
-        className={cn(
-          'transition-[translate] duration-300 ease-[var(--sf-ease)]',
-          isMulti ? 'col-start-1 row-start-2' : 'col-start-1 row-start-1',
-        )}
-      >
+      <div data-testid="capsule-input-left" className="shrink-0">
         <CapsuleInputLeftTools
           leading={leading}
           historyOpen={historyOpen}
@@ -113,31 +102,17 @@ export function CapsuleInputRow({
         />
       </div>
 
-      <div
-        data-testid="capsule-input-field"
-        className={cn(
-          'min-w-0 transition-[grid-column] duration-300 ease-[var(--sf-ease)]',
-          isMulti ? 'col-span-3 row-start-1' : 'col-start-2 row-start-1',
-        )}
-      >
+      <div data-testid="capsule-input-field" className="min-w-0 flex-1">
         <CapsuleGhostInput
           value={inputValue}
           onChange={setInputValue}
           disabled={disabled}
           onEnter={doSend}
           onLineCountChange={handleLineCountChange}
-          expanded={isMulti}
-          className="w-full"
         />
       </div>
 
-      <div
-        data-testid="capsule-input-right"
-        className={cn(
-          'justify-self-end transition-[translate] duration-300 ease-[var(--sf-ease)]',
-          isMulti ? 'col-start-3 row-start-2' : 'col-start-3 row-start-1',
-        )}
-      >
+      <div data-testid="capsule-input-right" className="shrink-0">
         <CapsuleInputRightActions
           inputValue={inputValue}
           disabled={disabled}

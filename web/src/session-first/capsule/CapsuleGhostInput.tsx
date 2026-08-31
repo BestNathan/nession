@@ -3,12 +3,14 @@ import { cn } from '@/lib/utils';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
 import { useHistoryGhost } from '@/session-first/capsule/useHistoryGhost';
 
-/** text-sm leading-5 + py-1.5 top/bottom (expanded) */
 export const CAPSULE_LINE_PX = 20;
 export const CAPSULE_PAD_Y_PX = 12;
+export const CAPSULE_SINGLE_HEIGHT_PX = 32;
 export const CAPSULE_MAX_LINES = 5;
 export const CAPSULE_MAX_HEIGHT_PX =
   CAPSULE_LINE_PX * CAPSULE_MAX_LINES + CAPSULE_PAD_Y_PX;
+
+const HEIGHT_EASE = 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)';
 
 interface CapsuleGhostInputProps {
   value: string;
@@ -17,8 +19,6 @@ interface CapsuleGhostInputProps {
   placeholder?: string;
   onEnter?: () => void;
   onLineCountChange?: (lineCount: number) => void;
-  /** Multi-line expanded layout uses taller padding / leading. */
-  expanded?: boolean;
   className?: string;
 }
 
@@ -29,17 +29,15 @@ export function CapsuleGhostInput({
   placeholder = 'Send input…',
   onEnter,
   onLineCountChange,
-  expanded = false,
   className,
 }: CapsuleGhostInputProps) {
   const { history } = useCommandHistory();
   const { ghostSuffix, acceptGhost, hasGhost } = useHistoryGhost(value, history);
   const [composing, setComposing] = useState(false);
+  const [height, setHeight] = useState(CAPSULE_SINGLE_HEIGHT_PX);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const showGhost = hasGhost && !composing;
-  const padY = expanded ? CAPSULE_PAD_Y_PX : 0;
-  const linePx = expanded ? CAPSULE_LINE_PX : 32;
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -47,10 +45,24 @@ export function CapsuleGhostInput({
       return;
     }
     const fromBreaks = Math.max(1, value.split('\n').length);
-    const content = Math.max(0, el.scrollHeight - padY);
-    const fromHeight = Math.max(1, Math.ceil(content / linePx));
-    onLineCountChange?.(Math.max(fromBreaks, fromHeight));
-  }, [value, onLineCountChange, padY, linePx]);
+    const prev = el.style.height;
+    el.style.height = 'auto';
+    const measured = el.scrollHeight;
+    el.style.height = prev;
+
+    const fromHeight = Math.max(
+      1,
+      Math.ceil(Math.max(0, measured - CAPSULE_PAD_Y_PX) / CAPSULE_LINE_PX),
+    );
+    const lines = Math.max(fromBreaks, fromHeight);
+    onLineCountChange?.(lines);
+
+    const nextHeight = Math.min(
+      Math.max(measured, CAPSULE_SINGLE_HEIGHT_PX),
+      CAPSULE_MAX_HEIGHT_PX,
+    );
+    setHeight(nextHeight);
+  }, [value, onLineCountChange]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Tab' && showGhost) {
@@ -69,13 +81,10 @@ export function CapsuleGhostInput({
   };
 
   return (
-    <div className={cn('relative flex min-w-0 items-center', className)}>
+    <div className={cn('relative min-w-0 flex-1', className)}>
       <div
         aria-hidden
-        className={cn(
-          'pointer-events-none absolute inset-0 overflow-hidden text-sm',
-          expanded ? 'px-1.5 py-1.5 leading-5' : 'flex items-center px-1.5 leading-8',
-        )}
+        className="pointer-events-none absolute inset-0 overflow-hidden px-1.5 py-1.5 text-sm leading-5"
       >
         <span className="whitespace-pre-wrap break-words text-transparent">{value}</span>
         {showGhost ? (
@@ -95,15 +104,11 @@ export function CapsuleGhostInput({
         disabled={disabled}
         placeholder={placeholder}
         aria-autocomplete="inline"
-        style={{ maxHeight: CAPSULE_MAX_HEIGHT_PX }}
+        style={{ height, maxHeight: CAPSULE_MAX_HEIGHT_PX, transition: HEIGHT_EASE }}
         className={cn(
-          'w-full resize-none overflow-y-auto border-0 bg-transparent text-sm text-foreground shadow-none',
+          'w-full resize-none overflow-y-auto border-0 bg-transparent px-1.5 py-1.5 text-sm leading-5',
+          'text-foreground shadow-none',
           'outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
-          'field-sizing-content',
-          'transition-[padding,min-height,line-height,height] duration-300 ease-[var(--sf-ease)]',
-          expanded
-            ? 'min-h-8 px-1.5 py-1.5 leading-5'
-            : 'h-8 min-h-8 px-1.5 py-0 leading-8',
         )}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
