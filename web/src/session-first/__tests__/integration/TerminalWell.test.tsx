@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { TerminalWell } from '@/session-first/TerminalWell';
 
 describe('TerminalWell', () => {
-  it('wraps children in a dark rounded well', () => {
+  it('wraps children in a dark full-bleed well', () => {
     render(
       <TerminalWell>
         <div data-testid="child">term</div>
@@ -11,8 +11,9 @@ describe('TerminalWell', () => {
     );
     const well = screen.getByTestId('terminal-well');
     expect(well).toContainElement(screen.getByTestId('child'));
-    expect(well.className).toMatch(/rounded/);
+    expect(well.className).not.toMatch(/rounded/);
     expect(well.className).toMatch(/overflow-hidden/);
     expect(well.className).toMatch(/\brelative\b/);
+    expect(well.className).toMatch(/bg-\[var\(--sf-terminal-well\)\]/);
   });
 });
