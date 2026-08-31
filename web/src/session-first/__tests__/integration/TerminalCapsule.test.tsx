@@ -68,7 +68,7 @@ describe('TerminalCapsule', () => {
     render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     const shell = screen.getByTestId('terminal-capsule').firstElementChild;
     expect(shell?.className).toMatch(/sf-capsule-surface/);
-    expect(shell?.className).toMatch(/rounded-full/);
+    expect(shell?.className).toMatch(/rounded-3xl/);
   });
 
   it('centers a capped-width dock on desktop instead of full terminal width', () => {
