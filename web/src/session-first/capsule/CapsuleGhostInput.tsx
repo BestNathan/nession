@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
 import { useHistoryGhost } from '@/session-first/capsule/useHistoryGhost';
 
-/** text-sm leading-5 + py-1.5 top/bottom */
+/** text-sm leading-5 + py-1.5 top/bottom (expanded) */
 export const CAPSULE_LINE_PX = 20;
 export const CAPSULE_PAD_Y_PX = 12;
 export const CAPSULE_MAX_LINES = 5;
@@ -17,6 +17,8 @@ interface CapsuleGhostInputProps {
   placeholder?: string;
   onEnter?: () => void;
   onLineCountChange?: (lineCount: number) => void;
+  /** Multi-line expanded layout uses taller padding / leading. */
+  expanded?: boolean;
   className?: string;
 }
 
@@ -27,6 +29,7 @@ export function CapsuleGhostInput({
   placeholder = 'Send input…',
   onEnter,
   onLineCountChange,
+  expanded = false,
   className,
 }: CapsuleGhostInputProps) {
   const { history } = useCommandHistory();
@@ -35,6 +38,8 @@ export function CapsuleGhostInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const showGhost = hasGhost && !composing;
+  const padY = expanded ? CAPSULE_PAD_Y_PX : 0;
+  const linePx = expanded ? CAPSULE_LINE_PX : 32;
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -42,10 +47,10 @@ export function CapsuleGhostInput({
       return;
     }
     const fromBreaks = Math.max(1, value.split('\n').length);
-    const content = Math.max(0, el.scrollHeight - CAPSULE_PAD_Y_PX);
-    const fromHeight = Math.max(1, Math.ceil(content / CAPSULE_LINE_PX));
+    const content = Math.max(0, el.scrollHeight - padY);
+    const fromHeight = Math.max(1, Math.ceil(content / linePx));
     onLineCountChange?.(Math.max(fromBreaks, fromHeight));
-  }, [value, onLineCountChange]);
+  }, [value, onLineCountChange, padY, linePx]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Tab' && showGhost) {
@@ -64,10 +69,13 @@ export function CapsuleGhostInput({
   };
 
   return (
-    <div className={cn('relative min-w-0', className)}>
+    <div className={cn('relative flex min-w-0 items-center', className)}>
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden px-2 py-1.5 text-sm leading-5"
+        className={cn(
+          'pointer-events-none absolute inset-0 overflow-hidden text-sm',
+          expanded ? 'px-1.5 py-1.5 leading-5' : 'flex items-center px-1.5 leading-8',
+        )}
       >
         <span className="whitespace-pre-wrap break-words text-transparent">{value}</span>
         {showGhost ? (
@@ -89,9 +97,12 @@ export function CapsuleGhostInput({
         aria-autocomplete="inline"
         style={{ maxHeight: CAPSULE_MAX_HEIGHT_PX }}
         className={cn(
-          'w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-sm leading-5',
-          'text-foreground outline-none',
-          'min-h-[var(--control-md)] field-sizing-content',
+          'w-full resize-none overflow-y-auto border-0 bg-transparent text-sm text-foreground shadow-none',
+          'outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+          'field-sizing-content',
+          expanded
+            ? 'min-h-8 px-1.5 py-1.5 leading-5'
+            : 'h-8 min-h-8 px-1.5 py-0 leading-8',
         )}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}

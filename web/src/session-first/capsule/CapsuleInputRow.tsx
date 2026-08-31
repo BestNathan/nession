@@ -109,6 +109,7 @@ export function CapsuleInputRow({
       disabled={disabled}
       onEnter={doSend}
       onLineCountChange={handleLineCountChange}
+      expanded={isMulti}
       className={isMulti ? 'w-full' : 'min-w-0 flex-1'}
     />
   );

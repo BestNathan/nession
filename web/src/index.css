@@ -198,6 +198,13 @@ html {
   outline-offset: var(--sf-focus-offset);
 }
 
+/* Capsule composer: no focus ring on the inline textarea (ChatGPT-style) */
+.session-first-shell [data-testid='capsule-ghost-input']:focus,
+.session-first-shell [data-testid='capsule-ghost-input']:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .session-first-shell {
     --sf-motion: 0ms;
