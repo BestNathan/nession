@@ -27,11 +27,27 @@ describe('TerminalCapsule', () => {
     expect(screen.queryByTestId('terminal-capsule-sheet')).not.toBeInTheDocument();
   });
 
-  it('renders desktop input row with commands trigger', () => {
+  it('renders desktop input row with History + Send only', () => {
     render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     expect(screen.getByTestId('capsule-input-row')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-commands-trigger')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-history-trigger')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-send')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-commands-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-paste')).not.toBeInTheDocument();
     expect(screen.queryByTestId('capsule-mode-toggle')).not.toBeInTheDocument();
+  });
+
+  it('shows paste/copy on mobile input mode', () => {
+    render(
+      <TerminalCapsule
+        variant="mobile"
+        mode="input"
+        onModeChange={vi.fn()}
+        sendText={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-paste')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
   });
 
   it('renders mobile mode toggle and switches body', async () => {

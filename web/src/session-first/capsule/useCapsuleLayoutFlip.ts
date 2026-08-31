@@ -105,6 +105,7 @@ export function runLayoutFlip(
     const dx = first.left - last.left;
     const dy = first.top - last.top;
     if (dx === 0 && dy === 0) {
+      clearFlipInlineStyles(el);
       continue;
     }
     el.style.transform = `translate(${dx}px, ${dy}px)`;
@@ -112,6 +113,9 @@ export function runLayoutFlip(
   }
 
   if (toPlay.length === 0) {
+    for (const { el } of targets) {
+      clearFlipInlineStyles(el);
+    }
     return;
   }
 

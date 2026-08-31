@@ -3,8 +3,8 @@ import { useCommandHistory } from '@/hooks/useCommandHistory';
 import { cn } from '@/lib/utils';
 import { CapsuleGhostInput } from '@/session-first/capsule/CapsuleGhostInput';
 import {
-  CapsuleInputLeftTools,
-  CapsuleInputRightActions,
+  CapsuleInputLeading,
+  CapsuleInputTrailingActions,
 } from '@/session-first/capsule/CapsuleInputTools';
 import {
   layoutFromLineCount,
@@ -19,7 +19,9 @@ interface CapsuleInputRowProps {
   onHistoryOpenChange: (open: boolean) => void;
   commandsOpen: boolean;
   onCommandsOpenChange: (open: boolean) => void;
+  /** Desktop Commands button — off by default (History + Send only). */
   showCommandsButton?: boolean;
+  /** Paste/Copy — intended for mobile soft-keyboard flows. */
   showPasteCopy?: boolean;
   leading?: React.ReactNode;
   onLayoutChange?: (layout: ComposerLayout) => void;
@@ -66,6 +68,12 @@ interface CapsuleComposerGridProps {
   onLineCountChange: (lineCount: number) => void;
 }
 
+/**
+ * Stable grid tree (no remount of textarea):
+ * - flat, no leading:  field | actions
+ * - flat, leading:     leading | field | actions
+ * - stacked:           field full width; leading + actions on row 2
+ */
 const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>(
   function CapsuleComposerGrid(
     {
@@ -86,92 +94,89 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
     },
     ref,
   ) {
-  const isStacked = layout === 'stacked';
+    const isStacked = layout === 'stacked';
+    const hasLeading = Boolean(leading);
 
-  return (
-    <div
-      ref={ref}
-      data-testid="capsule-input-row"
-      data-layout={layout}
-      className={cn(
-        'grid min-w-0 flex-1 gap-1',
-        !isStacked && 'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-1 items-end',
-        isStacked &&
-          'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-end',
-      )}
-    >
+    return (
       <div
-        data-testid="capsule-input-left"
-        data-flip-id="tools-left"
+        ref={ref}
+        data-testid="capsule-input-row"
+        data-layout={layout}
         className={cn(
-          'shrink-0',
-          isStacked ? 'col-start-1 row-start-2' : 'col-start-1 row-start-1',
+          'grid min-w-0 flex-1 gap-1',
+          !isStacked &&
+            !hasLeading &&
+            'grid-cols-[minmax(0,1fr)_auto] grid-rows-1 items-end',
+          !isStacked &&
+            hasLeading &&
+            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-1 items-end',
+          isStacked &&
+            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center',
         )}
       >
-        <CapsuleInputLeftTools
-          leading={leading}
-          historyOpen={historyOpen}
-          onHistoryOpenChange={onHistoryOpenChange}
-          commandsOpen={commandsOpen}
-          onCommandsOpenChange={onCommandsOpenChange}
-          showCommandsButton={showCommandsButton}
-          disabled={disabled}
-          sendText={sendText}
-          onSelectHistory={setInputValue}
-        />
-      </div>
-
-      <div
-        data-testid="capsule-input-field"
-        className={cn(
-          'min-w-0',
-          isStacked ? 'col-span-3 col-start-1 row-start-1' : 'col-start-2 row-start-1',
-        )}
-      >
-        <CapsuleGhostInput
-          value={inputValue}
-          onChange={setInputValue}
-          disabled={disabled}
-          onEnter={onSend}
-          onLineCountChange={onLineCountChange}
-        />
-      </div>
-
-      <div
-        data-testid="capsule-input-right"
-        data-flip-id="tools-right"
-        className={cn(
-          'shrink-0',
-          isStacked
-            ? 'col-start-3 row-start-2 justify-self-end'
-            : 'col-start-3 row-start-1',
-        )}
-      >
-        <CapsuleInputRightActions
-          inputValue={inputValue}
-          disabled={disabled}
-          showPasteCopy={showPasteCopy}
-          onSend={onSend}
-          onPaste={() => pasteIntoInput(setInputValue)}
-          onCopy={() => copyInputValue(inputValue)}
-        />
-      </div>
-
-      {isStacked ? (
         <div
-          data-testid="capsule-input-toolbar"
-          aria-hidden
-          className="pointer-events-none col-span-3 col-start-1 row-start-2"
-        />
-      ) : null}
-    </div>
-  );
+          data-testid="capsule-input-leading-slot"
+          className={cn(
+            'shrink-0',
+            !hasLeading && 'hidden',
+            isStacked ? 'col-start-1 row-start-2' : 'col-start-1 row-start-1',
+          )}
+        >
+          <CapsuleInputLeading leading={leading} />
+        </div>
+
+        <div
+          data-testid="capsule-input-field"
+          className={cn(
+            'min-w-0 self-end',
+            isStacked && 'col-span-3 col-start-1 row-start-1',
+            !isStacked && hasLeading && 'col-start-2 row-start-1',
+            !isStacked && !hasLeading && 'col-start-1 row-start-1',
+          )}
+        >
+          <CapsuleGhostInput
+            value={inputValue}
+            onChange={setInputValue}
+            disabled={disabled}
+            onEnter={onSend}
+            onLineCountChange={onLineCountChange}
+          />
+        </div>
+
+        <div
+          data-testid="capsule-input-actions-slot"
+          data-flip-id="tools-actions"
+          className={cn(
+            'shrink-0 self-end',
+            isStacked && 'col-start-3 row-start-2 justify-self-end',
+            !isStacked && hasLeading && 'col-start-3 row-start-1',
+            !isStacked && !hasLeading && 'col-start-2 row-start-1',
+          )}
+        >
+          <CapsuleInputTrailingActions
+            historyOpen={historyOpen}
+            onHistoryOpenChange={onHistoryOpenChange}
+            commandsOpen={commandsOpen}
+            onCommandsOpenChange={onCommandsOpenChange}
+            showCommandsButton={showCommandsButton}
+            showPasteCopy={showPasteCopy}
+            disabled={disabled}
+            sendText={sendText}
+            inputValue={inputValue}
+            onSelectHistory={setInputValue}
+            onSend={onSend}
+            onPaste={() => pasteIntoInput(setInputValue)}
+            onCopy={() => copyInputValue(inputValue)}
+          />
+        </div>
+      </div>
+    );
   },
 );
 
 /**
- * CSS-grid composer: tools flank the input (`flat`) or sit on a bottom toolbar (`stacked`).
- * Stable DOM tree — CapsuleGhostInput never reparents; FLIP animates tool positions.
+ * Content-driven flat ↔ stacked composer. Actions stay on the right;
+ * optional leading (mode toggle) on the left.
  */
 export function CapsuleInputRow({
   sendText,
@@ -180,8 +185,8 @@ export function CapsuleInputRow({
   onHistoryOpenChange,
   commandsOpen,
   onCommandsOpenChange,
-  showCommandsButton = true,
-  showPasteCopy = true,
+  showCommandsButton = false,
+  showPasteCopy = false,
   leading,
   onLayoutChange,
 }: CapsuleInputRowProps) {

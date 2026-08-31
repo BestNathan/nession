@@ -88,8 +88,10 @@ export function TerminalCapsule({
             onHistoryOpenChange={setHistoryOpen}
             commandsOpen={commandsOpen}
             onCommandsOpenChange={setCommandsOpen}
-            showCommandsButton={!isMobile}
-            showPasteCopy={!isMobile}
+            // Default bar: History + Send only. Commands via mobile mode.
+            // Paste/Copy only on mobile (no hardware clipboard shortcuts).
+            showCommandsButton={false}
+            showPasteCopy={isMobile}
             leading={
               showModeToggle && onModeChange ? (
                 <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />

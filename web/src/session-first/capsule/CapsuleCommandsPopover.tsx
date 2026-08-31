@@ -66,11 +66,16 @@ export function CapsuleCommandsPopover({
   return (
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger render={trigger ?? defaultTrigger} />
+        <PopoverTrigger
+          nativeButton={false}
+          disabled={disabled}
+          render={trigger ?? defaultTrigger}
+        />
         <PopoverContent
           align="end"
           side="top"
-          className="max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
+          sideOffset={8}
+          className="z-[100] max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
         >
           <PopoverHeader className="border-b border-border/60 p-2">
             <PopoverTitle>Commands</PopoverTitle>
