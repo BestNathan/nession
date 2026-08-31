@@ -21,6 +21,10 @@ interface CapsuleInputRowProps {
   onHeightChange?: (height: DockHeight) => void;
 }
 
+/**
+ * Stable 3-slot CSS grid (left | input | right) so expand/collapse only
+ * moves grid areas — the textarea node is never remounted (focus preserved).
+ */
 export function CapsuleInputRow({
   sendText,
   disabled = false,
@@ -77,71 +81,72 @@ export function CapsuleInputRow({
     }
   };
 
-  const left = (
-    <CapsuleInputLeftTools
-      leading={leading}
-      historyOpen={historyOpen}
-      onHistoryOpenChange={onHistoryOpenChange}
-      commandsOpen={commandsOpen}
-      onCommandsOpenChange={onCommandsOpenChange}
-      showCommandsButton={showCommandsButton}
-      disabled={disabled}
-      sendText={sendText}
-      onSelectHistory={setInputValue}
-    />
-  );
-
-  const right = (
-    <CapsuleInputRightActions
-      inputValue={inputValue}
-      disabled={disabled}
-      showPasteCopy={showPasteCopy}
-      onSend={doSend}
-      onPaste={handlePaste}
-      onCopy={handleCopy}
-    />
-  );
-
-  const input = (
-    <CapsuleGhostInput
-      value={inputValue}
-      onChange={setInputValue}
-      disabled={disabled}
-      onEnter={doSend}
-      onLineCountChange={handleLineCountChange}
-      expanded={isMulti}
-      className={isMulti ? 'w-full' : 'min-w-0 flex-1'}
-    />
-  );
-
   return (
     <div
       data-testid="capsule-input-row"
       data-expanded={isMulti ? 'true' : 'false'}
       className={cn(
-        'flex min-w-0 flex-1 gap-1',
-        'transition-[gap] duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
-        isMulti ? 'flex-col' : 'flex-row items-center',
+        'grid min-w-0 flex-1 gap-x-1 gap-y-1',
+        'transition-[gap] duration-300 ease-[var(--sf-ease)]',
+        isMulti
+          ? 'grid-cols-[auto_1fr_auto] grid-rows-[auto_auto]'
+          : 'grid-cols-[auto_1fr_auto] grid-rows-1 items-center',
       )}
     >
-      {isMulti ? (
-        <>
-          {input}
-          <div
-            data-testid="capsule-input-toolbar"
-            className="flex items-center justify-between gap-1"
-          >
-            {left}
-            {right}
-          </div>
-        </>
-      ) : (
-        <>
-          {left}
-          {input}
-          {right}
-        </>
-      )}
+      <div
+        data-testid="capsule-input-left"
+        className={cn(
+          'transition-[translate] duration-300 ease-[var(--sf-ease)]',
+          isMulti ? 'col-start-1 row-start-2' : 'col-start-1 row-start-1',
+        )}
+      >
+        <CapsuleInputLeftTools
+          leading={leading}
+          historyOpen={historyOpen}
+          onHistoryOpenChange={onHistoryOpenChange}
+          commandsOpen={commandsOpen}
+          onCommandsOpenChange={onCommandsOpenChange}
+          showCommandsButton={showCommandsButton}
+          disabled={disabled}
+          sendText={sendText}
+          onSelectHistory={setInputValue}
+        />
+      </div>
+
+      <div
+        data-testid="capsule-input-field"
+        className={cn(
+          'min-w-0 transition-[grid-column] duration-300 ease-[var(--sf-ease)]',
+          isMulti ? 'col-span-3 row-start-1' : 'col-start-2 row-start-1',
+        )}
+      >
+        <CapsuleGhostInput
+          value={inputValue}
+          onChange={setInputValue}
+          disabled={disabled}
+          onEnter={doSend}
+          onLineCountChange={handleLineCountChange}
+          expanded={isMulti}
+          className="w-full"
+        />
+      </div>
+
+      <div
+        data-testid="capsule-input-right"
+        className={cn(
+          'justify-self-end transition-[translate] duration-300 ease-[var(--sf-ease)]',
+          isMulti ? 'col-start-3 row-start-2' : 'col-start-3 row-start-1',
+        )}
+      >
+        <CapsuleInputRightActions
+          inputValue={inputValue}
+          disabled={disabled}
+          showPasteCopy={showPasteCopy}
+          onSend={doSend}
+          onPaste={handlePaste}
+          onCopy={handleCopy}
+        />
+      </div>
     </div>
   );
 }
