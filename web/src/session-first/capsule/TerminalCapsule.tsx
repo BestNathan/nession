@@ -66,8 +66,8 @@ export function TerminalCapsule({
           'flex border border-border shadow-lg backdrop-blur-sm',
           'bg-[var(--sf-capsule-surface)] text-foreground',
           // Always rounded-3xl — avoid pill↔rect snap that feels hard
-          'rounded-3xl px-2 py-1.5',
-          isCommandsMode ? 'min-h-11 items-center gap-2' : 'items-stretch',
+          'rounded-3xl px-3 py-2',
+          isCommandsMode ? 'min-h-11 items-center gap-2' : 'items-center',
         )}
       >
         {isCommandsMode && onModeChange ? (

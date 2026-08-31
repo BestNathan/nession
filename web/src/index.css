@@ -154,8 +154,9 @@ html {
   --sf-terminal-well: #1e1e2e;
   /* Capsule sits on the dark well; light elevated surface for readable text */
   --sf-capsule-surface: oklch(1 0 0 / 0.96);
-  --sf-capsule-line: 1.25rem; /* text-sm leading-5 */
+  --sf-capsule-line: 1.25rem; /* matches CAPSULE_LINE_PX / leading */
   --sf-capsule-max-lines: 5;
+  --sf-capsule-control: var(--control-md, 32px);
 }
 
 .session-first-shell {

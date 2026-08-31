@@ -2,6 +2,7 @@ import { ClipboardPaste, Copy, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
 
 interface CapsuleInputActionButtonsProps {
   inputValue: string;
@@ -32,14 +33,14 @@ export function CapsuleInputActionButtons({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon"
                   disabled={disabled}
                   data-testid="capsule-paste"
                   aria-label="Paste"
-                  className="max-lg:min-h-11 max-lg:min-w-11"
+                  className={capsuleIconButtonClass}
                   onClick={onPaste}
                 >
-                  <ClipboardPaste className="size-4" />
+                  <ClipboardPaste />
                 </Button>
               }
             />
@@ -53,14 +54,16 @@ export function CapsuleInputActionButtons({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon"
                   disabled={disabled || !inputValue}
                   data-testid="capsule-copy"
                   aria-label="Copy"
-                  className="max-lg:min-h-11 max-lg:min-w-11"
-                  onClick={() => { void onCopy(); }}
+                  className={capsuleIconButtonClass}
+                  onClick={() => {
+                    void onCopy();
+                  }}
                 >
-                  <Copy className="size-4" />
+                  <Copy />
                 </Button>
               }
             />
@@ -75,19 +78,20 @@ export function CapsuleInputActionButtons({
           render={
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               disabled={!canSend}
               data-testid="capsule-send"
               aria-label="Send"
               className={cn(
-                'size-8 rounded-full max-lg:size-11',
+                capsuleIconButtonClass,
+                'rounded-full border-0',
                 canSend
                   ? 'bg-foreground text-background hover:bg-foreground/90'
                   : 'bg-muted text-muted-foreground',
               )}
               onClick={onSend}
             >
-              <ArrowUp className="size-4" />
+              <ArrowUp />
             </Button>
           }
         />
