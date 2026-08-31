@@ -152,6 +152,10 @@ html {
 /* Session-first ChatGPT shell (#492 V1) — Catppuccin Mocha base for the well */
 :root {
   --sf-terminal-well: #1e1e2e;
+  /* Capsule sits on the dark well; light elevated surface for readable text */
+  --sf-capsule-surface: oklch(1 0 0 / 0.96);
+  --sf-capsule-line: 1.25rem; /* text-sm leading-5 */
+  --sf-capsule-max-lines: 5;
 }
 
 .session-first-shell {

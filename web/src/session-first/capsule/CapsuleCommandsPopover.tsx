@@ -70,7 +70,7 @@ export function CapsuleCommandsPopover({
         <PopoverContent
           align="end"
           side="top"
-          className="max-h-[45vh] w-80 overflow-hidden border-border/60 bg-[var(--sf-terminal-well)]/95 p-0 text-foreground"
+          className="max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
         >
           <PopoverHeader className="border-b border-border/60 p-2">
             <PopoverTitle>Commands</PopoverTitle>

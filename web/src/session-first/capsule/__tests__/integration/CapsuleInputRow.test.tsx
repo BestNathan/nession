@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleInputRow } from '@/session-first/capsule/CapsuleInputRow';
 
@@ -39,7 +39,23 @@ describe('CapsuleInputRow', () => {
     expect(sendText).toHaveBeenCalledWith('hello\r');
   });
 
-  it('reports multi-line dock height', async () => {
+  it('stays compact (row) for single-line input', () => {
+    render(
+      <CapsuleInputRow
+        sendText={vi.fn()}
+        historyOpen={false}
+        onHistoryOpenChange={vi.fn()}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+      />,
+    );
+    const row = screen.getByTestId('capsule-input-row');
+    expect(row).toHaveAttribute('data-expanded', 'false');
+    expect(row.className).toMatch(/flex-row/);
+    expect(screen.queryByTestId('capsule-input-toolbar')).not.toBeInTheDocument();
+  });
+
+  it('expands to column toolbar when content becomes multi-line', async () => {
     const onHeightChange = vi.fn();
     render(
       <CapsuleInputRow
@@ -51,23 +67,14 @@ describe('CapsuleInputRow', () => {
         onHeightChange={onHeightChange}
       />,
     );
-    await userEvent.type(screen.getByTestId('capsule-ghost-input'), 'line1{Shift>}{Enter}{/Shift}line2');
-    expect(onHeightChange).toHaveBeenCalledWith('multi');
-  });
-
-  it('keeps actions in a bottom toolbar below the full-width input', () => {
-    render(
-      <CapsuleInputRow
-        sendText={vi.fn()}
-        historyOpen={false}
-        onHistoryOpenChange={vi.fn()}
-        commandsOpen={false}
-        onCommandsOpenChange={vi.fn()}
-      />,
+    await userEvent.type(
+      screen.getByTestId('capsule-ghost-input'),
+      'line1{Shift>}{Enter}{/Shift}line2',
     );
-    const row = screen.getByTestId('capsule-input-row');
-    expect(row.className).toMatch(/flex-col/);
+    await waitFor(() => {
+      expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-expanded', 'true');
+    });
+    expect(onHeightChange).toHaveBeenCalledWith('multi');
     expect(screen.getByTestId('capsule-input-toolbar')).toBeInTheDocument();
-    expect(screen.getByTestId('capsule-ghost-input').parentElement?.className).toMatch(/w-full/);
   });
 });
