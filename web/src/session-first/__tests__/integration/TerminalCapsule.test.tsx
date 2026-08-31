@@ -71,9 +71,31 @@ describe('TerminalCapsule', () => {
     expect(shell?.className).toMatch(/rounded-full/);
   });
 
+  it('centers a capped-width dock on desktop instead of full terminal width', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    const root = screen.getByTestId('terminal-capsule');
+    expect(root.className).toMatch(/left-1\/2/);
+    expect(root.className).toMatch(/min\(100%-3rem,42rem\)/);
+    expect(root.className).not.toMatch(/inset-x-3/);
+  });
+
+  it('keeps near-full width on mobile', () => {
+    render(
+      <TerminalCapsule variant="mobile" mode="input" onModeChange={vi.fn()} sendText={vi.fn()} />,
+    );
+    expect(screen.getByTestId('terminal-capsule').className).toMatch(/inset-x-3/);
+  });
+
   it('uses safe-area positioning classes', () => {
     render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root.className).toMatch(/bottom-\[max\(0\.75rem,env\(safe-area-inset-bottom\)\)\]/);
+  });
+
+  it('does not draw a focus ring class on the ghost input', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    const input = screen.getByTestId('capsule-ghost-input');
+    expect(input.className).toMatch(/focus-visible:outline-none/);
+    expect(input.className).toMatch(/border-0/);
   });
 });

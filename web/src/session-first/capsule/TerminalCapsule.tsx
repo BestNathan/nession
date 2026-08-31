@@ -52,18 +52,22 @@ export function TerminalCapsule({
       data-disabled={disabled ? 'true' : undefined}
       data-dock-height={isExpanded ? 'multi' : 'single'}
       className={cn(
-        'absolute inset-x-3 z-10 flex flex-col',
+        'absolute z-10 flex flex-col',
         'bottom-[max(0.75rem,env(safe-area-inset-bottom))]',
+        // Mobile: near full width of the well
+        isMobile && 'inset-x-3',
+        // Desktop: centered, capped — not edge-to-edge with the terminal
+        !isMobile && 'left-1/2 w-[min(100%-3rem,42rem)] -translate-x-1/2',
       )}
     >
       <div
         className={cn(
           'border border-border shadow-lg backdrop-blur-sm',
           'bg-[var(--sf-capsule-surface)] text-foreground',
-          'px-2 py-1.5',
+          'px-1.5 py-1',
           'transition-[border-radius,padding] duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
-          isExpanded || isCommandsMode ? 'rounded-2xl py-2' : 'rounded-full',
-          isCommandsMode ? 'flex min-h-11 items-center gap-2' : 'flex',
+          isExpanded || isCommandsMode ? 'rounded-2xl px-2 py-2' : 'rounded-full',
+          isCommandsMode ? 'flex min-h-11 items-center gap-2' : 'flex items-center',
         )}
       >
         {isCommandsMode && onModeChange ? (
