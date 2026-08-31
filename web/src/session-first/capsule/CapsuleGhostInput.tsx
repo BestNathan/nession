@@ -100,6 +100,7 @@ export function CapsuleGhostInput({
           'w-full resize-none overflow-y-auto border-0 bg-transparent text-sm text-foreground shadow-none',
           'outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
           'field-sizing-content',
+          'transition-[padding,min-height,line-height,height] duration-300 ease-[var(--sf-ease)]',
           expanded
             ? 'min-h-8 px-1.5 py-1.5 leading-5'
             : 'h-8 min-h-8 px-1.5 py-0 leading-8',
