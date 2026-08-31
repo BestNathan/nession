@@ -1,14 +1,23 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
+import {
+  CAPSULE_LINE_PX,
+  CAPSULE_MAX_HEIGHT_PX,
+  CAPSULE_PAD_Y_PX,
+  CAPSULE_SINGLE_HEIGHT_PX,
+  capsuleFieldPadClass,
+  capsuleFieldTypeClass,
+} from '@/session-first/capsule/capsuleStyles';
 import { useHistoryGhost } from '@/session-first/capsule/useHistoryGhost';
 
-export const CAPSULE_LINE_PX = 20;
-export const CAPSULE_PAD_Y_PX = 12;
-export const CAPSULE_SINGLE_HEIGHT_PX = 32;
-export const CAPSULE_MAX_LINES = 5;
-export const CAPSULE_MAX_HEIGHT_PX =
-  CAPSULE_LINE_PX * CAPSULE_MAX_LINES + CAPSULE_PAD_Y_PX;
+export {
+  CAPSULE_LINE_PX,
+  CAPSULE_MAX_HEIGHT_PX,
+  CAPSULE_MAX_LINES,
+  CAPSULE_PAD_Y_PX,
+  CAPSULE_SINGLE_HEIGHT_PX,
+} from '@/session-first/capsule/capsuleStyles';
 
 const HEIGHT_EASE = 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)';
 
@@ -84,7 +93,11 @@ export function CapsuleGhostInput({
     <div className={cn('relative min-w-0 flex-1', className)}>
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden px-1.5 py-1.5 text-sm leading-5"
+        className={cn(
+          'pointer-events-none absolute inset-0 overflow-hidden',
+          capsuleFieldPadClass,
+          capsuleFieldTypeClass,
+        )}
       >
         <span className="whitespace-pre-wrap break-words text-transparent">{value}</span>
         {showGhost ? (
@@ -106,8 +119,10 @@ export function CapsuleGhostInput({
         aria-autocomplete="inline"
         style={{ height, maxHeight: CAPSULE_MAX_HEIGHT_PX, transition: HEIGHT_EASE }}
         className={cn(
-          'w-full resize-none overflow-y-auto border-0 bg-transparent px-1.5 py-1.5 text-sm leading-5',
-          'text-foreground shadow-none',
+          'w-full resize-none overflow-y-auto border-0 bg-transparent shadow-none',
+          capsuleFieldPadClass,
+          capsuleFieldTypeClass,
+          'text-foreground placeholder:text-muted-foreground',
           'outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
         )}
         onChange={(event) => onChange(event.target.value)}

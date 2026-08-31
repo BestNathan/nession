@@ -1,6 +1,8 @@
 import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsPopover';
 import { CapsuleHistoryPopover } from '@/session-first/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/session-first/capsule/CapsuleInputActionButtons';
+import { capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
+import { cn } from '@/lib/utils';
 
 interface CapsuleInputActionsProps {
   leading?: React.ReactNode;
@@ -25,7 +27,10 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
     return null;
   }
   return (
-    <div data-testid="capsule-input-leading" className="flex shrink-0 items-center gap-0.5">
+    <div
+      data-testid="capsule-input-leading"
+      className="flex h-8 shrink-0 items-center gap-1 max-lg:h-11"
+    >
       {leading}
     </div>
   );
@@ -33,7 +38,7 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
 
 /**
  * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
- * Kept as one cluster so FLIP can morph the whole group.
+ * Single height cluster so icons share a baseline with the field.
  */
 export function CapsuleInputTrailingActions({
   historyOpen,
@@ -53,7 +58,7 @@ export function CapsuleInputTrailingActions({
   return (
     <div
       data-testid="capsule-input-actions"
-      className="flex shrink-0 items-center gap-0.5"
+      className="flex h-8 shrink-0 items-center gap-1 max-lg:h-11"
     >
       <CapsuleHistoryPopover
         open={historyOpen}
@@ -65,6 +70,7 @@ export function CapsuleInputTrailingActions({
         }}
         disabled={disabled}
         onSelect={onSelectHistory}
+        triggerClassName={cn(capsuleIconButtonClass, 'rounded-lg')}
       />
       {showCommandsButton ? (
         <CapsuleCommandsPopover

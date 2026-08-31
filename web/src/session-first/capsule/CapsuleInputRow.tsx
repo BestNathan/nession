@@ -103,15 +103,15 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
         data-testid="capsule-input-row"
         data-layout={layout}
         className={cn(
-          'grid min-w-0 flex-1 gap-1',
+          'grid min-w-0 flex-1 gap-2',
           !isStacked &&
             !hasLeading &&
-            'grid-cols-[minmax(0,1fr)_auto] grid-rows-1 items-end',
+            'grid-cols-[minmax(0,1fr)_auto] grid-rows-1 items-center',
           !isStacked &&
             hasLeading &&
-            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-1 items-end',
+            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-1 items-center',
           isStacked &&
-            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center',
+            'grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-y-1.5',
         )}
       >
         <div
@@ -128,7 +128,7 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
         <div
           data-testid="capsule-input-field"
           className={cn(
-            'min-w-0 self-end',
+            'min-w-0',
             isStacked && 'col-span-3 col-start-1 row-start-1',
             !isStacked && hasLeading && 'col-start-2 row-start-1',
             !isStacked && !hasLeading && 'col-start-1 row-start-1',
@@ -147,7 +147,7 @@ const CapsuleComposerGrid = forwardRef<HTMLDivElement, CapsuleComposerGridProps>
           data-testid="capsule-input-actions-slot"
           data-flip-id="tools-actions"
           className={cn(
-            'shrink-0 self-end',
+            'shrink-0',
             isStacked && 'col-start-3 row-start-2 justify-self-end',
             !isStacked && hasLeading && 'col-start-3 row-start-1',
             !isStacked && !hasLeading && 'col-start-2 row-start-1',

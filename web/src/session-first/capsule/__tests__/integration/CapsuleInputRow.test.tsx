@@ -112,7 +112,21 @@ describe('CapsuleInputRow', () => {
     renderRow();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-layout', 'flat');
+    expect(row.className).toMatch(/items-center/);
     expect(row.className).toMatch(/grid-cols-\[minmax/);
+  });
+
+  it('uses shared body type on the field', () => {
+    renderRow();
+    const input = screen.getByTestId('capsule-ghost-input');
+    expect(input.className).toMatch(/sf-text-body/);
+    expect(input.className).toMatch(/sf-capsule-line/);
+  });
+
+  it('keeps History and Send at the same control size', () => {
+    renderRow();
+    expect(screen.getByTestId('capsule-history-trigger').className).toMatch(/size-8/);
+    expect(screen.getByTestId('capsule-send').className).toMatch(/size-8/);
   });
 
   it('switches to stacked layout for multi-line without dropping focus', async () => {
@@ -172,7 +186,7 @@ describe('CapsuleInputRow', () => {
     render(
       <CapsuleInputRow
         sendText={sendText}
-        historyOpen={true}
+        historyOpen={false}
         onHistoryOpenChange={onHistoryOpenChange}
         commandsOpen={false}
         onCommandsOpenChange={vi.fn()}
