@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { ComposerLayout } from '@/session-first/capsule/types';
 
 export const FLIP_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -148,7 +148,7 @@ export function useCapsuleLayoutFlip(
   const pendingFirst = useRef<Map<string, DOMRect> | null>(null);
   const prevLayout = useRef(layout);
 
-  const captureBeforeLayoutChange = () => {
+  const captureBeforeLayoutChange = useCallback(() => {
     const root = rootRef.current;
     if (!root || prefersReducedMotion()) {
       pendingFirst.current = null;
@@ -162,7 +162,7 @@ export function useCapsuleLayoutFlip(
       }
     });
     pendingFirst.current = map;
-  };
+  }, [rootRef]);
 
   useLayoutEffect(() => {
     if (prevLayout.current === layout) {

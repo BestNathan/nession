@@ -153,10 +153,50 @@ describe('CapsuleInputRow', () => {
     });
     expect(onLayoutChange).toHaveBeenCalledWith('stacked');
     expect(document.activeElement).toBe(input);
-    expect(screen.getByTestId('capsule-input-field').className).toMatch(/col-span-3/);
+    // Field stays in the fr column (not col-span across actions) so wrap width is stable
+    expect(screen.getByTestId('capsule-input-field').className).not.toMatch(/col-span-3/);
     expect(screen.getByTestId('capsule-input-actions-slot').className).toMatch(
       /row-start-2/,
     );
+  });
+
+  it('does not oscillate when soft-wrap height depends on flat vs stacked width', async () => {
+    // Reproduce React #185: stacked used to col-span the field under the
+    // actions column (wider) so soft-wrap unwraps → flat → wrap → loop.
+    const onLayoutChange = vi.fn();
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLTextAreaElement) {
+        const field = this.closest('[data-testid="capsule-input-field"]');
+        const spansFull = Boolean(field?.className.includes('col-span-3'));
+        if (this.value.length >= 24) {
+          // Narrow (no span) wraps to 2 lines; full-span unwraps to 1
+          return spansFull ? 32 : 52;
+        }
+        return 32;
+      },
+    });
+
+    try {
+      renderRow(onLayoutChange);
+      const input = screen.getByTestId('capsule-ghost-input');
+      await userEvent.type(input, 'x'.repeat(28));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('capsule-input-row')).toHaveAttribute(
+          'data-layout',
+          'stacked',
+        );
+      });
+      // Settled — not thrashing flat/stacked on every layout effect
+      expect(onLayoutChange.mock.calls.length).toBeLessThan(5);
+      expect(onLayoutChange).toHaveBeenCalledWith('stacked');
+      expect(
+        onLayoutChange.mock.calls.filter((c) => c[0] === 'flat').length,
+      ).toBe(0);
+    } finally {
+      Reflect.deleteProperty(HTMLTextAreaElement.prototype, 'scrollHeight');
+    }
   });
 
   it('returns to flat when content is single line again', async () => {
