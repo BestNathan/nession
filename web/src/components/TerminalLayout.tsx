@@ -68,7 +68,7 @@ function DesktopToolbarLayout({
         {isDesktop && terminalElement}
         {isDesktop ? (
           <TerminalCapsule
-            variant="desktop"
+            experience="web"
             sendText={sendText}
             disabled={toolbarDisabled}
           />

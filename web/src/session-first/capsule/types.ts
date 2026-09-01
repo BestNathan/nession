@@ -1,6 +1,9 @@
 export type CapsuleMode = 'input' | 'commands';
 
+/** @deprecated Use CapsuleExperience — desktop≡web, mobile≡app */
 export type CapsuleVariant = 'desktop' | 'mobile';
+
+export type CapsuleExperience = 'web' | 'app';
 
 export type CapsulePopoverId = 'history' | 'commands';
 
@@ -10,10 +13,11 @@ export type ComposerLayout = 'flat' | 'stacked';
 /** @deprecated Use ComposerLayout — single≡flat, multi≡stacked */
 export type DockHeight = 'single' | 'multi';
 
-export function dockHeightFromLayout(layout: ComposerLayout): DockHeight {
-  return layout === 'stacked' ? 'multi' : 'single';
-}
+export {
+  dockHeightFromLayout,
+  layoutFromLineCount,
+} from '@/session-first/capsule/measure/layoutFromLineCount';
 
-export function layoutFromLineCount(lineCount: number): ComposerLayout {
-  return lineCount >= 2 ? 'stacked' : 'flat';
+export function experienceFromVariant(variant: CapsuleVariant): CapsuleExperience {
+  return variant === 'mobile' ? 'app' : 'web';
 }

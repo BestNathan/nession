@@ -23,12 +23,12 @@ vi.mock('@/hooks/useCommandHistory', () => ({
 
 describe('TerminalCapsule', () => {
   it('never renders legacy sheet', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     expect(screen.queryByTestId('terminal-capsule-sheet')).not.toBeInTheDocument();
   });
 
-  it('renders desktop input row with History + Send only', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+  it('renders web input row with History + Send only', () => {
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     expect(screen.getByTestId('capsule-input-row')).toBeInTheDocument();
     expect(screen.getByTestId('capsule-history-trigger')).toBeInTheDocument();
     expect(screen.getByTestId('capsule-send')).toBeInTheDocument();
@@ -37,10 +37,10 @@ describe('TerminalCapsule', () => {
     expect(screen.queryByTestId('capsule-mode-toggle')).not.toBeInTheDocument();
   });
 
-  it('shows paste/copy on mobile input mode', () => {
+  it('shows paste/copy on app input mode', () => {
     render(
       <TerminalCapsule
-        variant="mobile"
+        experience="app"
         mode="input"
         onModeChange={vi.fn()}
         sendText={vi.fn()}
@@ -50,11 +50,11 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('capsule-copy')).toBeInTheDocument();
   });
 
-  it('renders mobile mode toggle and switches body', async () => {
+  it('renders app mode toggle and switches body', async () => {
     const onModeChange = vi.fn();
     const { rerender } = render(
       <TerminalCapsule
-        variant="mobile"
+        experience="app"
         mode="input"
         onModeChange={onModeChange}
         sendText={vi.fn()}
@@ -66,7 +66,7 @@ describe('TerminalCapsule', () => {
 
     rerender(
       <TerminalCapsule
-        variant="mobile"
+        experience="app"
         mode="commands"
         onModeChange={onModeChange}
         sendText={vi.fn()}
@@ -76,47 +76,43 @@ describe('TerminalCapsule', () => {
   });
 
   it('marks disabled state', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} disabled />);
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} disabled />);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-disabled', 'true');
   });
 
-  it('uses light elevated capsule surface over the terminal well', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
-    const shell = screen.getByTestId('terminal-capsule').firstElementChild;
-    expect(shell?.className).toMatch(/sf-capsule-surface/);
-    expect(shell?.className).toMatch(/rounded-3xl/);
+  it('uses token capsule surface and radius on shell', () => {
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+    const shell = screen.getByTestId('capsule-shell');
+    expect(shell.className).toMatch(/terminal-capsule-surface/);
+    expect(shell.className).toMatch(/radius-capsule/);
   });
 
-  it('centers a capped-width dock on desktop instead of full terminal width', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+  it('centers a capped-width dock on web', () => {
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
+    expect(root).toHaveAttribute('data-experience', 'web');
     expect(root.className).toMatch(/left-1\/2/);
-    expect(root.className).toMatch(/min\(100%-3rem,42rem\)/);
-    expect(root.className).not.toMatch(/inset-x-3/);
+    expect(root.className).toMatch(/composer-shell-max-width/);
   });
 
-  it('keeps near-full width on mobile', () => {
+  it('uses inset positioning on app', () => {
     render(
-      <TerminalCapsule variant="mobile" mode="input" onModeChange={vi.fn()} sendText={vi.fn()} />,
+      <TerminalCapsule experience="app" mode="input" onModeChange={vi.fn()} sendText={vi.fn()} />,
     );
-    expect(screen.getByTestId('terminal-capsule').className).toMatch(/inset-x-3/);
-  });
-
-  it('uses safe-area positioning classes', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
-    expect(root.className).toMatch(/bottom-\[max\(0\.75rem,env\(safe-area-inset-bottom\)\)\]/);
+    expect(root).toHaveAttribute('data-experience', 'app');
+    expect(root.className).toMatch(/composer-shell-inset/);
   });
 
   it('does not draw a focus ring class on the ghost input', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const input = screen.getByTestId('capsule-ghost-input');
     expect(input.className).toMatch(/focus-visible:outline-none/);
     expect(input.className).toMatch(/border-0/);
   });
 
-  it('exposes flat layout by default and stacked on desktop multiline input', async () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+  it('exposes flat layout by default and stacked on multiline input', async () => {
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-layout', 'flat');
     expect(root).toHaveAttribute('data-dock-height', 'single');
@@ -128,5 +124,10 @@ describe('TerminalCapsule', () => {
       expect(root).toHaveAttribute('data-layout', 'stacked');
     });
     expect(root).toHaveAttribute('data-dock-height', 'multi');
+  });
+
+  it('still accepts legacy variant prop', () => {
+    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+    expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-experience', 'web');
   });
 });

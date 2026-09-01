@@ -2,23 +2,15 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
 import {
-  CAPSULE_MAX_HEIGHT_PX,
-  CAPSULE_SINGLE_HEIGHT_PX,
   capsuleFieldPadClass,
   capsuleFieldTypeClass,
-  measureCapsuleLineCount,
 } from '@/session-first/capsule/capsuleStyles';
+import {
+  maxFieldHeightPx,
+  type ComposerMetrics,
+} from '@/session-first/capsule/measure/types';
+import { readComposerMetricsFromField } from '@/session-first/capsule/measure/readComposerMetrics';
 import { useHistoryGhost } from '@/session-first/capsule/useHistoryGhost';
-
-export {
-  CAPSULE_LINE_PX,
-  CAPSULE_MAX_HEIGHT_PX,
-  CAPSULE_MAX_LINES,
-  CAPSULE_PAD_Y_PX,
-  CAPSULE_SINGLE_HEIGHT_PX,
-} from '@/session-first/capsule/capsuleStyles';
-
-const HEIGHT_EASE = 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)';
 
 interface CapsuleGhostInputProps {
   value: string;
@@ -26,7 +18,6 @@ interface CapsuleGhostInputProps {
   disabled?: boolean;
   placeholder?: string;
   onEnter?: () => void;
-  onLineCountChange?: (lineCount: number) => void;
   className?: string;
 }
 
@@ -36,39 +27,47 @@ export function CapsuleGhostInput({
   disabled = false,
   placeholder = 'Send input…',
   onEnter,
-  onLineCountChange,
   className,
 }: CapsuleGhostInputProps) {
   const { history } = useCommandHistory();
   const { ghostSuffix, acceptGhost, hasGhost } = useHistoryGhost(value, history);
   const [composing, setComposing] = useState(false);
-  const [height, setHeight] = useState(CAPSULE_SINGLE_HEIGHT_PX);
+  const [height, setHeight] = useState<number | undefined>(undefined);
+  const [metrics, setMetrics] = useState<ComposerMetrics | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const showGhost = hasGhost && !composing;
+  const minHeight = metrics?.controlHeight ?? 32;
+  const maxHeight = metrics ? maxFieldHeightPx(metrics) : undefined;
+  const heightEase = 'var(--motion-composer)';
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) {
       return;
     }
+    const shell = el.closest('[data-testid="capsule-shell"]');
+    if (!(shell instanceof HTMLElement)) {
+      return;
+    }
+
+    const nextMetrics = readComposerMetricsFromField(shell, el);
+    setMetrics(nextMetrics);
+
     const prev = el.style.height;
     el.style.height = 'auto';
     const measured = el.scrollHeight;
     el.style.height = prev;
 
-    const lines = measureCapsuleLineCount(value, measured);
-    onLineCountChange?.(lines);
-
     const nextHeight =
       value.length === 0
-        ? CAPSULE_SINGLE_HEIGHT_PX
+        ? nextMetrics.controlHeight
         : Math.min(
-            Math.max(measured, CAPSULE_SINGLE_HEIGHT_PX),
-            CAPSULE_MAX_HEIGHT_PX,
+            Math.max(measured, nextMetrics.controlHeight),
+            maxFieldHeightPx(nextMetrics),
           );
     setHeight((prevHeight) => (prevHeight === nextHeight ? prevHeight : nextHeight));
-  }, [value, onLineCountChange]);
+  }, [value]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Tab' && showGhost) {
@@ -114,7 +113,11 @@ export function CapsuleGhostInput({
         disabled={disabled}
         placeholder={placeholder}
         aria-autocomplete="inline"
-        style={{ height, maxHeight: CAPSULE_MAX_HEIGHT_PX, transition: HEIGHT_EASE }}
+        style={{
+          height: height ?? minHeight,
+          maxHeight,
+          transition: maxHeight ? `height ${heightEase}` : undefined,
+        }}
         className={cn(
           'w-full resize-none overflow-y-auto border-0 bg-transparent shadow-none',
           capsuleFieldPadClass,

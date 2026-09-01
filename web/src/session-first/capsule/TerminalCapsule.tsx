@@ -1,20 +1,28 @@
-import { useState } from 'react';
-import { cn } from '@/lib/utils';
-import { CapsuleCommandsRow } from '@/session-first/capsule/CapsuleCommandsRow';
-import { CapsuleInputRow } from '@/session-first/capsule/CapsuleInputRow';
+import { useCallback, useRef } from 'react';
+import { CAPSULE_EXPERIENCE } from '@/session-first/capsule/config/experience';
 import { CapsuleModeToggle } from '@/session-first/capsule/CapsuleModeToggle';
+import { CapsuleShell } from '@/session-first/capsule/components/CapsuleShell';
+import { CommandsComposer } from '@/session-first/capsule/components/CommandsComposer';
+import { InputComposer } from '@/session-first/capsule/components/InputComposer';
+import { ComposerMeasureMirror } from '@/session-first/capsule/components/ComposerMeasureMirror';
+import { CapsuleProvider } from '@/session-first/capsule/state/CapsuleProvider';
+import { useComposerMeasure } from '@/session-first/capsule/state/useComposerMeasure';
+import { useCapsuleState } from '@/session-first/capsule/state/useCapsuleState';
 import {
-  dockHeightFromLayout,
+  experienceFromVariant,
+  layoutFromLineCount,
+  type CapsuleExperience,
   type CapsuleMode,
-  type CapsulePopoverId,
   type CapsuleVariant,
-  type ComposerLayout,
 } from '@/session-first/capsule/types';
+import { useCapsuleLayoutFlip } from '@/session-first/capsule/useCapsuleLayoutFlip';
 
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
   disabled?: boolean;
-  variant: CapsuleVariant;
+  /** @deprecated Use experience */
+  variant?: CapsuleVariant;
+  experience?: CapsuleExperience;
   mode?: CapsuleMode;
   onModeChange?: (mode: CapsuleMode) => void;
 }
@@ -23,85 +31,107 @@ export function TerminalCapsule({
   sendText,
   disabled = false,
   variant,
+  experience,
   mode = 'input',
   onModeChange,
 }: TerminalCapsuleProps) {
-  const [openPopover, setOpenPopover] = useState<CapsulePopoverId | null>(null);
-  const [layout, setLayout] = useState<ComposerLayout>('flat');
+  const resolvedExperience =
+    experience ?? (variant ? experienceFromVariant(variant) : 'web');
+  const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
+  const isApp = resolvedExperience === 'app';
+  const activeMode = isApp ? mode : 'input';
+  const isCommandsMode = isApp && activeMode === 'commands';
+  const allowLayoutChanges = !isApp || activeMode === 'input';
 
-  const historyOpen = openPopover === 'history';
-  const commandsOpen = openPopover === 'commands';
+  const state = useCapsuleState({
+    sendText,
+    disabled,
+    mode: activeMode,
+    onModeChange,
+    allowLayoutChanges,
+  });
 
-  const setHistoryOpen = (open: boolean) => {
-    setOpenPopover(open ? 'history' : null);
-  };
+  const shellRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const inputRowRef = useRef<HTMLDivElement>(null);
 
-  const setCommandsOpen = (open: boolean) => {
-    setOpenPopover(open ? 'commands' : null);
-  };
+  const showModeToggle = Boolean(isApp && onModeChange && experienceConfig.inputControls.modeToggle);
+  const {
+    applyLineCount,
+    composerLayout,
+    send: stateSend,
+    ...restState
+  } = state;
 
-  const isMobile = variant === 'mobile';
-  const showModeToggle = Boolean(isMobile && onModeChange);
-  const activeMode = isMobile ? mode : 'input';
-  const allowMultiLineGrowth = !isMobile || activeMode === 'input';
-  const isCommandsMode = isMobile && activeMode === 'commands';
+  const { captureBeforeLayoutChange } = useCapsuleLayoutFlip(
+    composerLayout,
+    inputRowRef,
+  );
+
+  const handleLineCountChange = useCallback(
+    (lineCount: number) => {
+      const next = layoutFromLineCount(lineCount);
+      if (next !== composerLayout) {
+        captureBeforeLayoutChange();
+      }
+      applyLineCount(lineCount);
+    },
+    [applyLineCount, captureBeforeLayoutChange, composerLayout],
+  );
+
+  const send = useCallback(() => {
+    if (composerLayout === 'stacked') {
+      captureBeforeLayoutChange();
+    }
+    stateSend();
+  }, [captureBeforeLayoutChange, composerLayout, stateSend]);
+
+  const measureMirrorRef = useComposerMeasure({
+    value: restState.inputValue,
+    shellRef,
+    contentWidthRef: contentRef,
+    onLineCountChange: handleLineCountChange,
+    enabled: allowLayoutChanges && !isCommandsMode,
+  });
 
   return (
-    <div
-      data-testid="terminal-capsule"
-      data-disabled={disabled ? 'true' : undefined}
-      data-layout={isCommandsMode ? undefined : layout}
-      data-dock-height={isCommandsMode ? 'single' : dockHeightFromLayout(layout)}
-      className={cn(
-        'absolute z-10 flex flex-col',
-        'bottom-[max(0.75rem,env(safe-area-inset-bottom))]',
-        // Mobile: near full width of the well
-        isMobile && 'inset-x-3',
-        // Desktop: centered, capped — not edge-to-edge with the terminal
-        !isMobile && 'left-1/2 w-[min(100%-3rem,42rem)] -translate-x-1/2',
-      )}
+    <CapsuleProvider
+      value={{
+        ...restState,
+        applyLineCount,
+        composerLayout,
+        send,
+        experience: resolvedExperience,
+        experienceConfig,
+        sendText,
+      }}
     >
-      <div
-        className={cn(
-          'flex border border-border shadow-lg backdrop-blur-sm',
-          'bg-[var(--sf-capsule-surface)] text-foreground',
-          // Always rounded-3xl — avoid pill↔rect snap that feels hard
-          'rounded-3xl px-3 py-2',
-          isCommandsMode ? 'min-h-11 items-center gap-2' : 'items-center',
-        )}
+      <CapsuleShell
+        experience={resolvedExperience}
+        layout={composerLayout}
+        mode={activeMode}
+        disabled={disabled}
+        shellRef={shellRef}
+        contentRef={contentRef}
+        measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
       >
         {isCommandsMode && onModeChange ? (
           <>
             <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
-            <CapsuleCommandsRow
-              sendText={sendText}
-              disabled={disabled}
-              commandsOpen={commandsOpen}
-              onCommandsOpenChange={setCommandsOpen}
-            />
+            <CommandsComposer />
           </>
         ) : (
-          <CapsuleInputRow
-            sendText={sendText}
-            disabled={disabled}
-            historyOpen={historyOpen}
-            onHistoryOpenChange={setHistoryOpen}
-            commandsOpen={commandsOpen}
-            onCommandsOpenChange={setCommandsOpen}
-            // Default bar: History + Send only. Commands via mobile mode.
-            // Paste/Copy only on mobile (no hardware clipboard shortcuts).
-            showCommandsButton={false}
-            showPasteCopy={isMobile}
+          <InputComposer
+            ref={inputRowRef}
             leading={
               showModeToggle && onModeChange ? (
                 <CapsuleModeToggle mode={mode} onModeChange={onModeChange} disabled={disabled} />
               ) : null
             }
-            onLayoutChange={allowMultiLineGrowth ? setLayout : undefined}
           />
         )}
-      </div>
-    </div>
+      </CapsuleShell>
+    </CapsuleProvider>
   );
 }
 
