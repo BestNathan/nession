@@ -17,7 +17,8 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
   await expect(page.getByTestId('session-first-main-content')).toBeVisible();
   await expect(page.getByTestId('terminal-well')).toBeVisible();
   await expect(page.getByTestId('fixture-terminal')).toBeVisible();
-  await expect(page.locator('[data-testid="fixture-terminal"] .xterm canvas')).toBeVisible();
+  // Renderer-agnostic: headless xterm may use the DOM renderer (no canvas).
+  await expect(page.locator('[data-testid="fixture-terminal"] .xterm-screen')).toBeVisible();
 
   await expect(page.getByTestId('session-item-row')).toHaveCount(6);
   await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
