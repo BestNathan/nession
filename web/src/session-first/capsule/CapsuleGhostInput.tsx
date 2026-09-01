@@ -2,12 +2,11 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
 import {
-  CAPSULE_LINE_PX,
   CAPSULE_MAX_HEIGHT_PX,
-  CAPSULE_PAD_Y_PX,
   CAPSULE_SINGLE_HEIGHT_PX,
   capsuleFieldPadClass,
   capsuleFieldTypeClass,
+  measureCapsuleLineCount,
 } from '@/session-first/capsule/capsuleStyles';
 import { useHistoryGhost } from '@/session-first/capsule/useHistoryGhost';
 
@@ -53,23 +52,21 @@ export function CapsuleGhostInput({
     if (!el) {
       return;
     }
-    const fromBreaks = Math.max(1, value.split('\n').length);
     const prev = el.style.height;
     el.style.height = 'auto';
     const measured = el.scrollHeight;
     el.style.height = prev;
 
-    const fromHeight = Math.max(
-      1,
-      Math.ceil(Math.max(0, measured - CAPSULE_PAD_Y_PX) / CAPSULE_LINE_PX),
-    );
-    const lines = Math.max(fromBreaks, fromHeight);
+    const lines = measureCapsuleLineCount(value, measured);
     onLineCountChange?.(lines);
 
-    const nextHeight = Math.min(
-      Math.max(measured, CAPSULE_SINGLE_HEIGHT_PX),
-      CAPSULE_MAX_HEIGHT_PX,
-    );
+    const nextHeight =
+      value.length === 0
+        ? CAPSULE_SINGLE_HEIGHT_PX
+        : Math.min(
+            Math.max(measured, CAPSULE_SINGLE_HEIGHT_PX),
+            CAPSULE_MAX_HEIGHT_PX,
+          );
     setHeight((prevHeight) => (prevHeight === nextHeight ? prevHeight : nextHeight));
   }, [value, onLineCountChange]);
 
