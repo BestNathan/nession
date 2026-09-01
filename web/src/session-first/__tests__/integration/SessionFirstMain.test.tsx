@@ -106,6 +106,41 @@ describe('SessionFirstMain', () => {
     expect(screen.getByTestId('session-first-terminal')).toBeInTheDocument();
   });
 
+  it('threads experience to the header: switcher shows in web, hidden in app', () => {
+    const view = render(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        connectionStatus="connected"
+      />,
+    );
+    expect(screen.getByTestId('surface-switcher')).toBeInTheDocument();
+
+    view.rerender(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        connectionStatus="connected"
+        experience="app"
+      />,
+    );
+    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+  });
+
   it('shows the resting top row and empty state when no session is selected', () => {
     render(
       <SessionFirstMain

@@ -52,6 +52,7 @@ export function SessionFirstSpatialLayout(props: {
               {...mainShared}
               surface="terminal"
               showWorkspace={false}
+              experience="app"
             />
           </div>
         }
@@ -61,6 +62,7 @@ export function SessionFirstSpatialLayout(props: {
               {...mainShared}
               surface="workspace"
               showTerminal={false}
+              experience="app"
             />
           </div>
         }

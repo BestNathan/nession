@@ -35,6 +35,22 @@ describe('SessionHeader', () => {
     expect(onSurface).toHaveBeenCalledWith('workspace');
   });
 
+  it('omits the surface switcher in the app experience', () => {
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        experience="app"
+      />,
+    );
+    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+  });
+
   it('makes AgentContext prominent when offline', () => {
     render(
       <SessionHeader

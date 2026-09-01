@@ -7,6 +7,7 @@ import {
 } from '@/session-first/patterns/SurfaceSwitcher';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import type { CapsuleExperience } from '@/session-first/capsule/types';
 import type { DomainState } from '@/session-first/domainState';
 import type { ConnectionStatus } from '@/types';
 
@@ -22,6 +23,8 @@ export interface SessionHeaderProps {
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
   serverStatus?: ConnectionStatus;
+  /** App experience: no Terminal|Workspace switcher — the spatial model owns navigation. */
+  experience?: CapsuleExperience;
 }
 
 export function SessionHeader({
@@ -34,6 +37,7 @@ export function SessionHeader({
   onBackToSessions,
   onOpenDrawer,
   serverStatus,
+  experience = 'web',
 }: SessionHeaderProps) {
   return (
     <header
@@ -88,7 +92,9 @@ export function SessionHeader({
               server: {serverStatus}
             </span>
           ) : null}
-          <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+          {experience !== 'app' ? (
+            <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+          ) : null}
         </div>
       </div>
     </header>

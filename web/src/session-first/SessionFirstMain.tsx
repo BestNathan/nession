@@ -8,7 +8,10 @@ import type { DomainState } from '@/session-first/domainState';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { TerminalWell } from '@/session-first/TerminalWell';
-import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
+import type {
+  Experience,
+  WorkspaceToolId,
+} from '@/session-first/workspace/toolTypes';
 import { WorkspaceShell } from '@/session-first/workspace/WorkspaceShell';
 import type { Agent, ConnectionStatus, Session } from '@/types';
 
@@ -31,6 +34,8 @@ export interface SessionFirstMainProps {
   showWorkspace?: boolean;
   /** Fixture/testing override for the terminal surface. Defaults to the real attached terminal. */
   terminal?: ReactNode;
+  /** App experience: the SessionHeader renders no Terminal|Workspace switcher. */
+  experience?: Experience;
 }
 
 export function SessionFirstMain({
@@ -49,6 +54,7 @@ export function SessionFirstMain({
   showTerminal = true,
   showWorkspace = true,
   terminal,
+  experience = 'web',
 }: SessionFirstMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
   return (
@@ -66,6 +72,7 @@ export function SessionFirstMain({
           onBackToSessions={onBackToSessions}
           onOpenDrawer={onOpenDrawer}
           serverStatus={connectionStatus}
+          experience={experience}
         />
       ) : (
         <div
@@ -112,10 +119,7 @@ export function SessionFirstMain({
           <>
             {showTerminal ? (
               <TerminalWell
-                className={cn(
-                  'min-h-0',
-                  (surface !== 'terminal' || !selectedSession) && 'hidden',
-                )}
+                className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
               >
                 {terminal ?? (
                   <SessionFirstTerminal
