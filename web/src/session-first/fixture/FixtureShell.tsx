@@ -34,6 +34,7 @@ export function FixtureShell() {
   return (
     <div
       data-testid="session-first-shell"
+      data-sf-design="polish"
       className="session-first-shell flex h-[100dvh] flex-col bg-background"
     >
       <SessionFirstWorkspace

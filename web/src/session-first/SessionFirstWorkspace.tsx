@@ -46,7 +46,11 @@ export interface SessionFirstWorkspaceProps {
   onBackToSessions?: () => void;
   onOpenEnv: () => void;
   onLegacy: () => void;
-  /** Fixture/testing override for the terminal surface. Defaults to the real attached terminal. */
+  /**
+   * Fixture/testing override for the terminal surface. Defaults to the real
+   * attached terminal. Applies only to the wide (non-spatial) render path;
+   * the spatial layout always uses the real terminal.
+   */
   terminal?: ReactNode;
 }
 

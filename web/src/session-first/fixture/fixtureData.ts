@@ -4,6 +4,8 @@ import type { Agent, Session } from '@/types';
  * Deterministic fixture for the canonical screen (/fixture route).
  * Static timestamps — screenshots remain comparable across runs.
  * Doubles as the Phase 6 (#561) golden-baseline data source.
+ * Note: rendered relative-time labels (formatRelativeTime) drift with the
+ * wall clock; the fixture data itself is static.
  */
 export const FIXTURE_AGENTS: Agent[] = [
   {
