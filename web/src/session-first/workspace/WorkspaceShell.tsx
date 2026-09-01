@@ -44,6 +44,7 @@ export function WorkspaceShell({ ctx, activeTool }: WorkspaceShellProps) {
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                aria-controls="workspace-tool-panel"
                 disabled={!available}
                 data-testid={`workspace-tool-${tool.id}`}
                 onClick={() => ctx.onToolChange(tool.id)}

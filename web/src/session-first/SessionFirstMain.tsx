@@ -3,50 +3,12 @@ import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/services/fileOps';
 import type { DomainState } from '@/session-first/domainState';
-import { AgentDetail } from '@/session-first/patterns/AgentDetail';
-import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
-import {
-  WorkspaceNavigation,
-  type WorkspaceToolId,
-} from '@/session-first/patterns/WorkspaceNavigation';
-import { SessionDetails } from '@/session-first/SessionDetails';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { TerminalWell } from '@/session-first/TerminalWell';
+import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
+import { WorkspaceShell } from '@/session-first/workspace/WorkspaceShell';
 import type { Agent, Session } from '@/types';
-
-function WorkspacePanel({
-  hidden,
-  tool,
-  onToolChange,
-  fileOps,
-  session,
-  agent,
-  domain,
-}: {
-  hidden: boolean;
-  tool: WorkspaceToolId;
-  onToolChange: (tool: WorkspaceToolId) => void;
-  fileOps: FileOps | null;
-  session: Session | null;
-  agent: Agent | undefined;
-  domain: DomainState | null;
-}) {
-  return (
-    <div className={cn('absolute inset-0 flex min-h-0 flex-col', hidden && 'hidden')}>
-      <WorkspaceNavigation tool={tool} onToolChange={onToolChange} filesAvailable />
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tool === 'files' && <FileWorkspace fileOps={fileOps} />}
-        {tool === 'session' && session && domain && (
-          <SessionDetails session={session} state={domain} />
-        )}
-        {tool === 'agent' && agent && domain && (
-          <AgentDetail agent={agent} state={domain} />
-        )}
-      </div>
-    </div>
-  );
-}
 
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
@@ -117,15 +79,23 @@ export function SessionFirstMain({
           </TerminalWell>
         ) : null}
         {showWorkspace ? (
-          <WorkspacePanel
-            hidden={surface !== 'workspace'}
-            tool={tool}
-            onToolChange={onToolChange}
-            fileOps={fileOps}
-            session={selectedSession}
-            agent={selectedAgent}
-            domain={domain}
-          />
+          <div
+            role="tabpanel"
+            id="workspace-tool-panel"
+            className={cn('min-h-0 flex-1', surface !== 'workspace' && 'hidden')}
+          >
+            <WorkspaceShell
+              ctx={{
+                session: selectedSession,
+                agent: selectedAgent,
+                domain,
+                fileOps,
+                experience: 'web',
+                onToolChange,
+              }}
+              activeTool={tool}
+            />
+          </div>
         ) : null}
       </div>
     </>
