@@ -8,6 +8,10 @@ import {
 import { mapDomainState } from '@/session-first/domainState';
 import { fixtureFileOps } from './fixtureFileOps';
 
+// Module-stable — the stub is immutable and stateless, so a single instance
+// is safe to share across renders (same pattern as fixtureRoute).
+const fixtureOps = fixtureFileOps();
+
 /**
  * Canonical Workspace surface (#561 Phase 2B): the real plugin shell with
  * deterministic files data, no network. Phase 6 baseline source.
@@ -32,13 +36,14 @@ export function FixtureWorkspace() {
     session: selectedSession,
     agent: selectedAgent,
     domain,
-    fileOps: fixtureFileOps(),
+    fileOps: fixtureOps,
     experience: 'web',
     onToolChange: () => {},
   };
   return (
     <div
       data-testid="session-first-shell"
+      data-sf-design="polish"
       className="session-first-shell flex h-[100dvh] flex-col bg-background"
     >
       <WorkspaceShell ctx={ctx} activeTool="files" />
