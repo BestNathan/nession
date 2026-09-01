@@ -52,6 +52,7 @@ export function SessionItem({
       <button
         type="button"
         data-testid={`session-item-${session.session_id}`}
+        aria-current={selected ? 'true' : undefined}
         className="flex min-w-0 flex-1 flex-col gap-0.5 py-1 text-left text-sm"
         onClick={() => onSelect(session)}
       >
