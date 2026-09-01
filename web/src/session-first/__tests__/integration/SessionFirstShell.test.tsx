@@ -252,13 +252,21 @@ describe('SessionFirstShell', () => {
     expect(screen.queryByTestId('env-manager')).not.toBeInTheDocument();
   });
 
-  it('shows dashboard error via chrome', () => {
+  it('renders without the global chrome bar', () => {
+    renderShell();
+    expect(screen.queryByTestId('session-first-chrome')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nession')).not.toBeInTheDocument();
+  });
+
+  it('shows inline dashboard error banner', async () => {
     dashboard.current = {
       ...dashboard.current,
       error: 'load failed',
     };
     renderShell();
     expect(screen.getByTestId('session-first-error')).toHaveTextContent('load failed');
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(dashboard.current.clearError).toHaveBeenCalledTimes(1);
   });
 
   it('opens attach dialog when a session is selected', async () => {
