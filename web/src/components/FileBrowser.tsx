@@ -489,11 +489,11 @@ function FileToolbar({
   onNavigateToCwd,
 }: FileToolbarProps) {
   return (
-    <div className="flex items-center gap-0.5 px-2 py-1.5 border-b flex-wrap">
+    <div className="flex items-center gap-1 px-2 py-1 border-b border-border/60">
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onGoToParent} disabled={parentDisabled} aria-label="Parent directory" />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onGoToParent} disabled={parentDisabled} aria-label="Parent directory" />
           }
         >
           <FolderUp className="h-3.5 w-3.5" />
@@ -505,7 +505,7 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onRefresh} disabled={loading} aria-label="Refresh" />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onRefresh} disabled={loading} aria-label="Refresh" />
           }
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
@@ -517,7 +517,7 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewFile} aria-label="New file" />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNewFile} aria-label="New file" />
           }
         >
           <FilePlus className="h-3.5 w-3.5" />
@@ -529,7 +529,7 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNewFolder} aria-label="New folder" />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNewFolder} aria-label="New folder" />
           }
         >
           <FolderPlus className="h-3.5 w-3.5" />
@@ -541,7 +541,7 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onUploadClick} aria-label="Upload file" />
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onUploadClick} aria-label="Upload file" />
           }
         >
           <Upload className="h-3.5 w-3.5" />
@@ -554,7 +554,7 @@ function FileToolbar({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onNavigateToCwd} disabled={cwdLoading} aria-label="Go to terminal directory" />
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNavigateToCwd} disabled={cwdLoading} aria-label="Go to terminal directory" />
             }
           >
             <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />

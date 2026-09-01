@@ -66,8 +66,9 @@ vi.mock('@/hooks/useProbePolling', () => ({
 vi.mock('@/session-first/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
-vi.mock('@/session-first/patterns/FileWorkspace', () => ({
-  FileWorkspace: () => <div data-testid="file-workspace" />,
+vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
+  FilesWebLayout: () => <div data-testid="file-workspace" />,
+  FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 vi.mock('@/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>

@@ -56,7 +56,7 @@ function FileViewerToolbar({
   const showEditToggle = isText && !forceReadOnly && (!isMarkdown || viewMode === 'raw');
 
   return (
-    <div className="flex items-center justify-between px-2 py-1 border-b flex-shrink-0">
+    <div className="flex items-center justify-between px-2 py-1 border-b border-border/60 flex-shrink-0">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground truncate max-w-[200px]">{filename}</span>
         {forceReadOnly && (
@@ -68,7 +68,7 @@ function FileViewerToolbar({
       </div>
       <div className="flex items-center gap-1">
         {isText && !isReadOnly && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onSave} disabled={!isDirty || saving}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onSave} disabled={!isDirty || saving}>
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
@@ -95,11 +95,11 @@ function FileViewerToolbar({
           </div>
         )}
         {showEditToggle && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onEditToggle}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={onEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-7 text-xs hover:text-destructive" onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
+        <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-destructive" onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
       </div>
     </div>
   );

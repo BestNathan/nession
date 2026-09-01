@@ -82,6 +82,7 @@ export function SessionFirstMain({
           <div
             role="tabpanel"
             id="workspace-tool-panel"
+            aria-labelledby={`workspace-tool-tab-${tool}`}
             className={cn('min-h-0 flex-1', surface !== 'workspace' && 'hidden')}
           >
             <WorkspaceShell

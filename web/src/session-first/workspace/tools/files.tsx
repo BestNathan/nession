@@ -1,6 +1,7 @@
 import { FileText } from 'lucide-react';
 import type { WorkspaceTool } from '../toolTypes';
-import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
+import { FilesWebLayout } from './filesWeb';
+import { FilesAppLayout } from './filesApp';
 
 export const filesTool: WorkspaceTool = {
   id: 'files',
@@ -8,8 +9,5 @@ export const filesTool: WorkspaceTool = {
   icon: FileText,
   order: 10,
   availability: (ctx) => ctx.fileOps !== null,
-  layout: {
-    web: ({ ctx }) => <FileWorkspace fileOps={ctx.fileOps} />,
-    app: ({ ctx }) => <FileWorkspace fileOps={ctx.fileOps} />,
-  },
+  layout: { web: FilesWebLayout, app: FilesAppLayout },
 };

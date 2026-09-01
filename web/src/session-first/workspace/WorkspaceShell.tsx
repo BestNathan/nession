@@ -41,6 +41,7 @@ export function WorkspaceShell({ ctx, activeTool }: WorkspaceShellProps) {
             return (
               <button
                 key={tool.id}
+                id={`workspace-tool-tab-${tool.id}`}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
