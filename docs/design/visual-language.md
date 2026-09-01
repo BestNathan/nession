@@ -119,7 +119,7 @@ Rules:
 - **R-S3** Bordered cards group *content* where whitespace fails (e.g. editor pane separators in Files) — never rows, headers, or the terminal.
 - **R-S4** Overlays dim the canvas; they do not recolor the chrome behind them.
 - **R-S5** Healthy chrome never elevates: no shadows on headers, sidebars, or rows in the default state. Elevation is reserved for floating controls and overlays.
-- **R-S6** Approved canonical screen (2026-09-01, #561 Phase 2A): navigation separates by hairline on the same canvas, not by a background block. Background blocks remain reserved for the work surface and state-driven surfaces.
+- **R-S6** Approved canonical screen (2026-09-01, #561 Phase 2A): navigation separates by hairline on the same canvas, not by a background block. This overrides the separation ladder's background-shift preference for navigation surfaces. Background blocks remain reserved for the work surface and state-driven surfaces.
 
 ## 4. Density hierarchy
 

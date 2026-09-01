@@ -25,7 +25,7 @@ Implementation
 
 ## What this document owns
 
-Page-level geometry and how regions relate: shell geometry, sidebar and header strategies, work-surface insets, gutters and max widths, vertical rhythm, large-screen whitespace, responsive transitions, edge-to-edge and contained-vs-flush rules, Web vs App composition.
+Page-level geometry and how regions relate: shell geometry, sidebar and chrome strategies, work-surface insets, gutters and max widths, vertical rhythm, large-screen whitespace, responsive transitions, edge-to-edge and contained-vs-flush rules, Web vs App composition.
 
 It does **not** own hierarchy and emphasis ([visual-language.md](visual-language.md)), values ([tokens.md](design-system/tokens.md), #467), measurable rules ([contracts.md](design-system/contracts.md), #545), or what a component contains ([patterns.md](design-system/patterns.md), #470).
 
@@ -35,20 +35,20 @@ Canonical frame: `1440 × 900` (`web.standard-desktop` in the [#547 viewport mat
 
 ```text
 ┌──────────────────────┬──────────────────────────────────────────┐
-│ search… [▾] +        │ fix-terminal-reconnect                   │
-│                      │ devbox-01 · online · active · attached   │ ← session 行
-│ ● fix-terminal…      │ [Terminal | Workspace]                   │
-│ ● design-system      │ ┌──────────────────────────────────────┐ │
-│ ○ prod-shell         │ │                                      │ │
-│ ⋮                    │ │      TERMINAL (唯一亮面)              │ │
-│ server: connected    │ │            [input  ▸]                │ │
-│                      │ └──────────────────────────────────────┘ │
+│ search… [▾]          │ fix-terminal-reconnect                   │
+│ [+ New Session]      │ devbox-01 · online · active · attached   │ ← session 行
+│ filters ▾ ⋮          │ [Terminal | Workspace]                   │
+│ ● fix-terminal…      │ ┌──────────────────────────────────────┐ │
+│ ● design-system      │ │                                      │ │
+│ ○ prod-shell         │ │      TERMINAL (唯一亮面)                 │ │
+│ ⋮                    │ │            [input  ▸]                │ │
+│ server: connected    │ └──────────────────────────────────────┘ │
 └──────────────────────┴──────────────────────────────────────────┘
 ```
 
 Relationships, not values:
 
-- The shell is **full-bleed**: no outer page gutter on desktop. There is **no global chrome bar** — no product wordmark, no app-level band. Chrome = the sidebar head row + the session line (≈ 70 px of 900); the Active Surface owns the rest.
+- The shell is **full-bleed**: no outer page gutter on desktop. There is **no global chrome bar** — no product wordmark, no app-level band. Chrome = the sidebar head (search / create / filters, ≈ 130 px) + the session line (two text rows, ≈ 60 px) + the sidebar footer (≈ 30 px) — about a quarter of the 900 px frame. The sidebar head's three stacked rows are known to exceed the visual-language intent of a single quiet head row; compacting it to one row is tracked as a follow-up (the approved mockup shows a one-line head).
 - The Active Surface owns every pixel the chrome does not consume. Chrome is sized by its own content; the surface absorbs the rest.
 - Sidebar and session line never grow when the window grows — extra space goes to the work surface (see §7).
 
@@ -59,7 +59,7 @@ Relationships, not values:
 - On compact widths the sidebar becomes an **overlay drawer** (Sheet), never a squeezed narrow column (see §8).
 - No nested sidebars: Workspace tools use compact top navigation, not a second full-width column ([interaction/web.md](interaction/web.md#surface-vs-tool-navigation)).
 
-## 3. Header / chrome height strategy
+## 3. Chrome height strategy
 
 - One band of chrome per region: the sidebar head row, the session line, Workspace tool nav. Never two stacked bands for the same region.
 - The session line is **two text rows, not a bordered bar**: a mono title row (session name) over a muted context row (host · status · attachment). It reads as text on canvas, not as a header control.
@@ -76,7 +76,7 @@ Relationships, not values:
 
 ## 5. Page gutters and content max widths
 
-- The shell is full-bleed; gutters exist **inside** regions (list row padding, header padding, tool insets) — never as an outer frame.
+- The shell is full-bleed; gutters exist **inside** regions (list row padding, chrome padding, tool insets) — never as an outer frame.
 - **Max width** is allowed only for reading content inside Workspace (e.g. editor text). Never for the terminal, never for the shell, never as an app-level centered column.
 - Lists fill their region; only prose-like content constrains.
 
