@@ -962,16 +962,21 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
 });
 ```
 
-- [ ] **Step 2: Build and run the e2e spec**
+- [ ] **Step 2: Mark CI-only — NEVER run the e2e stack locally**
 
-Run:
-```bash
-cd web && npm run build
-cd ../e2e && npx playwright test fixture-canonical
+⛔ **Local e2e runs are forbidden** (2026-09-01, developer tmux disturbed twice): the webServer stack spawns nession-server/agent via `cargo run` and globalSetup executes `tmux kill-server` — even with the intended `TMUX_TMPDIR` isolation this disturbed the developer's local tmux. The spec runs ONLY in the CI workflow (`.github/workflows/e2e.yml`), where GitHub Actions sets `CI=true`.
+
+At the top of the spec file, before `test.use(...)`:
+
+```ts
+// Local runs are forbidden: the webServer stack spawns nession-server/agent
+// and globalSetup executes `tmux kill-server`, which disturbs the
+// developer's local tmux. This spec runs only in the CI workflow
+// (.github/workflows/e2e.yml), where GitHub Actions sets CI=true.
+test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 ```
-Expected: PASS; screenshot written to `e2e/test-results/canonical-active-terminal.png`.
 
-(If the fixture page renders before the terminal well is laid out, add `await expect(page.getByTestId('fixture-terminal')).toBeVisible()` retries — Playwright auto-waits on `toBeVisible`.)
+Do **not** run `npm run build`, `npx playwright test`, or any cargo command locally. Static verification only: `cd web && npx tsc --noEmit` (does not touch the e2e stack) and optionally `cd e2e && npx playwright test --list` (lists tests only — does NOT start webServers or run globalSetup). CI verifies the actual run; the screenshot lands under `e2e/test-results/` on CI only.
 
 - [ ] **Step 3: Commit**
 
@@ -1048,12 +1053,10 @@ Expected: build success; lint 0 warnings; tsc 0 errors; all tests pass.
 
 - [ ] **Step 2: Playwright MCP verification at 1440×900**
 
-Start the local stack (fixture needs no backend, but the repo flow requires the full stack for UI verification):
+Start ONLY the vite dev server — the fixture renders the deterministic shell with no network, so no server/agent is needed (and starting them would touch the local tmux; the e2e stack is CI-only):
 
 ```bash
-HOME=/tmp/nession-demo cargo run -p nession-server &   # :19090
-HOME=/tmp/nession-demo cargo run -p nession-agent -- agent-config.toml &   # :19091
-cd web && npm run dev   # :13000
+cd web && npm run dev   # :13000 — fixture needs no backend
 ```
 
 Using Playwright MCP browser tools:
