@@ -66,6 +66,7 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
           </div>
         ) : (
           <SessionFirstWorkspace
+            connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}
             staleAgents={data.staleAgents}

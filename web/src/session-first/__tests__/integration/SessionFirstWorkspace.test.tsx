@@ -47,6 +47,7 @@ function baseProps(
   overrides: Partial<SessionFirstWorkspaceProps> = {},
 ): SessionFirstWorkspaceProps {
   return {
+    connectionStatus: 'connected',
     agents: [agent],
     filteredSessions: [sess],
     staleAgents: [],

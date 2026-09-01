@@ -8,9 +8,10 @@ import type { DomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/patterns/WorkspaceNavigation';
 import type { FileOps } from '@/services/fileOps';
-import type { Agent, Session } from '@/types';
+import type { Agent, ConnectionStatus, Session } from '@/types';
 
 export interface SessionFirstWorkspaceProps {
+  connectionStatus: ConnectionStatus;
   agents: Agent[];
   filteredSessions: Session[];
   staleAgents: string[];
@@ -48,7 +49,7 @@ export interface SessionFirstWorkspaceProps {
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   const {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
@@ -66,7 +67,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   });
 
   const sidebarProps = {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onKill, onOpenEnv, onLegacy,
