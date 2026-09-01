@@ -194,6 +194,12 @@ html {
   outline-offset: var(--sf-focus-offset);
 }
 
+/* Capsule composer typography — token vars only; beats global touch textarea bump. */
+.session-first-shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
+  font-size: var(--composer-font-size);
+  line-height: var(--composer-text-line-height);
+}
+
 /* Capsule composer: no focus ring on the inline textarea (ChatGPT-style) */
 .session-first-shell [data-testid='capsule-ghost-input']:focus,
 .session-first-shell [data-testid='capsule-ghost-input']:focus-visible {

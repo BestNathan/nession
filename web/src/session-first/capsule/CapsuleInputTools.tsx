@@ -1,7 +1,11 @@
 import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsPopover';
 import { CapsuleHistoryPopover } from '@/session-first/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/session-first/capsule/CapsuleInputActionButtons';
-import { capsuleControlRowClass, capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
+import {
+  capsuleControlRowClass,
+  capsuleIconButtonClass,
+  capsuleSecondaryIconButtonClass,
+} from '@/session-first/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
 
 interface CapsuleInputActionsProps {
@@ -19,6 +23,7 @@ interface CapsuleInputActionsProps {
   onSend: () => void;
   onPaste: () => void;
   onCopy: () => void;
+  compactSecondary?: boolean;
 }
 
 /** Optional leading slot (e.g. mobile mode toggle) — left side only. */
@@ -35,7 +40,7 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
 
 /**
  * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
- * Single height cluster so icons share a baseline with the field.
+ * App uses compact secondary icons so the field keeps horizontal space.
  */
 export function CapsuleInputTrailingActions({
   historyOpen,
@@ -51,7 +56,12 @@ export function CapsuleInputTrailingActions({
   onSend,
   onPaste,
   onCopy,
+  compactSecondary = false,
 }: Omit<CapsuleInputActionsProps, 'leading'>) {
+  const secondaryIconClass = compactSecondary
+    ? capsuleSecondaryIconButtonClass
+    : capsuleIconButtonClass;
+
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
       <CapsuleHistoryPopover
@@ -64,7 +74,7 @@ export function CapsuleInputTrailingActions({
         }}
         disabled={disabled}
         onSelect={onSelectHistory}
-        triggerClassName={cn(capsuleIconButtonClass, 'rounded-lg')}
+        triggerClassName={cn(secondaryIconClass, 'rounded-lg')}
       />
       {showCommandsButton ? (
         <CapsuleCommandsPopover
@@ -87,6 +97,7 @@ export function CapsuleInputTrailingActions({
         onSend={onSend}
         onPaste={onPaste}
         onCopy={onCopy}
+        secondaryIconClass={secondaryIconClass}
       />
     </div>
   );

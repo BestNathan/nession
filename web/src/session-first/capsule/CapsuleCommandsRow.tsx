@@ -42,7 +42,7 @@ export function CapsuleCommandsRow({
             size="sm"
             disabled={disabled}
             data-testid={`capsule-quick-key-${keyDef.label}`}
-            className="shrink-0 font-mono text-xs max-lg:min-h-11"
+            className="shrink-0 font-mono text-xs min-h-[length:var(--control-md)]"
             onClick={() => handlePhysKey(keyDef.seq)}
             onContextMenu={(event) => event.preventDefault()}
           >

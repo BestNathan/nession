@@ -11,6 +11,7 @@ interface CapsuleInputActionButtonsProps {
   onSend: () => void;
   onPaste: () => void;
   onCopy: () => void;
+  secondaryIconClass?: string;
 }
 
 export function CapsuleInputActionButtons({
@@ -20,6 +21,7 @@ export function CapsuleInputActionButtons({
   onSend,
   onPaste,
   onCopy,
+  secondaryIconClass = capsuleIconButtonClass,
 }: CapsuleInputActionButtonsProps) {
   const canSend = !disabled && Boolean(inputValue.trim());
 
@@ -37,7 +39,7 @@ export function CapsuleInputActionButtons({
                   disabled={disabled}
                   data-testid="capsule-paste"
                   aria-label="Paste"
-                  className={capsuleIconButtonClass}
+                  className={secondaryIconClass}
                   onClick={onPaste}
                 >
                   <ClipboardPaste />
@@ -58,7 +60,7 @@ export function CapsuleInputActionButtons({
                   disabled={disabled || !inputValue}
                   data-testid="capsule-copy"
                   aria-label="Copy"
-                  className={capsuleIconButtonClass}
+                  className={secondaryIconClass}
                   onClick={() => {
                     void onCopy();
                   }}

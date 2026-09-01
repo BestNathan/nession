@@ -12,7 +12,7 @@ function parsePx(raw: string, fallback: number): number {
 /** Read resolved composer metrics from computed CSS custom properties. */
 export function readComposerMetrics(scope: HTMLElement): ComposerMetrics {
   const styles = getComputedStyle(scope);
-  const textLineHeight = parsePx(styles.getPropertyValue('--composer-line-height'), 36);
+  const textLineHeight = parsePx(styles.getPropertyValue('--composer-line-height'), 20);
   const controlHeight = parsePx(styles.getPropertyValue('--control-md'), 32);
   const fieldPadY = parsePx(styles.getPropertyValue('--panel-padding'), 12) * 2;
   const maxLines = Number.parseInt(styles.getPropertyValue('--composer-max-lines'), 10);
