@@ -58,7 +58,7 @@ Relationships, not values:
 - The drawer overlays the Active Surface (scrim + elevation); the surface never shrinks or shifts to make room for it.
 - Extra horizontal space belongs to the Active Surface, never to the drawer.
 - The drawer holds search / filter / create / session rows. Its head's three stacked rows are known to exceed the visual-language intent of a single quiet head row; compacting it to one row is tracked as a follow-up (the approved mockup shows a one-line head).
-- No nested sidebars: Workspace tools use compact top navigation, not a second full-width column ([interaction/web.md](interaction/web.md#surface-vs-tool-navigation)).
+- No nested sidebars: Workspace tools live in the bottom floating tool bar; never a second full-width column ([interaction/web.md](interaction/web.md#surface-vs-tool-navigation)).
 
 ## 3. Chrome height strategy
 
