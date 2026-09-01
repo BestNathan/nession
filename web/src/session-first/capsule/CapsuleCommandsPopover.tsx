@@ -10,7 +10,15 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
+import {
+  capsuleCaptionTextClass,
+  capsuleIconButtonClass,
+  capsulePopoverBodyClass,
+  capsulePopoverHeaderClass,
+  capsulePopoverItemClass,
+  capsulePopoverPanelClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { readPopoverSideOffset } from '@/session-first/capsule/measure/readPopoverSideOffset';
 import { cn } from '@/lib/utils';
 import { CapsuleAddCommandButton, CapsuleAddCommandDialog, CapsuleDeleteButton } from '@/session-first/capsule/CapsuleAddCommandDialog';
 import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
@@ -54,7 +62,6 @@ export function CapsuleCommandsPopover({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
       disabled={disabled}
       data-testid="capsule-commands-trigger"
       className={cn(capsuleIconButtonClass, 'rounded-lg')}
@@ -75,13 +82,13 @@ export function CapsuleCommandsPopover({
         <PopoverContent
           align="end"
           side="top"
-          sideOffset={8}
-          className="z-[100] max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
+          sideOffset={readPopoverSideOffset()}
+          className={capsulePopoverPanelClass}
         >
-          <PopoverHeader className="border-b border-border/60 p-2">
+          <PopoverHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60')}>
             <PopoverTitle>Commands</PopoverTitle>
           </PopoverHeader>
-          <div className="flex max-h-[42vh] flex-col overflow-hidden">
+          <div className={capsulePopoverBodyClass}>
             {isChaining ? (
               <CapsuleChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />
             ) : null}
@@ -104,13 +111,15 @@ export function CapsuleCommandsPopover({
                     {showSeparator ? <Separator /> : null}
                     <button
                       type="button"
-                      className="flex h-8 w-full items-center gap-2 px-3 text-left text-xs transition-colors hover:bg-accent/40 disabled:opacity-50"
+                      className={capsulePopoverItemClass}
                       disabled={disabled}
                       onClick={() => handleRun(command)}
                     >
                       <span className="min-w-0 flex-1 truncate">{command.label}</span>
                       {isPreset ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground/60">built-in</span>
+                        <span className={cn(capsuleCaptionTextClass, 'shrink-0 text-muted-foreground/60')}>
+                          built-in
+                        </span>
                       ) : (
                         <CapsuleDeleteButton onClick={() => { void deleteCommand(command.id); }} />
                       )}
@@ -147,7 +156,6 @@ export function CapsuleCommandsMoreTrigger({
     <Button
       type="button"
       variant="ghost"
-      size="icon-sm"
       disabled={disabled}
       data-testid="capsule-commands-more"
       className={cn('min-h-[length:var(--control-md)]', capsuleIconButtonClass, className)}

@@ -1,8 +1,10 @@
 import { cn } from '@/lib/utils';
 import {
+  capsuleShellContentGapClass,
   capsuleShellInnerPadClass,
   capsuleShellRadiusClass,
   capsuleShellSurfaceClass,
+  capsuleShellWebPositionClass,
 } from '@/session-first/capsule/capsuleStyles';
 import type {
   CapsuleExperience,
@@ -46,7 +48,7 @@ export function CapsuleShell({
         'absolute z-10 flex flex-col',
         experience === 'app'
           ? 'inset-x-[length:var(--composer-shell-inset)] bottom-[max(var(--composer-shell-inset),var(--composer-shell-safe-area))]'
-          : 'left-1/2 w-[min(calc(100%-3rem),var(--composer-shell-max-width))] -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))]',
+          : capsuleShellWebPositionClass,
       )}
     >
       <div
@@ -57,7 +59,9 @@ export function CapsuleShell({
           capsuleShellSurfaceClass,
           capsuleShellRadiusClass,
           capsuleShellInnerPadClass,
-          isCommandsMode ? 'min-h-[length:var(--control-md)] items-center gap-2' : 'items-center',
+          isCommandsMode
+            ? cn('min-h-[length:var(--control-md)] items-center', capsuleShellContentGapClass)
+            : 'items-center',
         )}
       >
         <div ref={contentRef} data-testid="capsule-shell-content" className="flex min-w-0 flex-1">

@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  capsuleAddCommandFooterClass,
+  capsuleAddCommandIconClass,
+  capsuleChipButtonClass,
+  capsuleChipRowClass,
+  capsuleDialogActionRowClass,
+  capsuleDialogInputClass,
+  capsuleDialogMaxWidthClass,
+  capsuleDialogStackClass,
+  capsuleIconCloseButtonClass,
+  capsuleIconCloseSvgClass,
+  capsuleInlineFieldRowClass,
+  capsuleKeyInputClass,
+  capsuleLabelTextClass,
+  capsuleTabButtonClass,
+  capsuleTabRowClass,
+} from '@/session-first/capsule/capsuleStyles';
 
 type AddMode = 'plain' | 'combo';
 type Modifier = 'Ctrl' | 'Alt' | 'Shift' | 'Tab';
@@ -83,27 +101,27 @@ function ComboBuilder({
   const previewLabel = modLabels ? `${modLabels} + ${key || '?'}` : (key || '?');
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1.5">
+    <div className={capsuleDialogStackClass}>
+      <div className={capsuleChipRowClass}>
         {MODIFIERS.map((modifier) => (
           <Button
             key={modifier.key}
             variant={mods.has(modifier.key) ? 'default' : 'outline'}
             size="sm"
-            className="h-8 px-3 text-xs"
+            className={capsuleChipButtonClass}
             onClick={() => toggleMod(modifier.key)}
           >
             {modifier.label}
           </Button>
         ))}
       </div>
-      <div className="flex items-center gap-2">
-        <span className="shrink-0 text-xs text-muted-foreground">Key</span>
+      <div className={capsuleInlineFieldRowClass}>
+        <span className={capsuleLabelTextClass}>Key</span>
         <Input
           placeholder="A"
           value={key}
           onChange={(event) => setKey(event.target.value.slice(0, 4))}
-          className="h-8 w-16 text-center font-mono text-xs"
+          className={capsuleKeyInputClass}
           disabled={disabled}
         />
       </div>
@@ -111,16 +129,16 @@ function ComboBuilder({
         placeholder={previewLabel}
         value={label}
         onChange={(event) => setLabel(event.target.value)}
-        className="h-8 text-xs"
+        className={capsuleDialogInputClass}
         disabled={disabled}
       />
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>
+      <div className={capsuleDialogActionRowClass}>
+        <Button size="sm" variant="ghost" className={capsuleChipButtonClass} onClick={onCancel}>
           Cancel
         </Button>
         <Button
           size="sm"
-          className="h-8 text-xs"
+          className={capsuleChipButtonClass}
           disabled={disabled || !preview}
           onClick={() => onSave(label.trim() || previewLabel, preview)}
         >
@@ -144,28 +162,28 @@ function PlainForm({
   const [command, setCommand] = useState('');
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={capsuleDialogStackClass}>
       <Input
         placeholder="Label"
         value={label}
         onChange={(event) => setLabel(event.target.value)}
-        className="h-8 text-xs"
+        className={capsuleDialogInputClass}
         disabled={disabled}
       />
       <Input
         placeholder="Command (sent as: command + Enter)"
         value={command}
         onChange={(event) => setCommand(event.target.value)}
-        className="h-8 font-mono text-xs"
+        className={cn(capsuleDialogInputClass, 'font-mono')}
         disabled={disabled}
       />
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>
+      <div className={capsuleDialogActionRowClass}>
+        <Button size="sm" variant="ghost" className={capsuleChipButtonClass} onClick={onCancel}>
           Cancel
         </Button>
         <Button
           size="sm"
-          className="h-8 text-xs"
+          className={capsuleChipButtonClass}
           disabled={disabled || !label.trim() || !command.trim()}
           onClick={() => onSave(label.trim(), command.trim())}
         >
@@ -187,15 +205,15 @@ export function CapsuleAddCommandDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className={capsuleDialogMaxWidthClass}>
         <DialogHeader>
           <DialogTitle>Add Command</DialogTitle>
         </DialogHeader>
-        <div className="mb-3 flex gap-1.5">
+        <div className={capsuleTabRowClass}>
           <Button
             variant={mode === 'combo' ? 'default' : 'outline'}
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className={capsuleTabButtonClass}
             onClick={() => setMode('combo')}
           >
             Combo
@@ -203,7 +221,7 @@ export function CapsuleAddCommandDialog({
           <Button
             variant={mode === 'plain' ? 'default' : 'outline'}
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className={capsuleTabButtonClass}
             onClick={() => setMode('plain')}
           >
             Plain
@@ -238,15 +256,14 @@ export function CapsuleDeleteButton({ onClick }: { onClick: () => void }) {
         render={
           <Button
             variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+            className={capsuleIconCloseButtonClass}
             onClick={(event) => {
               event.stopPropagation();
               onClick();
             }}
             aria-label="Delete"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className={capsuleIconCloseSvgClass} />
           </Button>
         }
       />
@@ -268,12 +285,12 @@ export function CapsuleAddCommandButton({
     <Button
       variant="ghost"
       size="sm"
-      className="h-8 w-full rounded-none text-xs"
+      className={capsuleAddCommandFooterClass}
       disabled={disabled}
       data-testid="capsule-add-command"
       onClick={onClick}
     >
-      <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Command
+      <Plus className={capsuleAddCommandIconClass} /> Add Command
     </Button>
   );
 }
