@@ -27,6 +27,7 @@ export const FIXTURE_FILES: FileEntry[] = [
 /** Deterministic file contents for the viewer — keyed by path. */
 export const FIXTURE_FILE_CONTENTS: Record<string, string> = {
   'docs/design/visual-language.md': '# Visual Language\n\nTerminal dominates. Chrome recedes.\n',
+  'docs/design/composition.md': '# Layout / Composition\n\nChrome yields first, the work surface yields last.\n',
   'web/src/App.tsx': "export function App() {\n  return <div>session-first</div>;\n}\n",
   'web/src/index.css': '/* fixture css */\n',
   'web/src/session-first/workspace/WorkspaceShell.tsx': 'export function WorkspaceShell() {\n  return null;\n}\n',
