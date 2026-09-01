@@ -1,10 +1,15 @@
 import { cn } from '@/lib/utils';
 import {
+  capsuleShellAppDockBottomClass,
+  capsuleShellAppOuterClass,
+  capsuleShellCapsuleRadiusClass,
   capsuleShellContentGapClass,
+  capsuleShellDockBottomClass,
   capsuleShellInnerPadClass,
-  capsuleShellRadiusClass,
+  capsuleShellInnerSizeClass,
+  capsuleShellPillRadiusClass,
   capsuleShellSurfaceClass,
-  capsuleShellWebPositionClass,
+  capsuleShellWebOuterClass,
 } from '@/session-first/capsule/capsuleStyles';
 import type {
   CapsuleExperience,
@@ -18,6 +23,7 @@ interface CapsuleShellProps {
   layout?: ComposerLayout;
   mode?: CapsuleMode;
   disabled?: boolean;
+  dockRef?: React.Ref<HTMLDivElement>;
   shellRef?: React.Ref<HTMLDivElement>;
   contentRef?: React.Ref<HTMLDivElement>;
   measureMirror?: React.ReactNode;
@@ -29,6 +35,7 @@ export function CapsuleShell({
   layout = 'flat',
   mode = 'input',
   disabled,
+  dockRef,
   shellRef,
   contentRef,
   measureMirror,
@@ -36,31 +43,35 @@ export function CapsuleShell({
 }: CapsuleShellProps) {
   const isCommandsMode = mode === 'commands';
   const showLayout = !isCommandsMode;
+  const isApp = experience === 'app';
+  const usePillShape = !isCommandsMode && layout === 'flat' && !isApp;
 
   return (
     <div
+      ref={dockRef}
       data-testid="terminal-capsule"
       data-experience={experience}
       data-disabled={disabled ? 'true' : undefined}
       data-layout={showLayout ? layout : undefined}
       data-dock-height={showLayout ? dockHeightFromLayout(layout) : 'single'}
+      data-shell-shape={usePillShape ? 'pill' : 'capsule'}
       className={cn(
         'absolute z-10 flex flex-col',
-        experience === 'app'
-          ? 'inset-x-[length:var(--composer-shell-inset)] bottom-[max(var(--composer-shell-inset),var(--composer-shell-safe-area))]'
-          : capsuleShellWebPositionClass,
+        isApp ? capsuleShellAppOuterClass : capsuleShellWebOuterClass,
+        isApp ? capsuleShellAppDockBottomClass : capsuleShellDockBottomClass,
       )}
     >
       <div
         ref={shellRef}
         data-testid="capsule-shell"
         className={cn(
-          'flex',
+          'flex min-h-[length:var(--control-md)]',
+          isApp ? 'w-full' : capsuleShellInnerSizeClass,
           capsuleShellSurfaceClass,
-          capsuleShellRadiusClass,
+          usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
           isCommandsMode
-            ? cn('min-h-[length:var(--control-md)] items-center', capsuleShellContentGapClass)
+            ? cn('items-center', capsuleShellContentGapClass)
             : 'items-center',
         )}
       >

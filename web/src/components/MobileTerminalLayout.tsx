@@ -399,7 +399,7 @@ export function MobileTerminalLayout({
   const terminalPanel = (
     <div key="terminal" className="h-full flex flex-col">
       {terminalElement ? (
-        <div className="flex-1 min-h-0 relative flex flex-col">
+        <div className="flex-1 min-h-0 relative flex flex-col" data-terminal-capsule-host>
           {terminalElement}
           <TerminalScrollOverlay
             onScrollPages={onScrollPages}

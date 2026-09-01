@@ -32,6 +32,8 @@
     "shellPadX": { "value": "0.625rem" },
     "shellPadY": { "value": "0.375rem" },
     "shellContentGap": { "value": "0.5rem" },
+    "shellPillRadius": { "value": "9999px" },
+    "terminalClearanceGap": { "value": "0.375rem" },
     "captionFontSize": { "value": "0.625rem" },
     "popoverWidth": { "value": "20rem" },
     "popoverMaxHeight": { "value": "45vh" },

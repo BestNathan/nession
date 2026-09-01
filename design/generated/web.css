@@ -90,10 +90,12 @@
   --composer-row-gap: 0.375rem;
   --composer-toolbar-row-gap: 0.375rem;
   --composer-shell-pad-x: 0.75rem;
-  --composer-shell-pad-y: 0.5rem;
+  --composer-shell-pad-y: 0.375rem;
   --composer-shell-margin-x: 3rem;
   --composer-shell-margin-bottom: 0.75rem;
   --composer-shell-content-gap: 0.5rem;
+  --composer-shell-pill-radius: 9999px;
+  --composer-terminal-clearance-gap: 0.375rem;
   --composer-caption-font-size: 0.625rem;
   --composer-popover-width: 20rem;
   --composer-popover-max-height: 45vh;
@@ -287,6 +289,8 @@
   --spacing-composer-shell-margin-x: var(--composer-shell-margin-x);
   --spacing-composer-shell-margin-bottom: var(--composer-shell-margin-bottom);
   --spacing-composer-shell-content-gap: var(--composer-shell-content-gap);
+  --spacing-composer-shell-pill-radius: var(--composer-shell-pill-radius);
+  --spacing-composer-terminal-clearance-gap: var(--composer-terminal-clearance-gap);
   --spacing-composer-caption-font-size: var(--composer-caption-font-size);
   --spacing-composer-popover-width: var(--composer-popover-width);
   --spacing-composer-popover-max-height: var(--composer-popover-max-height);
@@ -340,6 +344,8 @@
   --composer-shell-pad-x: 0.625rem;
   --composer-shell-pad-y: 0.375rem;
   --composer-shell-content-gap: 0.5rem;
+  --composer-shell-pill-radius: 9999px;
+  --composer-terminal-clearance-gap: 0.375rem;
   --composer-caption-font-size: 0.625rem;
   --composer-popover-width: 20rem;
   --composer-popover-max-height: 45vh;
