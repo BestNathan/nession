@@ -101,5 +101,6 @@ Exact paths may follow repository conventions when #467 lands. Responsibilities:
 ```text
 design/tokens/          platform-neutral source (primitive, semantic, domain, experience)
 design/generated/       derived CSS / TS / lint metadata — do not edit by hand
-docs/design/            this architecture (IA, interaction, patterns)
+design/contracts/       measurable UI contracts (#545); see [contracts.md](contracts.md)
+docs/design/            this architecture (IA, interaction, patterns, validation)
 ```
