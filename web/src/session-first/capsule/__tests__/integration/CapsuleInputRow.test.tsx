@@ -116,6 +116,29 @@ describe('CapsuleInputRow', () => {
     expect(row.className).toMatch(/grid-cols-\[minmax/);
   });
 
+  it('stays flat when empty even if scrollHeight looks multi-line (mobile)', async () => {
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 52;
+      },
+    });
+
+    try {
+      const onLayoutChange = vi.fn();
+      renderRow(onLayoutChange);
+      await waitFor(() => {
+        expect(screen.getByTestId('capsule-input-row')).toHaveAttribute(
+          'data-layout',
+          'flat',
+        );
+      });
+      expect(onLayoutChange).not.toHaveBeenCalledWith('stacked');
+    } finally {
+      Reflect.deleteProperty(HTMLTextAreaElement.prototype, 'scrollHeight');
+    }
+  });
+
   it('uses shared body type on the field', () => {
     renderRow();
     const input = screen.getByTestId('capsule-ghost-input');
