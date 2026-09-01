@@ -50,9 +50,10 @@ export function SessionFirstMain({
   showWorkspace = true,
   terminal,
 }: SessionFirstMainProps) {
+  const hasSession = selectedSession !== null && domain !== null;
   return (
     <>
-      {selectedSession && domain ? (
+      {hasSession ? (
         <SessionHeader
           sessionName={selectedSession.session_name}
           agentLabel={
@@ -100,7 +101,7 @@ export function SessionFirstMain({
       <div
         data-testid="session-first-main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
-        {!selectedSession ? (
+        {!hasSession ? (
           <div
             data-testid="session-empty-state"
             className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"

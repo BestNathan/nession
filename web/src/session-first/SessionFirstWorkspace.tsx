@@ -103,9 +103,17 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
       <SessionDrawer
         open={!isWide ? showList : showDrawer}
         onClose={() => setShowDrawer(false)}
-        sidebar={<SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />}
+        sidebar={
+          <SessionFirstSidebar
+            {...sidebarProps}
+            onSelect={(session) => {
+              setShowDrawer(false);
+              onSelect(session);
+            }}
+          />
+        }
       />
-      <main className="min-h-0 flex-1">
+      <main className="flex min-h-0 flex-1 flex-col">
         <SessionFirstMain
           {...mainShared}
           surface={surface}
