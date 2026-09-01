@@ -2,7 +2,7 @@
 
 Version-controlled product and UI architecture for the next Nession Web and App experience.
 
-This index is the entry point. Downstream work — design tokens ([#467](https://github.com/BestNathan/nession/issues/467)), pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)), the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)), and platform migration ([#472](https://github.com/BestNathan/nession/issues/472), [#473](https://github.com/BestNathan/nession/issues/473)) — should reference these paths instead of a single GitHub issue.
+This index is the entry point. Downstream work — design tokens ([#467](https://github.com/BestNathan/nession/issues/467)), pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)), executable UI contracts and validation ([#544](https://github.com/BestNathan/nession/issues/544)–[#548](https://github.com/BestNathan/nession/issues/548)), the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)), and platform migration ([#472](https://github.com/BestNathan/nession/issues/472), [#473](https://github.com/BestNathan/nession/issues/473)) — should reference these paths instead of a single GitHub issue.
 
 **Umbrella:** [#468](https://github.com/BestNathan/nession/issues/468)
 **This doc set:** [#469](https://github.com/BestNathan/nession/issues/469)
@@ -24,9 +24,9 @@ Information Architecture
       ↓
 Interaction Model (Web / App)
       ↓
-Design System
+Design System (tokens + patterns)
       ↓
-Component / Pattern Architecture
+UI Contracts + Validation          ← #544–#548
       ↓
 Implementation
 ```
@@ -43,6 +43,8 @@ Implementation
 | [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
 | [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
 | [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [nine specs](design-system/patterns.md#catalog) ([#470](https://github.com/BestNathan/nession/issues/470)) |
+| [design-system/contracts.md](design-system/contracts.md) | Executable layout/pattern contracts; `design/contracts/` ownership ([#545](https://github.com/BestNathan/nession/issues/545), tracking [#544](https://github.com/BestNathan/nession/issues/544)) |
+| [design-system/validation.md](design-system/validation.md) | Browser assertions, Web/App viewport matrix, focused visual regression ([#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548)) |
 | [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
 
 ## Related issues
@@ -52,6 +54,7 @@ Implementation
 | 1 — Architecture docs | [#469](https://github.com/BestNathan/nession/issues/469) | This directory |
 | 2 — Design tokens | [#467](https://github.com/BestNathan/nession/issues/467) | Executable token architecture + lint |
 | 2 — UI patterns | [#470](https://github.com/BestNathan/nession/issues/470) | Pattern specifications |
+| 2 — Executable UI constraints | [#544](https://github.com/BestNathan/nession/issues/544) | Contracts + assertions + viewport matrix + focused visual ([#545](https://github.com/BestNathan/nession/issues/545)–[#548](https://github.com/BestNathan/nession/issues/548)); architecture: [contracts.md](design-system/contracts.md), [validation.md](design-system/validation.md) |
 | 3 — Vertical slice | [#471](https://github.com/BestNathan/nession/issues/471) | Session list → Terminal → Workspace validation path |
 | 4 — Web migration | [#472](https://github.com/BestNathan/nession/issues/472) | Migrate full Web UI to session-first shell |
 | 4 — App navigation | [#473](https://github.com/BestNathan/nession/issues/473) | App spatial model |
