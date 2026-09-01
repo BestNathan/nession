@@ -82,7 +82,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   };
 
   const mainShared = {
-    selectedSession, selectedAgent, domain, tool, fileOps,
+    selectedSession, selectedAgent, domain, tool, fileOps, connectionStatus,
     onSurfaceChange, onToolChange, onOpenAgent,
   };
 
@@ -109,7 +109,6 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
         <SessionFirstMain
           {...mainShared}
           surface={surface}
-          serverStatus={connectionStatus}
           onBackToSessions={onBackToSessions}
           onOpenDrawer={() => setShowDrawer(true)}
           terminal={terminal}

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import type { DomainState } from '@/session-first/domainState';
 import type { Agent, Session } from '@/types';
@@ -54,6 +55,7 @@ describe('SessionFirstMain', () => {
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
         onBackToSessions={vi.fn()}
+        connectionStatus="connected"
       />,
     );
 
@@ -76,6 +78,7 @@ describe('SessionFirstMain', () => {
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
+        connectionStatus="connected"
         terminal={<div data-testid="fixture-terminal" />}
       />,
     );
@@ -96,9 +99,61 @@ describe('SessionFirstMain', () => {
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
+        connectionStatus="connected"
       />,
     );
 
     expect(screen.getByTestId('session-first-terminal')).toBeInTheDocument();
+  });
+
+  it('shows the resting top row and empty state when no session is selected', () => {
+    render(
+      <SessionFirstMain
+        selectedSession={null}
+        selectedAgent={undefined}
+        domain={null}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenDrawer={vi.fn()}
+        connectionStatus="connected"
+      />,
+    );
+
+    expect(screen.getByTestId('session-resting-header')).toBeInTheDocument();
+    expect(screen.getByTestId('session-first-open-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('server-connection')).toHaveTextContent(
+      'server: connected',
+    );
+    expect(screen.getByTestId('session-empty-state')).toHaveTextContent(
+      'Select a session to start working',
+    );
+    expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
+  });
+
+  it('opens the sessions drawer from the resting top row button', async () => {
+    const onOpenDrawer = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SessionFirstMain
+        selectedSession={null}
+        selectedAgent={undefined}
+        domain={null}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenDrawer={onOpenDrawer}
+        connectionStatus="connected"
+      />,
+    );
+
+    await user.click(screen.getByTestId('session-first-open-drawer'));
+    expect(onOpenDrawer).toHaveBeenCalledTimes(1);
   });
 });

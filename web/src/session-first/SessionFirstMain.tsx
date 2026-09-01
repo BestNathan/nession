@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { Menu } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/services/fileOps';
@@ -22,7 +24,7 @@ export interface SessionFirstMainProps {
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
-  serverStatus?: ConnectionStatus;
+  connectionStatus: ConnectionStatus;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -43,7 +45,7 @@ export function SessionFirstMain({
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
-  serverStatus,
+  connectionStatus,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -62,48 +64,89 @@ export function SessionFirstMain({
           onOpenAgent={onOpenAgent}
           onBackToSessions={onBackToSessions}
           onOpenDrawer={onOpenDrawer}
-          serverStatus={serverStatus}
+          serverStatus={connectionStatus}
         />
-      ) : null}
+      ) : (
+        <div
+          data-testid="session-resting-header"
+          className="flex shrink-0 items-center justify-between px-[var(--sf-space-4)] py-[var(--sf-space-2)]"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0"
+            aria-label="Open sessions"
+            data-testid="session-first-open-drawer"
+            onClick={() => onOpenDrawer?.()}
+          >
+            <Menu className="size-5" />
+          </Button>
+          {connectionStatus ? (
+            <span
+              data-testid="server-connection"
+              className={cn(
+                'font-mono text-xs',
+                connectionStatus === 'disconnected'
+                  ? 'text-agent-error'
+                  : 'text-muted-foreground',
+              )}
+            >
+              server: {connectionStatus}
+            </span>
+          ) : null}
+        </div>
+      )}
       <div
         data-testid="session-first-main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
-        {showTerminal ? (
-          <TerminalWell
-            className={cn(
-              'min-h-0',
-              (surface !== 'terminal' || !selectedSession) && 'hidden',
-            )}
-          >
-            {terminal ?? (
-              <SessionFirstTerminal
-                hidden={surface !== 'terminal' || !selectedSession}
-                onDisconnect={() => undefined}
-                onError={() => undefined}
-              />
-            )}
-          </TerminalWell>
-        ) : null}
-        {showWorkspace ? (
+        {!selectedSession ? (
           <div
-            role="tabpanel"
-            id="workspace-tool-panel"
-            aria-labelledby={`workspace-tool-tab-${tool}`}
-            className={cn('min-h-0 flex-1', surface !== 'workspace' && 'hidden')}
+            data-testid="session-empty-state"
+            className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
           >
-            <WorkspaceShell
-              ctx={{
-                session: selectedSession,
-                agent: selectedAgent,
-                domain,
-                fileOps,
-                experience: 'web',
-                onToolChange,
-              }}
-              activeTool={tool}
-            />
+            <p>Select a session to start working</p>
           </div>
-        ) : null}
+        ) : (
+          <>
+            {showTerminal ? (
+              <TerminalWell
+                className={cn(
+                  'min-h-0',
+                  (surface !== 'terminal' || !selectedSession) && 'hidden',
+                )}
+              >
+                {terminal ?? (
+                  <SessionFirstTerminal
+                    hidden={surface !== 'terminal' || !selectedSession}
+                    onDisconnect={() => undefined}
+                    onError={() => undefined}
+                  />
+                )}
+              </TerminalWell>
+            ) : null}
+            {showWorkspace ? (
+              <div
+                role="tabpanel"
+                id="workspace-tool-panel"
+                aria-labelledby={`workspace-tool-tab-${tool}`}
+                className={cn('min-h-0 flex-1', surface !== 'workspace' && 'hidden')}
+              >
+                <WorkspaceShell
+                  ctx={{
+                    session: selectedSession,
+                    agent: selectedAgent,
+                    domain,
+                    fileOps,
+                    experience: 'web',
+                    onToolChange,
+                  }}
+                  activeTool={tool}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
     </>
   );
