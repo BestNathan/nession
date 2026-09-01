@@ -373,13 +373,13 @@ git commit -m "feat: terminal slot and server-connection footer for canonical sh
 
 **Files:**
 - Create: `web/src/session-first/fixture/FixtureShell.tsx`
-- Test: `web/src/session-first/fixture/__tests__/FixtureShell.test.tsx`
+- Test: `web/src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx` (repo convention: vitest only picks up `src/**/__tests__/unit/**` (node env) and `src/**/__tests__/integration/**` (jsdom); component tests using @testing-library/render need the jsdom `integration` dir — plain `__tests__/fixtureData.test.ts` paths are silently ignored)
 - Modify: `web/src/App.tsx`
 
 - [ ] **Step 1: Write the failing component test**
 
 ```tsx
-// web/src/session-first/fixture/__tests__/FixtureShell.test.tsx
+// web/src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { FixtureShell } from '../FixtureShell';
@@ -403,7 +403,7 @@ Note: the `data-selected` count assertion is added in Task 6 Step 3 (the attribu
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd web && npx vitest run src/session-first/fixture/__tests__/FixtureShell.test.tsx`
+Run: `cd web && npx vitest run src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx`
 Expected: FAIL — `Cannot find module '../FixtureShell'` (and `session-header-line` testid does not exist yet — both are fine at this stage).
 
 - [ ] **Step 3: Write FixtureShell**
@@ -529,7 +529,7 @@ import { FixtureShell } from './session-first/fixture/FixtureShell';
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd web && npx vitest run src/session-first/fixture/__tests__/FixtureShell.test.tsx`
+Run: `cd web && npx vitest run src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx`
 Expected: PASS (1 test). (The `data-selected` and `session-header-line` assertions are added in Tasks 6 and 7.)
 
 - [ ] **Step 6: Commit**
@@ -648,7 +648,7 @@ In `web/src/session-first/patterns/SessionItem.tsx`, replace the row `<div>`:
 
 - [ ] **Step 3: Add the selected-count assertion to the FixtureShell test**
 
-Append to `web/src/session-first/fixture/__tests__/FixtureShell.test.tsx`:
+Append to `web/src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx`:
 
 ```tsx
   it('marks exactly one session as selected', () => {
@@ -867,7 +867,7 @@ Expected: 0 errors; PASS. Then add the `session-header-line` assertion to `Fixtu
     expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
 ```
 
-and re-run `npx vitest run src/session-first/fixture/__tests__/FixtureShell.test.tsx` (expected: PASS, 2 tests).
+and re-run `npx vitest run src/session-first/fixture/__tests__/integration/FixtureShell.test.tsx` (expected: PASS, 2 tests).
 
 - [ ] **Step 6: Commit**
 
