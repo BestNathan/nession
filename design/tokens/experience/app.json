@@ -1,5 +1,5 @@
 {
-  "$description": "App experience density. Not imported by Web CSS.",
+  "$description": "App experience density. Remapped under [data-experience=app] in generated web.css.",
   "control": {
     "sm": { "value": "36px" },
     "md": { "value": "44px" },
@@ -19,5 +19,14 @@
   },
   "touchTarget": {
     "min": { "value": 44 }
+  },
+  "composer": {
+    "lineHeight": { "ref": "experience.app.row.md" },
+    "maxLines": { "value": 5 },
+    "shellInset": { "value": "0.75rem" },
+    "shellSafeArea": { "value": "env(safe-area-inset-bottom, 0px)" }
+  },
+  "motion": {
+    "composer": { "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)" }
   }
 }

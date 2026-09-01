@@ -5,7 +5,8 @@
     "black": { "value": "oklch(0 0 0)" },
     "white-alpha": {
       "10": { "value": "oklch(1 0 0 / 10%)" },
-      "15": { "value": "oklch(1 0 0 / 15%)" }
+      "15": { "value": "oklch(1 0 0 / 15%)" },
+      "96": { "value": "oklch(1 0 0 / 96%)" }
     },
     "zinc": {
       "50": { "value": "oklch(0.985 0 0)" },
@@ -52,6 +53,9 @@
     "gray": {
       "400": { "value": "oklch(0.707 0.022 261.325)" },
       "500": { "value": "oklch(0.551 0.027 264.364)" }
+    },
+    "catppuccin": {
+      "mocha-base": { "value": "#1e1e2e" }
     }
   },
   "radius": { "value": "0.625rem" }

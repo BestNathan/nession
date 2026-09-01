@@ -43,6 +43,7 @@
   --success-foreground: oklch(0.985 0 0);
   --warning-foreground: oklch(0.985 0 0);
   --info-foreground: oklch(0.985 0 0);
+  --radius-capsule: calc(var(--radius) * 2.2);
   --agent-online: var(--success);
   --agent-connecting: var(--muted-foreground);
   --agent-reconnecting: var(--muted-foreground);
@@ -59,6 +60,8 @@
   --terminal-foreground: var(--foreground);
   --terminal-selection: var(--ring);
   --terminal-cursor: var(--ring);
+  --terminal-well-background: #1e1e2e;
+  --terminal-capsule-surface: oklch(1 0 0 / 96%);
   --workspace-background: var(--background);
   --workspace-surface: var(--card);
   --workspace-navigation: var(--muted);
@@ -78,6 +81,11 @@
   --icon-sm: 14px;
   --icon-md: 16px;
   --panel-padding: 12px;
+  --composer-line-height: 36px;
+  --composer-max-lines: 5;
+  --composer-shell-max-width: 42rem;
+  --composer-shell-position: center;
+  --motion-composer: 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dark {
@@ -123,6 +131,7 @@
   --success-foreground: oklch(0.985 0 0);
   --warning-foreground: oklch(0.985 0 0);
   --info-foreground: oklch(0.985 0 0);
+  --radius-capsule: calc(var(--radius) * 2.2);
   --agent-online: var(--success);
   --agent-connecting: var(--muted-foreground);
   --agent-reconnecting: var(--muted-foreground);
@@ -139,6 +148,8 @@
   --terminal-foreground: var(--foreground);
   --terminal-selection: var(--ring);
   --terminal-cursor: var(--ring);
+  --terminal-well-background: #1e1e2e;
+  --terminal-capsule-surface: oklch(1 0 0 / 96%);
   --workspace-background: var(--background);
   --workspace-surface: var(--card);
   --workspace-navigation: var(--muted);
@@ -209,6 +220,8 @@
   --color-terminal-foreground: var(--terminal-foreground);
   --color-terminal-selection: var(--terminal-selection);
   --color-terminal-cursor: var(--terminal-cursor);
+  --color-terminal-well-background: var(--terminal-well-background);
+  --color-terminal-capsule-surface: var(--terminal-capsule-surface);
   --color-workspace-background: var(--workspace-background);
   --color-workspace-surface: var(--workspace-surface);
   --color-workspace-navigation: var(--workspace-navigation);
@@ -219,4 +232,34 @@
   --color-editor-background: var(--editor-background);
   --color-editor-gutter: var(--editor-gutter);
   --color-editor-active-line: var(--editor-active-line);
+  --spacing-control-sm: var(--control-sm);
+  --spacing-control-md: var(--control-md);
+  --spacing-control-lg: var(--control-lg);
+  --spacing-row-sm: var(--row-sm);
+  --spacing-row-md: var(--row-md);
+  --spacing-row-lg: var(--row-lg);
+  --spacing-composer-line-height: var(--composer-line-height);
+  --spacing-composer-max-lines: var(--composer-max-lines);
+  --spacing-composer-shell-max-width: var(--composer-shell-max-width);
+  --spacing-composer-shell-position: var(--composer-shell-position);
+  --spacing-motion-composer: var(--motion-composer);
+  --spacing-radius-capsule: var(--radius-capsule);
+}
+
+[data-experience="app"] {
+  --control-sm: 36px;
+  --control-md: 44px;
+  --control-lg: 52px;
+  --row-sm: 40px;
+  --row-md: 48px;
+  --row-lg: 56px;
+  --icon-sm: 18px;
+  --icon-md: 20px;
+  --panel-padding: 16px;
+  --touch-target-min: 44;
+  --composer-line-height: 48px;
+  --composer-max-lines: 5;
+  --composer-shell-inset: 0.75rem;
+  --composer-shell-safe-area: env(safe-area-inset-bottom, 0px);
+  --motion-composer: 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }

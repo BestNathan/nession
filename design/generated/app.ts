@@ -20,3 +20,12 @@ export const panel = {
 export const touchTarget = {
   min: 44,
 } as const;
+export const composer = {
+  lineHeight: 48,
+  maxLines: 5,
+  shellInset: "0.75rem",
+  shellSafeArea: "env(safe-area-inset-bottom, 0px)",
+} as const;
+export const motion = {
+  composer: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
+} as const;
