@@ -25,7 +25,7 @@ export function AgentContext({ agentLabel, state, onOpenAgent }: AgentContextPro
     <button
       type="button"
       data-testid="agent-context"
-      className="text-sm"
+      className="text-xs font-mono"
       onClick={() => onOpenAgent()}
     >
       {online ? (

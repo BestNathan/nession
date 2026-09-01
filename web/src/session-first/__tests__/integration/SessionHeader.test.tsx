@@ -28,6 +28,7 @@ describe('SessionHeader', () => {
       />,
     );
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
+    expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
     expect(screen.getByTestId('agent-context')).toHaveTextContent('devbox-01');
     expect(screen.queryByText('Agent offline')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
@@ -48,7 +49,7 @@ describe('SessionHeader', () => {
     expect(screen.getByTestId('agent-context')).toHaveTextContent('Agent offline');
   });
 
-  it('uses a larger back control under max-lg', () => {
+  it('uses a compact back control visible only below lg', () => {
     render(
       <SessionHeader
         sessionName="demo"
@@ -61,7 +62,8 @@ describe('SessionHeader', () => {
       />,
     );
     const back = screen.getByTestId('session-first-back-to-list');
-    expect(back.className).toMatch(/max-lg:size-11/);
+    expect(back.className).toMatch(/size-9/);
+    expect(back.className).toMatch(/lg:hidden/);
   });
 
   it('uses design tokens for header spacing and back transition', () => {
@@ -79,7 +81,7 @@ describe('SessionHeader', () => {
     const header = screen.getByRole('banner');
     expect(header.className).toMatch(/sf-space|var\(--sf-space/);
     const back = screen.getByTestId('session-first-back-to-list');
-    expect(back.className).toMatch(/max-lg:size-11/);
+    expect(back.className).toMatch(/size-9/);
     expect(back.className).toMatch(/duration-\[var\(--sf-motion\)\]/);
   });
 });

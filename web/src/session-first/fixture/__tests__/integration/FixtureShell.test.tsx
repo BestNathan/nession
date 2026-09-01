@@ -10,6 +10,7 @@ describe('FixtureShell', () => {
   it('renders the deterministic session-first shell', () => {
     render(<FixtureShell />);
     expect(screen.getByTestId('session-first-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
     expect(screen.getAllByTestId('session-item-row')).toHaveLength(6);
     expect(screen.getByTestId('session-first-main-content')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();

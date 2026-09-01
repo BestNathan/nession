@@ -10,12 +10,12 @@ const state: DomainState = {
 };
 
 describe('ConnectionStatus', () => {
-  it('renders three labeled channels and does not say Session offline', () => {
+  it('renders the three channel values and does not say Session offline', () => {
     render(<ConnectionStatus state={state} />);
-    expect(screen.getByTestId('channel-agent')).toHaveTextContent(/Agent/);
-    expect(screen.getByTestId('channel-agent')).toHaveTextContent(/offline/i);
-    expect(screen.getByTestId('channel-session')).toHaveTextContent(/Session/);
-    expect(screen.getByTestId('channel-attachment')).toHaveTextContent(/Attach failed/);
+    expect(screen.getByTestId('connection-status')).toBeInTheDocument();
+    expect(screen.getByTestId('channel-agent')).toHaveTextContent('Agent offline');
+    expect(screen.getByTestId('channel-session')).toHaveTextContent('active');
+    expect(screen.getByTestId('channel-attachment')).toHaveTextContent('Attach failed');
     expect(screen.queryByText(/Session offline/i)).not.toBeInTheDocument();
   });
 });
