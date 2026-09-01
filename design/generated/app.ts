@@ -32,6 +32,8 @@ export const composer = {
   shellPadX: "0.625rem",
   shellPadY: "0.375rem",
   shellContentGap: "0.5rem",
+  shellPillRadius: 9999,
+  terminalClearanceGap: "0.375rem",
   captionFontSize: "0.625rem",
   popoverWidth: "20rem",
   popoverMaxHeight: "45vh",

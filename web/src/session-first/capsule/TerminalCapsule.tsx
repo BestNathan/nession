@@ -16,6 +16,7 @@ import {
   type CapsuleVariant,
 } from '@/session-first/capsule/types';
 import { useCapsuleLayoutFlip } from '@/session-first/capsule/useCapsuleLayoutFlip';
+import { useCapsuleDockClearance } from '@/session-first/capsule/hooks/useCapsuleDockClearance';
 
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
@@ -52,8 +53,11 @@ export function TerminalCapsule({
   });
 
   const shellRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
+
+  useCapsuleDockClearance(dockRef);
 
   const showModeToggle = Boolean(isApp && onModeChange && experienceConfig.inputControls.modeToggle);
   const {
@@ -111,6 +115,7 @@ export function TerminalCapsule({
         layout={composerLayout}
         mode={activeMode}
         disabled={disabled}
+        dockRef={dockRef}
         shellRef={shellRef}
         contentRef={contentRef}
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}

@@ -27,14 +27,30 @@ export const capsuleShellSurfaceClass =
 export const capsuleShellInnerPadClass =
   'px-[length:var(--composer-shell-pad-x)] py-[length:var(--composer-shell-pad-y)]';
 
-export const capsuleShellRadiusClass = 'rounded-[length:var(--radius-capsule)]';
+/** Stacked / multi-row shell corners */
+export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
+
+/** Single-row web pill ends */
+export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-radius)]';
+
+export const capsuleShellInnerSizeClass =
+  'pointer-events-auto w-fit max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
+
+export const capsuleShellWebOuterClass =
+  'inset-x-[length:var(--composer-shell-margin-x)] flex justify-center pointer-events-none';
+
+export const capsuleShellAppOuterClass =
+  'inset-x-[length:var(--composer-shell-inset)] flex justify-center pointer-events-none';
+
+export const capsuleShellDockBottomClass =
+  'bottom-[max(var(--composer-shell-margin-bottom),env(safe-area-inset-bottom))]';
+
+export const capsuleShellAppDockBottomClass =
+  'bottom-[max(var(--composer-shell-inset),var(--composer-shell-safe-area))]';
 
 export const capsuleComposerGridGapClass = 'gap-[length:var(--composer-row-gap)]';
 
 export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--composer-toolbar-row-gap)]';
-
-export const capsuleShellWebPositionClass =
-  'left-1/2 w-[min(calc(100%-var(--composer-shell-margin-x)-var(--composer-shell-margin-x)),var(--composer-shell-max-width))] -translate-x-1/2 bottom-[max(var(--composer-shell-margin-bottom),env(safe-area-inset-bottom))]';
 
 export const capsuleShellContentGapClass = 'gap-[length:var(--composer-shell-content-gap)]';
 

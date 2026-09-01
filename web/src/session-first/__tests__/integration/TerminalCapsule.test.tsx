@@ -80,19 +80,21 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-disabled', 'true');
   });
 
-  it('uses token capsule surface and radius on shell', () => {
+  it('uses token capsule surface and pill radius on web flat shell', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const shell = screen.getByTestId('capsule-shell');
     expect(shell.className).toMatch(/terminal-capsule-surface/);
-    expect(shell.className).toMatch(/radius-capsule/);
+    expect(shell.className).toMatch(/composer-shell-pill-radius/);
+    expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
   });
 
-  it('centers a capped-width dock on web', () => {
+  it('centers a content-sized dock on web', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'web');
-    expect(root.className).toMatch(/left-1\/2/);
-    expect(root.className).toMatch(/composer-shell-max-width/);
+    expect(root.className).toMatch(/composer-shell-margin-x/);
+    expect(root.className).toMatch(/justify-center/);
+    expect(screen.getByTestId('capsule-shell').className).toMatch(/w-fit/);
   });
 
   it('uses inset positioning on app', () => {
@@ -124,6 +126,8 @@ describe('TerminalCapsule', () => {
       expect(root).toHaveAttribute('data-layout', 'stacked');
     });
     expect(root).toHaveAttribute('data-dock-height', 'multi');
+    expect(root).toHaveAttribute('data-shell-shape', 'capsule');
+    expect(screen.getByTestId('capsule-shell').className).toMatch(/radius-capsule/);
   });
 
   it('still accepts legacy variant prop', () => {

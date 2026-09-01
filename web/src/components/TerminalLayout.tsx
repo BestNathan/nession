@@ -64,7 +64,7 @@ function DesktopToolbarLayout({
 }: DesktopToolbarLayoutProps) {
   if (toolbar === 'capsule') {
     return (
-      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div className="relative flex-1 min-h-0 flex flex-col" data-terminal-capsule-host>
         {isDesktop && terminalElement}
         {isDesktop ? (
           <TerminalCapsule
