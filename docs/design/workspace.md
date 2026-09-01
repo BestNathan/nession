@@ -23,22 +23,28 @@ Git, Preview, Processes, and similar tools are **not** required for the first mi
 
 ## Tool registry
 
-Prefer a Workspace tool registry over hard-coded tab conditionals. Conceptual shape (the concrete API is implementation-specific):
+Prefer a Workspace tool registry over hard-coded tab conditionals. A tool is a **plugin**: it owns its label, icon, order, availability, and its own layouts per experience. Adding a tool = one file + one registry line; the framework (shell, tool bar, container) does not change. Conceptual shape (matches the shipped contract):
 
 ```ts
 interface WorkspaceTool {
-  id: string
+  id: WorkspaceToolId
   label: string
-  icon: unknown
+  icon: Icon
   order: number
-  availability: (context: SessionContext) => boolean
-  component: unknown
+  availability: (ctx: WorkspaceContext) => boolean
+  layout: {
+    web: ComponentType<{ ctx: WorkspaceContext }>   // per-experience layout
+    app: ComponentType<{ ctx: WorkspaceContext }>   // per-experience layout
+  }
 }
 ```
 
-Workspace navigation should be extensible by registering tools, not by growing a switch of special cases in the shell.
+Workspace navigation is extensible by registering tools, not by growing a switch of special cases in the shell.
 
-`availability` may hide a tool for a given Session (for example Files when the Agent does not expose a file API). Hidden tools must not leave empty chrome that implies the tool exists.
+- **Per-experience layouts.** Web/App differences live in `layout.web` / `layout.app` — never scattered `if (mobile)` metrics inside a shared component. Files is exactly this: web = tree ‖ editor, app = tree full-screen → push editor.
+- **No fixed pixels for structure.** Tool-internal layouts use grids and proportions (Files web = CSS grid, tree `1fr` ‖ editor `2fr`); spacing comes from `--sf-space-*` / Experience tokens, widths from proportion or content.
+- **Availability is per-Session** (e.g. Files when the Agent exposes no file API). A tool may also choose not to register at all — hidden tools leave no empty chrome. Registered-but-unavailable tools render as **disabled pills** (inert) in the tool bar — visible, not clickable — never as empty slots.
+- The framework renders a registry-driven **bottom floating tool bar** (label / icon / order / availability → disabled state) plus the active tool's layout for the current experience. It is the workspace's **only floating element**, same capsule family (radius / elevation / tokens) as the terminal input capsule.
 
 ## Master/detail is local to Files
 

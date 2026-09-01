@@ -105,10 +105,10 @@ Never stack more than two separation cues on the same edge by default.
 | Surface | Role | Default separation |
 |---------|------|---------------------|
 | App canvas | Ground of the app | None — the base background |
-| Navigation surface | Sessions sidebar | Same canvas; hairline separator (terminal-native) |
+| Navigation surface | Sessions drawer | Same canvas; hairline separator (terminal-native) |
+| Workspace ground tier | Workspace tool content — one step darker than canvas (`--muted` tier, `bg-muted/40`); canvas → workspace → terminal darkening ladder | Background shift vs canvas |
 | Primary work surface | Terminal | **Flush**; the darkest surface; no border, no card, no radius |
-| Secondary work surface | Workspace tool region | Background shift vs canvas |
-| Floating control surface | Composer / capsule, floating actions | Elevation (shadow); no border |
+| Floating control surface | Terminal input capsule + workspace tool bar (same capsule family); floating actions | Elevation (shadow); no border |
 | Popover / overlay | Menu, sheet, dialog | Elevation over a dimmed canvas; contained radius |
 | Destructive / warning surface | Confirm dialog, error state | Background tint + text color; no glow, no border stack |
 
