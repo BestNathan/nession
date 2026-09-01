@@ -51,10 +51,10 @@ export function ConnectionStatus({ state }: { state: DomainState }) {
   return (
     <div
       data-testid="connection-status"
-      className="flex min-w-0 items-center gap-1 text-xs"
+      className="truncate flex min-w-0 items-center gap-1 text-xs"
     >
       <span data-testid="channel-agent" className={fragmentClass(agentValueClass(state.agent.channel))}>
-        {state.agent.copy ?? state.agent.channel}
+        {state.agent.channel}
       </span>
       <span className="text-muted-foreground/40">·</span>
       <span data-testid="channel-session" className={fragmentClass(sessionValueClass(state.session.channel))}>

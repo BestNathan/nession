@@ -53,7 +53,7 @@ export function SessionHeader({
         </h1>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
           <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
           <ConnectionStatus state={state} />
         </div>
