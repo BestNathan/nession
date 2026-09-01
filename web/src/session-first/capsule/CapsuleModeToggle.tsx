@@ -29,7 +29,7 @@ export function CapsuleModeToggle({ mode, onModeChange, disabled = false }: Caps
         value="input"
         aria-label="Input mode"
         data-testid="capsule-mode-input"
-        className="max-lg:min-h-11 max-lg:min-w-11"
+        className="min-h-[length:var(--control-md)] min-w-[length:var(--control-md)] [&_svg]:size-[length:var(--icon-md)]"
       >
         <PenLine className="size-4" />
       </ToggleGroupItem>
@@ -37,7 +37,7 @@ export function CapsuleModeToggle({ mode, onModeChange, disabled = false }: Caps
         value="commands"
         aria-label="Commands mode"
         data-testid="capsule-mode-commands"
-        className="max-lg:min-h-11 max-lg:min-w-11"
+        className="min-h-[length:var(--control-md)] min-w-[length:var(--control-md)] [&_svg]:size-[length:var(--icon-md)]"
       >
         <Keyboard className="size-4" />
       </ToggleGroupItem>

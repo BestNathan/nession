@@ -58,11 +58,10 @@ export function CapsuleHistoryPopover({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
             disabled={disabled}
             data-testid="capsule-history-trigger"
             className={cn(
-              "size-8 shrink-0 max-lg:size-11 [&_svg:not([class*='size-'])]:size-4",
+              "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
               triggerClassName,
             )}
             aria-label="Command history"

@@ -66,12 +66,26 @@ describe('InputComposer', () => {
     expect(sendText).toHaveBeenCalledWith('hello\r');
   });
 
-  it('uses flat layout for single-line input', () => {
+  it('uses flat inline row on web single-line input', () => {
     renderWebCapsule();
     const row = screen.getByTestId('capsule-input-row');
     expect(row).toHaveAttribute('data-layout', 'flat');
-    expect(row.className).toMatch(/items-center/);
     expect(row.className).toMatch(/grid-cols-\[minmax/);
+    expect(screen.queryByTestId('capsule-input-toolbar-row')).not.toBeInTheDocument();
+  });
+
+  it('uses full-width field on app even when flat', () => {
+    render(
+      <TerminalCapsule
+        experience="app"
+        mode="input"
+        onModeChange={vi.fn()}
+        sendText={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-input-row')).toHaveAttribute('data-field-first', 'app');
+    expect(screen.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
+    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
   });
 
   it('stays flat when empty even if scrollHeight looks multi-line', async () => {
@@ -99,15 +113,22 @@ describe('InputComposer', () => {
     }
   });
 
-  it('uses token line-height classes on the field', () => {
+  it('uses token font-size classes on the field', () => {
     renderWebCapsule();
     const input = screen.getByTestId('capsule-ghost-input');
-    expect(input.className).toMatch(/composer-line-height/);
+    expect(input.className).toMatch(/composer-font-size/);
   });
 
-  it('uses token control sizing on History and Send', () => {
-    renderWebCapsule();
-    expect(screen.getByTestId('capsule-history-trigger').className).toMatch(/control-md/);
+  it('uses compact secondary controls on app', () => {
+    render(
+      <TerminalCapsule
+        experience="app"
+        mode="input"
+        onModeChange={vi.fn()}
+        sendText={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('capsule-history-trigger').className).toMatch(/control-sm/);
     expect(screen.getByTestId('capsule-send').className).toMatch(/control-md/);
   });
 
@@ -128,10 +149,7 @@ describe('InputComposer', () => {
       'data-input-width',
       'full',
     );
-    expect(screen.getByTestId('capsule-input-field').className).toMatch(/col-span-full/);
-    expect(screen.getByTestId('capsule-input-actions-slot').className).toMatch(
-      /row-start-2/,
-    );
+    expect(screen.getByTestId('capsule-input-toolbar-row')).toBeInTheDocument();
   });
 
   it('does not oscillate when soft-wrap height depends on layout width', async () => {

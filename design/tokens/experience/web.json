@@ -21,6 +21,13 @@
     "fontSize": { "value": "0.875rem" },
     "textLineHeight": { "value": "1.25rem" },
     "lineHeight": { "ref": "experience.web.composer.textLineHeight" },
+    "fieldInsetX": { "value": "0.75rem" },
+    "fieldInsetY": { "value": "0.375rem" },
+    "controlGap": { "value": "0.125rem" },
+    "rowGap": { "value": "0.375rem" },
+    "toolbarRowGap": { "value": "0.375rem" },
+    "shellPadX": { "value": "0.75rem" },
+    "shellPadY": { "value": "0.5rem" },
     "maxLines": { "value": 5 },
     "shellMaxWidth": { "value": "42rem" },
     "shellPosition": { "value": "center" }

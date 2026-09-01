@@ -10,6 +10,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
 import { CapsuleAddCommandButton, CapsuleAddCommandDialog, CapsuleDeleteButton } from '@/session-first/capsule/CapsuleAddCommandDialog';
 import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
@@ -56,7 +57,7 @@ export function CapsuleCommandsPopover({
       size="icon"
       disabled={disabled}
       data-testid="capsule-commands-trigger"
-      className="size-8 shrink-0 max-lg:size-11 [&_svg:not([class*='size-'])]:size-4"
+      className={cn(capsuleIconButtonClass, 'rounded-lg')}
       aria-label="Quick commands"
     >
       <Terminal />
@@ -149,7 +150,7 @@ export function CapsuleCommandsMoreTrigger({
       size="icon-sm"
       disabled={disabled}
       data-testid="capsule-commands-more"
-      className={cn('max-lg:min-h-11 max-lg:size-11', className)}
+      className={cn('min-h-[length:var(--control-md)]', capsuleIconButtonClass, className)}
       aria-label="More commands"
     >
       ⋯
