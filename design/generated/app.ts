@@ -21,7 +21,9 @@ export const touchTarget = {
   min: 44,
 } as const;
 export const composer = {
-  lineHeight: 48,
+  fontSize: "1rem",
+  textLineHeight: "1.375rem",
+  lineHeight: "1.375rem",
   maxLines: 5,
   shellInset: "0.75rem",
   shellSafeArea: "env(safe-area-inset-bottom, 0px)",

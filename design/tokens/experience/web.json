@@ -18,7 +18,9 @@
     "padding": { "value": "12px" }
   },
   "composer": {
-    "lineHeight": { "ref": "experience.web.row.md" },
+    "fontSize": { "value": "0.875rem" },
+    "textLineHeight": { "value": "1.25rem" },
+    "lineHeight": { "ref": "experience.web.composer.textLineHeight" },
     "maxLines": { "value": 5 },
     "shellMaxWidth": { "value": "42rem" },
     "shellPosition": { "value": "center" }
