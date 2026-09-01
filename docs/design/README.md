@@ -24,6 +24,10 @@ Information Architecture
       ↓
 Interaction Model (Web / App)
       ↓
+Visual Language                       ← #561
+      ↓
+Layout / Composition                  ← #561
+      ↓
 Design System (tokens + patterns)
       ↓
 UI Contracts + Validation          ← #544–#548
@@ -40,6 +44,8 @@ Implementation
 | [workspace.md](workspace.md) | Workspace as session-scoped tool container; initial tools; registry; Files master/detail is local to Files |
 | [interaction/web.md](interaction/web.md) | Sessions sidebar + Active Session; Terminal \| Workspace as peer surfaces (one visible at a time) |
 | [interaction/app.md](interaction/app.md) | Spatial model `Sessions ← Terminal → Workspace`; gestures as accelerators; not a shrunk Web layout |
+| [visual-language.md](visual-language.md) | What dominates and recedes; typography / surface / density hierarchy; visual emphasis levels ([#561](https://github.com/BestNathan/nession/issues/561)) |
+| [composition.md](composition.md) | Page-level layout relationships: shell geometry, chrome width/height strategies, insets, rhythm, responsive transitions ([#561](https://github.com/BestNathan/nession/issues/561)) |
 | [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
 | [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
 | [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [nine specs](design-system/patterns.md#catalog) ([#470](https://github.com/BestNathan/nession/issues/470)) |
@@ -58,6 +64,7 @@ Implementation
 | 3 — Vertical slice | [#471](https://github.com/BestNathan/nession/issues/471) | Session list → Terminal → Workspace validation path |
 | 4 — Web migration | [#472](https://github.com/BestNathan/nession/issues/472) | Migrate full Web UI to session-first shell |
 | 4 — App navigation | [#473](https://github.com/BestNathan/nession/issues/473) | App spatial model |
+| 5 — Visual language | [#561](https://github.com/BestNathan/nession/issues/561) | visual-language.md + composition.md; canonical screens; pattern Visual Contracts; baselines + visual regression gate |
 
 Related open issues that may overlap during migration: [#343](https://github.com/BestNathan/nession/issues/343), [#207](https://github.com/BestNathan/nession/issues/207), [#193](https://github.com/BestNathan/nession/issues/193), [#400](https://github.com/BestNathan/nession/issues/400).
 
