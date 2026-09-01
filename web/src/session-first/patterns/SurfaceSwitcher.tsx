@@ -14,9 +14,19 @@ export function SurfaceSwitcher({ surface, onSurfaceChange }: SurfaceSwitcherPro
       onValueChange={(v) => onSurfaceChange(v as Surface)}
       data-testid="surface-switcher"
     >
-      <TabsList>
-        <TabsTrigger value="terminal">Terminal</TabsTrigger>
-        <TabsTrigger value="workspace">Workspace</TabsTrigger>
+      <TabsList className="h-auto gap-0.5 bg-transparent p-0">
+        <TabsTrigger
+          value="terminal"
+          className="rounded-none bg-transparent px-1.5 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground data-active:bg-transparent data-active:text-foreground"
+        >
+          Terminal
+        </TabsTrigger>
+        <TabsTrigger
+          value="workspace"
+          className="rounded-none bg-transparent px-1.5 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground data-active:bg-transparent data-active:text-foreground"
+        >
+          Workspace
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="terminal" className="hidden" />
       <TabsContent value="workspace" className="hidden" />

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
 import { SessionFirstSpatialLayout } from '@/session-first/SessionFirstSpatialLayout';
@@ -8,9 +9,10 @@ import type { DomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/patterns/WorkspaceNavigation';
 import type { FileOps } from '@/services/fileOps';
-import type { Agent, Session } from '@/types';
+import type { Agent, ConnectionStatus, Session } from '@/types';
 
 export interface SessionFirstWorkspaceProps {
+  connectionStatus: ConnectionStatus;
   agents: Agent[];
   filteredSessions: Session[];
   staleAgents: string[];
@@ -44,16 +46,22 @@ export interface SessionFirstWorkspaceProps {
   onBackToSessions?: () => void;
   onOpenEnv: () => void;
   onLegacy: () => void;
+  /**
+   * Fixture/testing override for the terminal surface. Defaults to the real
+   * attached terminal. Applies only to the wide (non-spatial) render path;
+   * the spatial layout always uses the real terminal.
+   */
+  terminal?: ReactNode;
 }
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   const {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
     onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
-    showDetail, onBackToSessions, onOpenEnv, onLegacy,
+    showDetail, onBackToSessions, onOpenEnv, onLegacy, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
@@ -66,7 +74,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   });
 
   const sidebarProps = {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onKill, onOpenEnv, onLegacy,
@@ -101,6 +109,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
           {...mainShared}
           surface={surface}
           onBackToSessions={onBackToSessions}
+          terminal={terminal}
         />
       </main>
     </div>

@@ -62,4 +62,42 @@ describe('SessionFirstMain', () => {
     expect(content.className).toMatch(/flex-1/);
     expect(content.className).toMatch(/min-h-0/);
   });
+
+  it('renders the fixture terminal override instead of the attached terminal', () => {
+    render(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        terminal={<div data-testid="fixture-terminal" />}
+      />,
+    );
+
+    expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the attached terminal when no override is given', () => {
+    render(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('session-first-terminal')).toBeInTheDocument();
+  });
 });

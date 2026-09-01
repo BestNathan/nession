@@ -30,26 +30,35 @@ export function SessionHeader({
   onBackToSessions,
 }: SessionHeaderProps) {
   return (
-    <header className="flex flex-row flex-wrap items-center gap-x-[var(--sf-space-3)] gap-y-[var(--sf-space-2)] border-b px-[var(--sf-space-3)] py-[var(--sf-space-3)] max-lg:gap-x-[var(--sf-space-2)] lg:px-[var(--sf-space-4)] lg:py-[var(--sf-space-3)]">
-      {onBackToSessions ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-9 shrink-0 max-lg:size-11 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)] lg:hidden"
-          aria-label="Back to sessions"
-          data-testid="session-first-back-to-list"
-          onClick={() => onBackToSessions()}
-        >
-          <ChevronLeft className="size-5" />
-        </Button>
-      ) : null}
-      <h1 className="min-w-0 text-base font-semibold">{sessionName}</h1>
-      <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
-      <div className="hidden text-xs sm:block [&_[data-testid^=channel-]]:gap-x-2">
-        <ConnectionStatus state={state} />
+    <header
+      data-testid="session-header-line"
+      className="flex shrink-0 flex-col gap-1 px-[var(--sf-space-4)] py-[var(--sf-space-2)] max-lg:gap-1.5 max-lg:px-[var(--sf-space-3)]"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        {onBackToSessions ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)] lg:hidden"
+            aria-label="Back to sessions"
+            data-testid="session-first-back-to-list"
+            onClick={() => onBackToSessions()}
+          >
+            <ChevronLeft className="size-5" />
+          </Button>
+        ) : null}
+        <h1 className="min-w-0 truncate font-mono text-base font-semibold">
+          {sessionName}
+        </h1>
       </div>
-      <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
+          <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
+          <ConnectionStatus state={state} />
+        </div>
+        <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+      </div>
     </header>
   );
 }

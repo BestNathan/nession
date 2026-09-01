@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/services/fileOps';
@@ -62,6 +63,8 @@ export interface SessionFirstMainProps {
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
   showWorkspace?: boolean;
+  /** Fixture/testing override for the terminal surface. Defaults to the real attached terminal. */
+  terminal?: ReactNode;
 }
 
 export function SessionFirstMain({
@@ -77,6 +80,7 @@ export function SessionFirstMain({
   onBackToSessions,
   showTerminal = true,
   showWorkspace = true,
+  terminal,
 }: SessionFirstMainProps) {
   return (
     <>
@@ -103,11 +107,13 @@ export function SessionFirstMain({
               (surface !== 'terminal' || !selectedSession) && 'hidden',
             )}
           >
-            <SessionFirstTerminal
-              hidden={surface !== 'terminal' || !selectedSession}
-              onDisconnect={() => undefined}
-              onError={() => undefined}
-            />
+            {terminal ?? (
+              <SessionFirstTerminal
+                hidden={surface !== 'terminal' || !selectedSession}
+                onDisconnect={() => undefined}
+                onError={() => undefined}
+              />
+            )}
           </TerminalWell>
         ) : null}
         {showWorkspace ? (

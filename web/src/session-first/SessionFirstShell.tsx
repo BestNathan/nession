@@ -1,7 +1,8 @@
-import { Loader2 } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { EnvManager } from '@/components/env/EnvManager';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProbePolling } from '@/hooks/useProbePolling';
-import { SessionFirstChrome } from '@/session-first/SessionFirstChrome';
 import { SessionFirstDialogs } from '@/session-first/SessionFirstDialogs';
 import { SessionFirstWorkspace } from '@/session-first/SessionFirstWorkspace';
 import { useSessionFirstShellState } from '@/session-first/useSessionFirstShellState';
@@ -54,11 +55,31 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
         data-sf-design="polish"
         className="session-first-shell flex h-[100dvh] flex-col bg-background"
       >
-        <SessionFirstChrome
-          connectionStatus={connectionStatus}
-          error={data.error}
-          clearError={data.clearError}
-        />
+        {data.error ? (
+          <div
+            data-testid="session-first-error"
+            className="flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive text-sm"
+          >
+            <span className="min-w-0 flex-1">{data.error}</span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-5"
+                    aria-label="Dismiss error"
+                    onClick={() => data.clearError()}
+                  />
+                }
+              >
+                <X className="size-3" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Dismiss</TooltipContent>
+            </Tooltip>
+          </div>
+        ) : null}
         {state.isRestoringDeepLink ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Loader2 className="size-8 animate-spin text-muted-foreground" />
@@ -66,6 +87,7 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
           </div>
         ) : (
           <SessionFirstWorkspace
+            connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}
             staleAgents={data.staleAgents}
