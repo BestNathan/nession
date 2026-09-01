@@ -66,8 +66,9 @@ vi.mock('@/hooks/useProbePolling', () => ({
 vi.mock('@/session-first/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
-vi.mock('@/session-first/patterns/FileWorkspace', () => ({
-  FileWorkspace: () => <div data-testid="file-workspace" />,
+vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
+  FilesWebLayout: () => <div data-testid="file-workspace" />,
+  FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 vi.mock('@/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
@@ -114,10 +115,33 @@ vi.mock('@/hooks/useWebSocket', () => ({
 const deepLink = vi.hoisted(() => ({
   isRestoringDeepLink: false,
   sessionIdFromUrl: null as string | null,
+  restored: new Set<string>(),
 }));
 
+// Faithful to the real hook: a sessionIdFromUrl restores that session's
+// selection (guarded so the render-phase restore runs once per id).
 vi.mock('@/hooks/useSessionFirstDeepLink', () => ({
-  useSessionFirstDeepLink: () => deepLink,
+  useSessionFirstDeepLink: (opts: {
+    sessions: Session[];
+    onRestoreSession: (session: Session) => void;
+  }) => {
+    if (
+      deepLink.sessionIdFromUrl &&
+      !deepLink.restored.has(deepLink.sessionIdFromUrl)
+    ) {
+      deepLink.restored.add(deepLink.sessionIdFromUrl);
+      const session = opts.sessions.find(
+        (s) => s.session_id === deepLink.sessionIdFromUrl,
+      );
+      if (session) {
+        opts.onRestoreSession(session);
+      }
+    }
+    return {
+      isRestoringDeepLink: deepLink.isRestoringDeepLink,
+      sessionIdFromUrl: deepLink.sessionIdFromUrl,
+    };
+  },
 }));
 
 const mobileNav = vi.hoisted(() => ({
@@ -148,6 +172,7 @@ describe('SessionFirstShell', () => {
   beforeEach(() => {
     deepLink.isRestoringDeepLink = false;
     deepLink.sessionIdFromUrl = null;
+    deepLink.restored.clear();
     mobileNav.showList = true;
     mobileNav.showDetail = true;
     mobileNav.isWide = true;
@@ -179,8 +204,10 @@ describe('SessionFirstShell', () => {
     );
   });
 
-  it('applies safe-area padding to sidebar footer', () => {
+  it('applies safe-area padding to sidebar footer', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     const footer = screen.getByTestId('session-first-sidebar-footer');
     expect(footer.className).toMatch(
       /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
@@ -188,14 +215,19 @@ describe('SessionFirstShell', () => {
     expect(footer.className).toMatch(/sf-space|var\(--sf-space/);
   });
 
-  it('lists sessions without an Agent card grid', () => {
+  it('lists sessions in the drawer without an Agent card grid', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-item-row')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 
   it('selects a session, defaults to Terminal, then Workspace Files and Agent', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.getByRole('heading', { name: 'Fix terminal reconnect' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
@@ -212,6 +244,11 @@ describe('SessionFirstShell', () => {
       sessions: [],
       filteredSessions: [],
     };
+    // No selection to restore with an empty list: enter via the mobile list
+    // pane, where the drawer is open at rest.
+    mobileNav.isWide = false;
+    mobileNav.showList = true;
+    mobileNav.showDetail = false;
     renderShell();
     expect(screen.getByText(/No sessions/i)).toBeInTheDocument();
   });
@@ -234,17 +271,21 @@ describe('SessionFirstShell', () => {
     expect(screen.getByTestId('kill-session-dialog')).toBeInTheDocument();
   });
 
-  it('disables create when no online agents', () => {
+  it('disables create when no online agents', async () => {
     dashboard.current = {
       ...dashboard.current,
       agents: [{ ...agent, status: 'offline' }],
     };
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
 
   it('opens env manager from sidebar footer overflow and returns on back', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-first-overflow'));
     await userEvent.click(await screen.findByTestId('session-first-env'));
     expect(screen.getByTestId('env-manager')).toBeInTheDocument();
@@ -270,13 +311,17 @@ describe('SessionFirstShell', () => {
   });
 
   it('opens attach dialog when a session is selected', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
   });
 
   it('writes sessionIdAtom when attach is confirmed', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByTestId('attach-confirm'));
     await waitFor(() => {
@@ -292,7 +337,9 @@ describe('SessionFirstShell', () => {
   });
 
   it('calls openDetail when a session is selected', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(mobileNav.openDetail).toHaveBeenCalled();
   });
@@ -301,7 +348,9 @@ describe('SessionFirstShell', () => {
     mobileNav.isWide = true;
     mobileNav.showList = false;
     mobileNav.showDetail = true;
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByTestId('session-first-back-to-list'));
     expect(mobileNav.openList).toHaveBeenCalled();
@@ -323,7 +372,9 @@ describe('SessionFirstShell', () => {
     mobileNav.isWide = true;
     mobileNav.showList = true;
     mobileNav.showDetail = true;
+    deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
   });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import type { DomainState } from '@/session-first/domainState';
 import type { Agent, Session } from '@/types';
@@ -35,8 +36,9 @@ vi.mock('@/session-first/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
 
-vi.mock('@/session-first/patterns/FileWorkspace', () => ({
-  FileWorkspace: () => <div data-testid="file-workspace" />,
+vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
+  FilesWebLayout: () => <div data-testid="file-workspace" />,
+  FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 
 describe('SessionFirstMain', () => {
@@ -53,6 +55,7 @@ describe('SessionFirstMain', () => {
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
         onBackToSessions={vi.fn()}
+        connectionStatus="connected"
       />,
     );
 
@@ -75,6 +78,7 @@ describe('SessionFirstMain', () => {
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
+        connectionStatus="connected"
         terminal={<div data-testid="fixture-terminal" />}
       />,
     );
@@ -95,9 +99,96 @@ describe('SessionFirstMain', () => {
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
         onOpenAgent={vi.fn()}
+        connectionStatus="connected"
       />,
     );
 
     expect(screen.getByTestId('session-first-terminal')).toBeInTheDocument();
+  });
+
+  it('threads experience to the header: switcher shows in web, hidden in app', () => {
+    const view = render(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        connectionStatus="connected"
+      />,
+    );
+    expect(screen.getByTestId('surface-switcher')).toBeInTheDocument();
+
+    view.rerender(
+      <SessionFirstMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        connectionStatus="connected"
+        experience="app"
+      />,
+    );
+    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+  });
+
+  it('shows the resting top row and empty state when no session is selected', () => {
+    render(
+      <SessionFirstMain
+        selectedSession={null}
+        selectedAgent={undefined}
+        domain={null}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenDrawer={vi.fn()}
+        connectionStatus="connected"
+      />,
+    );
+
+    expect(screen.getByTestId('session-resting-header')).toBeInTheDocument();
+    expect(screen.getByTestId('session-first-open-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('server-connection')).toHaveTextContent(
+      'server: connected',
+    );
+    expect(screen.getByTestId('session-empty-state')).toHaveTextContent(
+      'Select a session to start working',
+    );
+    expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
+  });
+
+  it('opens the sessions drawer from the resting top row button', async () => {
+    const onOpenDrawer = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SessionFirstMain
+        selectedSession={null}
+        selectedAgent={undefined}
+        domain={null}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenDrawer={onOpenDrawer}
+        connectionStatus="connected"
+      />,
+    );
+
+    await user.click(screen.getByTestId('session-first-open-drawer'));
+    expect(onOpenDrawer).toHaveBeenCalledTimes(1);
   });
 });

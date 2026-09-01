@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
+import { FilesAppLayout } from '@/session-first/workspace/tools/filesApp';
 import type { FileOps, FileEntry } from '@/services/fileOps';
+import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -26,29 +28,80 @@ function makeFileOps(): FileOps {
   } as unknown as FileOps;
 }
 
-describe('FileWorkspace', () => {
-  it('shows attach-first empty state when fileOps is null', () => {
-    render(<FileWorkspace fileOps={null} />);
-    expect(screen.getByText(/attach/i)).toBeInTheDocument();
-    expect(screen.queryByText('f.txt')).not.toBeInTheDocument();
+function makeCtx(fileOps: FileOps | null): WorkspaceContext {
+  return {
+    session: null,
+    agent: undefined,
+    domain: null,
+    fileOps,
+    experience: 'web',
+    onToolChange: vi.fn(),
+  };
+}
+
+describe('FileWorkspace (web layout)', () => {
+  it('renders nothing while fileOps is unavailable (tool availability owns that state)', () => {
+    const { container } = render(<FileWorkspace ctx={makeCtx(null)} />);
+    expect(container.firstChild).toBeNull();
   });
 
-  it('opens a file in the detail pane', async () => {
-    render(<FileWorkspace fileOps={makeFileOps()} />);
-    await userEvent.click(await screen.findByText('f.txt'));
-    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
+  it('root keeps the file-workspace testid and exposes the web layout grid', () => {
+    render(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    expect(screen.getByTestId('file-workspace')).toBeInTheDocument();
+    expect(screen.getByTestId('files-web-layout')).toBeInTheDocument();
   });
 
-  it('clears selection when fileOps detaches then reattaches', async () => {
-    const { rerender } = render(<FileWorkspace fileOps={makeFileOps()} />);
-    await userEvent.click(await screen.findByText('f.txt'));
+  it('shows the select-a-file hint before any file is opened', () => {
+    render(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    expect(screen.getByText('Select a file')).toBeInTheDocument();
+  });
+
+  it('opens a file in the detail pane and closes it', async () => {
+    const user = userEvent.setup();
+    render(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    await user.click(await screen.findByText('f.txt'));
+    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
+    await user.click(screen.getByLabelText('Close file'));
+    expect(screen.getByText('Select a file')).toBeInTheDocument();
+  });
+
+  it('clears the selection when fileOps detaches then reattaches', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    await user.click(await screen.findByText('f.txt'));
     expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
 
-    rerender(<FileWorkspace fileOps={null} />);
-    expect(screen.getByText(/attach/i)).toBeInTheDocument();
+    rerender(<FileWorkspace ctx={makeCtx(null)} />);
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
 
-    rerender(<FileWorkspace fileOps={makeFileOps()} />);
+    rerender(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
     expect(screen.getByText('Select a file')).toBeInTheDocument();
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+  });
+});
+
+describe('FilesAppLayout', () => {
+  it('browser full-screen until a file is selected, then pushed editor; close returns', async () => {
+    const user = userEvent.setup();
+    render(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    await user.click(await screen.findByText('f.txt'));
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+    expect(screen.getByText('f.txt')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Close file'));
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+  });
+
+  it('clears the selection when fileOps detaches then reattaches', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
+    await user.click(await screen.findByText('f.txt'));
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={makeCtx(null)} />);
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
   });
 });

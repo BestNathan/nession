@@ -7,13 +7,19 @@ vi.mock('@/session-first/fixture/FixtureTerminal', () => ({
 }));
 
 describe('FixtureShell', () => {
-  it('renders the deterministic session-first shell', () => {
+  it('renders the deterministic session-first shell with the static terminal', () => {
     render(<FixtureShell />);
     expect(screen.getByTestId('session-first-shell')).toBeInTheDocument();
     expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
-    expect(screen.getAllByTestId('session-item-row')).toHaveLength(6);
     expect(screen.getByTestId('session-first-main-content')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+    expect(screen.getByTestId('server-connection')).toHaveTextContent('server: connected');
+  });
+
+  it('renders the sessions drawer deterministically', () => {
+    render(<FixtureShell />);
+    expect(screen.getByTestId('session-drawer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('session-item-row')).toHaveLength(6);
   });
 
   it('marks exactly one session as selected', () => {

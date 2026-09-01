@@ -9,9 +9,9 @@ import {
 } from '@/session-first/SessionFirstSidebar';
 import type { DomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/session-first/patterns/WorkspaceNavigation';
+import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 import type { FileOps } from '@/services/fileOps';
-import type { Agent, Session } from '@/types';
+import type { Agent, ConnectionStatus, Session } from '@/types';
 
 type SidebarFields = Omit<SessionFirstSidebarProps, 'className' | 'onSelect'>;
 
@@ -21,6 +21,7 @@ interface MainShared {
   domain: DomainState | null;
   tool: WorkspaceToolId;
   fileOps: FileOps | null;
+  connectionStatus: ConnectionStatus;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
@@ -51,6 +52,7 @@ export function SessionFirstSpatialLayout(props: {
               {...mainShared}
               surface="terminal"
               showWorkspace={false}
+              experience="app"
             />
           </div>
         }
@@ -60,6 +62,7 @@ export function SessionFirstSpatialLayout(props: {
               {...mainShared}
               surface="workspace"
               showTerminal={false}
+              experience="app"
             />
           </div>
         }

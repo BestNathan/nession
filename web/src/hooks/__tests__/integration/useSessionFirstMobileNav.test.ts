@@ -71,10 +71,10 @@ describe('useSessionFirstMobileNav', () => {
     expect(result.current.showDetail).toBe(false);
   });
 
-  it('shows both panes on wide viewports', () => {
+  it('hides the list on wide viewports (drawer replaces the list pane)', () => {
     mockMatchMedia(true);
     const { result } = renderHook(() => useSessionFirstMobileNav('a1:s1'));
-    expect(result.current.showList).toBe(true);
+    expect(result.current.showList).toBe(false);
     expect(result.current.showDetail).toBe(true);
   });
 

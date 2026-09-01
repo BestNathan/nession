@@ -35,6 +35,22 @@ describe('SessionHeader', () => {
     expect(onSurface).toHaveBeenCalledWith('workspace');
   });
 
+  it('omits the surface switcher in the app experience', () => {
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        experience="app"
+      />,
+    );
+    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+  });
+
   it('makes AgentContext prominent when offline', () => {
     render(
       <SessionHeader
@@ -64,6 +80,69 @@ describe('SessionHeader', () => {
     const back = screen.getByTestId('session-first-back-to-list');
     expect(back.className).toMatch(/size-9/);
     expect(back.className).toMatch(/lg:hidden/);
+  });
+
+  it('opens the sessions drawer from the top row button', async () => {
+    const onOpenDrawer = vi.fn();
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenDrawer={onOpenDrawer}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    expect(onOpenDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the server micro-status when provided', () => {
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        serverStatus="connected"
+      />,
+    );
+    expect(screen.getByTestId('server-connection')).toHaveTextContent('server: connected');
+  });
+
+  it('marks the server micro-status with the error tone when disconnected', () => {
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+        serverStatus="disconnected"
+      />,
+    );
+    const status = screen.getByTestId('server-connection');
+    expect(status.className).toMatch(/text-agent-error/);
+  });
+
+  it('omits the drawer button and server status when not provided', () => {
+    render(
+      <SessionHeader
+        sessionName="s"
+        agentLabel="host"
+        state={healthy}
+        surface="terminal"
+        onSurfaceChange={vi.fn()}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('session-first-open-drawer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('server-connection')).not.toBeInTheDocument();
   });
 
   it('uses design tokens for header spacing and back transition', () => {
