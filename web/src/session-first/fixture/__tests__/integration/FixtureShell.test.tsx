@@ -14,4 +14,13 @@ describe('FixtureShell', () => {
     expect(screen.getByTestId('session-first-main-content')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
   });
+
+  it('marks exactly one session as selected', () => {
+    render(<FixtureShell />);
+    expect(
+      screen
+        .getAllByTestId('session-item-row')
+        .filter((el) => el.getAttribute('data-selected') === 'true'),
+    ).toHaveLength(1);
+  });
 });

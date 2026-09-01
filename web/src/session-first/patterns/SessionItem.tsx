@@ -37,11 +37,18 @@ export function SessionItem({
   return (
     <div
       data-testid="session-item-row"
+      data-selected={selected}
       className={cn(
-        'group flex items-start gap-1 rounded-lg px-[var(--sf-space-3)] py-[var(--sf-space-2)] transition-colors',
-        selected && 'bg-muted',
+        'group relative flex items-start gap-1 px-[var(--sf-space-3)] py-[var(--sf-space-2)] transition-colors hover:bg-muted/40',
       )}
     >
+      {selected ? (
+        <span
+          data-testid="session-item-selected-bar"
+          className="absolute bottom-1 left-0 top-1 rounded-r-sm w-0.5 bg-primary"
+          aria-hidden="true"
+        />
+      ) : null}
       <button
         type="button"
         data-testid={`session-item-${session.session_id}`}

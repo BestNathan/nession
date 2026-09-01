@@ -61,7 +61,7 @@ export function SessionFirstSidebar({
   return (
     <aside
       className={cn(
-        'flex h-full w-full shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground lg:w-72',
+        'flex h-full w-full shrink-0 flex-col border-r border-border/60 lg:w-72',
         className,
       )}
     >
