@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
+import { SessionDrawer } from '@/session-first/SessionDrawer';
 import { SessionFirstSpatialLayout } from '@/session-first/SessionFirstSpatialLayout';
 import { useAppSpatialIndex } from '@/session-first/app-spatial/useAppSpatialIndex';
-import { cn } from '@/lib/utils';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { DomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
@@ -61,10 +61,11 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
     onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
-    showDetail, onBackToSessions, onOpenEnv, onLegacy, terminal,
+    onBackToSessions, onOpenEnv, onLegacy, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
+  const [showDrawer, setShowDrawer] = useState(false);
   const { spatialIndex, onIndexChange, onSpatialSelect } = useAppSpatialIndex({
     selectedId,
     surface,
@@ -74,7 +75,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   });
 
   const sidebarProps = {
-    connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onKill, onOpenEnv, onLegacy,
@@ -98,17 +99,19 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <SessionFirstSidebar
-        className={cn(!showList && 'hidden lg:flex')}
-        {...sidebarProps}
-        onSelect={onSelect}
+    <div className="relative flex min-h-0 flex-1">
+      <SessionDrawer
+        open={!isWide ? showList : showDrawer}
+        onClose={() => setShowDrawer(false)}
+        sidebar={<SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />}
       />
-      <main className={cn('flex min-h-0 flex-1 flex-col', !showDetail && 'hidden lg:flex')}>
+      <main className="min-h-0 flex-1">
         <SessionFirstMain
           {...mainShared}
           surface={surface}
+          serverStatus={connectionStatus}
           onBackToSessions={onBackToSessions}
+          onOpenDrawer={() => setShowDrawer(true)}
           terminal={terminal}
         />
       </main>

@@ -8,7 +8,7 @@ import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { TerminalWell } from '@/session-first/TerminalWell';
 import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 import { WorkspaceShell } from '@/session-first/workspace/WorkspaceShell';
-import type { Agent, Session } from '@/types';
+import type { Agent, ConnectionStatus, Session } from '@/types';
 
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
@@ -21,6 +21,8 @@ export interface SessionFirstMainProps {
   onToolChange: (tool: WorkspaceToolId) => void;
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
+  onOpenDrawer?: () => void;
+  serverStatus?: ConnectionStatus;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -40,6 +42,8 @@ export function SessionFirstMain({
   onToolChange,
   onOpenAgent,
   onBackToSessions,
+  onOpenDrawer,
+  serverStatus,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -57,6 +61,8 @@ export function SessionFirstMain({
           onSurfaceChange={onSurfaceChange}
           onOpenAgent={onOpenAgent}
           onBackToSessions={onBackToSessions}
+          onOpenDrawer={onOpenDrawer}
+          serverStatus={serverStatus}
         />
       ) : null}
       <div
