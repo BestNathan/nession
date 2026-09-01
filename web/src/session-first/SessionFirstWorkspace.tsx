@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
 import { SessionFirstSpatialLayout } from '@/session-first/SessionFirstSpatialLayout';
@@ -45,6 +46,8 @@ export interface SessionFirstWorkspaceProps {
   onBackToSessions?: () => void;
   onOpenEnv: () => void;
   onLegacy: () => void;
+  /** Fixture/testing override for the terminal surface. Defaults to the real attached terminal. */
+  terminal?: ReactNode;
 }
 
 export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
@@ -54,7 +57,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
     onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
-    showDetail, onBackToSessions, onOpenEnv, onLegacy,
+    showDetail, onBackToSessions, onOpenEnv, onLegacy, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
@@ -102,6 +105,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
           {...mainShared}
           surface={surface}
           onBackToSessions={onBackToSessions}
+          terminal={terminal}
         />
       </main>
     </div>
