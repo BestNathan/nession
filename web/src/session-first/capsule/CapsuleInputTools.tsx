@@ -1,7 +1,7 @@
 import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsPopover';
 import { CapsuleHistoryPopover } from '@/session-first/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/session-first/capsule/CapsuleInputActionButtons';
-import { capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
+import { capsuleControlRowClass, capsuleIconButtonClass } from '@/session-first/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
 
 interface CapsuleInputActionsProps {
@@ -27,10 +27,7 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
     return null;
   }
   return (
-    <div
-      data-testid="capsule-input-leading"
-      className="flex h-8 shrink-0 items-center gap-1 max-lg:h-11"
-    >
+    <div data-testid="capsule-input-leading" className={capsuleControlRowClass}>
       {leading}
     </div>
   );
@@ -56,10 +53,7 @@ export function CapsuleInputTrailingActions({
   onCopy,
 }: Omit<CapsuleInputActionsProps, 'leading'>) {
   return (
-    <div
-      data-testid="capsule-input-actions"
-      className="flex h-8 shrink-0 items-center gap-1 max-lg:h-11"
-    >
+    <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
       <CapsuleHistoryPopover
         open={historyOpen}
         onOpenChange={(open) => {

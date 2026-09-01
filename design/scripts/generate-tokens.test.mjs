@@ -99,10 +99,17 @@ test('generateWebCss emits domain --agent-online and --agent-connecting', () => 
   assert.match(css, /--agent-connecting\b/);
 });
 
-test('generateWebCss does not emit App touch-target-min or control-app-*', () => {
+test('generateWebCss scopes App density vars under [data-experience=app] only', () => {
   const css = generateWebCss(fixture);
-  assert.doesNotMatch(css, /touch-target-min/);
   assert.doesNotMatch(css, /control-app-/);
+  const rootBlock = css.match(/:root\s*\{([^}]*)\}/s)?.[1] ?? '';
+  assert.doesNotMatch(rootBlock, /--touch-target-min:/);
+  assert.match(css, /\[data-experience="app"\][\s\S]*--touch-target-min:\s*44/);
+});
+
+test('generateWebCss emits [data-experience=app] control remap', () => {
+  const css = generateWebCss(fixture);
+  assert.match(css, /\[data-experience="app"\]\s*\{[^}]*--control-md:\s*44px/s);
 });
 
 test('generateLintMetadata marks green-500 as a primitive forbidden in components', () => {

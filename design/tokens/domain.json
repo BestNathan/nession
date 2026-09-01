@@ -22,7 +22,9 @@
     "background": { "ref": "semantic.background" },
     "foreground": { "ref": "semantic.foreground" },
     "selection": { "ref": "semantic.ring" },
-    "cursor": { "ref": "semantic.ring" }
+    "cursor": { "ref": "semantic.ring" },
+    "wellBackground": { "ref": "primitive.color.catppuccin.mocha-base" },
+    "capsuleSurface": { "ref": "primitive.color.white-alpha.96" }
   },
   "workspace": {
     "background": { "ref": "semantic.background" },

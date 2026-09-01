@@ -407,7 +407,7 @@ export function MobileTerminalLayout({
           />
           {terminalOnly ? (
             <TerminalCapsule
-              variant="mobile"
+              experience="app"
               mode={capsuleMode}
               onModeChange={setCapsuleMode}
               sendText={capsuleSendText}

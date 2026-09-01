@@ -8,7 +8,18 @@ const DESIGN_DIR = join(SCRIPT_DIR, '..');
 const TOKENS_DIR = join(DESIGN_DIR, 'tokens');
 const GENERATED_DIR = join(DESIGN_DIR, 'generated');
 
-const NON_COLOR_SEMANTIC = new Set(['radius']);
+const NON_COLOR_SEMANTIC = new Set(['radius', 'radius-capsule']);
+
+const THEME_SIZE_PREFIXES = [
+  'control-',
+  'row-',
+  'composer-',
+  'terminal-well-background',
+  'terminal-capsule-surface',
+  'radius-capsule',
+  'motion-composer',
+  'touch-target-min',
+];
 
 const LINT_PRIMITIVES = {
   'green-500': ['success', 'agent-online'],
@@ -135,6 +146,24 @@ function emitCustomProps(leaves, tokens, theme) {
   );
 }
 
+function shouldBridgeThemeSize(name) {
+  return THEME_SIZE_PREFIXES.some(
+    (prefix) => name === prefix || name.startsWith(prefix),
+  );
+}
+
+function emitAppExperienceRemap(tokens) {
+  const app = tokens.experience?.app ?? {};
+  const appLeaves = flattenLeaves(app);
+  if (appLeaves.length === 0) {
+    return [];
+  }
+  const lines = appLeaves.map(
+    ({ path, node }) => `  --${toKebab(path)}: ${cssValue(node, tokens, 'light')};`,
+  );
+  return ['', '[data-experience="app"] {', ...lines, '}', ''];
+}
+
 export function generateWebCss(tokens) {
   const light = tokens.semantic?.themes?.light ?? {};
   const dark = tokens.semantic?.themes?.dark ?? {};
@@ -166,6 +195,18 @@ export function generateWebCss(tokens) {
     const name = toKebab(path);
     themeBridges.push(`  --color-${name}: var(--${name});`);
   }
+  for (const { path } of webLeaves) {
+    const name = toKebab(path);
+    if (shouldBridgeThemeSize(name)) {
+      themeBridges.push(`  --spacing-${name}: var(--${name});`);
+    }
+  }
+  for (const { path } of lightSemantic) {
+    const name = toKebab(path);
+    if (shouldBridgeThemeSize(name)) {
+      themeBridges.push(`  --spacing-${name}: var(--${name});`);
+    }
+  }
 
   return [
     '/* generated — do not edit */',
@@ -181,7 +222,7 @@ export function generateWebCss(tokens) {
     '@theme inline {',
     ...themeBridges,
     '}',
-    '',
+    ...emitAppExperienceRemap(tokens),
   ].join('\n');
 }
 
