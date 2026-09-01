@@ -24,6 +24,7 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       'nession/no-primitive-tokens': 'error',
       'nession/no-cross-experience-token': 'error',
+      'nession/no-capsule-magic-metrics': 'error',
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
@@ -87,6 +88,7 @@ export default tseslint.config(
     files: ['**/__tests__/**', '**/*.test.*', '**/*.spec.*'],
     rules: {
       'max-lines-per-function': 'off',
+      'nession/no-capsule-magic-metrics': 'off',
     },
   },
 

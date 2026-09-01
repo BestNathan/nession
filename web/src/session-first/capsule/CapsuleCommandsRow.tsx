@@ -6,6 +6,11 @@ import {
   CapsuleCommandsPopover,
 } from '@/session-first/capsule/CapsuleCommandsPopover';
 import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
+import {
+  capsuleComposerGridGapClass,
+  capsuleQuickKeyButtonClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { cn } from '@/lib/utils';
 
 interface CapsuleCommandsRowProps {
   sendText: (text: string) => void;
@@ -33,7 +38,7 @@ export function CapsuleCommandsRow({
       {isChaining ? (
         <CapsuleChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />
       ) : null}
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      <div className={cn('flex min-w-0 flex-1 items-center overflow-x-auto', capsuleComposerGridGapClass)}>
         {QUICK_MOBILE_KEYS.map((keyDef) => (
           <Button
             key={keyDef.label}
@@ -42,7 +47,7 @@ export function CapsuleCommandsRow({
             size="sm"
             disabled={disabled}
             data-testid={`capsule-quick-key-${keyDef.label}`}
-            className="shrink-0 font-mono text-xs min-h-[length:var(--control-md)]"
+            className={capsuleQuickKeyButtonClass}
             onClick={() => handlePhysKey(keyDef.seq)}
             onContextMenu={(event) => event.preventDefault()}
           >

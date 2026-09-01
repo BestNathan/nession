@@ -7,6 +7,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import {
+  capsuleDropdownItemClass,
+  capsuleDropdownMinWidthClass,
+  capsulePhysKeyButtonClass,
+  capsulePhysKeyGridGapClass,
+  capsulePhysKeyIconClass,
+  capsulePhysKeyRowClass,
+} from '@/session-first/capsule/capsuleStyles';
 import {
   ARROW_KEYS,
   CHAIN_LONG_PRESS_MS,
@@ -40,10 +49,10 @@ export function PhysKeyRow({
     const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const iconEl =
-      keyDef.label === '←' ? <ArrowLeft className="size-3.5" /> :
-      keyDef.label === '↑' ? <ArrowUp className="size-3.5" /> :
-      keyDef.label === '↓' ? <ArrowDown className="size-3.5" /> :
-      keyDef.label === '→' ? <ArrowRight className="size-3.5" /> :
+      keyDef.label === '←' ? <ArrowLeft className={capsulePhysKeyIconClass} /> :
+      keyDef.label === '↑' ? <ArrowUp className={capsulePhysKeyIconClass} /> :
+      keyDef.label === '↓' ? <ArrowDown className={capsulePhysKeyIconClass} /> :
+      keyDef.label === '→' ? <ArrowRight className={capsulePhysKeyIconClass} /> :
       null;
 
     const handlePointerDown = () => {
@@ -82,7 +91,7 @@ export function PhysKeyRow({
       <Button
         variant="secondary"
         size="sm"
-        className="h-9 w-full text-xs font-mono"
+        className={capsulePhysKeyButtonClass}
         disabled={disabled}
         data-testid={`phys-key-${keyDef.label}`}
         onPointerDown={handlePointerDown}
@@ -97,8 +106,8 @@ export function PhysKeyRow({
   };
 
   return (
-    <div data-testid="phys-key-row" className="flex justify-between gap-2 border-b border-border/60 px-2 py-1.5">
-      <div className="grid flex-1 grid-cols-5 gap-1">
+    <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
+      <div className={cn('grid flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}>
         {visibleKeys.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
@@ -109,20 +118,20 @@ export function PhysKeyRow({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="h-9 w-full text-xs"
+                  className={capsulePhysKeyButtonClass}
                   disabled={disabled}
                   aria-label="More keys"
                 >
-                  <MoreHorizontal className="size-3.5" />
+                  <MoreHorizontal className={capsulePhysKeyIconClass} />
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" className="min-w-[100px]">
+            <DropdownMenuContent align="end" className={capsuleDropdownMinWidthClass}>
               {dropdownKeys.map((keyDef) => (
                 <DropdownMenuItem
                   key={keyDef.label}
                   onClick={() => onKey(keyDef.seq)}
-                  className="cursor-pointer font-mono text-xs"
+                  className={capsuleDropdownItemClass}
                 >
                   {keyDef.label}
                 </DropdownMenuItem>
@@ -132,7 +141,7 @@ export function PhysKeyRow({
         ) : null}
       </div>
 
-      <div className="grid shrink-0 grid-cols-3 grid-rows-2 gap-1">
+      <div className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}>
         <div />
         <KeyButton keyDef={ARROW_KEYS[0]} />
         <div />

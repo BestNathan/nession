@@ -11,6 +11,16 @@ import {
 } from '@/components/ui/popover';
 import { useCommandHistory } from '@/hooks/useCommandHistory';
 import { cn } from '@/lib/utils';
+import {
+  capsuleCaptionTextClass,
+  capsuleEmptyStatePadClass,
+  capsuleHistoryItemClass,
+  capsulePopoverHeaderClass,
+  capsulePopoverPanelClass,
+  capsulePopoverScrollClass,
+  capsulePopoverSearchClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { readPopoverSideOffset } from '@/session-first/capsule/measure/readPopoverSideOffset';
 
 interface CapsuleHistoryPopoverProps {
   open: boolean;
@@ -50,7 +60,6 @@ export function CapsuleHistoryPopover({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      {/* nativeButton=false: render target is Base UI <Button>, not a raw <button> */}
       <PopoverTrigger
         nativeButton={false}
         disabled={disabled}
@@ -73,30 +82,31 @@ export function CapsuleHistoryPopover({
       <PopoverContent
         align="end"
         side="top"
-        sideOffset={8}
-        // Above terminal well chrome (z-10) and FLIP stacking contexts
-        className="z-[100] max-h-[45vh] w-80 overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md"
+        sideOffset={readPopoverSideOffset()}
+        className={capsulePopoverPanelClass}
       >
-        <PopoverHeader className="gap-2 border-b border-border/60 p-2">
+        <PopoverHeader className={capsulePopoverHeaderClass}>
           <PopoverTitle>History</PopoverTitle>
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search history…"
-            className="h-8 text-xs"
+            className={capsulePopoverSearchClass}
             data-testid="capsule-history-search"
           />
         </PopoverHeader>
-        <div className="max-h-[38vh] overflow-y-auto p-1">
+        <div className={capsulePopoverScrollClass}>
           {entries.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-muted-foreground">No matching commands</p>
+            <p className={cn(capsuleEmptyStatePadClass, 'text-muted-foreground')}>
+              No matching commands
+            </p>
           ) : (
             entries.map((entry) => (
               <button
                 key={entry.id}
                 type="button"
                 data-testid="capsule-history-item"
-                className="flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-xs hover:bg-accent/40"
+                className={capsuleHistoryItemClass}
                 onClick={() => {
                   onSelect(entry.command);
                   onOpenChange(false);
@@ -104,7 +114,7 @@ export function CapsuleHistoryPopover({
                 }}
               >
                 <span className="truncate font-mono">{entry.command}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
+                <span className={cn(capsuleCaptionTextClass, 'shrink-0 text-muted-foreground')}>
                   {relativeTime(entry.timestamp)}
                 </span>
               </button>

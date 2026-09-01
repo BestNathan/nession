@@ -1,5 +1,9 @@
 import { Button } from '@/components/ui/button';
 import { formatSeq } from '@/session-first/capsule/physKeys';
+import {
+  capsuleChainBarClass,
+  capsuleMiniButtonClass,
+} from '@/session-first/capsule/capsuleStyles';
 
 interface CapsuleChainBarProps {
   buffer: string[];
@@ -9,17 +13,14 @@ interface CapsuleChainBarProps {
 
 export function CapsuleChainBar({ buffer, onCancel, onSend }: CapsuleChainBarProps) {
   return (
-    <div
-      data-testid="capsule-chain-bar"
-      className="flex items-center gap-2 border-b border-border/60 bg-primary/10 px-2 py-1 text-xs"
-    >
+    <div data-testid="capsule-chain-bar" className={capsuleChainBarClass}>
       <span className="text-muted-foreground">Chain:</span>
       <code className="font-mono text-primary">{buffer.map(formatSeq).join(' ')}</code>
       <div className="flex-1" />
-      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={onCancel}>
+      <Button variant="ghost" size="sm" className={capsuleMiniButtonClass} onClick={onCancel}>
         Cancel
       </Button>
-      <Button variant="default" size="sm" className="h-6 text-[10px]" onClick={onSend}>
+      <Button variant="default" size="sm" className={capsuleMiniButtonClass} onClick={onSend}>
         Send
       </Button>
     </div>

@@ -43,6 +43,12 @@ tokens-gen:
 tokens-check:
     node design/scripts/generate-tokens.mjs --check
 
+check-design-tokens:
+    ./scripts/check-design-tokens.sh
+
+check-design-tokens-selftest:
+    ./scripts/check-design-tokens-selftest.sh
+
 # ── Web ─────────────────────────────────────────────────────────────────────
 
 # Lint + type-check (fast, pre-commit)
