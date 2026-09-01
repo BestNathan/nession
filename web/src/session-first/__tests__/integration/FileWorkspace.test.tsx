@@ -64,6 +64,20 @@ describe('FileWorkspace (web layout)', () => {
     await user.click(screen.getByLabelText('Close file'));
     expect(screen.getByText('Select a file')).toBeInTheDocument();
   });
+
+  it('clears the selection when fileOps detaches then reattaches', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    await user.click(await screen.findByText('f.txt'));
+    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
+
+    rerender(<FileWorkspace ctx={makeCtx(null)} />);
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+
+    rerender(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
+    expect(screen.getByText('Select a file')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+  });
 });
 
 describe('FilesAppLayout', () => {
@@ -75,6 +89,19 @@ describe('FilesAppLayout', () => {
     expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
     expect(screen.getByText('f.txt')).toBeInTheDocument();
     await user.click(screen.getByLabelText('Close file'));
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+  });
+
+  it('clears the selection when fileOps detaches then reattaches', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
+    await user.click(await screen.findByText('f.txt'));
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={makeCtx(null)} />);
+    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+
+    rerender(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
   });
 });
