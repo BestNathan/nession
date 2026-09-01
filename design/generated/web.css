@@ -81,7 +81,9 @@
   --icon-sm: 14px;
   --icon-md: 16px;
   --panel-padding: 12px;
-  --composer-line-height: 36px;
+  --composer-font-size: 0.875rem;
+  --composer-text-line-height: 1.25rem;
+  --composer-line-height: 1.25rem;
   --composer-max-lines: 5;
   --composer-shell-max-width: 42rem;
   --composer-shell-position: center;
@@ -238,6 +240,8 @@
   --spacing-row-sm: var(--row-sm);
   --spacing-row-md: var(--row-md);
   --spacing-row-lg: var(--row-lg);
+  --spacing-composer-font-size: var(--composer-font-size);
+  --spacing-composer-text-line-height: var(--composer-text-line-height);
   --spacing-composer-line-height: var(--composer-line-height);
   --spacing-composer-max-lines: var(--composer-max-lines);
   --spacing-composer-shell-max-width: var(--composer-shell-max-width);
@@ -257,7 +261,9 @@
   --icon-md: 20px;
   --panel-padding: 16px;
   --touch-target-min: 44;
-  --composer-line-height: 48px;
+  --composer-font-size: 1rem;
+  --composer-text-line-height: 1.375rem;
+  --composer-line-height: 1.375rem;
   --composer-max-lines: 5;
   --composer-shell-inset: 0.75rem;
   --composer-shell-safe-area: env(safe-area-inset-bottom, 0px);
