@@ -44,6 +44,10 @@ vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 
+vi.mock('@/session-first/workspace/tools/filesApp', () => ({
+  FilesAppLayout: () => <div data-testid="file-workspace" />,
+}));
+
 function baseProps(
   overrides: Partial<SessionFirstWorkspaceProps> = {},
 ): SessionFirstWorkspaceProps {

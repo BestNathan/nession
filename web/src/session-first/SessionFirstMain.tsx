@@ -143,7 +143,7 @@ export function SessionFirstMain({
                     agent: selectedAgent,
                     domain,
                     fileOps,
-                    experience: 'web',
+                    experience,
                     onToolChange,
                   }}
                   activeTool={tool}
