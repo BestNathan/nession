@@ -22,7 +22,7 @@ export function AppToolHeader({ toolLabel, onBack }: AppToolHeaderProps) {
         type="button"
         variant="ghost"
         size="icon"
-        className="size-11 shrink-0"
+        className="size-11 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
         aria-label="Back to terminal"
         data-testid="app-tool-back"
         onClick={onBack}

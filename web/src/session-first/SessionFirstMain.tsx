@@ -24,7 +24,7 @@ interface WorkspaceTabPanelProps {
   surface: Surface;
   tool: WorkspaceToolId;
   fileOps: FileOps | null;
-  experience?: Experience;
+  experience: Experience;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
 }
@@ -36,7 +36,7 @@ function WorkspaceTabPanel({
   surface,
   tool,
   fileOps,
-  experience = 'web',
+  experience,
   onSurfaceChange,
   onToolChange,
 }: WorkspaceTabPanelProps) {
@@ -49,7 +49,7 @@ function WorkspaceTabPanel({
     >
       {experience === 'app' ? (
         <AppToolHeader
-          toolLabel={WORKSPACE_TOOLS.find((t) => t.id === tool)?.label ?? ''}
+          toolLabel={WORKSPACE_TOOLS.find((t) => t.id === tool)!.label}
           onBack={() => onSurfaceChange('terminal')}
         />
       ) : null}
