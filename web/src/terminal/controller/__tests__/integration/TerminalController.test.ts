@@ -206,7 +206,7 @@ describe('TerminalController', () => {
 
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     controller.write('abc');
-    expect(writeSpy).toHaveBeenCalledWith('abc');
+    expect(writeSpy).toHaveBeenCalledWith('abc', expect.any(Function));
   });
 
   it('paste delegates to xterm.paste', () => {
@@ -250,7 +250,7 @@ describe('TerminalController', () => {
     // Output from the transport lands in the xterm display.
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     transport.onOutput!(new Uint8Array([104, 105]));
-    expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]));
+    expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]), expect.any(Function));
   });
 
   it('writes transport output to the terminal in arrival order', () => {
@@ -265,8 +265,8 @@ describe('TerminalController', () => {
     transport.onOutput!(new Uint8Array([2]));
 
     expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]));
+    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
     writeSpy.mockRestore();
     controller.detach();
   });

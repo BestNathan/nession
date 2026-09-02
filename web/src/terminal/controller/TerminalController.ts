@@ -155,10 +155,11 @@ export class TerminalController {
     // Transport → xterm: display output as it arrives.
     transport.onOutput = (data: Uint8Array) => {
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
-      terminal.write(data);
-      if (follow) {
-        this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
-      }
+      terminal.write(data, () => {
+        if (follow) {
+          this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+        }
+      });
     };
     // Remote (tmux → agent) resize → local xterm grid.
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
@@ -245,10 +246,11 @@ export class TerminalController {
   /** Write data to the xterm display (e.g. from an external source). */
   write(data: string | Uint8Array): void {
     const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
-    this._terminal?.write(data);
-    if (follow) {
-      this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
-    }
+    this._terminal?.write(data, () => {
+      if (follow) {
+        this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+      }
+    });
   }
 
   /**

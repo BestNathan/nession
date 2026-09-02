@@ -88,14 +88,15 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
   });
 
-  it('centers a full-width dock capped by shell max width on web', () => {
+  it('stretches a full-width dock between shell margins on web', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'web');
     expect(root.className).toMatch(/composer-shell-margin-x/);
-    expect(root.className).toMatch(/justify-center/);
-    expect(screen.getByTestId('capsule-shell').className).toMatch(/w-full/);
-    expect(screen.getByTestId('capsule-shell').className).toMatch(/composer-shell-max-width/);
+    expect(root.className).toMatch(/items-stretch/);
+    const shell = screen.getByTestId('capsule-shell');
+    expect(shell.className).toMatch(/w-full/);
+    expect(shell.className).not.toMatch(/composer-shell-max-width/);
   });
 
   it('uses inset positioning on app', () => {
