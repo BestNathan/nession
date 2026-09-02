@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionHeader } from '@/session-first/patterns/SessionHeader';
@@ -20,6 +20,10 @@ const base = {
 };
 
 describe('SessionHeader app branch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders a single row: sessions, name, state fragment, workspace', () => {
     render(
       <SessionHeader
@@ -34,12 +38,13 @@ describe('SessionHeader app branch', () => {
     expect(screen.getByTestId('app-header-workspace')).toBeInTheDocument();
     expect(screen.getByText('fix-terminal-reconnect')).toBeInTheDocument();
     // state fragment survives compression (no status collapsing)
-    expect(screen.getByTestId('connection-status')).toBeInTheDocument();
+    expect(screen.getByTestId('connection-status')).toHaveTextContent(/online/);
   });
 
-  it('does not render the Terminal|Workspace switcher in app', () => {
+  it('omits the sessions and workspace buttons when callbacks are absent', () => {
     render(<SessionHeader {...base} experience="app" />);
-    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-header-sessions')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-header-workspace')).not.toBeInTheDocument();
   });
 
   it('fires onOpenWorkspace from the workspace button', async () => {
