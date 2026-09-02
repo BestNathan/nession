@@ -33,11 +33,14 @@ export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
 /** Single-row web pill ends */
 export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-radius)]';
 
+export const capsuleShellWebInnerClass =
+  'pointer-events-auto w-full overflow-hidden';
+
 export const capsuleShellInnerSizeClass =
   'pointer-events-auto w-full max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
 
 export const capsuleShellWebOuterClass =
-  'inset-x-[length:var(--composer-shell-margin-x)] flex justify-center pointer-events-none';
+  'inset-x-[length:var(--composer-shell-margin-x)] flex w-full flex-col items-stretch pointer-events-none';
 
 export const capsuleShellAppOuterClass =
   'inset-x-[length:var(--composer-shell-inset)] flex justify-center pointer-events-none';

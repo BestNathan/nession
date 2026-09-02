@@ -1,4 +1,5 @@
 import { useLayoutEffect, type RefObject } from 'react';
+import { TERMINAL_CAPSULE_OCCLUSION_EVENT } from '@/terminal/capsule/occlusionScroll';
 
 /**
  * Publishes --terminal-capsule-occlusion on the nearest [data-terminal-capsule-host].
@@ -25,6 +26,7 @@ export function useCapsuleDockClearance(dockRef: RefObject<HTMLElement | null>):
       const gap = Number.parseFloat(gapRaw) || 0;
       const clearance = Math.max(0, hostRect.bottom - dockRect.top + gap);
       host.style.setProperty('--terminal-capsule-occlusion', `${clearance}px`);
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_OCCLUSION_EVENT));
     };
 
     const observer = new ResizeObserver(update);

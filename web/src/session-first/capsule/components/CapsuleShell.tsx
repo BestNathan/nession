@@ -6,9 +6,9 @@ import {
   capsuleShellContentGapClass,
   capsuleShellDockBottomClass,
   capsuleShellInnerPadClass,
-  capsuleShellInnerSizeClass,
   capsuleShellPillRadiusClass,
   capsuleShellSurfaceClass,
+  capsuleShellWebInnerClass,
   capsuleShellWebOuterClass,
 } from '@/session-first/capsule/capsuleStyles';
 import type {
@@ -66,7 +66,7 @@ export function CapsuleShell({
         data-testid="capsule-shell"
         className={cn(
           'flex min-h-[length:var(--control-md)]',
-          isApp ? 'w-full' : capsuleShellInnerSizeClass,
+          isApp ? 'w-full' : capsuleShellWebInnerClass,
           capsuleShellSurfaceClass,
           usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
