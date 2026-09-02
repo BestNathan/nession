@@ -25,6 +25,7 @@ export default tseslint.config(
       'nession/no-primitive-tokens': 'error',
       'nession/no-cross-experience-token': 'error',
       'nession/no-capsule-magic-metrics': 'error',
+      'nession/no-sf-overlay-vars': 'error',
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
@@ -89,6 +90,7 @@ export default tseslint.config(
     rules: {
       'max-lines-per-function': 'off',
       'nession/no-capsule-magic-metrics': 'off',
+      'nession/no-sf-overlay-vars': 'off',
     },
   },
 

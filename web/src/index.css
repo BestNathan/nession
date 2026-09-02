@@ -149,11 +149,7 @@ html {
   overflow-wrap: anywhere;
 }
 
-/* Session-first ChatGPT shell (#492 V1) — Catppuccin Mocha base for the well */
-:root {
-  --sf-terminal-well: #1e1e2e;
-}
-
+/* Session-first ChatGPT shell (#492 V1) */
 .session-first-shell {
   /* Lock chrome to light semantic tokens even if a parent adds .dark later */
   color-scheme: light;
@@ -171,27 +167,11 @@ html {
   --sidebar-border: oklch(0.922 0 0);
   background-color: var(--background);
   color: var(--foreground);
-
-  --sf-space-1: 0.25rem;
-  --sf-space-2: 0.5rem;
-  --sf-space-3: 0.75rem;
-  --sf-space-4: 1rem;
-  --sf-space-5: 1.5rem;
-
-  --sf-text-title: 1rem;
-  --sf-text-body: 0.875rem;
-  --sf-text-muted: 0.75rem;
-  --sf-leading: 1.5;
-
-  --sf-focus-ring: 2px;
-  --sf-focus-offset: 2px;
-  --sf-motion: 180ms;
-  --sf-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 .session-first-shell :focus-visible {
-  outline: var(--sf-focus-ring) solid var(--ring);
-  outline-offset: var(--sf-focus-offset);
+  outline: var(--focus-ring-width) solid var(--ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */
@@ -209,6 +189,6 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .session-first-shell {
-    --sf-motion: 0ms;
+    --motion-shell-duration: 0ms;
   }
 }

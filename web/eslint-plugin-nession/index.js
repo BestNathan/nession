@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import noPrimitiveTokens from './rules/no-primitive-tokens.js';
 import noCrossExperienceToken from './rules/no-cross-experience-token.js';
 import noCapsuleMagicMetrics from './rules/no-capsule-magic-metrics.js';
+import noSfOverlayVars from './rules/no-sf-overlay-vars.js';
 
 const metadataPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -20,6 +21,7 @@ const plugin = {
     'no-primitive-tokens': noPrimitiveTokens(lintMetadata),
     'no-cross-experience-token': noCrossExperienceToken(lintMetadata),
     'no-capsule-magic-metrics': noCapsuleMagicMetrics(),
+    'no-sf-overlay-vars': noSfOverlayVars(),
   },
 };
 

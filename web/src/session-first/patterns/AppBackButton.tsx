@@ -20,7 +20,7 @@ export function AppBackButton({ label, testid, onClick }: AppBackButtonProps) {
       type="button"
       variant="ghost"
       size="icon"
-      className="size-11 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
+      className="size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]"
       aria-label={label}
       data-testid={testid}
       onClick={onClick}

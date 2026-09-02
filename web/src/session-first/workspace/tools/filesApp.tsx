@@ -66,7 +66,7 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
       <div className="flex h-full min-h-0 flex-col">
         <div
           data-testid="files-app-nav"
-          className="flex shrink-0 items-center gap-1 px-[var(--sf-space-2)] pt-[var(--sf-space-1)]"
+          className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[var(--shell-space-1)]"
         >
           <AppBackButton label="Back to files" testid="files-app-back" onClick={handleBackClick} />
           <span className="min-w-0 truncate font-mono text-sm font-semibold">{selected.filename}</span>

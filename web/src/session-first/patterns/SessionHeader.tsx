@@ -75,7 +75,7 @@ export function SessionHeader({
     return (
       <header
         data-testid="session-header-line"
-        className="flex shrink-0 items-center gap-2 px-[var(--sf-space-3)] pt-[max(var(--sf-space-2),env(safe-area-inset-top))]"
+        className="flex shrink-0 items-center gap-2 px-[var(--shell-space-3)] pt-[max(var(--shell-space-2),env(safe-area-inset-top))]"
       >
         {onOpenDrawer
           ? renderMenuButton({
@@ -83,7 +83,7 @@ export function SessionHeader({
               testid: 'app-header-sessions',
               onClick: onOpenDrawer,
               className:
-                'size-11 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
+                'size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
             })
           : null}
         {title}
@@ -95,7 +95,7 @@ export function SessionHeader({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-11 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
+            className="size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]"
             aria-label="Workspace"
             data-testid="app-header-workspace"
             onClick={() => onOpenWorkspace()}
@@ -109,7 +109,7 @@ export function SessionHeader({
   return (
     <header
       data-testid="session-header-line"
-      className="flex shrink-0 flex-col gap-1 px-[var(--sf-space-4)] py-[var(--sf-space-2)] max-lg:gap-1.5 max-lg:px-[var(--sf-space-3)]"
+      className="flex shrink-0 flex-col gap-1 px-[var(--shell-space-4)] py-[var(--shell-space-2)] max-lg:gap-1.5 max-lg:px-[var(--shell-space-3)]"
     >
       <div className="flex min-w-0 items-center gap-2">
         {onOpenDrawer
@@ -118,7 +118,7 @@ export function SessionHeader({
               testid: 'session-first-open-drawer',
               onClick: onOpenDrawer,
               className:
-                'size-9 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
+                'size-9 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
             })
           : null}
         {onBackToSessions ? (
@@ -126,7 +126,7 @@ export function SessionHeader({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)] lg:hidden"
+            className="size-9 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] lg:hidden"
             aria-label="Back to sessions"
             data-testid="session-first-back-to-list"
             onClick={() => onBackToSessions()}
