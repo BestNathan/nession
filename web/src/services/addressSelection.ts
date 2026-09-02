@@ -22,14 +22,28 @@ export function measureLatency(url: string, timeoutMs = 3_000): Promise<AddressL
       settled = true;
       clearTimeout(timer);
       if (ws) {
-        // Detach handlers before closing so the close doesn't re-enter finish.
-        ws.onopen = null;
-        ws.onerror = null;
-        ws.onclose = null;
-        try {
-          ws.close();
-        } catch {
-          /* already closing */
+        const socket = ws;
+        ws = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.onopen = null;
+          try {
+            socket.close();
+          } catch {
+            /* already closing */
+          }
+        } else if (socket.readyState === WebSocket.CONNECTING) {
+          // Closing while CONNECTING makes Chrome log "closed before established".
+          // Defer close until the handshake completes (or fails via onerror).
+          socket.onopen = () => {
+            socket.onopen = null;
+            try {
+              socket.close();
+            } catch {
+              /* already closing */
+            }
+          };
         }
       }
       resolve({ url, latencyMs });

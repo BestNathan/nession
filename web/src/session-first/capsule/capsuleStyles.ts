@@ -40,7 +40,7 @@ export const capsuleShellInnerSizeClass =
   'pointer-events-auto w-full max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
 
 export const capsuleShellWebOuterClass =
-  'inset-x-[length:var(--composer-shell-margin-x)] flex w-full flex-col items-stretch pointer-events-none';
+  'inset-x-[length:var(--composer-shell-margin-x)] flex flex-col items-stretch pointer-events-none';
 
 export const capsuleShellAppOuterClass =
   'inset-x-[length:var(--composer-shell-inset)] flex justify-center pointer-events-none';

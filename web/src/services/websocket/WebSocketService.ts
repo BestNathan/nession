@@ -89,6 +89,14 @@ export class WebSocketService {
     return this.core.getConnectionStatus();
   }
 
+  getUrl(): string {
+    return this.core.getUrl();
+  }
+
+  getAuthToken(): string {
+    return this.core.getAuthToken();
+  }
+
   onConnectionChange(callback: ConnectionChangeCallback): () => void {
     return this.core.onConnectionChange(callback);
   }

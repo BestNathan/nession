@@ -8,9 +8,9 @@ import {
   P2P_MAX_RECONNECT,
   ATTACH_TIMEOUT_MS,
 } from '@/terminal/hooks/useTerminalStateMachine';
-import { sessionIdAtom, sessionNameAtom, attachInfoAtom, forcedRelayAtom } from '@/atoms/session';
+import { sessionIdAtom, sessionNameAtom, attachInfoAtom, forcedRelayAtom, manualOverrideAtom } from '@/atoms/session';
 import { p2pConnectionAtom } from '@/atoms/connection';
-import { terminalSessionStateAtom, lastResizeAtom } from '@/terminal/state';
+import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
 import type { WebSocketService } from '@/services/websocket';
 
@@ -76,6 +76,7 @@ function makeStore(opts: {
   // The real attach flow sets the state machine to 'connecting' before the
   // terminal mounts; match that entry condition.
   store.set(terminalSessionStateAtom, 'connecting');
+  store.set(terminalTransportReadyAtom, true);
   return store;
 }
 
@@ -213,7 +214,7 @@ describe('useTerminalStateMachine', () => {
     expect(result.current.reconnectCount).toBe(1);
   });
 
-  it('p2p: exhausting the reconnect budget lands on failed', () => {
+  it('p2p: exhausting the reconnect budget forces relay fallback in auto mode', () => {
     const { conn, setConnectionState } = makeP2PConnection();
     const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
     store.set(p2pConnectionAtom, conn);
@@ -221,9 +222,6 @@ describe('useTerminalStateMachine', () => {
     const { result, rerender } = renderWithStore(store, () => useTerminalStateMachine());
     expect(result.current.terminalState).toBe('connected');
 
-    // Each cycle: transport drops (reconnecting → count++) then reconnects
-    // (bridge promotes back to connected → fresh client.attach). After
-    // P2P_MAX_RECONNECT entries the next reconnecting entry declares failed.
     for (let i = 1; i <= P2P_MAX_RECONNECT + 1; i++) {
       act(() => { setConnectionState('reconnecting'); rerender(); });
       if (i <= P2P_MAX_RECONNECT) {
@@ -231,7 +229,41 @@ describe('useTerminalStateMachine', () => {
       }
     }
 
+    expect(store.get(forcedRelayAtom)).toBe(true);
+    expect(result.current.terminalState).toBe('connecting');
+  });
+
+  it('p2p: exhausting the reconnect budget lands on failed with manual override', () => {
+    const { conn, setConnectionState } = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+    store.set(p2pConnectionAtom, conn);
+    store.set(manualOverrideAtom, 'ws://manual/ws');
+
+    const { result, rerender } = renderWithStore(store, () => useTerminalStateMachine());
+    expect(result.current.terminalState).toBe('connected');
+
+    for (let i = 1; i <= P2P_MAX_RECONNECT + 1; i++) {
+      act(() => { setConnectionState('reconnecting'); rerender(); });
+      if (i <= P2P_MAX_RECONNECT) {
+        act(() => { setConnectionState('connected'); rerender(); });
+      }
+    }
+
+    expect(store.get(forcedRelayAtom)).toBe(false);
     expect(result.current.terminalState).toBe('failed');
-    expect(result.current.reconnectCount).toBe(P2P_MAX_RECONNECT + 1);
+  });
+
+  it('relay: reconnecting after P2P transport fallback begins relay attach', () => {
+    const serverConnection = makeServerConnection(true);
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+    store.set(terminalSessionStateAtom, 'reconnecting');
+    store.set(forcedRelayAtom, true);
+
+    const { result } = renderWithStore(store, () =>
+      useTerminalStateMachine({ serverConnection }),
+    );
+
+    expect(result.current.terminalState).toBe('attached');
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo, type MutableRefObject } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { p2pStateAtom, p2pConnectionAtom, p2pEpochAtom } from '../atoms/connection';
 
@@ -171,6 +171,85 @@ function useTransportReset(
   prevConnectionTokenRef.current = connectionToken;
 }
 
+/** Manage the agent WebSocket lifecycle (connect, reconnect, waiters). */
+function useAgentWebSocket(opts: {
+  agentUrl: string | undefined;
+  connectionToken: string | undefined;
+  connectionState: ConnectionState;
+  setConnectionState: (s: ConnectionState) => void;
+  setP2pState: (s: ConnectionState) => void;
+  setReconnectAttempt: (n: number) => void;
+  generationRef: MutableRefObject<number>;
+  reconnectAttemptRef: MutableRefObject<number>;
+  handlersRef: MutableRefObject<Set<MessageHandler>>;
+  maxReconnectAttemptsRef: MutableRefObject<number>;
+  reconnectBaseDelayRef: MutableRefObject<number>;
+  onErrorRef: MutableRefObject<((error: Error) => void) | undefined>;
+  reconnectTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  wsRef: MutableRefObject<WebSocket | null>;
+  waitersRef: MutableRefObject<Set<{ resolve: () => void; reject: (e: Error) => void }>>;
+}): void {
+  const {
+    agentUrl, connectionToken, connectionState,
+    setConnectionState, setP2pState, setReconnectAttempt,
+    generationRef, reconnectAttemptRef, handlersRef,
+    maxReconnectAttemptsRef, reconnectBaseDelayRef, onErrorRef,
+    reconnectTimerRef, wsRef, waitersRef,
+  } = opts;
+
+  useEffect(() => {
+    if (!agentUrl) {return;}
+
+    generationRef.current += 1;
+    const myGeneration = generationRef.current;
+
+    const ctx: ConnectWsContext = {
+      agentUrl, connectionToken,
+      generation: myGeneration,
+      generationRef,
+      reconnectAttemptRef,
+      setConnectionState, setP2pState, setReconnectAttempt, handlersRef,
+      maxReconnectAttempts: maxReconnectAttemptsRef.current,
+      reconnectBaseDelay: reconnectBaseDelayRef.current,
+      onError: onErrorRef.current,
+      reconnectTimerRef, wsRef,
+      connectSelf: () => connectWs(ctx),
+    };
+    connectWs(ctx);
+
+    return () => {
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
+    };
+  }, [
+    agentUrl,
+    connectionToken,
+    setP2pState,
+    setConnectionState,
+    setReconnectAttempt,
+    generationRef,
+    reconnectAttemptRef,
+    handlersRef,
+    maxReconnectAttemptsRef,
+    reconnectBaseDelayRef,
+    onErrorRef,
+    reconnectTimerRef,
+    wsRef,
+  ]);
+
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      const waiters = waitersRef.current;
+      waitersRef.current = new Set();
+      waiters.forEach((w) => w.resolve());
+    } else if (connectionState === 'disconnected') {
+      const waiters = waitersRef.current;
+      waitersRef.current = new Set();
+      waiters.forEach((w) => w.reject(new Error('Connection lost')));
+    }
+  }, [connectionState, waitersRef]);
+}
+
 /**
  * Manages a P2P WebSocket connection to an agent for both terminal I/O
  * and file operations. Returns null if options is null (relay mode).
@@ -212,6 +291,16 @@ export function useP2PConnection(
   const maxReconnectAttempts = options?.maxReconnectAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const reconnectBaseDelay = options?.reconnectBaseDelay ?? DEFAULT_BASE_DELAY;
 
+  // Retry policy is read from refs so a change (e.g. last-candidate backoff bump)
+  // does not re-run the connect effect, close the socket, and wipe message
+  // handlers that ConnectionManager registered on the live connection object.
+  const maxReconnectAttemptsRef = useRef(maxReconnectAttempts);
+  maxReconnectAttemptsRef.current = maxReconnectAttempts;
+  const reconnectBaseDelayRef = useRef(reconnectBaseDelay);
+  reconnectBaseDelayRef.current = reconnectBaseDelay;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   // The useState initializer above only runs on the hook's FIRST render. In the
   // real flow this hook is first rendered with null options (the address plan
   // resolves asynchronously in useAddressPlan, so activeUrl is null on render
@@ -246,59 +335,13 @@ export function useP2PConnection(
   // connectionState effect below (no busy-polling — works under fake timers).
   const waitersRef = useRef<Set<{ resolve: () => void; reject: (e: Error) => void }>>(new Set());
 
-  useEffect(() => {
-    if (!agentUrl) {return;}
-
-    // Bump the generation BEFORE connecting: any WebSocket event from an
-    // earlier generation will now see generationRef.current !== ctx.generation
-    // and self-discard — even if it fires before React runs the old effect's
-    // cleanup (the failure mode the old activeRef boolean couldn't prevent).
-    generationRef.current += 1;
-    const myGeneration = generationRef.current;
-
-    const ctx: ConnectWsContext = {
-      agentUrl, connectionToken,
-      generation: myGeneration,
-      generationRef,
-      reconnectAttemptRef,
-      setConnectionState, setP2pState, setReconnectAttempt, handlersRef,
-      maxReconnectAttempts, reconnectBaseDelay, onError,
-      reconnectTimerRef, wsRef,
-      connectSelf: () => connectWs(ctx),
-    };
-    connectWs(ctx);
-
-    const handlers = handlersRef.current;
-    return () => {
-      // The generation was already bumped when this effect re-ran, so stale
-      // callbacks from the old connection self-discard. Only clean up timers
-      // and sockets here.
-      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
-      handlers.clear();
-      // NOTE: pending waitForConnection() waiters are intentionally NOT rejected
-      // here. Under React StrictMode (dev) this effect runs mount → cleanup →
-      // mount; rejecting on cleanup would fail a file op issued during the first
-      // mount even though the second connection is about to succeed. Waiters
-      // persist (ref survives the remount) and are settled by the connectionState
-      // effect on (re)connect, or expire via their own timeout on real unmount.
-    };
-  }, [agentUrl, connectionToken, onError, maxReconnectAttempts, reconnectBaseDelay, setP2pState]);
-
-  // Settle any pending waitForConnection() promises whenever the state settles
-  // into a terminal-for-waiting value ('connected' → resolve, 'disconnected' →
-  // reject). Event-driven so it works with fake timers and adds no latency.
-  useEffect(() => {
-    if (connectionState === 'connected') {
-      const waiters = waitersRef.current;
-      waitersRef.current = new Set();
-      waiters.forEach((w) => w.resolve());
-    } else if (connectionState === 'disconnected') {
-      const waiters = waitersRef.current;
-      waitersRef.current = new Set();
-      waiters.forEach((w) => w.reject(new Error('Connection lost')));
-    }
-  }, [connectionState]);
+  useAgentWebSocket({
+    agentUrl, connectionToken, connectionState,
+    setConnectionState, setP2pState, setReconnectAttempt,
+    generationRef, reconnectAttemptRef, handlersRef,
+    maxReconnectAttemptsRef, reconnectBaseDelayRef, onErrorRef,
+    reconnectTimerRef, wsRef, waitersRef,
+  });
 
   const sendMessage = useCallback((msg: Record<string, unknown>) => {
     try { if (wsRef.current?.readyState === WebSocket.OPEN) {wsRef.current.send(JSON.stringify(msg));} }
@@ -371,7 +414,9 @@ export function useP2PConnection(
   // (Terminal, TerminalView) can subscribe without prop drilling. The
   // hasP2pTarget boolean flips when options goes null↔object, so the atom is
   // cleared on unmount and when switching to relay mode.
-  useEffect(() => {
+  // Publish synchronously before child mount effects so xterm's ConnectionManager
+  // and the attach state machine read the same live socket on the first frame.
+  useLayoutEffect(() => {
     if (hasP2pTarget) {
       setP2pConnection(connection);
     }
@@ -380,6 +425,12 @@ export function useP2PConnection(
       setP2pState('disconnected');
     };
   }, [connection, hasP2pTarget, setP2pConnection, setP2pState]);
+
+  useEffect(() => {
+    if (!hasP2pTarget) {
+      handlersRef.current.clear();
+    }
+  }, [hasP2pTarget]);
 
   if (!options) {return null;}
   return connection;

@@ -75,7 +75,7 @@ export function CapsuleCommandsPopover({
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger
-          nativeButton={false}
+          nativeButton
           disabled={disabled}
           render={trigger ?? defaultTrigger}
         />

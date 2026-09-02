@@ -15,6 +15,14 @@ export function getWebSocketService(): WebSocketService | null {
 
 export function createWebSocketService(url: string, authToken: string): WebSocketService {
   if (wsServiceInstance) {
+    const status = wsServiceInstance.getConnectionStatus();
+    if (
+      wsServiceInstance.getUrl() === url &&
+      wsServiceInstance.getAuthToken() === authToken &&
+      status !== 'disconnected'
+    ) {
+      return wsServiceInstance;
+    }
     wsServiceInstance.disconnect();
   }
 

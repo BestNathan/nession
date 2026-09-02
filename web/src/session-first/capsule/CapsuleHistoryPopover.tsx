@@ -61,7 +61,7 @@ export function CapsuleHistoryPopover({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        nativeButton={false}
+        nativeButton
         disabled={disabled}
         render={
           <Button
