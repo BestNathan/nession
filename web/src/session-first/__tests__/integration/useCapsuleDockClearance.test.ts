@@ -62,7 +62,7 @@ describe('useCapsuleDockClearance', () => {
     const dockRef = { current: dock };
     renderHook(() => useCapsuleDockClearance(dockRef));
 
-    expect(host.style.getPropertyValue('--terminal-capsule-clearance')).toBe('68px');
+    expect(host.style.getPropertyValue('--terminal-capsule-occlusion')).toBe('68px');
     expect(observe).toHaveBeenCalledWith(dock);
     expect(observe).toHaveBeenCalledWith(host);
   });
