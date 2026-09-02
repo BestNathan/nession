@@ -1,5 +1,6 @@
 export { MessageRouterImpl } from './MessageRouter';
 export { AgentSocketClient } from './AgentSocketClient';
+export { ServerSocketClient } from './ServerSocketClient';
 export {
   buildAgentWsUrl,
   reconnectDelayMs,
