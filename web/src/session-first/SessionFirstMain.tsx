@@ -27,6 +27,7 @@ export interface SessionFirstMainProps {
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
+  onOpenWorkspace?: () => void;
   connectionStatus: ConnectionStatus;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
@@ -50,6 +51,7 @@ export function SessionFirstMain({
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
+  onOpenWorkspace,
   connectionStatus,
   showTerminal = true,
   showWorkspace = true,
@@ -71,6 +73,7 @@ export function SessionFirstMain({
           onOpenAgent={onOpenAgent}
           onBackToSessions={onBackToSessions}
           onOpenDrawer={onOpenDrawer}
+          onOpenWorkspace={onOpenWorkspace}
           serverStatus={connectionStatus}
           experience={experience}
         />

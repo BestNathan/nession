@@ -1,4 +1,4 @@
-import { ChevronLeft, Menu } from 'lucide-react';
+import { ChevronLeft, Menu, PanelRight } from 'lucide-react';
 import { AgentContext } from '@/session-first/patterns/AgentContext';
 import { ConnectionStatus as SessionConnectionStatus } from '@/session-first/patterns/ConnectionStatus';
 import {
@@ -22,6 +22,7 @@ export interface SessionHeaderProps {
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
+  onOpenWorkspace?: () => void;
   serverStatus?: ConnectionStatus;
   /** App experience: no Terminal|Workspace switcher — the spatial model owns navigation. */
   experience?: CapsuleExperience;
@@ -36,9 +37,49 @@ export function SessionHeader({
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
+  onOpenWorkspace,
   serverStatus,
   experience = 'web',
 }: SessionHeaderProps) {
+  if (experience === 'app') {
+    return (
+      <header
+        data-testid="session-header-line"
+        className="flex shrink-0 items-center gap-2 px-[var(--sf-space-3)] pt-[max(var(--sf-space-2),env(safe-area-inset-top))]"
+      >
+        {onOpenDrawer ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
+            aria-label="Sessions"
+            data-testid="app-header-sessions"
+            onClick={() => onOpenDrawer()}
+          >
+            <Menu className="size-5" />
+          </Button>
+        ) : null}
+        <h1 className="min-w-0 truncate font-mono text-base font-semibold">{sessionName}</h1>
+        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
+          <SessionConnectionStatus state={state} />
+        </div>
+        {onOpenWorkspace ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
+            aria-label="Workspace"
+            data-testid="app-header-workspace"
+            onClick={() => onOpenWorkspace()}
+          >
+            <PanelRight className="size-5" />
+          </Button>
+        ) : null}
+      </header>
+    );
+  }
   return (
     <header
       data-testid="session-header-line"
@@ -92,9 +133,7 @@ export function SessionHeader({
               server: {serverStatus}
             </span>
           ) : null}
-          {experience !== 'app' ? (
-            <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
-          ) : null}
+          <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
         </div>
       </div>
     </header>
