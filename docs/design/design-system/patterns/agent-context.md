@@ -69,6 +69,69 @@ Same quiet/prominent rule on both.
 | Open details | SurfaceSwitcher → Workspace if needed, then Agent tool — or jump to Agent tool | Push AgentDetail on the Workspace navigation stack; must not steal top-level `Sessions ← Terminal → Workspace` gestures |
 | Touch | Compact | `touchTarget.min` on the tappable identity |
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+
+### Dominance
+
+- Agent identity is **secondary metadata** in every context this pattern appears — never the row's hero.
+- When `agent.online`, this pattern must not be the loudest element in [SessionHeader](session-header.md) or [SessionItem](session-item.md).
+
+### Information hierarchy
+
+- **Primary:** Agent display name / host when the user needs to know *where* the Session runs.
+- **Secondary:** Status phrase when Agent is not `online`.
+- **Tertiary:** Healthy indicator (dot or none) — present only if it adds disambiguation; often omitted entirely when `online`.
+
+### Alignment
+
+- Inline with Session title row in the header; left-aligned with other header metadata.
+- On App, vertically centered in the single-row header band ([composition.md](../../composition.md) §9).
+
+### Density
+
+- **Compact / metadata density** — one line, no wrapping in the header compact form.
+- App: tappable hit area meets `touchTarget.min` without inflating header height.
+
+### Whitespace
+
+- No padded card around healthy AgentContext. Identity sits in the header's natural rhythm.
+- Unhealthy states may add a local tint or compact badge — still header-scale, not a banner.
+
+### Contrast
+
+- Healthy: `quiet` / `tertiary` — identity at secondary text contrast ([visual-language.md](../../visual-language.md) R-E1).
+- Unhealthy: `conditional-prominent` — phrase and indicator jump one or two emphasis levels; Session title stays `primary`.
+
+### Surface treatment
+
+- No bordered card, no elevation, no full-width danger bar in the header.
+- Optional Domain tint on the identity cluster only when `offline` / `error` — background shift preferred over border.
+
+### State-driven emphasis
+
+| Agent | Emphasis | Treatment |
+|-------|----------|-----------|
+| `online` | `quiet` | Identity only; no status phrase; no green badge |
+| `connecting` / `reconnecting` | `conditional-prominent`, medium | Short phrase; subtle indicator |
+| `offline` / `error` | `conditional-prominent`, high | Phrase + Domain tint; names **Agent** |
+
+Session lifecycle and attachment **never** change AgentContext's indicator — those channels stay on [ConnectionStatus](connection-status.md).
+
+### Anti-patterns
+
+- Green border or glow on healthy Agent (`border-green-500/30` — shipping `AgentCard` predecessor).
+- "Session offline" / "Disconnected" as the sole phrase with no Agent distinction.
+- Listing other Sessions for this Agent (recreates Agent-first navigation).
+- Full-header red bar when only Agent connectivity is degraded.
+- Equal contrast for identity and alarm phrase when `online`.
+
+### Canonical reference
+
+- Web: Active Terminal fixture `/#/fixture` at 1440×900 — header AgentContext on selected Session ([#563](https://github.com/BestNathan/nession/pull/563)).
+- App: `/#/fixture/app` at 390×844 — compressed identity in single-row header ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Healthy Agent is visually quiet (identity without alarm chrome).

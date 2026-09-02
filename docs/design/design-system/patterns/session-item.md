@@ -85,6 +85,73 @@ Same information hierarchy on both: name first, metadata second.
 | Secondary actions | Icon buttons / overflow | Prefer swipe actions or overflow; keep kill behind confirm |
 | Agent prominence when unhealthy | Metadata line or compact badge | Same, larger type allowed; still not an Agent header |
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and Session navigation in the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+
+### Dominance
+
+- **Session name is the only high-emphasis text** in a healthy row.
+- Agent identity, workload hint, and recency are secondary metadata — never equal weight to the name.
+- Reachability indicators must not become a header-scale badge when `agent.online`.
+
+### Information hierarchy
+
+- **Primary:** Session name (`primary` typography role).
+- **Secondary:** Metadata line — workload · Agent · recency (`secondary` / `tertiary`).
+- **Conditional-prominent:** Agent reachability phrase or compact badge only when Agent is not healthy.
+
+### Alignment
+
+- Name on the first line (or leading column); metadata directly below or trailing on the same baseline cluster.
+- Selection affordance is a single leading bar or background shift — left-aligned with list gutter.
+
+### Density
+
+- Experience Web `row.md` (~36px) on Web; App row + `touchTarget.min`.
+- Comfortable scannable density ([visual-language.md](../../visual-language.md) §4) — not card-padding inflation.
+
+### Whitespace
+
+- Row padding groups name from metadata; **no bordered card** per row.
+- Trailing actions live in the row's action gutter — not permanent layout width when hidden.
+
+### Contrast
+
+- Name: highest contrast in the row.
+- Metadata: secondary/tertiary — all metadata fragments share one emphasis band (no equal-contrast competition).
+- Selection: one accent cue — not stacked border + shadow + accent bar.
+
+### Surface treatment
+
+- Flat list row on navigation surface background shift — not a nested card ([visual-language.md](../../visual-language.md) R-S2, R-S3).
+- Selection: **one coherent cue** (background shift *or* leading accent bar — not both plus border plus shadow).
+
+### State-driven emphasis
+
+| Condition | Emphasis change |
+|-----------|-----------------|
+| `agent.online` | Reachability stays `quiet` — no badge required |
+| `agent.offline` / `error` | Metadata line or compact badge → `conditional-prominent`; name stays `primary` |
+| `session.exited` | Name drops one level — secondary treatment; not greyed as if Agent died |
+| Row selected | Selection cue only — does not elevate metadata |
+
+Destructive actions (kill): **progressive disclosure** — visible on hover, focus, or selection only (P8).
+
+### Anti-patterns
+
+- Equal contrast for all metadata fragments (workload, Agent, recency).
+- Multiple accent colors in one row.
+- Permanent visible kill / destructive control in normal visual flow.
+- Nested-card appearance (border + radius + shadow on each row).
+- Single dot standing for Agent + Session + attachment.
+- "Session offline" copy when only Agent is unreachable.
+
+### Canonical reference
+
+- Web: `/#/fixture` 1440×900 — six fixture rows, one selected, mixed Agent health ([#563](https://github.com/BestNathan/nession/pull/563)).
+- App: `/#/fixture/app` 390×844 — Sessions spatial layer rows ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Row represents a Session, not an Agent.
