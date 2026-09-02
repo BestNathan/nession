@@ -41,7 +41,7 @@ interface WorkspaceTool {
 
 Workspace navigation is extensible by registering tools, not by growing a switch of special cases in the shell.
 
-- **Per-experience layouts.** Web/App differences live in `layout.web` / `layout.app` — never scattered `if (mobile)` metrics inside a shared component. Files is exactly this: web = tree ‖ editor, app = tree full-screen → push editor.
+- **Per-experience layouts.** Web/App differences live in `layout.web` / `layout.app` — never scattered `if (mobile)` metrics inside a shared component. Files is exactly this: web = tree ‖ editor, app = tree full-screen → push editor; the pushed editor carries a tool-internal sub-header (`←` + file path, dirty-confirm back); session/agent tools provide app containers (full-screen scroll + bottom safe-area clearing the home indicator and the floating tool bar) rather than shared web fallbacks.
 - **No fixed pixels for structure.** Tool-internal layouts use grids and proportions (Files web = CSS grid, tree `1fr` ‖ editor `2fr`); spacing comes from `--sf-space-*` / Experience tokens, widths from proportion or content.
 - **Availability is per-Session** (e.g. Files when the Agent exposes no file API). A tool may also choose not to register at all — hidden tools leave no empty chrome. Registered-but-unavailable tools render as **disabled pills** (inert) in the tool bar — visible, not clickable — never as empty slots.
 - The framework renders a registry-driven **bottom floating tool bar** (label / icon / order / availability → disabled state) plus the active tool's layout for the current experience. It is the workspace's **only floating element**, same capsule family (radius / elevation / tokens) as the terminal input capsule.

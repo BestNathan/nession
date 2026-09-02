@@ -105,10 +105,12 @@ Relationships, not values:
 |--|-----|-----|
 | Navigation | Sessions drawer overlay (left, scrim + slide-in) | Sessions drawer layer; no persistent column |
 | Surfaces | Terminal \| Workspace via SurfaceSwitcher | Spatial `Sessions ← Terminal → Workspace` ([interaction/app.md](interaction/app.md)) |
-| Chrome | Top row (drawer button + session line + switcher + server micro-status); no band | Compact header + safe-area insets (notch / home indicator) |
+| Chrome | Top row (drawer button + session line + switcher + server micro-status); no band | Single-row App header (`[≡] session · state fragment [☰]` on Terminal, `[←] tool label` on Workspace, ≈48px + top safe-area); overlay buttons removed — one visible navigation affordance per page (edge-band gestures are accelerators, never the only path) |
 | Work surface | Terminal owns the surface region | Terminal owns the maximum mid-screen region; layers overlay it |
-| Controls | Pointer density | Touch-target density; visible non-gesture controls required |
+| Controls | Pointer density | Touch-target density (touch targets ≥ 44px, `experience.app.touchTarget.min` semantics); visible non-gesture controls required |
 | Affordances | Hover/focus disclosure | Thumb-reach placement per platform |
+
+Workspace tools own their push/pop sub-navigation (e.g. the Files editor sub-header `←` + path); top-level back always returns to Terminal. App chrome sizes come from tokens/`env()` — no fixed px.
 
 App composes the same surfaces and hierarchy with its own geometry; it is not a compressed Web layout.
 

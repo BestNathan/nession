@@ -9,6 +9,7 @@ import { LoginPage } from './components/LoginPage';
 import { WebSocketContext } from './hooks/useWebSocket';
 import { useAppConnection } from './hooks/useAppConnection';
 import { isSessionFirst, setSessionFirst } from './lib/sessionFirst';
+import { FixtureApp } from './session-first/fixture/FixtureApp';
 import { FixtureShell } from './session-first/fixture/FixtureShell';
 import { FixtureWorkspace } from './session-first/fixture/FixtureWorkspace';
 import { SessionFirstShell } from './session-first/SessionFirstShell';
@@ -17,6 +18,7 @@ import { SessionFirstShell } from './session-first/SessionFirstShell';
 // scope and reuse in both routers without a useMemo dependency.
 const fixtureRoute = { path: '/fixture', element: <FixtureShell /> };
 const fixtureWorkspaceRoute = { path: '/fixture/workspace', element: <FixtureWorkspace /> };
+const fixtureAppRoute = { path: '/fixture/app', element: <FixtureApp /> };
 
 function ReconnectingShell() {
   return (
@@ -44,6 +46,7 @@ function App() {
 
   const loginRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
       fixtureWorkspaceRoute,
       fixtureRoute,
       {
@@ -66,6 +69,7 @@ function App() {
 
   const appRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
       fixtureWorkspaceRoute,
       fixtureRoute,
       {

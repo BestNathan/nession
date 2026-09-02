@@ -8,12 +8,65 @@ import type { DomainState } from '@/session-first/domainState';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { TerminalWell } from '@/session-first/TerminalWell';
+import { AppToolHeader } from '@/session-first/patterns/AppToolHeader';
 import type {
   Experience,
   WorkspaceToolId,
 } from '@/session-first/workspace/toolTypes';
+import { WORKSPACE_TOOLS } from '@/session-first/workspace/tools';
 import { WorkspaceShell } from '@/session-first/workspace/WorkspaceShell';
 import type { Agent, ConnectionStatus, Session } from '@/types';
+
+interface WorkspaceTabPanelProps {
+  selectedSession: Session;
+  selectedAgent: Agent | undefined;
+  domain: DomainState;
+  surface: Surface;
+  tool: WorkspaceToolId;
+  fileOps: FileOps | null;
+  experience: Experience;
+  onSurfaceChange: (surface: Surface) => void;
+  onToolChange: (tool: WorkspaceToolId) => void;
+}
+
+function WorkspaceTabPanel({
+  selectedSession,
+  selectedAgent,
+  domain,
+  surface,
+  tool,
+  fileOps,
+  experience,
+  onSurfaceChange,
+  onToolChange,
+}: WorkspaceTabPanelProps) {
+  return (
+    <div
+      role="tabpanel"
+      id="workspace-tool-panel"
+      aria-labelledby={`workspace-tool-tab-${tool}`}
+      className={cn('flex min-h-0 flex-1 flex-col', surface !== 'workspace' && 'hidden')}
+    >
+      {experience === 'app' ? (
+        <AppToolHeader
+          toolLabel={WORKSPACE_TOOLS.find((t) => t.id === tool)!.label}
+          onBack={() => onSurfaceChange('terminal')}
+        />
+      ) : null}
+      <WorkspaceShell
+        ctx={{
+          session: selectedSession,
+          agent: selectedAgent,
+          domain,
+          fileOps,
+          experience,
+          onToolChange,
+        }}
+        activeTool={tool}
+      />
+    </div>
+  );
+}
 
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
@@ -27,6 +80,7 @@ export interface SessionFirstMainProps {
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
+  onOpenWorkspace?: () => void;
   connectionStatus: ConnectionStatus;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
@@ -50,6 +104,7 @@ export function SessionFirstMain({
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
+  onOpenWorkspace,
   connectionStatus,
   showTerminal = true,
   showWorkspace = true,
@@ -71,6 +126,7 @@ export function SessionFirstMain({
           onOpenAgent={onOpenAgent}
           onBackToSessions={onBackToSessions}
           onOpenDrawer={onOpenDrawer}
+          onOpenWorkspace={onOpenWorkspace}
           serverStatus={connectionStatus}
           experience={experience}
         />
@@ -130,25 +186,18 @@ export function SessionFirstMain({
                 )}
               </TerminalWell>
             ) : null}
-            {showWorkspace ? (
-              <div
-                role="tabpanel"
-                id="workspace-tool-panel"
-                aria-labelledby={`workspace-tool-tab-${tool}`}
-                className={cn('min-h-0 flex-1', surface !== 'workspace' && 'hidden')}
-              >
-                <WorkspaceShell
-                  ctx={{
-                    session: selectedSession,
-                    agent: selectedAgent,
-                    domain,
-                    fileOps,
-                    experience: 'web',
-                    onToolChange,
-                  }}
-                  activeTool={tool}
-                />
-              </div>
+            {showWorkspace && hasSession ? (
+              <WorkspaceTabPanel
+                selectedSession={selectedSession}
+                selectedAgent={selectedAgent}
+                domain={domain}
+                surface={surface}
+                tool={tool}
+                fileOps={fileOps}
+                experience={experience}
+                onSurfaceChange={onSurfaceChange}
+                onToolChange={onToolChange}
+              />
             ) : null}
           </>
         )}
