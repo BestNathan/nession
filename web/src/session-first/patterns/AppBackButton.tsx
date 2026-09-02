@@ -1,5 +1,6 @@
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { shellIconButtonClass } from '@/session-first/shellStyles';
 
 export interface AppBackButtonProps {
   /** Accessible name for the affordance (e.g. "Back to files"). */
@@ -20,7 +21,7 @@ export function AppBackButton({ label, testid, onClick }: AppBackButtonProps) {
       type="button"
       variant="ghost"
       size="icon"
-      className="size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]"
+      className={shellIconButtonClass}
       aria-label={label}
       data-testid={testid}
       onClick={onClick}

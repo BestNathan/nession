@@ -20,6 +20,9 @@
   "touchTarget": {
     "min": { "value": 44 }
   },
+  "shell": {
+    "iconButtonSize": { "ref": "experience.app.control.md" }
+  },
   "composer": {
     "fontSize": { "value": "1rem" },
     "textLineHeight": { "value": "1.375rem" },

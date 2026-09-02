@@ -4,6 +4,8 @@ import { SearchBar } from '@/components/SearchBar';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
+import { shellMotionClass, shellRowControlMinClass } from '@/session-first/shellStyles';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 
 export interface SessionListHeaderProps {
@@ -98,7 +100,10 @@ export function SessionListHeader({
         type="button"
         variant="ghost"
         size="sm"
-        className="justify-start rounded-none px-1 text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground max-lg:min-h-11"
+        className={cn(
+          'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
+          shellMotionClass,
+        )}
         data-testid="session-first-create"
         aria-label="Create session"
         disabled={createDisabled}
@@ -112,7 +117,7 @@ export function SessionListHeader({
           <CollapsibleTrigger
             data-testid="session-list-filters"
             render={
-              <Button type="button" variant="ghost" size="sm" className="min-h-8 max-lg:min-h-11 text-muted-foreground hover:text-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]">
+              <Button type="button" variant="ghost" size="sm" className={cn(shellRowControlMinClass, 'max-lg:min-h-11 text-muted-foreground hover:text-foreground', shellMotionClass)}>
                 <Filter className="size-4" />
                 Filters
               </Button>
@@ -133,7 +138,7 @@ export function SessionListHeader({
                     size="sm"
                     onClick={() => setStatusFilter(filter.key)}
                     aria-pressed={isActive}
-                    className="min-h-8 flex-shrink-0"
+                    className={cn(shellRowControlMinClass, 'flex-shrink-0')}
                   >
                     {filter.label}
                     {count !== undefined && (

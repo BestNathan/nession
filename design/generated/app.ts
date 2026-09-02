@@ -20,6 +20,9 @@ export const panel = {
 export const touchTarget = {
   min: 44,
 } as const;
+export const shell = {
+  iconButtonSize: 44,
+} as const;
 export const composer = {
   fontSize: "1rem",
   textLineHeight: "1.375rem",

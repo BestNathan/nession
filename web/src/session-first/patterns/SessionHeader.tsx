@@ -7,6 +7,7 @@ import {
 } from '@/session-first/patterns/SurfaceSwitcher';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { shellIconButtonClass } from '@/session-first/shellStyles';
 import type { CapsuleExperience } from '@/session-first/capsule/types';
 import type { DomainState } from '@/session-first/domainState';
 import type { ConnectionStatus } from '@/types';
@@ -82,8 +83,7 @@ export function SessionHeader({
               label: 'Sessions',
               testid: 'app-header-sessions',
               onClick: onOpenDrawer,
-              className:
-                'size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+              className: shellIconButtonClass,
             })
           : null}
         {title}
@@ -95,7 +95,7 @@ export function SessionHeader({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-11 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]"
+            className={shellIconButtonClass}
             aria-label="Workspace"
             data-testid="app-header-workspace"
             onClick={() => onOpenWorkspace()}
@@ -117,8 +117,7 @@ export function SessionHeader({
               label: 'Open sessions',
               testid: 'session-first-open-drawer',
               onClick: onOpenDrawer,
-              className:
-                'size-9 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+              className: shellIconButtonClass,
             })
           : null}
         {onBackToSessions ? (
@@ -126,7 +125,7 @@ export function SessionHeader({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 shrink-0 transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] lg:hidden"
+            className={cn(shellIconButtonClass, 'lg:hidden')}
             aria-label="Back to sessions"
             data-testid="session-first-back-to-list"
             onClick={() => onBackToSessions()}
