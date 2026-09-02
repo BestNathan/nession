@@ -42,7 +42,6 @@ export function SessionFirstSpatialLayout(props: {
       <AppSpatialShell
         index={spatialIndex}
         onIndexChange={onIndexChange}
-        showHeaderActions
         sessions={
           <SessionFirstSidebar {...sidebarProps} onSelect={onSpatialSelect} />
         }
@@ -53,6 +52,8 @@ export function SessionFirstSpatialLayout(props: {
               surface="terminal"
               showWorkspace={false}
               experience="app"
+              onOpenDrawer={() => onIndexChange(0)}
+              onOpenWorkspace={() => onIndexChange(2)}
             />
           </div>
         }

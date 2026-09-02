@@ -162,7 +162,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('app-spatial-open-workspace'));
+    await user.click(screen.getByTestId('app-header-workspace'));
     expect(onSurfaceChange).toHaveBeenCalledWith('workspace');
   });
 

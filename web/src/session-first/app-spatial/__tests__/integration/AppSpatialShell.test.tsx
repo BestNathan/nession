@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import {
   AppSpatialShell,
   type SpatialPageIndex,
@@ -16,7 +15,6 @@ describe('AppSpatialShell', () => {
   function renderShell(
     overrides: Partial<{
       index: SpatialPageIndex;
-      showHeaderActions: boolean;
     }> = {},
   ) {
     return render(
@@ -26,7 +24,6 @@ describe('AppSpatialShell', () => {
         workspace={<div>workspace-content</div>}
         index={overrides.index ?? 1}
         onIndexChange={onIndexChange}
-        showHeaderActions={overrides.showHeaderActions ?? true}
       />,
     );
   }
@@ -40,16 +37,10 @@ describe('AppSpatialShell', () => {
     expect(screen.getByTestId('app-spatial-page-workspace')).toBeInTheDocument();
   });
 
-  it('clicking open-sessions calls onIndexChange(0); open-workspace calls 2', async () => {
-    const user = userEvent.setup();
-    renderShell({ index: 1, showHeaderActions: true });
+  it('does not render overlay navigation buttons by default', () => {
+    renderShell({ index: 1 });
 
-    await user.click(screen.getByTestId('app-spatial-open-sessions'));
-    expect(onIndexChange).toHaveBeenCalledWith(0);
-
-    onIndexChange.mockClear();
-
-    await user.click(screen.getByTestId('app-spatial-open-workspace'));
-    expect(onIndexChange).toHaveBeenCalledWith(2);
+    expect(screen.queryByTestId('app-spatial-open-sessions')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-spatial-open-workspace')).not.toBeInTheDocument();
   });
 });
