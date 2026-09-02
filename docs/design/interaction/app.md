@@ -24,11 +24,15 @@ Navigation  ←  Work  →  Tools
 - Swipe left from the Session (Terminal) surface: reveal/open Workspace.
 - Sessions and Workspace **must** also have visible controls. Gestures are accelerators, not the only discoverable or accessible path.
 
+Landed in Phase 2C (#561): the single-row App header provides them — `[≡]` Sessions / `[☰]` Workspace on the Terminal page, `[←]` back-to-Terminal on the Workspace page (plus the workspace bottom floating tool bar). The former 44px overlay PanelLeft/PanelRight buttons were removed as duplicates.
+
 ## Workspace inside App
 
 Workspace tools use a **normal native navigation stack** internally (push/pop within the tool, system back). Nested tool navigation must not conflict with the top-level `Sessions ← Terminal → Workspace` gestures.
 
 Do not force a Files-style master/detail chrome onto every tool. See [workspace.md](../workspace.md).
+
+Files' App layout pushes the editor with a tool-internal sub-header (`←` + path, dirty edits confirm before leaving); session/agent tools use full-screen scroll containers with bottom safe-area — master/detail stays local to Files.
 
 ## Implementation note
 
