@@ -1,5 +1,4 @@
-import { ChevronLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { AppBackButton } from './AppBackButton';
 
 export interface AppToolHeaderProps {
   toolLabel: string;
@@ -18,17 +17,7 @@ export function AppToolHeader({ toolLabel, onBack }: AppToolHeaderProps) {
       data-testid="app-tool-header"
       className="flex shrink-0 items-center gap-1 px-[var(--sf-space-2)] pt-[max(var(--sf-space-1),env(safe-area-inset-top))]"
     >
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-11 shrink-0 transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]"
-        aria-label="Back to terminal"
-        data-testid="app-tool-back"
-        onClick={onBack}
-      >
-        <ChevronLeft className="size-5" />
-      </Button>
+      <AppBackButton label="Back to terminal" testid="app-tool-back" onClick={onBack} />
       <h1 className="min-w-0 truncate font-mono text-sm font-semibold">{toolLabel}</h1>
     </header>
   );

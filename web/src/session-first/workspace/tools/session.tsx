@@ -1,5 +1,6 @@
 import { Settings2 } from 'lucide-react';
 import type { WorkspaceTool } from '../toolTypes';
+import { AppToolScroll } from '../AppToolScroll';
 import { SessionDetails } from '@/session-first/SessionDetails';
 
 export const sessionTool: WorkspaceTool = {
@@ -12,12 +13,9 @@ export const sessionTool: WorkspaceTool = {
     web: ({ ctx }) => (ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null),
     app: ({ ctx }) =>
       ctx.session && ctx.domain ? (
-        <div
-          data-testid="session-details-app"
-          className="h-full min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]"
-        >
+        <AppToolScroll data-testid="session-details-app">
           <SessionDetails session={ctx.session} state={ctx.domain} />
-        </div>
+        </AppToolScroll>
       ) : null,
   },
 };

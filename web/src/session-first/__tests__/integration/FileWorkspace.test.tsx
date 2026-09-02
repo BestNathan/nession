@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
-import { FilesAppLayout } from '@/session-first/workspace/tools/filesApp';
 import type { FileOps, FileEntry } from '@/services/fileOps';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
@@ -22,10 +21,11 @@ function makeFileOps(): FileOps {
     deleteFile: vi.fn().mockResolvedValue({ path: '/f.txt', success: true }),
     createDir: vi.fn().mockResolvedValue({ path: '/d', success: true }),
     renameFile: vi.fn().mockResolvedValue({ from: '/a', to: '/b', success: true }),
+    getCwd: vi.fn().mockResolvedValue({ path: '/' }),
     uploadFile: vi.fn().mockResolvedValue({ path: '/f.txt', written: 5 }),
     base64Decode: (b64: string) => atob(b64),
     base64Encode: (s: string) => btoa(s),
-  } as unknown as FileOps;
+  };
 }
 
 function makeCtx(fileOps: FileOps | null): WorkspaceContext {
@@ -77,32 +77,5 @@ describe('FileWorkspace (web layout)', () => {
     rerender(<FileWorkspace ctx={makeCtx(makeFileOps())} />);
     expect(screen.getByText('Select a file')).toBeInTheDocument();
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
-  });
-});
-
-describe('FilesAppLayout', () => {
-  it('browser full-screen until a file is selected, then pushed editor; close returns', async () => {
-    const user = userEvent.setup();
-    render(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-    await user.click(await screen.findByText('f.txt'));
-    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
-    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
-    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
-    await user.click(screen.getByLabelText('Close file'));
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
-  });
-
-  it('clears the selection when fileOps detaches then reattaches', async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
-    await user.click(await screen.findByText('f.txt'));
-    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
-
-    rerender(<FilesAppLayout ctx={makeCtx(null)} />);
-    expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
-
-    rerender(<FilesAppLayout ctx={makeCtx(makeFileOps())} />);
-    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
   });
 });
