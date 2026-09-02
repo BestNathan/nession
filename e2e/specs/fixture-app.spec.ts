@@ -20,11 +20,11 @@ test('canonical App fixture renders the spatial terminal page', async ({ page })
   await expect(page.getByTestId('session-header-line')).toBeVisible();
   await expect(page.getByTestId('app-header-sessions')).toBeVisible();
   await expect(page.getByTestId('app-header-workspace')).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveCount(0);
+  await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
   await expect(page.getByTestId('app-spatial-open-sessions')).toHaveCount(0);
 
-  // terminal surface dominant, scroll overlay present
-  await expect(page.getByTestId('terminal-well')).toBeVisible();
+  // terminal page is the centered pager page
+  await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
 
   await page.screenshot({ path: 'test-results/canonical-app-terminal.png', fullPage: true });
 });
