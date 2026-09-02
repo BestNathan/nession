@@ -22,6 +22,8 @@ Nession-specific composition: assemblies of [primitives](components.md) that enc
 | [ConnectionStatus](patterns/connection-status.md) | atom | Independent Agent / Session / attachment presentation |
 | [FileWorkspace](patterns/file-workspace.md) | tool | Files master/detail; not the Workspace shell |
 | [AgentDetail](patterns/agent-detail.md) | tool | Agent/connection details; single detail layout |
+| [TerminalCapsule](patterns/terminal-capsule.md) | chrome | Floating Terminal input / commands composer (session-first) |
+| [TerminalSurface](patterns/terminal-surface.md) | surface | xterm well, focus, scroll, clearance, attach lifecycle (session-first) |
 
 App spatial navigation (`Sessions ← Terminal → Workspace`) is an [interaction model](../interaction/app.md), not a tenth pattern. Patterns that appear on App must respect that model and visible non-gesture alternatives ([#473](https://github.com/BestNathan/nession/issues/473)).
 

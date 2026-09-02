@@ -44,11 +44,14 @@ Implementation
 | [workspace.md](workspace.md) | Workspace as session-scoped tool container; initial tools; registry; Files master/detail is local to Files |
 | [interaction/web.md](interaction/web.md) | Sessions sidebar + Active Session; Terminal \| Workspace as peer surfaces (one visible at a time) |
 | [interaction/app.md](interaction/app.md) | Spatial model `Sessions ← Terminal → Workspace`; gestures as accelerators; not a shrunk Web layout |
+| [design-system/patterns/terminal-surface.md](design-system/patterns/terminal-surface.md) | Terminal xterm interaction: input planes, focus, scroll, clearance, Web vs App |
+| [design-system/patterns/terminal-capsule.md](design-system/patterns/terminal-capsule.md) | Floating Terminal composer: flat/stacked, tokens, Web vs App |
 | [visual-language.md](visual-language.md) | What dominates and recedes; typography / surface / density hierarchy; visual emphasis levels ([#561](https://github.com/BestNathan/nession/issues/561)) |
 | [composition.md](composition.md) | Page-level layout relationships: shell geometry, chrome width/height strategies, insets, rhythm, responsive transitions ([#561](https://github.com/BestNathan/nession/issues/561)) |
+| [styling-convergence.md](styling-convergence.md) | `--sf-*` / generated tokens / raw Tailwind ownership audit and migration plan ([#561](https://github.com/BestNathan/nession/issues/561) Phase 5) |
 | [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
 | [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
-| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [nine specs](design-system/patterns.md#catalog) ([#470](https://github.com/BestNathan/nession/issues/470)) |
+| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [eleven specs](design-system/patterns.md#catalog); Visual Contracts ([#470](https://github.com/BestNathan/nession/issues/470), [#561](https://github.com/BestNathan/nession/issues/561)) |
 | [design-system/contracts.md](design-system/contracts.md) | Executable layout/pattern contracts; `design/contracts/` ownership ([#545](https://github.com/BestNathan/nession/issues/545), tracking [#544](https://github.com/BestNathan/nession/issues/544)) |
 | [design-system/validation.md](design-system/validation.md) | Browser assertions, Web/App viewport matrix, focused visual regression ([#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548)) |
 | [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
