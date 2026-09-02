@@ -4,6 +4,14 @@ import type { Agent, Session } from '@/types';
  * Deterministic fixture for the canonical screen (/fixture route).
  * Static timestamps — screenshots remain comparable across runs.
  * Doubles as the Phase 6 (#561) golden-baseline data source.
+ *
+ * Viewport matrix (e2e):
+ * - Web Active Terminal 1440×900 — fixture-canonical.spec.ts
+ * - Web Workspace 1440×900 — fixture-workspace.spec.ts
+ * - Web compact 1024×768 — fixture-matrix.spec.ts
+ * - App Terminal / Workspace 390×844 — fixture-app.spec.ts
+ * - App Sessions 390×844 — fixture-matrix.spec.ts
+ *
  * Note: rendered relative-time labels (formatRelativeTime) drift with the
  * wall clock; the fixture data itself is static.
  */
