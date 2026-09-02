@@ -6,13 +6,15 @@ import type { Agent, Session } from '@/types';
  * Doubles as the Phase 6 (#561) golden-baseline data source.
  *
  * Viewport matrix (e2e):
- * - Web Active Terminal 1440×900 — fixture-canonical.spec.ts
- * - Web Workspace 1440×900 — fixture-workspace.spec.ts
- * - Web compact 1024×768 — fixture-matrix.spec.ts
- * - App Terminal / Workspace 390×844 — fixture-app.spec.ts
- * - App Sessions 390×844 — fixture-matrix.spec.ts
+ * - Web Active Terminal 1440×900 — fixture-canonical.spec.ts + fixture-visual.spec.ts
+ * - Web Workspace 1440×900 — fixture-workspace.spec.ts + fixture-visual.spec.ts
+ * - Web compact 1024×768 — fixture-matrix.spec.ts + fixture-visual.spec.ts
+ * - App Terminal / Workspace / Sessions 390×844 — fixture-app.spec.ts + fixture-visual.spec.ts
  *
- * Note: rendered relative-time labels (formatRelativeTime) drift with the
+ * Visual baselines: e2e/specs/__snapshots__/fixture-visual.spec.ts/ (Phase 7 #561).
+ * Frozen clock: e2e/helpers/fixtureVisual.ts FIXTURE_FROZEN_TIME (visual regression only).
+ *
+ * Note: without the frozen clock, relative-time labels (formatRelativeTime) drift with the
  * wall clock; the fixture data itself is static.
  */
 export const FIXTURE_AGENTS: Agent[] = [

@@ -231,6 +231,36 @@ The E2E workflow (`.github/workflows/e2e.yml`):
 
 **Retry Policy:** Tests retry 2 times in CI (configured in `playwright.config.ts`).
 
+## Canonical visual regression (#561 / #548)
+
+Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `specs/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
+
+| Baseline | Viewport | Snapshot name |
+|----------|----------|---------------|
+| Web Active Terminal | 1440×900 | `web-active-terminal.png` |
+| Web Workspace | 1440×900 | `web-workspace.png` |
+| Web compact Terminal | 1024×768 | `web-compact-terminal.png` |
+| Web compact Workspace | 1024×768 | `web-compact-workspace.png` |
+| App Terminal | 390×844 | `app-terminal.png` |
+| App Sessions | 390×844 | `app-sessions.png` |
+| App Workspace | 390×844 | `app-workspace.png` |
+
+Snapshots live in `e2e/specs/__snapshots__/fixture-visual.spec.ts/` (committed to git).
+
+### Updating baselines
+
+After an **intentional** visual change to a canonical screen:
+
+```bash
+./scripts/update-canonical-snapshots.sh
+# or manually:
+cd e2e && CI=true npx playwright test fixture-visual --update-snapshots
+```
+
+Review the diff, commit updated PNGs, and note the visual change in the PR. CI uploads `visual-snapshot-diffs` artifacts on failure.
+
+Relative-time labels use a frozen clock (`e2e/helpers/fixtureVisual.ts`) during visual tests only.
+
 ## Maintenance
 
 ### Updating Dependencies
