@@ -58,6 +58,7 @@ export function SessionFirstSidebar({
 
   return (
     <aside
+      data-testid="session-first-sidebar"
       className={cn(
         'flex h-full w-full shrink-0 flex-col',
         className,
