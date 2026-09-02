@@ -2,7 +2,7 @@
 
 Version-controlled product and UI architecture for the next Nession Web and App experience.
 
-This index is the entry point. Downstream work — design tokens ([#467](https://github.com/BestNathan/nession/issues/467)), pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)), the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)), and platform migration ([#472](https://github.com/BestNathan/nession/issues/472), [#473](https://github.com/BestNathan/nession/issues/473)) — should reference these paths instead of a single GitHub issue.
+This index is the entry point. Downstream work — design tokens ([#467](https://github.com/BestNathan/nession/issues/467)), pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)), executable UI contracts and validation ([#544](https://github.com/BestNathan/nession/issues/544)–[#548](https://github.com/BestNathan/nession/issues/548)), the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)), and platform migration ([#472](https://github.com/BestNathan/nession/issues/472), [#473](https://github.com/BestNathan/nession/issues/473)) — should reference these paths instead of a single GitHub issue.
 
 **Umbrella:** [#468](https://github.com/BestNathan/nession/issues/468)
 **This doc set:** [#469](https://github.com/BestNathan/nession/issues/469)
@@ -24,9 +24,13 @@ Information Architecture
       ↓
 Interaction Model (Web / App)
       ↓
-Design System
+Visual Language                       ← #561
       ↓
-Component / Pattern Architecture
+Layout / Composition                  ← #561
+      ↓
+Design System (tokens + patterns)
+      ↓
+UI Contracts + Validation          ← #544–#548
       ↓
 Implementation
 ```
@@ -40,10 +44,30 @@ Implementation
 | [workspace.md](workspace.md) | Workspace as session-scoped tool container; initial tools; registry; Files master/detail is local to Files |
 | [interaction/web.md](interaction/web.md) | Sessions sidebar + Active Session; Terminal \| Workspace as peer surfaces (one visible at a time) |
 | [interaction/app.md](interaction/app.md) | Spatial model `Sessions ← Terminal → Workspace`; gestures as accelerators; not a shrunk Web layout |
+| [design-system/patterns/terminal-surface.md](design-system/patterns/terminal-surface.md) | Terminal xterm interaction: input planes, focus, scroll, clearance, Web vs App |
+| [design-system/patterns/terminal-capsule.md](design-system/patterns/terminal-capsule.md) | Floating Terminal composer: flat/stacked, tokens, Web vs App |
+| [visual-language.md](visual-language.md) | What dominates and recedes; typography / surface / density hierarchy; visual emphasis levels ([#561](https://github.com/BestNathan/nession/issues/561)) |
+| [composition.md](composition.md) | Page-level layout relationships: shell geometry, chrome width/height strategies, insets, rhythm, responsive transitions ([#561](https://github.com/BestNathan/nession/issues/561)) |
+| [styling-convergence.md](styling-convergence.md) | `--sf-*` / generated tokens / raw Tailwind ownership audit and migration plan ([#561](https://github.com/BestNathan/nession/issues/561) Phase 5) |
 | [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
 | [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
-| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [nine specs](design-system/patterns.md#catalog) ([#470](https://github.com/BestNathan/nession/issues/470)) |
+| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [eleven specs](design-system/patterns.md#catalog); Visual Contracts ([#470](https://github.com/BestNathan/nession/issues/470), [#561](https://github.com/BestNathan/nession/issues/561)) |
+| [design-system/contracts.md](design-system/contracts.md) | Executable layout/pattern contracts; `design/contracts/` ownership ([#545](https://github.com/BestNathan/nession/issues/545), tracking [#544](https://github.com/BestNathan/nession/issues/544)) |
+| [design-system/validation.md](design-system/validation.md) | Browser assertions, Web/App viewport matrix, focused visual regression ([#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548)) |
 | [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
+
+## #561 staging acceptance ([#561](https://github.com/BestNathan/nession/issues/561))
+
+Canonical reference PNGs (human review on **staging** before release):
+
+| Screenshot | Viewport / surface |
+|------------|-------------------|
+| [canonical-app-terminal.png](screenshots/canonical-app-terminal.png) | App Active Terminal 390×844 |
+| [canonical-app-sessions.png](screenshots/canonical-app-sessions.png) | App Sessions 390×844 |
+| [canonical-app-workspace.png](screenshots/canonical-app-workspace.png) | App Workspace 390×844 |
+| [canonical-app-files-push.png](screenshots/canonical-app-files-push.png) | App Files push sub-flow |
+
+Live fixtures (same data as CI golden baselines): `/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app` on the staging deployment. CI gate: `e2e/specs/fixture-visual.spec.ts` (7 Linux snapshots).
 
 ## Related issues
 
@@ -52,9 +76,11 @@ Implementation
 | 1 — Architecture docs | [#469](https://github.com/BestNathan/nession/issues/469) | This directory |
 | 2 — Design tokens | [#467](https://github.com/BestNathan/nession/issues/467) | Executable token architecture + lint |
 | 2 — UI patterns | [#470](https://github.com/BestNathan/nession/issues/470) | Pattern specifications |
+| 2 — Executable UI constraints | [#544](https://github.com/BestNathan/nession/issues/544) | Contracts + assertions + viewport matrix + focused visual ([#545](https://github.com/BestNathan/nession/issues/545)–[#548](https://github.com/BestNathan/nession/issues/548)); architecture: [contracts.md](design-system/contracts.md), [validation.md](design-system/validation.md) |
 | 3 — Vertical slice | [#471](https://github.com/BestNathan/nession/issues/471) | Session list → Terminal → Workspace validation path |
 | 4 — Web migration | [#472](https://github.com/BestNathan/nession/issues/472) | Migrate full Web UI to session-first shell |
 | 4 — App navigation | [#473](https://github.com/BestNathan/nession/issues/473) | App spatial model |
+| 5 — Visual language | [#561](https://github.com/BestNathan/nession/issues/561) | visual-language.md + composition.md; canonical screens; pattern Visual Contracts; baselines + visual regression gate |
 
 Related open issues that may overlap during migration: [#343](https://github.com/BestNathan/nession/issues/343), [#207](https://github.com/BestNathan/nession/issues/207), [#193](https://github.com/BestNathan/nession/issues/193), [#400](https://github.com/BestNathan/nession/issues/400).
 

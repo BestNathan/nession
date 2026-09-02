@@ -70,6 +70,68 @@ No Primitive `text-green-400` health pills (shipping predecessor `getHealthStatu
 | Close | Switch tool or SurfaceSwitcher back to Terminal | Pop to Workspace tool list, then dismiss Workspace to Terminal. Visible back control required |
 | Density | Compact | App Experience spacing / safe area ([#473](https://github.com/BestNathan/nession/issues/473)) |
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and Workspace Agent tool layouts on canonical screens ([#566](https://github.com/BestNathan/nession/pull/566), [#568](https://github.com/BestNathan/nession/pull/568)).
+
+### Dominance
+
+- AgentDetail is **disclosure level 3** — more explicit than [AgentContext](agent-context.md), still inside auxiliary Workspace, never primary navigation.
+- The Agent **identity block** and ConnectionStatus detail form may be primary **within this tool page** — not primary in the full app shell.
+
+### Information hierarchy
+
+- **Primary on page:** Agent identity + ConnectionStatus detail (three labeled channels).
+- **Secondary:** connection facts (host, addresses, versions), health evidence.
+- **Tertiary:** session count as fact; optional session fact list — not a Session switcher.
+
+### Alignment
+
+- Single-column stacked sections — no Files-style master/detail split.
+- Labels left or top; values follow ConnectionStatus detail rhythm.
+
+### Density
+
+- **Forms/dialogs relaxed density** within sections — readable for diagnostic content.
+- Compact on Web; App adds safe-area and touch spacing without inflating to marketing-page whitespace.
+
+### Whitespace
+
+- Section gaps group identity, status, connection, actions — whitespace before borders.
+- No nested cards per field group unless whitespace fails for dense key-value grids.
+
+### Contrast
+
+- Agent channel foregrounded relative to Session/attachment on **this page** — still Domain tokens, not Primitive green pills.
+- Healthy Agent: identity at `secondary`–`primary`; channels at readable secondary.
+- Unhealthy Agent: Agent channel `conditional-prominent`; Session/attachment channels stay labeled and neutral.
+
+### Surface treatment
+
+- Flat `workspace.surface` page — no elevation, no hero banner.
+- Actions row uses Experience `control.*` — ghost/secondary, not a wall of primary buttons.
+
+### State-driven emphasis
+
+| Condition | Emphasis |
+|-----------|----------|
+| Agent `online` | Agent channel quiet in detail form; full facts readable |
+| Agent `offline` / `error` | Agent channel + health evidence `conditional-prominent`; page title remains Agent identity — not retitled "Session failed" |
+| Session fact list | Tertiary — opening another Session routes to [SessionList](session-list.md), not this list as primary nav |
+
+### Anti-patterns
+
+- Agent-grouped session browser replacing flat SessionList.
+- Single fused health badge for Agent + Session + attachment.
+- Files-style browser+editor split on this tool.
+- Primitive `text-green-400` health pills (shipping predecessor).
+- "Open dashboard of this Agent's sessions" as the primary action.
+
+### Canonical reference
+
+- Web: `/#/fixture/workspace` — Agent tool body in Workspace ([#566](https://github.com/BestNathan/nession/pull/566)).
+- App: `/#/fixture/app` — Agent tool in spatial Workspace stack ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Single detail layout (no Files-style browser+editor split).
