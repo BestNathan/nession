@@ -1,0 +1,81 @@
+{
+  "$description": "Web experience density. Emitted as CSS variables in generated web.css.",
+  "control": {
+    "sm": { "value": "28px" },
+    "md": { "value": "32px" },
+    "lg": { "value": "36px" }
+  },
+  "row": {
+    "sm": { "value": "28px" },
+    "md": { "value": "36px" },
+    "lg": { "value": "40px" }
+  },
+  "icon": {
+    "sm": { "value": "14px" },
+    "md": { "value": "16px" }
+  },
+  "panel": {
+    "padding": { "value": "12px" }
+  },
+  "shell": {
+    "space-1": { "value": "0.25rem" },
+    "space-2": { "value": "0.5rem" },
+    "space-3": { "value": "0.75rem" },
+    "space-4": { "value": "1rem" },
+    "space-5": { "value": "1.5rem" },
+    "iconButtonSize": { "ref": "experience.web.control.lg" }
+  },
+  "focus": {
+    "ringWidth": { "value": "2px" },
+    "ringOffset": { "value": "2px" }
+  },
+  "composer": {
+    "fontSize": { "value": "0.875rem" },
+    "textLineHeight": { "value": "1.25rem" },
+    "lineHeight": { "ref": "experience.web.composer.textLineHeight" },
+    "fieldInsetX": { "value": "0.75rem" },
+    "fieldInsetY": { "value": "0.375rem" },
+    "controlGap": { "value": "0.125rem" },
+    "rowGap": { "value": "0.375rem" },
+    "toolbarRowGap": { "value": "0.375rem" },
+    "shellPadX": { "value": "0.75rem" },
+    "shellPadY": { "value": "0.375rem" },
+    "shellMarginX": { "value": "3rem" },
+    "shellMarginBottom": { "value": "0.75rem" },
+    "shellContentGap": { "value": "0.5rem" },
+    "shellPillRadius": { "value": "9999px" },
+    "terminalClearanceGap": { "value": "0.375rem" },
+    "captionFontSize": { "value": "0.625rem" },
+    "popoverWidth": { "value": "20rem" },
+    "popoverMaxHeight": { "value": "45vh" },
+    "popoverListMaxHeight": { "value": "38vh" },
+    "popoverBodyMaxHeight": { "value": "42vh" },
+    "popoverPad": { "value": "0.5rem" },
+    "popoverInnerPad": { "value": "0.25rem" },
+    "popoverGap": { "value": "0.5rem" },
+    "popoverItemPadX": { "value": "0.75rem" },
+    "popoverSideOffset": { "value": "8px" },
+    "physKeyHeight": { "ref": "experience.web.control.lg" },
+    "physKeyIconSize": { "ref": "experience.web.icon.sm" },
+    "physKeyPadX": { "value": "0.5rem" },
+    "physKeyPadY": { "value": "0.375rem" },
+    "physKeyGridGap": { "value": "0.25rem" },
+    "miniControlHeight": { "value": "1.5rem" },
+    "dropdownMinWidth": { "value": "6.25rem" },
+    "dialogGap": { "value": "0.75rem" },
+    "dialogMaxWidth": { "value": "24rem" },
+    "chipGap": { "value": "0.375rem" },
+    "keyInputWidth": { "value": "4rem" },
+    "tabHeight": { "value": "1.75rem" },
+    "iconCloseSize": { "value": "1.5rem" },
+    "popoverZIndex": { "value": 100 },
+    "maxLines": { "value": 5 },
+    "shellMaxWidth": { "value": "42rem" },
+    "shellPosition": { "value": "center" }
+  },
+  "motion": {
+    "composer": { "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)" },
+    "shellDuration": { "value": "180ms" },
+    "shellEase": { "value": "cubic-bezier(0.2, 0, 0, 1)" }
+  }
+}

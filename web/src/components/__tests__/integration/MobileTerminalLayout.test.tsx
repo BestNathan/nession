@@ -11,9 +11,13 @@ vi.mock( '@/components/FileViewer', () => ({ FileViewer: () => <div data-testid=
 
 function setup(
   terminalElement: React.ReactNode = <div data-testid="terminal" />,
-  options: { toolbarDisabled?: boolean; controller?: Pick<TerminalController, 'handleInput'> | null } = {},
+  options: {
+    toolbarDisabled?: boolean;
+    controller?: Pick<TerminalController, 'handleInput'> | null;
+    terminalOnly?: boolean;
+  } = {},
 ) {
-  const { toolbarDisabled = false, controller = null } = options;
+  const { toolbarDisabled = false, controller = null, terminalOnly = false } = options;
   const onScrollPages = vi.fn();
   const onScrollToBottom = vi.fn();
   render(
@@ -25,6 +29,7 @@ function setup(
       onScrollPages={onScrollPages}
       onScrollToBottom={onScrollToBottom}
       controller={controller as TerminalController | null | undefined}
+      terminalOnly={terminalOnly}
     />,
   );
   return { onScrollPages, onScrollToBottom };
@@ -104,5 +109,22 @@ describe('MobileTerminalLayout collapsed toolbar shortcut buttons', () => {
     expect(row).not.toBeNull();
     // jsdom does not compute Tailwind, so assert the class is present.
     expect(row?.className).toMatch(/overflow-x-auto/);
+  });
+});
+
+describe('MobileTerminalLayout terminalOnly', () => {
+  it('skips swipe ModeBar and Files/Env panels', () => {
+    setup(<div data-testid="terminal" />, { terminalOnly: true });
+    expect(screen.getByTestId('mobile-terminal-only')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal')).toBeInTheDocument();
+    expect(screen.queryByText('Files')).not.toBeInTheDocument();
+    expect(screen.queryByText('Environment')).not.toBeInTheDocument();
+  });
+
+  it('uses TerminalCapsule instead of the bottom Input|Commands toolbar', () => {
+    setup(<div data-testid="terminal" />, { terminalOnly: true });
+    expect(screen.getByTestId('terminal-capsule')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open input panel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Env/i })).not.toBeInTheDocument();
   });
 });

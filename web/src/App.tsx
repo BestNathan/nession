@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   createHashRouter,
   RouterProvider,
@@ -8,6 +8,17 @@ import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
 import { WebSocketContext } from './hooks/useWebSocket';
 import { useAppConnection } from './hooks/useAppConnection';
+import { isSessionFirst, setSessionFirst } from './lib/sessionFirst';
+import { FixtureApp } from './session-first/fixture/FixtureApp';
+import { FixtureShell } from './session-first/fixture/FixtureShell';
+import { FixtureWorkspace } from './session-first/fixture/FixtureWorkspace';
+import { SessionFirstShell } from './session-first/SessionFirstShell';
+
+// Module-stable (static element, immutable) — safe to create once at module
+// scope and reuse in both routers without a useMemo dependency.
+const fixtureRoute = { path: '/fixture', element: <FixtureShell /> };
+const fixtureWorkspaceRoute = { path: '/fixture/workspace', element: <FixtureWorkspace /> };
+const fixtureAppRoute = { path: '/fixture/app', element: <FixtureApp /> };
 
 function ReconnectingShell() {
   return (
@@ -31,8 +42,13 @@ function App() {
     isRestoringSession,
   } = useAppConnection();
 
+  const [sessionFirst, setSessionFirstOn] = useState(() => isSessionFirst());
+
   const loginRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
+      fixtureWorkspaceRoute,
+      fixtureRoute,
       {
         path: '*',
         element: (
@@ -53,22 +69,41 @@ function App() {
 
   const appRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
+      fixtureWorkspaceRoute,
+      fixtureRoute,
       {
         path: '/',
         element: (
           <WebSocketContext.Provider value={wsService!}>
-            <Dashboard connectionStatus={connectionStatus} />
+            {sessionFirst ? (
+              <SessionFirstShell
+                connectionStatus={connectionStatus}
+                onLegacy={() => {
+                  setSessionFirst(false);
+                  setSessionFirstOn(false);
+                }}
+              />
+            ) : (
+              <Dashboard
+                connectionStatus={connectionStatus}
+                onSessionFirst={() => {
+                  setSessionFirst(true);
+                  setSessionFirstOn(true);
+                }}
+              />
+            )}
           </WebSocketContext.Provider>
         ),
         children: [
           { index: true, element: null },
           { path: 'terminal/:sessionId', element: null },
-          { path: 'env', element: null },
+          { path: 'env', element: sessionFirst ? <Navigate to="/" replace /> : null },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },
     ]),
-    [connectionStatus, wsService],
+    [connectionStatus, wsService, sessionFirst],
   );
 
   if (isRestoringSession || (isAuthenticated && !wsService)) {

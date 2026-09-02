@@ -25,8 +25,8 @@ export function TerminalViewport({ controller }: { controller: TerminalControlle
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
-      style={{ backgroundColor: '#1e1e2e' }}
+      data-terminal-viewport
+      className="h-full w-full box-border bg-terminal-background pb-[length:var(--terminal-capsule-clearance,0px)]"
     />
   );
 }

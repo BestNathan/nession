@@ -1,0 +1,127 @@
+import { useState } from 'react';
+import { History } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { useCommandHistory } from '@/hooks/useCommandHistory';
+import { cn } from '@/lib/utils';
+import {
+  capsuleCaptionTextClass,
+  capsuleEmptyStatePadClass,
+  capsuleHistoryItemClass,
+  capsulePopoverHeaderClass,
+  capsulePopoverPanelClass,
+  capsulePopoverScrollClass,
+  capsulePopoverSearchClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { readPopoverSideOffset } from '@/session-first/capsule/measure/readPopoverSideOffset';
+
+interface CapsuleHistoryPopoverProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled?: boolean;
+  onSelect: (command: string) => void;
+  triggerClassName?: string;
+}
+
+function relativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function CapsuleHistoryPopover({
+  open,
+  onOpenChange,
+  disabled = false,
+  onSelect,
+  triggerClassName,
+}: CapsuleHistoryPopoverProps) {
+  const [query, setQuery] = useState('');
+  const { filterHistory } = useCommandHistory();
+  const entries = filterHistory(query);
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        nativeButton={false}
+        disabled={disabled}
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={disabled}
+            data-testid="capsule-history-trigger"
+            className={cn(
+              "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
+              triggerClassName,
+            )}
+            aria-label="Command history"
+          >
+            <History />
+          </Button>
+        }
+      />
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={readPopoverSideOffset()}
+        className={capsulePopoverPanelClass}
+      >
+        <PopoverHeader className={capsulePopoverHeaderClass}>
+          <PopoverTitle>History</PopoverTitle>
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search history…"
+            className={capsulePopoverSearchClass}
+            data-testid="capsule-history-search"
+          />
+        </PopoverHeader>
+        <div className={capsulePopoverScrollClass}>
+          {entries.length === 0 ? (
+            <p className={cn(capsuleEmptyStatePadClass, 'text-muted-foreground')}>
+              No matching commands
+            </p>
+          ) : (
+            entries.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                data-testid="capsule-history-item"
+                className={capsuleHistoryItemClass}
+                onClick={() => {
+                  onSelect(entry.command);
+                  onOpenChange(false);
+                  setQuery('');
+                }}
+              >
+                <span className="truncate font-mono">{entry.command}</span>
+                <span className={cn(capsuleCaptionTextClass, 'shrink-0 text-muted-foreground')}>
+                  {relativeTime(entry.timestamp)}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}

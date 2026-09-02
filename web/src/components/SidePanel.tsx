@@ -48,7 +48,7 @@ export function SidePanel({
       {isOpen && (
         <div
           data-testid="sidepanel-backdrop"
-          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-20 bg-overlay/40 lg:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}

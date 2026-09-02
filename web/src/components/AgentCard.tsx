@@ -26,7 +26,7 @@ export function AgentCard({ agent, onClick, onRename, onDelete }: AgentCardProps
     <Card
       className={cn(
         'cursor-pointer transition-all hover:border-primary/50',
-        agent.status === 'online' && 'border-green-500/30',
+        agent.status === 'online' && 'border-agent-online/30',
       )}
       onClick={onClick}
     >

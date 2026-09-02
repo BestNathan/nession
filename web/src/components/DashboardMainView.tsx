@@ -23,6 +23,7 @@ export interface DashboardMainViewProps {
   agentToDelete: Agent | null;
   setAgentToDelete: (a: Agent | null) => void;
   incrementServerRefreshKey: () => void;
+  onSessionFirst?: () => void;
 }
 
 export function DashboardMainView({
@@ -37,6 +38,7 @@ export function DashboardMainView({
   agentToDelete,
   setAgentToDelete,
   incrementServerRefreshKey,
+  onSessionFirst,
 }: DashboardMainViewProps) {
   const [createSessionAgentId, setCreateSessionAgentId] = useState<string | null>(null);
 
@@ -63,6 +65,7 @@ export function DashboardMainView({
         }}
         error={data.error}
         serverRefreshKey={serverRefreshKey}
+        onSessionFirst={onSessionFirst}
       />
 
       <div className="flex-1 min-h-0 flex flex-col p-3 gap-4 md:p-4 lg:p-6 lg:gap-6 pb-[env(safe-area-inset-bottom)] w-full max-w-[1920px] mx-auto">

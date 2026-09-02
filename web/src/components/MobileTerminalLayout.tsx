@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type { FileOps, FileEntry } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
+import { TerminalCapsule, type CapsuleMode } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
 
 interface MobileTerminalLayoutProps {
@@ -31,6 +32,8 @@ interface MobileTerminalLayoutProps {
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
   controller?: TerminalController | null;
+  /** Session-first: terminal panel only — Files/Env live in Workspace surface. */
+  terminalOnly?: boolean;
 }
 
 interface TerminalInputBarProps {
@@ -376,32 +379,68 @@ export function MobileTerminalLayout({
   onTerminalReveal,
   onGetTerminalPwd,
   controller,
+  terminalOnly = false,
 }: MobileTerminalLayoutProps) {
   const [activePanel, setActivePanel] = useState(0);
   const [inputCollapsed, setInputCollapsed] = useState(true);
+  const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
 
-  const panels = [
-    // Panel 0: Terminal
+  const capsuleSendText = (text: string) => {
+    if (toolbarDisabled) {
+      return;
+    }
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  };
+
+  const terminalPanel = (
     <div key="terminal" className="h-full flex flex-col">
       {terminalElement ? (
-        <div className="flex-1 min-h-0 relative flex flex-col">
+        <div className="flex-1 min-h-0 relative flex flex-col" data-terminal-capsule-host>
           {terminalElement}
           <TerminalScrollOverlay
             onScrollPages={onScrollPages}
             onScrollToBottom={onScrollToBottom}
           />
+          {terminalOnly ? (
+            <TerminalCapsule
+              experience="app"
+              mode={capsuleMode}
+              onModeChange={setCapsuleMode}
+              sendText={capsuleSendText}
+              disabled={toolbarDisabled}
+            />
+          ) : null}
         </div>
       ) : (
         <div className="flex-1 min-h-0" />
       )}
-      <TerminalInputBar
-        disabled={toolbarDisabled}
-        collapsed={inputCollapsed}
-        onToggle={() => setInputCollapsed((prev) => !prev)}
-        onReveal={onTerminalReveal}
-        controller={controller}
-      />
-    </div>,
+      {!terminalOnly ? (
+        <TerminalInputBar
+          disabled={toolbarDisabled}
+          collapsed={inputCollapsed}
+          onToggle={() => setInputCollapsed((prev) => !prev)}
+          onReveal={onTerminalReveal}
+          controller={controller}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (terminalOnly) {
+    return (
+      <div data-testid="mobile-terminal-only" className="flex-1 min-h-0 flex flex-col">
+        {terminalPanel}
+      </div>
+    );
+  }
+
+  const panels = [
+    // Panel 0: Terminal
+    terminalPanel,
 
     // Panel 1: Files
     <div key="files" className="h-full flex flex-col">

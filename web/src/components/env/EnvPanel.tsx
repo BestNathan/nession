@@ -243,7 +243,7 @@ function EnvFileRow({
       )}
       {isSourced ? (
         isCreateTime ? (
-          <span className="h-6 w-6 flex items-center justify-center text-emerald-500" title="Applied at session creation">
+          <span className="h-6 w-6 flex items-center justify-center text-success" title="Applied at session creation">
             <Check className="w-3.5 h-3.5" />
           </span>
         ) : (

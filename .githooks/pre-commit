@@ -69,6 +69,29 @@ if [ -n "$STAGED_TSX" ]; then
   fi
 fi
 
+# ── Capsule design-token gate (eslint rule + selftest on script change) ─────
+STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/session-first/capsule/.*\.(ts|tsx)$' || true)
+STAGED_TOKEN_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^design/tokens/' || true)
+STAGED_TOKEN_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-design-tokens' || true)
+if [ -n "$STAGED_CAPSULE$STAGED_TOKEN_SRC$STAGED_TOKEN_CHECK" ]; then
+  echo -e "${YELLOW}→ check-design-tokens${NC}"
+  if ./scripts/check-design-tokens.sh; then
+    echo -e "${GREEN}✓ check-design-tokens${NC}"
+  else
+    echo -e "${RED}✗ check-design-tokens — use capsuleStyles + design/tokens/${NC}"
+    HAS_ERROR=1
+  fi
+fi
+if echo "$STAGED_TOKEN_CHECK" | grep -q selftest; then
+  echo -e "${YELLOW}→ check-design-tokens-selftest${NC}"
+  if ./scripts/check-design-tokens-selftest.sh; then
+    echo -e "${GREEN}✓ check-design-tokens-selftest${NC}"
+  else
+    echo -e "${RED}✗ check-design-tokens-selftest${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Web: unit tests ────────────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-test-unit${NC}"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { createWebSocketService, destroyWebSocketService, WebSocketService } from '../services/websocket';
+import { createWebSocketService, destroyWebSocketService, getWebSocketService, WebSocketService } from '../services/websocket';
 import { ConnectionStatus } from '../types';
 import { getToken, setToken, clearToken, getRememberPreference } from '../lib/auth';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
@@ -30,7 +30,11 @@ export function useAppConnection() {
 
   useEffect(() => {
     return () => {
-      if (wsService) {
+      // Only tear down the singleton if it is still this instance. Otherwise a
+      // later setWsService() would have already replaced it, and destroying
+      // here would close the *new* socket (StrictMode and token/status
+      // updates both re-run this effect).
+      if (wsService && getWebSocketService() === wsService) {
         destroyWebSocketService();
       }
     };

@@ -20,8 +20,8 @@ export function TerminalBanner({ banner, reconnectAttempt }: TerminalBannerProps
     <div
       className={
         banner === 'reconnecting'
-          ? 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-yellow-600/90 text-yellow-50'
-          : 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-red-600/90 text-red-50'
+          ? 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-warning/90 text-warning-foreground'
+          : 'absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-destructive/90 text-destructive-foreground'
       }
     >
       {banner === 'reconnecting' ? (

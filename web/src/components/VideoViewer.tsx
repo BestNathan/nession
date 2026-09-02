@@ -11,7 +11,7 @@ export function VideoViewer({ blobUrl, filename }: VideoViewerProps) {
           {filename}
         </span>
       </div>
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-black/30">
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-inverse/30">
         <video
           controls
           src={blobUrl}

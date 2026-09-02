@@ -35,10 +35,24 @@ quick: fmt lint
 # Full CI checks (fmt + lint + coverage — coverage already runs all tests)
 check: fmt lint coverage
 
+# ── Design tokens ───────────────────────────────────────────────────────────
+
+tokens-gen:
+    node design/scripts/generate-tokens.mjs
+
+tokens-check:
+    node design/scripts/generate-tokens.mjs --check
+
+check-design-tokens:
+    ./scripts/check-design-tokens.sh
+
+check-design-tokens-selftest:
+    ./scripts/check-design-tokens-selftest.sh
+
 # ── Web ─────────────────────────────────────────────────────────────────────
 
 # Lint + type-check (fast, pre-commit)
-web-lint:
+web-lint: tokens-check
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 

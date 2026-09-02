@@ -59,9 +59,9 @@ function ReachIcon({ reachable }: { reachable: Reachable }) {
     return <HelpCircle className="w-3 h-3 text-muted-foreground shrink-0" />;
   }
   return reachable ? (
-    <Wifi className="w-3 h-3 text-green-500 shrink-0" />
+    <Wifi className="w-3 h-3 text-success shrink-0" />
   ) : (
-    <WifiOff className="w-3 h-3 text-red-500 shrink-0" />
+    <WifiOff className="w-3 h-3 text-destructive shrink-0" />
   );
 }
 
@@ -75,9 +75,9 @@ function mobileIcon(
     return { icon: Loader2, className: 'animate-spin text-muted-foreground' };
   }
   if (effectiveMode === 'relay') {
-    return { icon: WifiOff, className: 'text-amber-500' };
+    return { icon: WifiOff, className: 'text-warning' };
   }
-  return { icon: Wifi, className: 'text-green-500' };
+  return { icon: Wifi, className: 'text-success' };
 }
 
 // ── Shared address list content ──────────────────────────────────────
@@ -106,7 +106,7 @@ function AddressListItems({
         )}
         onClick={() => onSelect(null)}
       >
-        <Wifi className="w-4 h-4 text-green-500 shrink-0" />
+        <Wifi className="w-4 h-4 text-success shrink-0" />
         <span className="text-sm font-medium">Auto (lowest latency)</span>
       </div>
       {addresses.map((addr) => {

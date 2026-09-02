@@ -76,7 +76,7 @@ function FileTabBar({
           >
             <span className="truncate">{file.filename}</span>
             {dirtyFiles.has(file.id) && (
-              <span className="size-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+              <span className="size-1.5 rounded-full bg-file-modified flex-shrink-0" />
             )}
             <X
               className="tab-close size-3 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-destructive ml-0.5 transition-opacity"

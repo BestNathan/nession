@@ -14,8 +14,7 @@ describe('TerminalViewport', () => {
 
     const el = container.firstElementChild;
     expect(el).not.toBeNull();
-    expect(el).toHaveClass('h-full', 'w-full');
-    expect(el).toHaveStyle({ backgroundColor: '#1e1e2e' });
+    expect(el).toHaveClass('h-full', 'w-full', 'bg-terminal-background');
   });
 
   it('calls controller.attach on mount and detach on unmount', () => {

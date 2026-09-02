@@ -6,6 +6,7 @@ import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { MobileTerminalLayout } from './MobileTerminalLayout';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { TerminalCapsule } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '../services/fileOps';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
@@ -26,6 +27,98 @@ interface TerminalLayoutProps {
   fontSizeManager?: FontSizeManager | null;
   onGetTerminalPwd?: () => Promise<string>;
   controller?: TerminalController | null;
+  /** Session-first mobile: skip Files/Env swipe panels (use Workspace instead). */
+  terminalOnly?: boolean;
+  /** Desktop toolbar variant when fileOps is absent (session-first path). */
+  toolbar?: 'bottombar' | 'capsule';
+}
+
+interface DesktopToolbarLayoutProps {
+  toolbar: 'bottombar' | 'capsule';
+  isDesktop: boolean;
+  terminalElement: React.ReactNode;
+  toolbarDisabled: boolean;
+  envPanel: React.ReactNode;
+  inputPanel: React.ReactNode;
+  commandsPanel: React.ReactNode;
+  bottomTab: BottomTab;
+  onBottomTabChange: (tab: BottomTab) => void;
+  sheetOpen: boolean;
+  onSheetToggle: (open: boolean) => void;
+  sendText: (text: string) => void;
+}
+
+function DesktopToolbarLayout({
+  toolbar,
+  isDesktop,
+  terminalElement,
+  toolbarDisabled,
+  envPanel,
+  inputPanel,
+  commandsPanel,
+  bottomTab,
+  onBottomTabChange,
+  sheetOpen,
+  onSheetToggle,
+  sendText,
+}: DesktopToolbarLayoutProps) {
+  if (toolbar === 'capsule') {
+    return (
+      <div className="relative flex-1 min-h-0 flex flex-col" data-terminal-capsule-host>
+        {isDesktop && terminalElement}
+        {isDesktop ? (
+          <TerminalCapsule
+            experience="web"
+            sendText={sendText}
+            disabled={toolbarDisabled}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex-1 min-h-0 flex flex-col">
+        {isDesktop && terminalElement}
+      </div>
+      <BottomBar
+        activeTab={bottomTab}
+        onTabChange={onBottomTabChange}
+        showFilesTab={false}
+        sheetOpen={sheetOpen}
+        onSheetToggle={onSheetToggle}
+        envPanel={envPanel}
+        inputPanel={inputPanel}
+        commandsPanel={commandsPanel}
+      />
+    </>
+  );
+}
+
+function useDesktopKeyboardGuard(
+  isDesktop: boolean,
+  controller: TerminalController | null | undefined,
+) {
+  useEffect(() => {
+    if (!isDesktop || !controller) {
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDesktop, controller]);
 }
 
 /**
@@ -50,37 +143,24 @@ export function TerminalLayout({
   fontSizeManager,
   onGetTerminalPwd,
   controller,
+  terminalOnly = false,
+  toolbar = 'bottombar',
 }: TerminalLayoutProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [bottomTab, setBottomTab] = useState<BottomTab>('input');
   const [sheetOpen, setSheetOpen] = useState(false);
+  useDesktopKeyboardGuard(isDesktop, controller);
 
-  // Desktop keyboard input handling
-  useEffect(() => {
-    if (!isDesktop || !controller) {
+  const capsuleSendText = (text: string) => {
+    if (toolbarDisabled) {
       return;
     }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if target is an input/textarea (let native handling work)
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return;
-      }
-
-      // Ignore modifier-only keys
-      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
-        return;
-      }
-
-      // Let xterm handle the keyboard input via its own event system
-      // This useEffect is just to ensure the desktop layout is properly separated
-      // The actual keyboard handling happens in xterm's TerminalInputHandler
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDesktop, controller]);
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  };
 
   const envPanel = <EnvPanel sessionId={sessionId} />;
   const inputPanel = <InputPanel sendText={(text) => {
@@ -124,21 +204,20 @@ export function TerminalLayout({
       }
     />
   ) : (
-    <>
-      <div className="flex-1 min-h-0 flex flex-col">
-        {isDesktop && terminalElement}
-      </div>
-      <BottomBar
-        activeTab={bottomTab}
-        onTabChange={setBottomTab}
-        showFilesTab={false}
-        sheetOpen={sheetOpen}
-        onSheetToggle={setSheetOpen}
-        envPanel={envPanel}
-        inputPanel={inputPanel}
-        commandsPanel={commandsPanel}
-      />
-    </>
+    <DesktopToolbarLayout
+      toolbar={toolbar}
+      isDesktop={isDesktop}
+      terminalElement={terminalElement}
+      toolbarDisabled={toolbarDisabled}
+      envPanel={envPanel}
+      inputPanel={inputPanel}
+      commandsPanel={commandsPanel}
+      bottomTab={bottomTab}
+      onBottomTabChange={setBottomTab}
+      sheetOpen={sheetOpen}
+      onSheetToggle={setSheetOpen}
+      sendText={capsuleSendText}
+    />
   );
 
   // ── Layout containers always mounted, hidden with CSS ──────────────
@@ -160,6 +239,7 @@ export function TerminalLayout({
           fontSizeManager={fontSizeManager}
           onGetTerminalPwd={onGetTerminalPwd}
           controller={controller}
+          terminalOnly={terminalOnly}
         />
       </div>
 
