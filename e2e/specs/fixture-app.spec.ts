@@ -16,8 +16,10 @@ test('canonical App fixture renders the spatial terminal page', async ({ page })
   await expect(page.getByTestId('app-spatial-shell')).toBeVisible();
 
   // single-row header: sessions + workspace affordances, NO switcher, NO
-  // duplicated floating buttons
-  await expect(page.getByTestId('session-header-line')).toBeVisible();
+  // duplicated floating buttons. Both pager pages stay mounted, so the
+  // header line renders twice (terminal + workspace pages).
+  await expect(page.getByTestId('session-header-line')).toHaveCount(2);
+  await expect(page.getByTestId('session-header-line').first()).toBeVisible();
   await expect(page.getByTestId('app-header-sessions')).toBeVisible();
   await expect(page.getByTestId('app-header-workspace')).toBeVisible();
   await expect(page.getByTestId('surface-switcher')).toHaveCount(0);
