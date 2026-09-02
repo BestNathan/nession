@@ -12,11 +12,12 @@ describe('FixtureApp', () => {
     render(<FixtureApp />);
     expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
     // The spatial pager keeps every page mounted — the workspace page's
-    // SessionFirstMain renders its own header line, so both exist.
-    expect(screen.getAllByTestId('session-header-line').length).toBeGreaterThan(0);
+    // SessionFirstMain renders its own header line, so exactly two exist.
+    expect(screen.getAllByTestId('session-header-line')).toHaveLength(2);
     expect(screen.getByTestId('app-header-sessions')).toBeInTheDocument();
     expect(screen.getByTestId('app-header-workspace')).toBeInTheDocument();
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
+    expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
   });
 
   it('navigates to the workspace page via ☰ and back via ←', async () => {
@@ -25,8 +26,13 @@ describe('FixtureApp', () => {
     await user.click(screen.getByTestId('app-header-workspace'));
     expect(screen.getByTestId('app-tool-header')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
+    // Surface derives from the pager position: the terminal page is now
+    // hidden — proves the pager moved, not just mounted.
+    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(true);
     await user.click(screen.getByTestId('app-tool-back'));
     expect(screen.getByTestId('terminal-well')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(false);
   });
 
   it('opens the sessions page via the header ≡ button', async () => {
@@ -34,5 +40,8 @@ describe('FixtureApp', () => {
     const user = userEvent.setup();
     await user.click(screen.getByTestId('app-header-sessions'));
     expect(screen.getByTestId('session-first-sidebar')).toBeInTheDocument();
+    // The sessions page is a pager position, not a surface — the terminal
+    // page must stay visible behind it.
+    expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(false);
   });
 });

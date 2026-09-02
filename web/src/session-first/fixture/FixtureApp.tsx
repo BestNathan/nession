@@ -30,9 +30,9 @@ const fixtureOps = fixtureFileOps();
  */
 export function FixtureApp() {
   const [spatialIndex, setSpatialIndex] = useState<SpatialPageIndex>(1);
-  // Surface tracks the page semantics; each pager page pins its own surface
-  // in JSX, so only the setter is needed here.
-  const [, setSurface] = useState<Surface>('terminal');
+  // Surface derives from the pager position — page 2 is the workspace,
+  // every other position is the terminal page.
+  const surface: Surface = spatialIndex === 2 ? 'workspace' : 'terminal';
   const [tool, setTool] = useState<WorkspaceToolId>('files');
 
   const selectedId = FIXTURE_SELECTED_ID;
@@ -81,10 +81,8 @@ export function FixtureApp() {
     tool,
     fileOps: fixtureOps,
     connectionStatus: 'connected' as const,
-    onSurfaceChange: (s: Surface) => {
-      setSurface(s);
-      setSpatialIndex(s === 'workspace' ? 2 : 1);
-    },
+    onSurfaceChange: (s: Surface) =>
+      setSpatialIndex(s === 'workspace' ? 2 : 1),
     onToolChange: setTool,
     onOpenAgent: () => {},
   };
@@ -97,10 +95,7 @@ export function FixtureApp() {
     >
       <AppSpatialShell
         index={spatialIndex}
-        onIndexChange={(index) => {
-          setSpatialIndex(index);
-          setSurface(index === 2 ? 'workspace' : 'terminal');
-        }}
+        onIndexChange={setSpatialIndex}
         sessions={
           <SessionFirstSidebar
             {...sidebarProps}
@@ -111,7 +106,7 @@ export function FixtureApp() {
           <div className="flex h-full min-h-0 flex-col">
             <SessionFirstMain
               {...mainShared}
-              surface="terminal"
+              surface={surface}
               showWorkspace={false}
               experience="app"
               onOpenDrawer={() => setSpatialIndex(0)}
@@ -132,7 +127,7 @@ export function FixtureApp() {
           <div className="flex h-full min-h-0 flex-col">
             <SessionFirstMain
               {...mainShared}
-              surface="workspace"
+              surface={surface}
               showTerminal={false}
               experience="app"
             />
