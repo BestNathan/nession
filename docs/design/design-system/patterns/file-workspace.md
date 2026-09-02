@@ -72,6 +72,69 @@ No Primitive zinc/gray path colors in product TSX.
 | Gestures | Splitter drag | Inner horizontal swipe must not dismiss Workspace; prefer stack back |
 | Terminal | Hidden while Workspace/Files is the surface | Hidden while Workspace layer is open |
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and Web Workspace canonical screen ([#566](https://github.com/BestNathan/nession/pull/566)).
+
+### Dominance
+
+- FileWorkspace is a **secondary work surface** inside Workspace — auxiliary to the Session, never peer to Terminal at the shell level.
+- When Files is active, the **editor content or selected file name** may be primary within the tool; the browser tree is secondary/supporting.
+
+### Information hierarchy
+
+- **Primary (detail pane):** open file content / editor hero.
+- **Secondary (browser pane):** tree paths, file names, selection highlight.
+- **Tertiary:** path chrome, diff marks, empty-editor placeholder.
+
+### Alignment
+
+- Master/detail split inside the tool only — browser left (Web wide), editor right; App stack: browser → push editor.
+- WorkspaceNavigation stays **above** this split (Web) or at stack root (App) — not embedded in the file panes.
+
+### Density
+
+- **Workspace tools density** — dense tree rows and editor chrome ([visual-language.md](../../visual-language.md) §4).
+- Editor uses Domain `editor.*` tokens — not shadcn admin card padding.
+
+### Whitespace
+
+- Pane separation: border or background shift between browser and editor — acceptable here because whitespace alone cannot separate two dense work panes (R-S3 content exception).
+- Do not wrap the entire Files tool in an outer card that separates it from Workspace shell.
+
+### Contrast
+
+- Selected file: Domain `file.selected` — one accent in the browser pane.
+- Modified/created/deleted marks: Domain file tokens — not Primitive palette dots.
+- Unreachable file API: `conditional-prominent` local error — names Agent/connectivity, not Session death.
+
+### Surface treatment
+
+- Secondary work surface background shift vs Workspace canvas.
+- Bordered split **inside** the tool only — not a shell-level Terminal \| Files split.
+
+### State-driven emphasis
+
+| Condition | Emphasis |
+|-----------|----------|
+| File selected | Browser row highlight; editor shows content |
+| File modified | Domain mark on tab/row — local, not whole-pane alarm |
+| Agent offline / file API unavailable | Tool hidden or Files-level error — `conditional-prominent` |
+| Session `exited` | Read-only/unavailable — Session channel neutral, not Agent red |
+
+### Anti-patterns
+
+- Default Web layout with Files beside Terminal (permanent split).
+- Master/detail layout forced onto AgentDetail or Session tool bodies.
+- ConnectionStatus three-channel colors on file rows.
+- Files tool as a second app shell with its own persistent outer sidebar.
+- App: shrunken side-by-side Web split when stack navigation fits better.
+
+### Canonical reference
+
+- Web: `/#/fixture/workspace` 1440×900 — tree + editor with realistic fixture files ([#566](https://github.com/BestNathan/nession/pull/566)).
+- App: `/#/fixture/app` Workspace → Files — `filesApp` push layout ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Master/detail exists only inside the Files tool.
