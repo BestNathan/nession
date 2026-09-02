@@ -13,6 +13,7 @@ import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
+import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
 import { MobileImeInput } from '../input/MobileImeInput';
 import type { FontSizeManager } from '../FontSizeManager';
@@ -73,6 +74,7 @@ export class TerminalController {
   private inputRouter: InputRouter | null = null;
   private inputSourceManager: InputSourceManager;
   private mobileIme: MobileImeInput | null = null;
+  private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private useMobileIme: boolean;
   private attached = false;
 
@@ -140,8 +142,24 @@ export class TerminalController {
 
     this.instance.attach(element);
 
+    const capsuleHost = element.closest('[data-terminal-capsule-host]');
+    if (capsuleHost instanceof HTMLElement) {
+      this.capsuleOcclusionScroll = new CapsuleOcclusionScroll(
+        terminal,
+        capsuleHost,
+        () => this.cellDimensions.height,
+      );
+      this.capsuleOcclusionScroll.bind();
+    }
+
     // Transport → xterm: display output as it arrives.
-    transport.onOutput = (data: Uint8Array) => { terminal.write(data); };
+    transport.onOutput = (data: Uint8Array) => {
+      const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
+      terminal.write(data);
+      if (follow) {
+        this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+      }
+    };
     // Remote (tmux → agent) resize → local xterm grid.
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
     // Transport connection state → domain TerminalStatus callback.
@@ -198,6 +216,9 @@ export class TerminalController {
     this.mobileIme?.dispose();
     this.mobileIme = null;
 
+    this.capsuleOcclusionScroll?.dispose();
+    this.capsuleOcclusionScroll = null;
+
     // Break transport→terminal closures before disposing either side.
     if (this.transport) {
       this.transport.onOutput = null;
@@ -223,7 +244,11 @@ export class TerminalController {
 
   /** Write data to the xterm display (e.g. from an external source). */
   write(data: string | Uint8Array): void {
+    const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
     this._terminal?.write(data);
+    if (follow) {
+      this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+    }
   }
 
   /**
@@ -320,8 +345,14 @@ export class TerminalController {
 
   // ── Scroll / font-size / cell dimensions ─────────────────────────────────
 
-  /** Scroll the xterm viewport to the bottom. */
-  scrollToBottom(): void { this.instance.scrollToBottom(); }
+  /** Scroll the xterm viewport to the live bottom (above capsule occlusion when present). */
+  scrollToBottom(): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollToMarginBottom();
+      return;
+    }
+    this.instance.scrollToBottom();
+  }
   /** Scroll the xterm viewport by whole pages (negative = up). */
   scrollPages(pages: number): void { this.instance.scrollPages(pages); }
   /** Scroll the xterm viewport by lines (negative = up). */

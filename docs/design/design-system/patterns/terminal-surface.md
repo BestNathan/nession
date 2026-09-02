@@ -84,7 +84,7 @@ Desktop shell does **not** install global key handlers that compete with xterm. 
 | Scroll overlay `pointerdown` | Keep IME focused (`preventDefault` on overlay chrome only) | — |
 | Commands mode | Phys key buttons | Immediate sequences via quickcmd source |
 
-**Rule:** Tap-to-focus opens IME even when capsule is visible. When scrolled to the live bottom, the cursor row may sit under the capsule overlay — scroll up to read obscured lines (ChatGPT-style).
+**Rule:** Tap-to-focus opens IME even when capsule is visible. Live output pins above the fake-terminal band; scroll up to read lines that pass under the capsule.
 
 **Rule:** Top-level spatial gestures ([app.md](../../interaction/app.md) — Sessions / Workspace) must not fire from normal terminal scroll regions. Edge activation zones belong in App shell spec, not here.
 
@@ -106,7 +106,7 @@ Desktop shell does **not** install global key handlers that compete with xterm. 
 
 ## Viewport fit & capsule occlusion
 
-**xterm uses the full well height.** The capsule is a floating overlay; it does **not** shrink the xterm grid via viewport padding.
+**xterm uses the full well height.** The capsule is a floating overlay. The bottom occlusion band is a **fake terminal** (same background, no live text when pinned to bottom). Scroll margin keeps the live bottom above that band; scrolling up lets history pass under the capsule.
 
 Occlusion height is computed at runtime:
 
@@ -116,7 +116,8 @@ occlusion = max(0, hostBottom − dockTop) + terminalClearanceGap
 
 Published on `[data-terminal-capsule-host]` as `--terminal-capsule-occlusion` by `useCapsuleDockClearance`. Consumed by:
 
-- `[data-terminal-capsule-host]::after` — bottom fade into terminal background (visual only)
+- `[data-terminal-capsule-host]::after` — opaque fake-terminal band (visual cover when pinned)
+- `CapsuleOcclusionScroll` — scroll margin so live output stops above the band
 - `TerminalScrollOverlay` — `bottom` offset so controls sit above the dock
 
 | Trigger | Must recalculate |
@@ -190,9 +191,9 @@ Do not document compose frozen semantics in two places — capsule spec owns Ent
 
 ## Acceptance
 
-- [ ] Session-first Web path: xterm full well height; capsule overlays scrollback; fade at occlusion zone.
-- [ ] Session-first App path: same overlay model; IME tap-to-focus; scroll overlay above dock; overlay scroll does not kill IME.
-- [ ] At live bottom, newest lines may be partially hidden under capsule — scroll up to read (intentional).
+- [ ] Session-first Web path: xterm full well height; capsule spans shell max width; live bottom above fake-terminal band.
+- [ ] Session-first App path: same overlay + scroll-margin model; IME tap-to-focus; scroll overlay above dock.
+- [ ] At live bottom, newest lines stay above the fake-terminal band; scroll up to read under the capsule.
 - [ ] `toolbarDisabled` disables capsule and quick keys; xterm scrollback still readable.
 - [ ] Workspace surface switch refits xterm on return (no zero-size or clipped grid).
 - [ ] Relay and P2P attach paths share the same input/focus rules.

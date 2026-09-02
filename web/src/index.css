@@ -174,7 +174,7 @@ html {
   outline-offset: var(--focus-ring-offset);
 }
 
-/* Terminal capsule overlay — scrollback fades under floating dock (ChatGPT-style) */
+/* Terminal capsule — fake-terminal band (same bg as xterm; hides lines when pinned to bottom) */
 [data-terminal-capsule-host] {
   position: relative;
 }
@@ -187,7 +187,7 @@ html {
   bottom: 0;
   height: var(--terminal-capsule-occlusion, 0px);
   z-index: 5;
-  background: linear-gradient(to bottom, transparent, var(--terminal-background));
+  background: var(--terminal-background);
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */

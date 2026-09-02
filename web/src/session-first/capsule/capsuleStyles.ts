@@ -34,7 +34,7 @@ export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
 export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-radius)]';
 
 export const capsuleShellInnerSizeClass =
-  'pointer-events-auto w-fit max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
+  'pointer-events-auto w-full max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
 
 export const capsuleShellWebOuterClass =
   'inset-x-[length:var(--composer-shell-margin-x)] flex justify-center pointer-events-none';
