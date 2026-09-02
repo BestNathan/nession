@@ -546,10 +546,14 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
   **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明它还真的能抓到 —— 门禁静默失效比没门禁更糟。
 
   `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
-- **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
+- **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。注意它跑在默认 socket 上,安全性只来自名字前缀(`:43` list / `:67` kill)。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check`,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **⛔ 禁止擅自改动 lint 规则**:`[workspace.lints.*]`、`clippy.toml`、命令行 `-A`、`#[allow]` 一律需仓库所有者明确同意后才能改,收紧和放宽都算。报错修代码,不准改规则消错。测试代码同样必须受门禁覆盖,不靠"测试是特例"豁免。详见「Rust linting」。
+- **⛔ 禁止 `tmux kill-server`,禁止不带 `-t <name>` 的 `kill-session`。** `kill-session -t <name>` 只允许针对本次自己创建的会话。需要临时 tmux 一律 `tmux -S /tmp/<唯一名>/sock`,清理前先用 `#{socket_path}` 断言路径。**`TMUX_TMPDIR=` 前缀不是隔离,不准拿它当保险。**
+- **⛔ 禁止本地跑 e2e**(`npx playwright test`、为 e2e 跑 `cargo run`)。本地验 UI 只用 `cd web && npm run dev`;查 spec 语法用 `npx playwright test --list`。e2e spec 一律带 `test.skip(!process.env.CI, 'local only — runs in CI workflow only')`。与 §「Screenshots with Playwright」的 Playwright MCP 工具无关,那个照常用。
+
+  以上两条的实测依据与修复进度见 #574、#575。
 - **覆盖率阈值**（`scripts/check-coverage.sh` 是唯一来源,每次遍历全部登记的 crate,不按改动收窄）：
 
   | 目标 | 阈值 |
