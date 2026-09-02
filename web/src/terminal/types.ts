@@ -21,6 +21,9 @@ export interface ConnectionOptions {
 /** Device class for responsive rendering. */
 export type DeviceProfile = 'mobile' | 'desktop';
 
+/** Scrollback ownership for the terminal surface. */
+export type TerminalScrollbackMode = 'local-buffer' | 'legacy';
+
 /** Device profile configuration. */
 export interface DeviceProfileConfig {
   fontSize: number;

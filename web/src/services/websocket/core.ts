@@ -198,6 +198,14 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
     return this.connectionStatus;
   }
 
+  getUrl(): string {
+    return this.url;
+  }
+
+  getAuthToken(): string {
+    return this.authToken;
+  }
+
   onConnectionChange(callback: ConnectionChangeCallback): () => void {
     this.connectionChangeCallbacks.push(callback);
     return () => {

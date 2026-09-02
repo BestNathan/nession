@@ -59,33 +59,64 @@ export class TerminalInstance {
     if (this.disposed) {
       return;
     }
+    if (this.terminal.element?.parentElement === element) {
+      return;
+    }
+    if (this.terminal.element) {
+      // xterm.open() is one-shot: once the terminal has been opened it returns
+      // early when called again. Reparent the existing DOM tree so detach /
+      // reattach preserves both the buffer and the renderer state.
+      element.appendChild(this.terminal.element);
+      (element as XtermMountElement).xtermInstance = this.terminal;
+      this.terminal.refresh(0, this.terminal.rows - 1);
+      return;
+    }
     this.terminal.open(element);
     // Expose the Terminal instance on the container element so E2E tests can
     // read the buffer (canvas/webgl renderers don't put text in the DOM).
     (element as XtermMountElement).xtermInstance = this.terminal;
   }
 
-  /** Detach from container. No-op: terminal instance stays alive. */
+  /** Detach from container — preserve JS buffer; drop stale DOM nodes. */
   detach(): void {
-    // Intentionally empty
+    if (this.disposed) {
+      return;
+    }
+    this.terminal.element?.remove();
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
   }
 
   get cellDimensions(): { width: number; height: number } {
-    const rs = (this.terminal as unknown as {
-      _core?: {
-        _renderService?: {
-          dimensions?: {
-            css?: {
-              cell?: { width: number; height: number };
+    const fallback = { width: 8, height: 16 };
+    try {
+      const rs = (this.terminal as unknown as {
+        _core?: {
+          _renderService?: {
+            dimensions?: {
+              css?: {
+                cell?: { width: number; height: number };
+              };
             };
           };
         };
+      })._core?._renderService;
+      if (!rs) {
+        return fallback;
+      }
+      const dims = rs.dimensions;
+      return {
+        width: dims?.css?.cell?.width || fallback.width,
+        height: dims?.css?.cell?.height || fallback.height,
       };
-    })._core?._renderService;
-    return {
-      width: rs?.dimensions?.css?.cell?.width || 8,
-      height: rs?.dimensions?.css?.cell?.height || 16,
-    };
+    } catch {
+      // xterm's dimensions getter throws until the renderer finishes its first
+      // layout pass (common right after open(), under StrictMode remount, or
+      // when WebGL is still initializing).
+      return fallback;
+    }
   }
 
   scrollToBottom(): void { this.terminal.scrollToBottom(); }

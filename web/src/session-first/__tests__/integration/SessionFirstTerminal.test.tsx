@@ -9,12 +9,15 @@ const { wsListeners } = vi.hoisted(() => ({
   wsListeners: [] as Array<(status: string) => void>,
 }));
 
-vi.mock('@/hooks/useP2PConnection', () => ({ useP2PConnection: () => {} }));
-vi.mock('@/hooks/useAddressPlan', () => ({
-  useAddressPlan: () => ({ ready: true, urls: [] }),
+vi.mock('@/hooks/useP2PAttachTransport', () => ({
+  useP2PAttachTransport: () => ({
+    waitingForAddressPlan: false,
+    p2pConnection: null,
+    activeUrl: null,
+  }),
 }));
-vi.mock('@/terminal/hooks/useTerminalStateMachine', () => ({
-  useTerminalStateMachine: () => ({ terminalState: 'idle', reconnectCount: 0 }),
+vi.mock('@/session-first/terminal/useSessionFirstTerminalAttach', () => ({
+  useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
 vi.mock('@/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/hooks/useWebSocket', () => ({
@@ -33,28 +36,14 @@ vi.mock('@/hooks/useWebSocket', () => ({
     applySessionEnv: vi.fn(),
   }),
 }));
-vi.mock('@/terminal/components/TerminalPane', () => ({
-  TerminalPane: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="terminal-pane">{sessionId}</div>
+vi.mock('@/session-first/terminal/SessionFirstTerminalPane', () => ({
+  SessionFirstTerminalPane: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="session-first-terminal-pane">{sessionId}</div>
   ),
 }));
-vi.mock('@/components/TerminalLayout', () => ({
-  TerminalLayout: ({
-    terminalElement,
-    terminalOnly,
-    toolbar,
-  }: {
-    terminalElement: React.ReactNode;
-    terminalOnly?: boolean;
-    toolbar?: string;
-  }) => (
-    <div
-      data-testid="terminal-layout"
-      data-terminal-only={terminalOnly ? 'true' : 'false'}
-      data-toolbar={toolbar ?? 'bottombar'}
-    >
-      {terminalElement}
-    </div>
+vi.mock('@/session-first/terminal/TerminalSurface', () => ({
+  TerminalSurface: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="session-first-terminal-surface">{children}</div>
   ),
 }));
 
@@ -99,30 +88,27 @@ describe('SessionFirstTerminal', () => {
     renderTerminal(false);
     const root = screen.getByTestId('session-first-terminal');
     expect(root).toHaveTextContent('Select a session');
-    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-first-terminal-pane')).not.toBeInTheDocument();
   });
 
-  it('renders TerminalLayout with capsule toolbar when a session is attached', () => {
+  it('renders native TerminalSurface when a session is attached', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');
     renderTerminal(false, store);
-    const layout = screen.getByTestId('terminal-layout');
-    expect(layout).toBeInTheDocument();
-    expect(layout).toHaveAttribute('data-toolbar', 'capsule');
-    expect(layout).toHaveAttribute('data-terminal-only', 'true');
+    expect(screen.getByTestId('session-first-terminal-surface')).toBeInTheDocument();
   });
 
-  it('keeps TerminalPane mounted when hidden while a session is attached', () => {
+  it('keeps terminal pane mounted when hidden while a session is attached', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');
     const { rerenderHidden } = renderTerminal(false, store);
 
-    const pane = screen.getByTestId('terminal-pane');
+    const pane = screen.getByTestId('session-first-terminal-pane');
     expect(pane).toHaveTextContent('agent:sess');
 
     rerenderHidden(true);
     expect(screen.getByTestId('session-first-terminal').className).toMatch(/\bhidden\b/);
-    expect(screen.getByTestId('terminal-pane')).toBe(pane);
+    expect(screen.getByTestId('session-first-terminal-pane')).toBe(pane);
   });
 
   it('clears a stuck failed banner when attaching a new session after relay drop', () => {

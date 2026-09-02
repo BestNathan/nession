@@ -26,7 +26,6 @@ export function useAppConnection() {
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL,
   );
   const unsubRef = useRef<(() => void) | null>(null);
-  const hasAutoConnected = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -79,14 +78,22 @@ export function useAppConnection() {
   }, [connectInternal]);
 
   useEffect(() => {
-    if (!hasAutoConnected.current && autoConnect) {
-      hasAutoConnected.current = true;
-      connectInternal(getRememberPreference(), true).catch(() => {
+    if (!autoConnect) {
+      return;
+    }
+
+    let cancelled = false;
+    connectInternal(getRememberPreference(), true).catch(() => {
+      if (!cancelled) {
         clearToken();
         setWasEverAuthed(false);
         setConnectionStatus('disconnected');
-      });
-    }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [autoConnect, connectInternal]);
 
   useVisibilityReconnect(wasEverAuthed, wsService);

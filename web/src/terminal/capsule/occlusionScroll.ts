@@ -2,6 +2,8 @@ import type { Terminal } from '@xterm/xterm';
 
 export const TERMINAL_CAPSULE_OCCLUSION_EVENT = 'terminal-capsule-occlusion';
 
+export type ScrollMode = 'following' | 'history';
+
 /** Read published occlusion height from the capsule host (inline style wins). */
 export function readOcclusionPx(host: HTMLElement): number {
   const inline = host.style.getPropertyValue('--terminal-capsule-occlusion');
@@ -48,7 +50,11 @@ export class CapsuleOcclusionScroll {
   private scrollDisposable: { dispose(): void } | null = null;
   private resizeDisposable: { dispose(): void } | null = null;
   private occlusionListener: (() => void) | null = null;
+  private touchStartListener: ((event: TouchEvent) => void) | null = null;
+  private touchMoveListener: ((event: TouchEvent) => void) | null = null;
+  private touchLastY: number | null = null;
   private wasFollowing = true;
+  private currentMode: ScrollMode = 'following';
   private observedDock: HTMLElement | null = null;
 
   constructor(
@@ -70,7 +76,8 @@ export class CapsuleOcclusionScroll {
     };
 
     const updateFollowingFromScroll = () => {
-      this.wasFollowing = this.isFollowingMarginBottom();
+      const following = this.isFollowingMarginBottom();
+      this.setMode(following ? 'following' : 'history');
     };
 
     this.scrollDisposable = this.terminal.onScroll(updateFollowingFromScroll);
@@ -94,6 +101,18 @@ export class CapsuleOcclusionScroll {
     this.occlusionListener = onOcclusionGeometryChange;
     this.host.addEventListener(TERMINAL_CAPSULE_OCCLUSION_EVENT, this.occlusionListener);
 
+    const element = this.terminal.element;
+    if (element) {
+      this.terminal.attachCustomWheelEventHandler((event) => this.handleWheel(event));
+
+      this.touchStartListener = (event) => {
+        this.touchLastY = event.touches[0]?.clientY ?? null;
+      };
+      this.touchMoveListener = (event) => this.handleTouchMove(event);
+      element.addEventListener('touchstart', this.touchStartListener, { capture: true, passive: true });
+      element.addEventListener('touchmove', this.touchMoveListener, { capture: true, passive: false });
+    }
+
     updateFollowingFromScroll();
     onOcclusionGeometryChange();
   }
@@ -112,10 +131,65 @@ export class CapsuleOcclusionScroll {
     this.scrollDisposable = null;
     this.resizeDisposable?.dispose();
     this.resizeDisposable = null;
+    const element = this.terminal.element;
+    this.terminal.attachCustomWheelEventHandler(() => true);
+    if (element && this.touchStartListener) {
+      element.removeEventListener('touchstart', this.touchStartListener, true);
+    }
+    if (element && this.touchMoveListener) {
+      element.removeEventListener('touchmove', this.touchMoveListener, true);
+    }
+    this.touchStartListener = null;
+    this.touchMoveListener = null;
+    this.touchLastY = null;
+    this.host.style.removeProperty('--terminal-content-bottom-inset');
+    delete this.host.dataset.terminalScrollMode;
   }
 
   marginLines(): number {
     return marginLinesFromOcclusion(readOcclusionPx(this.host), this.getCellHeight());
+  }
+
+  mode(): ScrollMode {
+    return this.currentMode;
+  }
+
+  enterHistory(): void {
+    this.setMode('history');
+  }
+
+  handleWheel(event: WheelEvent): boolean {
+    if (!this.hasLocalScrollback()) {
+      return true;
+    }
+    const lines = this.wheelLines(event.deltaY, event.deltaMode);
+    if (lines === 0) {
+      return true;
+    }
+    if (lines < 0) {
+      this.enterHistory();
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.terminal.scrollLines(lines);
+    this.syncModeFromViewport();
+    return false;
+  }
+
+  scrollPages(pages: number): void {
+    if (pages < 0) {
+      this.enterHistory();
+    }
+    this.terminal.scrollPages(pages);
+    this.syncModeFromViewport();
+  }
+
+  scrollLines(lines: number): void {
+    if (lines < 0) {
+      this.enterHistory();
+    }
+    this.terminal.scrollLines(lines);
+    this.syncModeFromViewport();
   }
 
   isFollowingMarginBottom(): boolean {
@@ -124,18 +198,68 @@ export class CapsuleOcclusionScroll {
       buffer.viewportY,
       buffer.length,
       this.terminal.rows,
-      this.marginLines(),
+      0,
     );
   }
 
-  /** Pin to live bottom — content stops above the fake-terminal band. */
+  /** Pin to the real xterm bottom; the viewport reserves the capsule space. */
   scrollToMarginBottom(): void {
-    const margin = this.marginLines();
+    this.setMode('following');
     this.terminal.scrollToBottom();
-    if (margin > 0) {
-      this.terminal.scrollLines(-margin);
-    }
     this.wasFollowing = true;
+  }
+
+  private setMode(mode: ScrollMode): void {
+    this.currentMode = mode;
+    this.wasFollowing = mode === 'following';
+    const inset = mode === 'following'
+      ? 'var(--terminal-capsule-occlusion, 0px)'
+      : '0px';
+    this.host.style.setProperty('--terminal-content-bottom-inset', inset);
+    this.host.dataset.terminalScrollMode = mode;
+  }
+
+  private syncModeFromViewport(): void {
+    this.setMode(this.isFollowingMarginBottom() ? 'following' : 'history');
+  }
+
+  private wheelLines(deltaY: number, deltaMode: number): number {
+    if (!Number.isFinite(deltaY) || deltaY === 0) {
+      return 0;
+    }
+    if (deltaMode === 1) {
+      return Math.trunc(deltaY);
+    }
+    if (deltaMode === 2) {
+      return Math.trunc(deltaY * this.terminal.rows);
+    }
+    const cellHeight = this.getCellHeight();
+    const pixelsPerLine = cellHeight > 0 ? cellHeight : 16;
+    return Math.sign(deltaY) * Math.max(1, Math.round(Math.abs(deltaY) / pixelsPerLine));
+  }
+
+  private handleTouchMove(event: TouchEvent): void {
+    if (!this.hasLocalScrollback()) {
+      return;
+    }
+    const currentY = event.touches[0]?.clientY;
+    if (currentY === undefined || this.touchLastY === null) {
+      this.touchLastY = currentY ?? null;
+      return;
+    }
+    const deltaY = currentY - this.touchLastY;
+    this.touchLastY = currentY;
+    const lines = this.wheelLines(-deltaY, 0);
+    if (lines === 0) {
+      return;
+    }
+    if (lines < 0) {
+      this.enterHistory();
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.terminal.scrollLines(lines);
+    this.syncModeFromViewport();
   }
 
   scheduleScrollToMarginBottom(): void {
@@ -157,7 +281,7 @@ export class CapsuleOcclusionScroll {
 
   /** Snapshot follow state before write — xterm auto-scroll resets viewport. */
   snapshotFollowing(): boolean {
-    this.wasFollowing = this.isFollowingMarginBottom();
+    this.wasFollowing = this.currentMode === 'following' && this.isFollowingMarginBottom();
     return this.wasFollowing;
   }
 
@@ -168,5 +292,10 @@ export class CapsuleOcclusionScroll {
     }
     this.observedDock = dock;
     this.resizeObserver?.observe(dock);
+  }
+
+  private hasLocalScrollback(): boolean {
+    const buffer = this.terminal.buffer.active;
+    return buffer.type === 'normal' && buffer.length > this.terminal.rows;
   }
 }

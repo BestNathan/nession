@@ -4,6 +4,7 @@ import { getDefaultStore } from 'jotai';
 import type { ConnectionState } from '../../hooks/useP2PConnection';
 import { inputModeAtomFamily, type InputMode } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
+import { terminalTransportReadyAtom } from '../state/transport';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
@@ -17,7 +18,7 @@ import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
 import { MobileImeInput } from '../input/MobileImeInput';
 import type { FontSizeManager } from '../FontSizeManager';
-import type { DeviceProfile } from '../types';
+import type { DeviceProfile, TerminalScrollbackMode } from '../types';
 
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
@@ -29,6 +30,7 @@ export interface TerminalControllerOptions {
    * a real, cursor-anchored element to attach to.
    */
   deviceProfile?: DeviceProfile;
+  scrollbackMode?: TerminalScrollbackMode;
 }
 
 /**
@@ -76,6 +78,7 @@ export class TerminalController {
   private mobileIme: MobileImeInput | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private useMobileIme: boolean;
+  private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
 
   /** Callbacks → Jotai */
@@ -96,6 +99,7 @@ export class TerminalController {
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
+    this.scrollbackMode = options.scrollbackMode ?? 'legacy';
     this.initInputRouter();
   }
 
@@ -126,33 +130,51 @@ export class TerminalController {
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
+  /** True when xterm is open in the DOM and transport handlers are wired. */
+  isViewportAttached(): boolean {
+    return this.attached;
+  }
+
   /** Create xterm, mount on `element`, and wire the transport to it. */
   attach(element: HTMLElement): void {
-    if (this.attached) { return; }
-
-    const transport = this.transportFactory();
-    this.instance.onCellSizeChange = () => {
-      this.resizeController?.remeasure();
-    };
     const terminal = this.instance.terminal;
-
-    this.transport = transport;
-    this._terminal = terminal;
-    this.attached = true;
-
-    this.instance.attach(element);
-
-    const capsuleHost = element.closest('[data-terminal-capsule-host]');
-    if (capsuleHost instanceof HTMLElement) {
-      this.capsuleOcclusionScroll = new CapsuleOcclusionScroll(
-        terminal,
-        capsuleHost,
-        () => this.cellDimensions.height,
-      );
-      this.capsuleOcclusionScroll.bind();
+    if (this.instance.isDisposed) {
+      return;
     }
 
-    // Transport → xterm: display output as it arrives.
+    // Same container — transport-only rewire (P2P socket / route changed).
+    if (this.attached && terminal.element?.parentElement === element) {
+      this.rewireTransport(terminal);
+      return;
+    }
+
+    // Reparent to a new viewport container (React remount).
+    if (this.attached && terminal.element?.parentElement !== element) {
+      this.teardownTransport();
+      this.capsuleOcclusionScroll?.dispose();
+      this.capsuleOcclusionScroll = null;
+      this.instance.detach();
+      this.attached = false;
+    }
+    if (this.attached) { return; }
+
+    this.instance.attach(element);
+    if (!terminal.element) {
+      this.teardownTransport();
+      return;
+    }
+
+    this.attached = true;
+    this._terminal = terminal;
+    this.rewireTransport(terminal);
+    this.wireTerminalUi(element, terminal);
+  }
+
+  /** Swap ConnectionManager after P2P reconnect without tearing down xterm. */
+  private rewireTransport(terminal: Terminal): void {
+    this.teardownTransport();
+    const transport = this.transportFactory();
+    this.transport = transport;
     transport.onOutput = (data: Uint8Array) => {
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       terminal.write(data, () => {
@@ -161,20 +183,51 @@ export class TerminalController {
         }
       });
     };
-    // Remote (tmux → agent) resize → local xterm grid.
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
-    // Transport connection state → domain TerminalStatus callback.
     transport.onStateChange = (state: ConnectionState) => {
       this.onStateChange?.(mapConnectionState(state));
     };
-    // Transport failure / disconnect → facade callbacks.
     transport.onError = (err: Error) => { this.onError?.(err); };
     transport.onDisconnect = () => { this.onDisconnect?.(); };
+    getDefaultStore().set(terminalTransportReadyAtom, true);
+  }
+
+  private teardownTransport(): void {
+    getDefaultStore().set(terminalTransportReadyAtom, false);
+    if (this.transport) {
+      this.transport.onOutput = null;
+      this.transport.onResize = null;
+      this.transport.onStateChange = null;
+      this.transport.onError = null;
+      this.transport.onDisconnect = null;
+      this.transport.dispose();
+      this.transport = null;
+    }
+  }
+
+  private wireTerminalUi(element: HTMLElement, terminal: Terminal): void {
+    this.instance.onCellSizeChange = () => {
+      this.resizeController?.remeasure();
+    };
+
+    const capsuleHost = element.closest('[data-terminal-capsule-host]');
+    if (this.scrollbackMode === 'local-buffer' && capsuleHost instanceof HTMLElement) {
+      this.capsuleOcclusionScroll = new CapsuleOcclusionScroll(
+        terminal,
+        capsuleHost,
+        () => this.cellDimensions.height,
+      );
+      requestAnimationFrame(() => {
+        if (!this.attached || !this.capsuleOcclusionScroll) { return; }
+        this.capsuleOcclusionScroll.bind();
+      });
+    }
 
     terminal.onTitleChange((title: string) => { this.onTitleChange?.(title); });
 
-    // Input routing: terminal mode is the default, so register + activate the
-    // terminal handler now. Keyboard input flows xterm → handler → transport.
+    const transport = this.transport;
+    if (!transport) { return; }
+
     const router = this.inputRouter ?? this.initInputRouter();
     const terminalHandler = new TerminalInputHandler(
       transport,
@@ -187,8 +240,6 @@ export class TerminalController {
     router.register(terminalHandler);
     terminalHandler.activate();
 
-    // Mobile: give the soft keyboard / IME a real cursor-anchored textarea.
-    // Must come after instance.attach() — it reaches into terminal.element.
     if (this.useMobileIme && terminal.element) {
       this.mobileIme = new MobileImeInput(terminal, terminal.element, {
         onSend: (text) => {
@@ -197,7 +248,6 @@ export class TerminalController {
       });
     }
 
-    // Observe the container after first render so it has laid out.
     this.resizeController = new ResizeController(this);
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
@@ -220,25 +270,19 @@ export class TerminalController {
     this.capsuleOcclusionScroll?.dispose();
     this.capsuleOcclusionScroll = null;
 
-    // Break transport→terminal closures before disposing either side.
-    if (this.transport) {
-      this.transport.onOutput = null;
-      this.transport.onResize = null;
-      this.transport.onStateChange = null;
-      this.transport.onError = null;
-      this.transport.onDisconnect = null;
-    }
+    this.teardownTransport();
 
-    // Deactivate the active input handler (unsubscribes xterm onData) and drop
-    // the router so the terminal handler's closures are released before dispose.
     this.inputRouter?.setMode({ type: 'terminal' });
     this.inputRouter = null;
 
     this.instance.detach();
     this._terminal = null;
+  }
 
-    this.transport?.dispose();
-    this.transport = null;
+  /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
+  dispose(): void {
+    this.detach();
+    this.instance.dispose();
   }
 
   // ── Data flow ───────────────────────────────────────────────────────────
@@ -356,9 +400,21 @@ export class TerminalController {
     this.instance.scrollToBottom();
   }
   /** Scroll the xterm viewport by whole pages (negative = up). */
-  scrollPages(pages: number): void { this.instance.scrollPages(pages); }
+  scrollPages(pages: number): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollPages(pages);
+      return;
+    }
+    this.instance.scrollPages(pages);
+  }
   /** Scroll the xterm viewport by lines (negative = up). */
-  scrollLines(lines: number): void { this.instance.scrollLines(lines); }
+  scrollLines(lines: number): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollLines(lines);
+      return;
+    }
+    this.instance.scrollLines(lines);
+  }
 
   /** Font-size manager while attached; null after detach(). */
   get fontSizeManager(): FontSizeManager | null {

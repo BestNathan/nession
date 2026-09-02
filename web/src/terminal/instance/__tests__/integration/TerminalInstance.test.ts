@@ -67,6 +67,9 @@ describe('TerminalInstance', () => {
     // Attach to second container
     instance.attach(container2);
 
+    // Reattach must put the existing xterm DOM back into the new viewport.
+    expect(instance.terminal.element?.parentElement).toBe(container2);
+
     // Verify scrollback is preserved - buffer should still have content
     const bufferAfterReattach = instance.terminal.buffer.active;
     expect(bufferAfterReattach.length).toBe(initialBufferLength);
