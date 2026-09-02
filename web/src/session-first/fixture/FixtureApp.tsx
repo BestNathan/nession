@@ -91,6 +91,7 @@ export function FixtureApp() {
     <div
       data-testid="session-first-shell"
       data-sf-design="polish"
+      data-experience="app"
       className="session-first-shell flex h-[100dvh] flex-col bg-background"
     >
       <AppSpatialShell

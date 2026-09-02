@@ -8,6 +8,7 @@ import type { DomainState } from '@/session-first/domainState';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { TerminalWell } from '@/session-first/TerminalWell';
+import { shellIconButtonClass } from '@/session-first/shellStyles';
 import { AppToolHeader } from '@/session-first/patterns/AppToolHeader';
 import type {
   Experience,
@@ -139,7 +140,7 @@ export function SessionFirstMain({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 shrink-0"
+            className={shellIconButtonClass}
             aria-label="Open sessions"
             data-testid="session-first-open-drawer"
             onClick={() => onOpenDrawer?.()}

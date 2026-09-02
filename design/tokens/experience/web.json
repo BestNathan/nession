@@ -22,7 +22,8 @@
     "space-2": { "value": "0.5rem" },
     "space-3": { "value": "0.75rem" },
     "space-4": { "value": "1rem" },
-    "space-5": { "value": "1.5rem" }
+    "space-5": { "value": "1.5rem" },
+    "iconButtonSize": { "ref": "experience.web.control.lg" }
   },
   "focus": {
     "ringWidth": { "value": "2px" },

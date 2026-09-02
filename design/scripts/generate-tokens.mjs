@@ -15,6 +15,7 @@ const THEME_SIZE_PREFIXES = [
   'row-',
   'composer-',
   'shell-space-',
+  'shell-icon-button-size',
   'focus-ring-',
   'terminal-well-background',
   'terminal-capsule-surface',

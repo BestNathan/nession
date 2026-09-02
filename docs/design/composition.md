@@ -150,6 +150,22 @@ Promote to **tokens only when stable and needed** (Phase 5 convergence):
 
 **Forbidden as a substitute:** new local metric variables (e.g. `--sf-*` extensions) invented to express composition on top of the token model ([#561](https://github.com/BestNathan/nession/issues/561) non-goals; [tokens.md](design-system/tokens.md) layer stack).
 
+## 14. Shell control metrics (Phase 8 audit)
+
+Approved mapping from session-first shell chrome to Experience tokens (see `web/src/session-first/shellStyles.ts`):
+
+| Role | Token / class | Web | App |
+|------|---------------|-----|-----|
+| Header / toolbar icon buttons | `--shell-icon-button-size` → `shellIconButtonClass` | `control-lg` (36px) | `control-md` (44px) under `[data-experience="app"]` |
+| Compact row actions (filter, sort) | `--control-md` → `shellRowControlMinClass` | 32px min height | unchanged on web |
+
+**Documented exceptions** (composition / breakpoint-specific — not tokenized):
+
+- `max-lg:min-h-11` on Session list actions — mobile web touch band (44px) without switching the whole shell to app experience.
+- Decorative glyph sizes inside controls (`size-3` … `size-5` sort arrows, menu icons, loaders) — semantic icon scale not yet duplicated in shell tokens.
+- `min-h-0` flex layout chains — structural, not touch targets.
+- Session row kill affordance (`size-8`) — secondary destructive control; revisit if a third pattern repeats it.
+
 ## What this document does not own
 
 - Hierarchy and emphasis → [visual-language.md](visual-language.md).

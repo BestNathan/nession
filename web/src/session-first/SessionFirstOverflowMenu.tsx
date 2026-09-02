@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ServerInfoMenu } from '@/components/ServerInfoMenu';
 import { setSessionFirst } from '@/lib/sessionFirst';
+import { shellIconButtonClass } from '@/session-first/shellStyles';
 
 export function SessionFirstOverflowMenu({
   onOpenEnv,
@@ -24,7 +25,7 @@ export function SessionFirstOverflowMenu({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9"
+            className={shellIconButtonClass}
             data-testid="session-first-overflow"
             aria-label="More"
           />

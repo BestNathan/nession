@@ -7,7 +7,9 @@ import {
 } from 'react';
 import { PanelLeft, PanelRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useEdgeSwipePager } from './useEdgeSwipePager';
+import { shellIconButtonClass } from '@/session-first/shellStyles';
 
 const FALLBACK_WIDTH_PX = 375;
 
@@ -81,6 +83,7 @@ export function AppSpatialShell({
     <div
       ref={shellRef}
       data-testid="app-spatial-shell"
+      data-experience="app"
       className="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       <div
@@ -116,7 +119,7 @@ export function AppSpatialShell({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute top-2 left-2 z-10 size-11"
+                  className={cn('absolute top-2 left-2 z-10', shellIconButtonClass)}
                   aria-label="Sessions"
                   data-testid="app-spatial-open-sessions"
                   onClick={() => onIndexChange(0)}
@@ -127,7 +130,7 @@ export function AppSpatialShell({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute top-2 right-2 z-10 size-11"
+                  className={cn('absolute top-2 right-2 z-10', shellIconButtonClass)}
                   aria-label="Workspace"
                   data-testid="app-spatial-open-workspace"
                   onClick={() => onIndexChange(2)}
