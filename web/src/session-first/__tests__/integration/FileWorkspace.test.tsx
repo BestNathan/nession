@@ -87,7 +87,8 @@ describe('FilesAppLayout', () => {
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
     await user.click(await screen.findByText('f.txt'));
     expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
-    expect(screen.getByText('f.txt')).toBeInTheDocument();
+    expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
+    expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
     await user.click(screen.getByLabelText('Close file'));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
   });

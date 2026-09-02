@@ -10,6 +10,14 @@ export const sessionTool: WorkspaceTool = {
   availability: () => true,
   layout: {
     web: ({ ctx }) => (ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null),
-    app: ({ ctx }) => (ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null),
+    app: ({ ctx }) =>
+      ctx.session && ctx.domain ? (
+        <div
+          data-testid="session-details-app"
+          className="h-full min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]"
+        >
+          <SessionDetails session={ctx.session} state={ctx.domain} />
+        </div>
+      ) : null,
   },
 };
