@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import type { DomainState } from '@/session-first/domainState';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
@@ -35,6 +35,10 @@ const base = {
 };
 
 describe('SessionFirstMain experience threading', () => {
+  beforeEach(() => {
+    lastCtx = null;
+  });
+
   it('passes experience="app" into the workspace ctx', () => {
     render(
       <SessionFirstMain
@@ -49,6 +53,7 @@ describe('SessionFirstMain experience threading', () => {
 
   it('defaults to experience="web"', () => {
     render(<SessionFirstMain {...base} domain={domain} />);
+    expect(screen.getByTestId('mock-workspace-shell')).toBeInTheDocument();
     expect(lastCtx?.experience).toBe('web');
   });
 });
