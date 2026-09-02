@@ -84,7 +84,7 @@ export function SessionListHeader({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-[var(--sf-space-2)] border-b p-[var(--sf-space-2)] max-lg:gap-[var(--sf-space-3)]">
+    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] border-b p-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -98,7 +98,7 @@ export function SessionListHeader({
         type="button"
         variant="ghost"
         size="sm"
-        className="justify-start rounded-none px-1 text-muted-foreground transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)] hover:text-foreground max-lg:min-h-11"
+        className="justify-start rounded-none px-1 text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground max-lg:min-h-11"
         data-testid="session-first-create"
         aria-label="Create session"
         disabled={createDisabled}
@@ -112,7 +112,7 @@ export function SessionListHeader({
           <CollapsibleTrigger
             data-testid="session-list-filters"
             render={
-              <Button type="button" variant="ghost" size="sm" className="min-h-8 max-lg:min-h-11 text-muted-foreground hover:text-foreground transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]">
+              <Button type="button" variant="ghost" size="sm" className="min-h-8 max-lg:min-h-11 text-muted-foreground hover:text-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]">
                 <Filter className="size-4" />
                 Filters
               </Button>

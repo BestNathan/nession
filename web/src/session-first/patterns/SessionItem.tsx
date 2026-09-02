@@ -39,7 +39,7 @@ export function SessionItem({
       data-testid="session-item-row"
       data-selected={selected}
       className={cn(
-        'group relative flex items-start gap-1 px-[var(--sf-space-3)] py-[var(--sf-space-2)] transition-colors hover:bg-muted/40',
+        'group relative flex items-start gap-1 px-[var(--shell-space-3)] py-[var(--shell-space-2)] transition-colors hover:bg-muted/40',
       )}
     >
       {selected ? (

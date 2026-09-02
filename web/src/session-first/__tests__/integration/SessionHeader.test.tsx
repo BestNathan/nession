@@ -158,9 +158,9 @@ describe('SessionHeader', () => {
       />,
     );
     const header = screen.getByRole('banner');
-    expect(header.className).toMatch(/sf-space|var\(--sf-space/);
+    expect(header.className).toMatch(/shell-space|var\(--shell-space/);
     const back = screen.getByTestId('session-first-back-to-list');
     expect(back.className).toMatch(/size-9/);
-    expect(back.className).toMatch(/duration-\[var\(--sf-motion\)\]/);
+    expect(back.className).toMatch(/duration-\[var\(--motion-shell-duration\)\]/);
   });
 });

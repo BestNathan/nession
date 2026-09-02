@@ -94,7 +94,7 @@ export function SessionFirstSidebar({
       </div>
       <div
         data-testid="session-first-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--sf-space-2)] py-[var(--sf-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
         <SessionFirstOverflowMenu onOpenEnv={onOpenEnv} onLegacy={onLegacy} />
       </div>

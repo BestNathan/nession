@@ -133,7 +133,7 @@ export function SessionFirstMain({
       ) : (
         <div
           data-testid="session-resting-header"
-          className="flex shrink-0 items-center justify-between px-[var(--sf-space-4)] py-[var(--sf-space-2)]"
+          className="flex shrink-0 items-center justify-between px-[var(--shell-space-4)] py-[var(--shell-space-2)]"
         >
           <Button
             type="button"

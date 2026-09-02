@@ -27,7 +27,7 @@ export function WorkspaceShell({ ctx, activeTool }: WorkspaceShellProps) {
       </div>
       <div
         data-testid="workspace-tool-bar"
-        className="pointer-events-none absolute inset-x-0 bottom-[var(--sf-space-3)] z-10 flex justify-center px-4"
+        className="pointer-events-none absolute inset-x-0 bottom-[var(--shell-space-3)] z-10 flex justify-center px-4"
       >
         <div
           role="tablist"
@@ -50,7 +50,7 @@ export function WorkspaceShell({ ctx, activeTool }: WorkspaceShellProps) {
                 data-testid={`workspace-tool-${tool.id}`}
                 onClick={() => ctx.onToolChange(tool.id)}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-[var(--sf-motion)] ease-[var(--sf-ease)]',
+                  'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
                   isActive
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground',

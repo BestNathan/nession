@@ -14,6 +14,6 @@ describe('TerminalWell', () => {
     expect(well.className).not.toMatch(/rounded/);
     expect(well.className).toMatch(/overflow-hidden/);
     expect(well.className).toMatch(/\brelative\b/);
-    expect(well.className).toMatch(/bg-\[var\(--sf-terminal-well\)\]/);
+    expect(well.className).toMatch(/bg-\[var\(--terminal-well-background\)\]/);
   });
 });

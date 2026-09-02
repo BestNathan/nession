@@ -81,6 +81,13 @@
   --icon-sm: 14px;
   --icon-md: 16px;
   --panel-padding: 12px;
+  --shell-space-1: 0.25rem;
+  --shell-space-2: 0.5rem;
+  --shell-space-3: 0.75rem;
+  --shell-space-4: 1rem;
+  --shell-space-5: 1.5rem;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --composer-font-size: 0.875rem;
   --composer-text-line-height: 1.25rem;
   --composer-line-height: 1.25rem;
@@ -124,6 +131,8 @@
   --composer-shell-max-width: 42rem;
   --composer-shell-position: center;
   --motion-composer: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-shell-duration: 180ms;
+  --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 .dark {
@@ -276,6 +285,13 @@
   --spacing-row-sm: var(--row-sm);
   --spacing-row-md: var(--row-md);
   --spacing-row-lg: var(--row-lg);
+  --spacing-shell-space-1: var(--shell-space-1);
+  --spacing-shell-space-2: var(--shell-space-2);
+  --spacing-shell-space-3: var(--shell-space-3);
+  --spacing-shell-space-4: var(--shell-space-4);
+  --spacing-shell-space-5: var(--shell-space-5);
+  --spacing-focus-ring-width: var(--focus-ring-width);
+  --spacing-focus-ring-offset: var(--focus-ring-offset);
   --spacing-composer-font-size: var(--composer-font-size);
   --spacing-composer-text-line-height: var(--composer-text-line-height);
   --spacing-composer-line-height: var(--composer-line-height);
@@ -319,6 +335,8 @@
   --spacing-composer-shell-max-width: var(--composer-shell-max-width);
   --spacing-composer-shell-position: var(--composer-shell-position);
   --spacing-motion-composer: var(--motion-composer);
+  --spacing-motion-shell-duration: var(--motion-shell-duration);
+  --spacing-motion-shell-ease: var(--motion-shell-ease);
   --spacing-radius-capsule: var(--radius-capsule);
 }
 

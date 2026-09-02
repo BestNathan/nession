@@ -17,6 +17,17 @@
   "panel": {
     "padding": { "value": "12px" }
   },
+  "shell": {
+    "space-1": { "value": "0.25rem" },
+    "space-2": { "value": "0.5rem" },
+    "space-3": { "value": "0.75rem" },
+    "space-4": { "value": "1rem" },
+    "space-5": { "value": "1.5rem" }
+  },
+  "focus": {
+    "ringWidth": { "value": "2px" },
+    "ringOffset": { "value": "2px" }
+  },
   "composer": {
     "fontSize": { "value": "0.875rem" },
     "textLineHeight": { "value": "1.25rem" },
@@ -62,6 +73,8 @@
     "shellPosition": { "value": "center" }
   },
   "motion": {
-    "composer": { "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)" }
+    "composer": { "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)" },
+    "shellDuration": { "value": "180ms" },
+    "shellEase": { "value": "cubic-bezier(0.2, 0, 0, 1)" }
   }
 }

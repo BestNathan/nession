@@ -105,6 +105,6 @@ describe('SessionItem', () => {
       />,
     );
     const row = screen.getByTestId('session-item-row');
-    expect(row.className).toMatch(/sf-space|var\(--sf-space/);
+    expect(row.className).toMatch(/shell-space|var\(--shell-space/);
   });
 });

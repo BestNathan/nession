@@ -15,7 +15,7 @@ export function AppToolHeader({ toolLabel, onBack }: AppToolHeaderProps) {
   return (
     <header
       data-testid="app-tool-header"
-      className="flex shrink-0 items-center gap-1 px-[var(--sf-space-2)] pt-[max(var(--sf-space-1),env(safe-area-inset-top))]"
+      className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[max(var(--shell-space-1),env(safe-area-inset-top))]"
     >
       <AppBackButton label="Back to terminal" testid="app-tool-back" onClick={onBack} />
       <h1 className="min-w-0 truncate font-mono text-sm font-semibold">{toolLabel}</h1>

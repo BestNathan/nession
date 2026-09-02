@@ -14,10 +14,13 @@ const THEME_SIZE_PREFIXES = [
   'control-',
   'row-',
   'composer-',
+  'shell-space-',
+  'focus-ring-',
   'terminal-well-background',
   'terminal-capsule-surface',
   'radius-capsule',
   'motion-composer',
+  'motion-shell-',
   'touch-target-min',
 ];
 

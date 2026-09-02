@@ -212,7 +212,7 @@ describe('SessionFirstShell', () => {
     expect(footer.className).toMatch(
       /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
     );
-    expect(footer.className).toMatch(/sf-space|var\(--sf-space/);
+    expect(footer.className).toMatch(/shell-space|var\(--shell-space/);
   });
 
   it('lists sessions in the drawer without an Agent card grid', async () => {
