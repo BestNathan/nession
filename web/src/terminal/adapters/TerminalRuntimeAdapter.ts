@@ -1,5 +1,5 @@
 import { getDefaultStore } from 'jotai';
-import type { TerminalController, TerminalControllerEvents } from '../controller/TerminalController';
+import type { TerminalControllerEvents } from '../controller/TerminalController';
 import { inputModeAtomFamily } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
 import { terminalTransportReadyAtom } from '../state/transport';
@@ -7,6 +7,11 @@ import { terminalTransportReadyAtom } from '../state/transport';
 /**
  * Mirrors imperative TerminalController events into Jotai atoms for React UI.
  * Keeps terminal/** free of direct getDefaultStore() writes in the controller.
+ *
+ * Injected into the TerminalController at construction (useTerminal), so
+ * readiness published during the viewport's layout-phase attach is never lost
+ * to a late binding (issue #598). Detach/dispose publish ready=false through
+ * the same adapter, so no explicit unbind is required.
  */
 export function createTerminalRuntimeAdapter(): TerminalControllerEvents {
   const store = getDefaultStore();
@@ -20,15 +25,5 @@ export function createTerminalRuntimeAdapter(): TerminalControllerEvents {
     onResize: (_sid, cols, rows) => {
       store.set(lastResizeAtom, { cols, rows });
     },
-  };
-}
-
-export function bindTerminalRuntimeAdapter(
-  controller: TerminalController,
-): () => void {
-  controller.events = createTerminalRuntimeAdapter();
-  return () => {
-    controller.events = undefined;
-    getDefaultStore().set(terminalTransportReadyAtom, false);
   };
 }

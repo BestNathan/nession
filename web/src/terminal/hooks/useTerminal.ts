@@ -1,7 +1,7 @@
 // web/src/terminal/hooks/useTerminal.ts
 import { useMemo, useEffect, useRef } from 'react';
 import { TerminalController } from '../controller/TerminalController';
-import { bindTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
+import { createTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { DeviceProfile, TerminalScrollbackMode } from '../types';
@@ -68,6 +68,13 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
       mode,
       startedAt: 0,
     };
+    // The runtime adapter is injected at construction — BEFORE any viewport can
+    // attach. TerminalViewport attaches the controller in a useLayoutEffect,
+    // and the controller publishes transport readiness during that attach; a
+    // late (passive-effect) binding used to miss that first event, leaving
+    // terminalTransportReadyAtom false and blocking the SessionRuntime's
+    // transportReady-gated attach forever (issue #598).
+    const events = createTerminalRuntimeAdapter();
     return new TerminalController(
       session,
       transportFactory,
@@ -77,6 +84,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
         scrollback,
         deviceProfile,
         scrollbackMode,
+        events,
       },
     );
   }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, scrollbackMode]);
@@ -91,17 +99,13 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     const generation = ++controllerEffectGenerationRef.current;
     activeControllerRef.current = controller;
 
-    let unbindAdapter: (() => void) | undefined;
-    if (controller) {
-      unbindAdapter = bindTerminalRuntimeAdapter(controller);
-    }
-
+    // The adapter now lives on the controller (injected at construction), so
+    // dispose/detach publish readiness=false through it — no unbind here.
     if (previous && previous !== controller) {
       previous.dispose();
     }
 
     return () => {
-      unbindAdapter?.();
       const retiring = controller;
       const cleanupGeneration = generation;
       queueMicrotask(() => {
