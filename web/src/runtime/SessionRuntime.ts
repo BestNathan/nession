@@ -3,6 +3,7 @@ import type { AddressPlan } from '@/hooks/useAddressPlan';
 import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
 import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapter';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
 import { AttachStateMachine } from '@/runtime/AttachStateMachine';
 import { FileCapability } from '@/runtime/FileCapability';
@@ -19,6 +20,10 @@ export interface SessionRuntimeConfig {
   routeEpoch: number;
 }
 
+export type SessionRuntimeEvent =
+  | { type: 'next-candidate'; activeUrl: string | null }
+  | { type: 'force-relay' };
+
 export class SessionRuntime {
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
@@ -27,6 +32,12 @@ export class SessionRuntime {
   private p2pAdapter: P2PConnection | null = null;
   private fileCapability: FileCapability | null = null;
   private routeEpoch: number;
+  private transportGeneration = 0;
+  private connectionUnsub: (() => void) | null = null;
+  private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
+  private readonly runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
+  /** Guards against re-entrant / duplicate terminal-disconnect handling. */
+  private disconnectHandling = false;
 
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
@@ -49,6 +60,11 @@ export class SessionRuntime {
 
   get waitingForAddressPlan(): boolean {
     return this.addressPolicy.isP2P && !this.config.addressPlan.ready;
+  }
+
+  /** Bumps on internal candidate rotation; distinct from user routeEpoch. */
+  get currentTransportGeneration(): number {
+    return this.transportGeneration;
   }
 
   getP2PConnection(): P2PConnection | null {
@@ -82,26 +98,91 @@ export class SessionRuntime {
     this.syncAgentClient();
   }
 
+  /** @deprecated Prefer internal handler; kept for unit tests. */
   onCandidateDisconnected(): 'next-candidate' | 'force-relay' | 'none' {
-    const action = this.addressPolicy.onCandidateDisconnected();
-    if (action.type === 'next-candidate' || action.type === 'force-relay') {
-      this.syncAgentClient();
-    }
-    return action.type === 'none' ? 'none' : action.type;
+    return this.applyCandidateDisconnect();
   }
 
-  subscribeConnectionState(handler: (state: import('@/services/socket/types').ConnectionState) => void): () => void {
-    if (!this.agentClient) {
-      return () => {};
-    }
-    return this.agentClient.onConnectionStateChange(handler);
+  subscribeConnectionState(handler: (state: ConnectionState) => void): () => void {
+    this.connectionStateListeners.add(handler);
+    return () => {
+      this.connectionStateListeners.delete(handler);
+    };
+  }
+
+  subscribeRuntimeEvents(handler: (event: SessionRuntimeEvent) => void): () => void {
+    this.runtimeEventListeners.add(handler);
+    return () => {
+      this.runtimeEventListeners.delete(handler);
+    };
   }
 
   dispose(): void {
+    this.teardownConnectionHandler();
     this.agentClient?.dispose();
     this.agentClient = null;
     this.p2pAdapter = null;
     this.fileCapability = null;
+    this.connectionStateListeners.clear();
+    this.runtimeEventListeners.clear();
+  }
+
+  private emitConnectionState(state: ConnectionState): void {
+    for (const listener of this.connectionStateListeners) {
+      listener(state);
+    }
+  }
+
+  private emitRuntimeEvent(event: SessionRuntimeEvent): void {
+    for (const listener of this.runtimeEventListeners) {
+      listener(event);
+    }
+  }
+
+  private applyCandidateDisconnect(): 'next-candidate' | 'force-relay' | 'none' {
+    const action = this.addressPolicy.onCandidateDisconnected();
+    if (action.type === 'next-candidate') {
+      this.transportGeneration += 1;
+      this.syncAgentClient();
+      this.emitRuntimeEvent({ type: 'next-candidate', activeUrl: this.activeUrl });
+      return 'next-candidate';
+    }
+    if (action.type === 'force-relay') {
+      this.transportGeneration += 1;
+      this.emitRuntimeEvent({ type: 'force-relay' });
+      return 'force-relay';
+    }
+    return 'none';
+  }
+
+  private handleTerminalDisconnect(): void {
+    if (this.disconnectHandling) {
+      return;
+    }
+    this.disconnectHandling = true;
+    try {
+      this.onCandidateDisconnected();
+    } finally {
+      this.disconnectHandling = false;
+    }
+  }
+
+  private teardownConnectionHandler(): void {
+    this.connectionUnsub?.();
+    this.connectionUnsub = null;
+  }
+
+  private wireConnectionHandler(): void {
+    this.teardownConnectionHandler();
+    if (!this.agentClient) {
+      return;
+    }
+    this.connectionUnsub = this.agentClient.onConnectionStateChange((next) => {
+      this.emitConnectionState(next);
+      if (next === 'disconnected') {
+        this.handleTerminalDisconnect();
+      }
+    });
   }
 
   private syncAgentClient(): void {
@@ -109,6 +190,7 @@ export class SessionRuntime {
     const token = this.config.attachInfo?.connection_token;
 
     if (!url || !this.config.attachInfo) {
+      this.teardownConnectionHandler();
       this.agentClient?.dispose();
       this.agentClient = null;
       this.p2pAdapter = null;
@@ -117,23 +199,30 @@ export class SessionRuntime {
     }
 
     const maxAttempts = this.addressPolicy.maxReconnectAttempts();
+    const isNewClient = !this.agentClient;
 
-    if (!this.agentClient) {
-      this.agentClient = new AgentSocketClient({
+    if (isNewClient) {
+      const client = new AgentSocketClient({
         agentUrl: url,
         connectionToken: token,
         maxReconnectAttempts: maxAttempts,
       });
-      this.agentClient.connect();
+      this.agentClient = client;
+      client.connect();
+      this.wireConnectionHandler();
     } else {
-      this.agentClient.configure({
+      this.agentClient!.configure({
         agentUrl: url,
         connectionToken: token,
         maxReconnectAttempts: maxAttempts,
       });
     }
 
-    this.p2pAdapter = createP2PConnectionAdapter(this.agentClient);
-    this.fileCapability = new FileCapability(this.agentClient);
+    const client = this.agentClient;
+    if (!client) {
+      return;
+    }
+    this.p2pAdapter = createP2PConnectionAdapter(client);
+    this.fileCapability = new FileCapability(client);
   }
 }

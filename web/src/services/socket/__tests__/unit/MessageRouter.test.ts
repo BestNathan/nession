@@ -60,4 +60,10 @@ describe('MessageRouterImpl', () => {
     router.dispose();
     await expect(p).rejects.toThrow('MessageRouter disposed');
   });
+
+  it('failPending rejects in-flight requests immediately', async () => {
+    const p = router.request('file.read', {});
+    router.failPending(new Error('Connection lost'));
+    await expect(p).rejects.toThrow('Connection lost');
+  });
 });

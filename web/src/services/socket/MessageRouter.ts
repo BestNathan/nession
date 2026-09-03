@@ -89,13 +89,17 @@ export class MessageRouterImpl implements MessageRouter {
     }
   }
 
-  dispose(): void {
-    this.disposed = true;
+  failPending(error: Error): void {
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
-      p.reject(new Error('MessageRouter disposed'));
+      p.reject(error);
     }
     this.pending.clear();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.failPending(new Error('MessageRouter disposed'));
     this.handlers.clear();
     this.binaryHandlers.clear();
   }

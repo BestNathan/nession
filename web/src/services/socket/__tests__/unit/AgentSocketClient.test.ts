@@ -242,4 +242,59 @@ describe('AgentSocketClient', () => {
     }));
     await expect(p).resolves.toEqual({ ok: true });
   });
+
+  it('rejects pending request when socket closes before response', async () => {
+    setupMockWebSocket();
+    const client = new AgentSocketClient({
+      agentUrl: 'ws://agent/ws',
+      maxReconnectAttempts: 5,
+      reconnectBaseDelay: 100,
+    });
+    client.connect();
+    await flushTimers();
+
+    const p = client.request('file.read', { path: '/x' });
+    lastWs().onclose!(new CloseEvent('close'));
+    await expect(p).rejects.toThrow('Connection lost');
+  });
+
+  it('resets reconnect budget when endpoint identity changes', async () => {
+    setupMockWebSocket(0);
+    const client = new AgentSocketClient({
+      agentUrl: 'ws://a/ws',
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 50,
+    });
+    client.connect();
+    await flushTimers();
+
+    // Exhaust A's reconnect budget (attempt 0 → reconnecting, attempt 1 → reconnecting, attempt 2 → disconnected)
+    lastWs().onclose!(new CloseEvent('close'));
+    expect(client.connectionState).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(100);
+    lastWs().onclose!(new CloseEvent('close'));
+    expect(client.connectionState).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(100);
+    lastWs().onclose!(new CloseEvent('close'));
+    expect(client.connectionState).toBe('disconnected');
+
+    client.configure({ agentUrl: 'ws://b/ws' });
+    expect(client.connectionState).toBe('connecting');
+    expect(client.reconnectAttempts).toBe(0);
+
+    lastWs().onclose!(new CloseEvent('close'));
+    expect(client.connectionState).toBe('reconnecting');
+    expect(client.reconnectAttempts).toBe(1);
+  });
+
+  it('rejects request from prior endpoint when configure switches URL', async () => {
+    setupMockWebSocket(0);
+    const client = new AgentSocketClient({ agentUrl: 'ws://a/ws' });
+    client.connect();
+    await flushTimers();
+
+    const p = client.request('file.read', { path: '/x' });
+    client.configure({ agentUrl: 'ws://b/ws' });
+    await expect(p).rejects.toThrow('Connection lost');
+  });
 });

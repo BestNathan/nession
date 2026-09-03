@@ -101,6 +101,16 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('emits runtime events on candidate advancement', () => {
+    const rt = new SessionRuntime(makeConfig());
+    const events: string[] = [];
+    rt.subscribeRuntimeEvents((e) => events.push(e.type));
+    expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+    expect(rt.activeUrl).toBe('ws://b/ws');
+    expect(events).toEqual(['next-candidate']);
+    rt.dispose();
+  });
+
   it('notifies connection state subscribers when socket connects', () => {
     const rt = new SessionRuntime(makeConfig());
     const states: string[] = [];

@@ -11,6 +11,7 @@ import {
   orderedUrlsAtom,
   forcedRelayAtom,
 } from '@/atoms/session';
+import { p2pEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
@@ -101,7 +102,8 @@ function wrapper(store: ReturnType<typeof createStore>, strict = false) {
 }
 
 function releaseAllRuntimes(): void {
-  for (const sid of ['agent:a', 'agent:b']) {
+  for (const sid of ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay']) {
+    sessionRuntimeRegistry.release(sid);
     sessionRuntimeRegistry.release(sid);
     sessionRuntimeRegistry.release(sid);
   }
@@ -114,8 +116,13 @@ describe('useSessionRuntime integration', () => {
     setupMockWebSocket();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     releaseAllRuntimes();
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
     vi.clearAllMocks();
     globalThis.WebSocket = OriginalWebSocket;
   });
@@ -246,5 +253,126 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.p2pConnection).toBeNull();
     expect(result.current.p2pState).toBe('disconnected');
     expect(result.current.runtime).toBeNull();
+  });
+
+  async function waitForRuntime(getRuntime: () => SessionRuntime | null): Promise<void> {
+    await waitFor(() => {
+      expect(getRuntime()).not.toBeNull();
+    });
+  }
+
+  async function waitForRuntimeWs(getRuntime: () => SessionRuntime | null): Promise<void> {
+    await waitForRuntime(getRuntime);
+    await waitFor(() => {
+      expect(instances.length).toBeGreaterThan(0);
+    });
+  }
+
+  it('advances from A to B once with two shared-runtime consumers', async () => {
+    addressPlanState.urls = ['ws://a/ws', 'ws://b/ws'];
+
+    const store = makeStore('agent:a', 'token-a');
+    store.set(orderedUrlsAtom, ['ws://a/ws', 'ws://b/ws']);
+    store.set(attachInfoAtom, {
+      ...makeAttachInfo('agent:a', 'token-a'),
+      agent_address: 'ws://a/ws',
+      addresses: [
+        { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
+        { url: 'ws://b/ws', label: 'B', network_type: 'vpn', priority: 5, status: 'reachable' },
+      ],
+    });
+
+    const shell = renderHook(() => useSessionRuntime({ transportFirst: true }), { wrapper: wrapper(store) });
+    const terminal = renderHook(() => useSessionRuntime({ transportFirst: true }), { wrapper: wrapper(store) });
+
+    await waitForRuntimeWs(() => shell.result.current.runtime);
+    const shared = shell.result.current.runtime!;
+    expect(shared).toBe(terminal.result.current.runtime);
+
+    const disconnectSpy = vi.spyOn(shared, 'onCandidateDisconnected');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      for (let i = 0; i <= 2; i += 1) {
+        lastWs().onclose?.(new CloseEvent('close'));
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+    });
+    vi.useRealTimers();
+
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
+    expect(shell.result.current.activeUrl).toBe('ws://b/ws');
+    expect(store.get(forcedRelayAtom)).toBe(false);
+
+    disconnectSpy.mockRestore();
+    shell.unmount();
+    terminal.unmount();
+  });
+
+  it('keeps B active after candidate rotation despite route epoch stability', async () => {
+    addressPlanState.urls = ['ws://a/ws', 'ws://b/ws'];
+
+    const store = makeStore('agent:failover-b', 'token-a');
+    store.set(sessionIdAtom, 'agent:failover-b');
+    store.set(orderedUrlsAtom, ['ws://a/ws', 'ws://b/ws']);
+    store.set(attachInfoAtom, {
+      ...makeAttachInfo('agent:failover-b', 'token-a'),
+      agent_address: 'ws://a/ws',
+      addresses: [
+        { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
+        { url: 'ws://b/ws', label: 'B', network_type: 'vpn', priority: 5, status: 'reachable' },
+      ],
+    });
+
+    const epochBefore = store.get(p2pEpochAtom);
+    const { result, rerender } = renderHook(
+      () => useSessionRuntime({ transportFirst: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitForRuntime(() => result.current.runtime);
+
+    act(() => {
+      expect(result.current.runtime!.onCandidateDisconnected()).toBe('next-candidate');
+    });
+    rerender();
+
+    expect(result.current.activeUrl).toBe('ws://b/ws');
+    expect(store.get(p2pEpochAtom)).toBe(epochBefore);
+    rerender();
+    expect(result.current.activeUrl).toBe('ws://b/ws');
+  });
+
+  it('mirrors force-relay from runtime event to forcedRelayAtom', async () => {
+    addressPlanState.urls = ['ws://a/ws', 'ws://b/ws'];
+
+    const store = makeStore('agent:failover-relay', 'token-a');
+    store.set(sessionIdAtom, 'agent:failover-relay');
+    store.set(orderedUrlsAtom, ['ws://a/ws', 'ws://b/ws']);
+    store.set(attachInfoAtom, {
+      ...makeAttachInfo('agent:failover-relay', 'token-a'),
+      agent_address: 'ws://a/ws',
+      addresses: [
+        { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
+        { url: 'ws://b/ws', label: 'B', network_type: 'vpn', priority: 5, status: 'reachable' },
+      ],
+    });
+
+    const { result, rerender } = renderHook(
+      () => useSessionRuntime({ transportFirst: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitForRuntime(() => result.current.runtime);
+
+    act(() => {
+      expect(result.current.runtime!.onCandidateDisconnected()).toBe('next-candidate');
+      expect(result.current.runtime!.onCandidateDisconnected()).toBe('force-relay');
+    });
+    rerender();
+
+    expect(store.get(forcedRelayAtom)).toBe(true);
+    rerender();
+    expect(result.current.p2pConnection).toBeNull();
   });
 });

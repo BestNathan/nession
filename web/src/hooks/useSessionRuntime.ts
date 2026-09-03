@@ -77,29 +77,24 @@ function useRuntimeConnectionSync(opts: {
   sessionId: string | null;
   runtime: SessionRuntime | null;
   runtimeConfig: SessionRuntimeConfig | null;
-  planUrlsKey: string;
   isP2P: boolean;
   setP2pConnection: (c: P2PConnection | null) => void;
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
   setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
-  setP2pEpoch: (update: (epoch: number) => number) => void;
 }): RuntimeConnectionSyncResult {
   const {
     sessionId,
     runtime,
     runtimeConfig,
-    planUrlsKey,
     isP2P,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
-    setP2pEpoch,
   } = opts;
   const [p2pConnection, setLocalP2p] = useState<P2PConnection | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const startedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (
@@ -113,7 +108,6 @@ function useRuntimeConnectionSync(opts: {
       setConnectionState('disconnected');
       setP2pConnection(null);
       setP2pState('disconnected');
-      startedKeyRef.current = null;
       return;
     }
 
@@ -126,27 +120,21 @@ function useRuntimeConnectionSync(opts: {
     setConnectionState(initial);
     setP2pState(initial);
 
-    const attemptKey = `${runtime.activeUrl ?? ''}:${planUrlsKey}`;
-    if (initial !== 'disconnected') {
-      startedKeyRef.current = attemptKey;
-    }
-
     const unsubState = runtime.subscribeConnectionState((next) => {
       setConnectionState(next);
       setP2pState(next);
-      if (next !== 'disconnected') {
-        startedKeyRef.current = attemptKey;
-        return;
+      if (next === 'connecting') {
+        setLocalP2p(runtime.getP2PConnection());
+        setP2pConnection(runtime.getP2PConnection());
       }
-      if (startedKeyRef.current !== attemptKey) {
-        return;
-      }
-      const action = runtime.onCandidateDisconnected();
-      if (action === 'next-candidate') {
-        setP2pEpoch((e) => e + 1);
+    });
+
+    const unsubEvents = runtime.subscribeRuntimeEvents((event) => {
+      if (event.type === 'next-candidate') {
         setTerminalState('connecting');
-      } else if (action === 'force-relay') {
-        setP2pEpoch((e) => e + 1);
+        setLocalP2p(runtime.getP2PConnection());
+        setP2pConnection(runtime.getP2PConnection());
+      } else if (event.type === 'force-relay') {
         setTerminalState('connecting');
         setForcedRelay(true);
       }
@@ -154,17 +142,16 @@ function useRuntimeConnectionSync(opts: {
 
     return () => {
       unsubState();
+      unsubEvents();
     };
   }, [
     sessionId,
     runtime,
     runtimeConfig,
-    planUrlsKey,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
-    setP2pEpoch,
   ]);
 
   useEffect(() => {
@@ -173,7 +160,6 @@ function useRuntimeConnectionSync(opts: {
       setConnectionState('disconnected');
       setP2pConnection(null);
       setP2pState('disconnected');
-      startedKeyRef.current = null;
     }
   }, [isP2P, setP2pConnection, setP2pState]);
 
@@ -192,7 +178,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const [forcedRelayState, setForcedRelay] = useAtom(forcedRelayAtom);
   const effectiveMode = useAtomValue(effectiveModeAtom);
   const routeEpoch = useAtomValue(p2pEpochAtom);
-  const setP2pEpoch = useSetAtom(p2pEpochAtom);
   const setP2pConnection = useSetAtom(p2pConnectionAtom);
   const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
@@ -246,13 +231,11 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     sessionId,
     runtime,
     runtimeConfig,
-    planUrlsKey,
     isP2P,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
-    setP2pEpoch,
   });
 
   const fileOps: FileOps | null = useMemo(() => {

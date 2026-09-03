@@ -76,6 +76,8 @@ export class AgentSocketClient implements SocketClient {
     }
 
     this.userClosed = false;
+    this.reconnectAttempt = 0;
+    this.router.failPending(new Error('Connection lost'));
     this.clearReconnectTimer();
     this.teardownSocket();
     this.setState('connecting');
@@ -99,6 +101,10 @@ export class AgentSocketClient implements SocketClient {
     options?: RequestOptions,
   ): Promise<T> {
     return this.router.request<T>(type, payload, options);
+  }
+
+  failPending(error: Error): void {
+    this.router.failPending(error);
   }
 
   onBinary(handler: (data: ArrayBuffer) => void): () => void {
@@ -225,6 +231,8 @@ export class AgentSocketClient implements SocketClient {
       if (this.userClosed) {
         return;
       }
+
+      this.router.failPending(new Error('Connection lost'));
 
       const maxAttempts = this.config.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
       const attempt = this.reconnectAttempt;
