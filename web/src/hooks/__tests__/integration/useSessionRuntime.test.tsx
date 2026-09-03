@@ -11,7 +11,7 @@ import {
   orderedUrlsAtom,
   forcedRelayAtom,
 } from '@/atoms/session';
-import { p2pEpochAtom } from '@/atoms/connection';
+import { routeIntentEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
@@ -324,7 +324,7 @@ describe('useSessionRuntime integration', () => {
       ],
     });
 
-    const epochBefore = store.get(p2pEpochAtom);
+    const epochBefore = store.get(routeIntentEpochAtom);
     const { result, rerender } = renderHook(
       () => useSessionRuntime({ transportFirst: true }),
       { wrapper: wrapper(store) },
@@ -338,7 +338,7 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     expect(result.current.activeUrl).toBe('ws://b/ws');
-    expect(store.get(p2pEpochAtom)).toBe(epochBefore);
+    expect(store.get(routeIntentEpochAtom)).toBe(epochBefore);
     rerender();
     expect(result.current.activeUrl).toBe('ws://b/ws');
   });

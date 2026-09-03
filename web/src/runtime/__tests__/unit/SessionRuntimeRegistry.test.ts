@@ -19,7 +19,7 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://agent/ws'] },
     transportFirst: false,
-    routeEpoch: 0,
+    routeIntentEpoch: 0,
   };
 }
 

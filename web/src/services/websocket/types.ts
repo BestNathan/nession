@@ -29,6 +29,7 @@ export interface WebSocketServiceCore {
 
   // ── Request/response ─────────────────────────────────────
   request<T>(type: string, payload: unknown): Promise<T>;
+  failPending(error: Error): void;
 
   // ── Utility ──────────────────────────────────────────────
   generateMessageId(): string;

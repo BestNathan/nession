@@ -16,7 +16,8 @@ import {
 import {
   effectiveModeAtom,
   isSwitchingAtom,
-  p2pEpochAtom,
+  routeIntentEpochAtom,
+  transportGenerationAtom,
 } from '@/atoms/connection';
 import { useTerminal } from '@/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/session-first/terminal/useSessionFirstTerminalAttach';
@@ -167,10 +168,11 @@ export function useTerminalOrchestration({
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [isSwitching] = useAtom(isSwitchingAtom);
   const [envRefs] = useAtom(envRefsAtom);
-  const p2pEpoch = useAtomValue(p2pEpochAtom);
+  const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
+  const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, p2pState } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, p2pState, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -216,7 +218,7 @@ export function useTerminalOrchestration({
   const inputDisabled = banner !== 'none' || isSwitching;
   const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
-  const transportKey = `${p2pEpoch}:${activeUrl ?? ''}`;
+  const transportKey = runtimeTransportKey ?? `${routeIntentEpoch}:${transportGeneration}:${activeUrl ?? ''}`;
 
   useEffect(() => {
     if (!controller) { return; }

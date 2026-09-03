@@ -7,6 +7,7 @@ import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
 import { AttachStateMachine } from '@/runtime/AttachStateMachine';
 import { FileCapability } from '@/runtime/FileCapability';
+import { SessionAttachController } from '@/runtime/SessionAttachController';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -17,7 +18,8 @@ export interface SessionRuntimeConfig {
   forcedRelay: boolean;
   addressPlan: AddressPlan;
   transportFirst: boolean;
-  routeEpoch: number;
+  /** User-initiated route identity (manual switch); resets candidate index when changed. */
+  routeIntentEpoch: number;
 }
 
 export type SessionRuntimeEvent =
@@ -27,11 +29,12 @@ export type SessionRuntimeEvent =
 export class SessionRuntime {
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
+  readonly attachController: SessionAttachController;
   private addressPolicy: AddressAttachPolicy;
   private agentClient: AgentSocketClient | null = null;
   private p2pAdapter: P2PConnection | null = null;
   private fileCapability: FileCapability | null = null;
-  private routeEpoch: number;
+  private routeIntentEpoch: number;
   private transportGeneration = 0;
   private connectionUnsub: (() => void) | null = null;
   private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
@@ -41,8 +44,9 @@ export class SessionRuntime {
 
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
-    this.routeEpoch = config.routeEpoch;
+    this.routeIntentEpoch = config.routeIntentEpoch;
     this.attachState = new AttachStateMachine({ transportFirst: config.transportFirst });
+    this.attachController = new SessionAttachController(this.attachState);
     this.addressPolicy = new AddressAttachPolicy({
       attachInfo: config.attachInfo,
       orderedUrls: config.orderedUrls,
@@ -62,9 +66,18 @@ export class SessionRuntime {
     return this.addressPolicy.isP2P && !this.config.addressPlan.ready;
   }
 
-  /** Bumps on internal candidate rotation; distinct from user routeEpoch. */
+  /** Bumps on internal candidate rotation; distinct from routeIntentEpoch. */
   get currentTransportGeneration(): number {
     return this.transportGeneration;
+  }
+
+  get currentRouteIntentEpoch(): number {
+    return this.routeIntentEpoch;
+  }
+
+  /** Stable key for terminal viewport remount on route / transport change. */
+  get transportKey(): string {
+    return `${this.routeIntentEpoch}:${this.transportGeneration}:${this.activeUrl ?? ''}`;
   }
 
   getP2PConnection(): P2PConnection | null {
@@ -76,10 +89,12 @@ export class SessionRuntime {
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): void {
-    const routeChanged = next.routeEpoch !== undefined && next.routeEpoch !== this.routeEpoch;
+    const routeChanged =
+      next.routeIntentEpoch !== undefined
+      && next.routeIntentEpoch !== this.routeIntentEpoch;
     this.config = { ...this.config, ...next };
-    if (next.routeEpoch !== undefined) {
-      this.routeEpoch = next.routeEpoch;
+    if (next.routeIntentEpoch !== undefined) {
+      this.routeIntentEpoch = next.routeIntentEpoch;
     }
 
     this.addressPolicy.update({
@@ -119,6 +134,7 @@ export class SessionRuntime {
 
   dispose(): void {
     this.teardownConnectionHandler();
+    this.attachController.cancelActiveAttach();
     this.agentClient?.dispose();
     this.agentClient = null;
     this.p2pAdapter = null;

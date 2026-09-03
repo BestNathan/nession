@@ -89,6 +89,15 @@ export class MessageRouterImpl implements MessageRouter {
     }
   }
 
+  hasHandlers(type: string): boolean {
+    const set = this.handlers.get(type);
+    return set !== undefined && set.size > 0;
+  }
+
+  hasPending(id: string): boolean {
+    return this.pending.has(id);
+  }
+
   failPending(error: Error): void {
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);

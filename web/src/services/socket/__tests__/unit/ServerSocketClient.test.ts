@@ -31,6 +31,7 @@ function makeCore(overrides: Partial<WebSocketServiceCore> = {}): WebSocketServi
     }) as WebSocketServiceCore['request'],
     generateMessageId: vi.fn(() => 'msg-1'),
     getP2PConnectionInfo: vi.fn(() => null),
+    failPending: vi.fn(),
     ...overrides,
   };
 }

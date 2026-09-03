@@ -12,8 +12,21 @@ import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
-/** @deprecated Route identity is owned by SessionRuntime; kept for compat during migration. */
-export const p2pEpochAtom = atom(0);
+/** User-initiated route switch epoch — resets P2P candidate index when changed. */
+export const routeIntentEpochAtom = atom(0);
+
+/** Runtime-owned transport generation — candidate rotation / endpoint switch. */
+export const transportGenerationAtom = atom(0);
+
+/** @deprecated Alias for {@link routeIntentEpochAtom}. */
+export const p2pEpochAtom = atom(
+  (get) => get(routeIntentEpochAtom),
+  (get, set, update: number | ((prev: number) => number)) => {
+    const prev = get(routeIntentEpochAtom);
+    const next = typeof update === 'function' ? update(prev) : update;
+    set(routeIntentEpochAtom, next);
+  },
+);
 
 // ── Derived ─────────────────────────────────────────────────────
 

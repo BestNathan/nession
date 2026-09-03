@@ -27,7 +27,7 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
     transportFirst: true,
-    routeEpoch: 0,
+    routeIntentEpoch: 0,
     ...overrides,
   };
 }
@@ -96,7 +96,7 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     expect(rt.onCandidateDisconnected()).toBe('next-candidate');
     expect(rt.activeUrl).toBe('ws://b/ws');
-    rt.updateContext({ routeEpoch: 1 });
+    rt.updateContext({ routeIntentEpoch: 1 });
     expect(rt.activeUrl).toBe('ws://a/ws');
     rt.dispose();
   });

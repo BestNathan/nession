@@ -69,8 +69,7 @@ export class ServerSocketClient implements SocketClient {
   }
 
   failPending(error: Error): void {
-    void error;
-    // Server correlation still lives in WebSocketServiceCore (follow-up #593).
+    this.core.failPending(error);
   }
 
   onBinary(handler: (data: ArrayBuffer) => void): () => void {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
-import { effectiveModeAtom, p2pEpochAtom, p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
+import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom } from '@/terminal/state/session';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
@@ -20,6 +20,7 @@ export interface UseSessionRuntimeResult {
   p2pState: ConnectionState;
   fileOps: FileOps | null;
   activeUrl: string | null;
+  transportKey: string | null;
   waitingForAddressPlan: boolean;
   addressPlan: ReturnType<typeof useAddressPlan>;
 }
@@ -82,6 +83,7 @@ function useRuntimeConnectionSync(opts: {
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
   setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+  setTransportGeneration: (n: number) => void;
 }): RuntimeConnectionSyncResult {
   const {
     sessionId,
@@ -92,6 +94,7 @@ function useRuntimeConnectionSync(opts: {
     setP2pState,
     setForcedRelay,
     setTerminalState,
+    setTransportGeneration,
   } = opts;
   const [p2pConnection, setLocalP2p] = useState<P2PConnection | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
@@ -130,6 +133,7 @@ function useRuntimeConnectionSync(opts: {
     });
 
     const unsubEvents = runtime.subscribeRuntimeEvents((event) => {
+      setTransportGeneration(runtime.currentTransportGeneration);
       if (event.type === 'next-candidate') {
         setTerminalState('connecting');
         setLocalP2p(runtime.getP2PConnection());
@@ -139,6 +143,8 @@ function useRuntimeConnectionSync(opts: {
         setForcedRelay(true);
       }
     });
+
+    setTransportGeneration(runtime.currentTransportGeneration);
 
     return () => {
       unsubState();
@@ -152,6 +158,7 @@ function useRuntimeConnectionSync(opts: {
     setP2pState,
     setForcedRelay,
     setTerminalState,
+    setTransportGeneration,
   ]);
 
   useEffect(() => {
@@ -177,10 +184,11 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const [manualOverride] = useAtom(manualOverrideAtom);
   const [forcedRelayState, setForcedRelay] = useAtom(forcedRelayAtom);
   const effectiveMode = useAtomValue(effectiveModeAtom);
-  const routeEpoch = useAtomValue(p2pEpochAtom);
+  const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
   const setP2pConnection = useSetAtom(p2pConnectionAtom);
   const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
+  const setTransportGeneration = useSetAtom(transportGenerationAtom);
 
   const forcedRelay = manualOverride ? false : forcedRelayState;
   const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
@@ -204,7 +212,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       forcedRelay,
       addressPlan: { urls: addressPlan.urls, ready: addressPlanReady },
       transportFirst: options.transportFirst,
-      routeEpoch,
+      routeIntentEpoch,
     };
   }, [
     sessionId,
@@ -217,7 +225,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     addressPlanReady,
     addressPlan.urls,
     options.transportFirst,
-    routeEpoch,
+    routeIntentEpoch,
   ]);
 
   const runtime = useRuntimeOwnership(
@@ -236,6 +244,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     setP2pState,
     setForcedRelay,
     setTerminalState,
+    setTransportGeneration,
   });
 
   const fileOps: FileOps | null = useMemo(() => {
@@ -251,6 +260,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     p2pState,
     fileOps,
     activeUrl: runtime?.sessionId === sessionId ? runtime.activeUrl ?? null : null,
+    transportKey: runtime?.sessionId === sessionId ? runtime.transportKey : null,
     waitingForAddressPlan: isP2P ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
     addressPlan,
   };

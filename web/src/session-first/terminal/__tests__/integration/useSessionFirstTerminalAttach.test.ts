@@ -18,6 +18,7 @@ import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } 
 import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
 import type { WebSocketService } from '@/services/websocket';
 import { AttachStateMachine } from '@/runtime/AttachStateMachine';
+import { SessionAttachController } from '@/runtime/SessionAttachController';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
 function makeServerConnection(isConnected: boolean) {
@@ -76,8 +77,10 @@ function makeStore(opts: {
 }
 
 function makeRuntime(): SessionRuntime {
+  const attachState = new AttachStateMachine({ transportFirst: true });
   return {
-    attachState: new AttachStateMachine({ transportFirst: true }),
+    attachState,
+    attachController: new SessionAttachController(attachState),
   } as SessionRuntime;
 }
 
@@ -88,7 +91,8 @@ function renderAttachHook(opts: {
   p2pState?: ConnectionState;
   runtime?: SessionRuntime | null;
 }) {
-  const { store, p2p, wsService, runtime } = opts;
+  const { store, p2p, wsService } = opts;
+  const runtime = opts.runtime ?? makeRuntime();
   const initialState = opts.p2pState ?? (p2p ? p2p.conn.connectionState : 'disconnected');
   return renderHook(
     ({ state }: { state?: ConnectionState } = { state: initialState }) =>
@@ -239,6 +243,13 @@ describe('useSessionFirstTerminalAttach', () => {
       store.set(terminalTransportReadyAtom, true);
     });
     rerender();
+
+    const secondAttach = p2p.sendMessage.mock.calls[1][0] as { id: string };
+    act(() => {
+      for (const h of p2p.getHandlers()) {
+        h({ msg_type: 'ok', id: secondAttach.id, timestamp: 0, payload: {} });
+      }
+    });
 
     expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
     expect(p2p.sendMessage).toHaveBeenLastCalledWith(

@@ -32,6 +32,7 @@ function createMockCore(): { core: WebSocketServiceCore; fireMessage: (type: str
       request: vi.fn(),
       generateMessageId: vi.fn(() => 'msg_ep_1'),
       getP2PConnectionInfo: vi.fn(),
+      failPending: vi.fn(),
     },
     fireMessage: (type: string, payload: unknown) => {
       const set = handlers.get(type);
