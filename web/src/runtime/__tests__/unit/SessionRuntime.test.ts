@@ -1,9 +1,48 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
+import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/runtime/AttachStateMachine';
 import type { RelayServerConnection } from '@/runtime/relayServerConnection';
 import type { AttachInfo, ConnectionStatus } from '@/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
+
+interface MockWs {
+  readyState: number;
+  onopen: ((ev: Event) => void) | null;
+  onmessage: ((ev: MessageEvent) => void) | null;
+  send: ReturnType<typeof vi.fn>;
+}
+
+let wsInstances: MockWs[] = [];
+
+function lastWs(): MockWs {
+  return wsInstances[wsInstances.length - 1];
+}
+
+/** Drive a mock ws to the open state (AgentSocketClient.setState('connected')). */
+function openWs(): void {
+  const ws = lastWs();
+  ws.readyState = 1;
+  ws.onopen?.(new Event('open'));
+}
+
+/** Count client.attach messages sent on any tracked ws. */
+function countClientAttach(): number {
+  let count = 0;
+  for (const ws of wsInstances) {
+    for (const call of ws.send.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0]));
+        if (parsed.msg_type === 'client.attach') {
+          count += 1;
+        }
+      } catch {
+        // non-JSON (binary) frame — ignore
+      }
+    }
+  }
+  return count;
+}
 
 function makeAttachInfo(): AttachInfo {
   return {
@@ -56,6 +95,7 @@ function makeRelayServerConnection(initialStatus: ConnectionStatus = 'disconnect
 
 describe('SessionRuntime', () => {
   beforeEach(() => {
+    wsInstances = [];
     vi.stubGlobal('WebSocket', class {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -67,6 +107,10 @@ describe('SessionRuntime', () => {
       onclose: ((ev: CloseEvent) => void) | null = null;
       send = vi.fn();
       close = vi.fn();
+
+      constructor() {
+        wsInstances.push(this);
+      }
     });
   });
 
@@ -228,6 +272,71 @@ describe('SessionRuntime', () => {
     rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
     expect(rt.getP2PConnection()).toBeNull();
     rt.dispose();
+  });
+
+
+  describe('self-driving attach retry', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', () => {
+      vi.useFakeTimers();
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      expect(rt.attachState.phase).toBe('connecting');
+      expect(countClientAttach()).toBe(1);
+
+      // No React/manual re-invocation — each timeout must schedule the next attach itself.
+      for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
+        vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        expect(countClientAttach()).toBe(i + 2);
+      }
+      // Budget exhausted on the auto route: force-relay, P2P client torn down, no further attach.
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
+      expect(rt.attachState.phase).toBe('connecting');
+      expect(rt.getP2PConnection()).toBeNull();
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
+      expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
+      rt.dispose();
+    });
+
+    it('stops retrying with failed on a manual route after the budget is exhausted', () => {
+      vi.useFakeTimers();
+      const rt = new SessionRuntime(makeConfig({ transportReady: true, manualOverride: 'ws://a/ws' }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      expect(countClientAttach()).toBe(1);
+
+      for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
+        vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      }
+      expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      expect(rt.attachState.phase).toBe('failed');
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
+      expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
+      rt.dispose();
+    });
+
+    it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', () => {
+      vi.useFakeTimers();
+      const rt = new SessionRuntime(makeConfig({ transportReady: true }));
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      openWs();
+      expect(countClientAttach()).toBe(1);
+
+      rt.updateContext({ lastResize: { cols: 120, rows: 40 } });
+      rt.updateContext({ lastResize: { cols: 80, rows: 24 } });
+      expect(countClientAttach()).toBe(1);
+
+      vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      expect(countClientAttach()).toBe(2);
+      expect(rt.attachState.reconnectCount).toBe(1);
+      rt.dispose();
+    });
   });
 
   it('re-begins relay after server websocket reconnect', () => {

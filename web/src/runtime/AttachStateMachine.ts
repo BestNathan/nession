@@ -27,6 +27,8 @@ export interface AttachTransitionResult {
   reconnectCount: number;
   forceRelay: boolean;
   bumpRouteEpoch: boolean;
+  /** True when an ATTACH_TIMEOUT left budget remaining — the owner should re-attach. */
+  retryAttach: boolean;
 }
 
 /**
@@ -44,13 +46,14 @@ export class AttachStateMachine {
   }
 
   dispatch(event: AttachEvent): AttachTransitionResult {
-    const flags = { forceRelay: false, bumpRouteEpoch: false };
+    const flags = { forceRelay: false, bumpRouteEpoch: false, retryAttach: false };
     this.applyEvent(event, flags);
     return {
       phase: this.phase,
       reconnectCount: this.reconnectCount,
       forceRelay: flags.forceRelay,
       bumpRouteEpoch: flags.bumpRouteEpoch,
+      retryAttach: flags.retryAttach,
     };
   }
 
@@ -69,7 +72,7 @@ export class AttachStateMachine {
 
   private applyEvent(
     event: AttachEvent,
-    flags: { forceRelay: boolean; bumpRouteEpoch: boolean },
+    flags: { forceRelay: boolean; bumpRouteEpoch: boolean; retryAttach: boolean },
   ): void {
     switch (event.type) {
       case 'SESSION_SELECTED':
@@ -156,7 +159,7 @@ export class AttachStateMachine {
 
   private onAttachTimeout(
     event: Extract<AttachEvent, { type: 'ATTACH_TIMEOUT' }>,
-    flags: { forceRelay: boolean; bumpRouteEpoch: boolean },
+    flags: { forceRelay: boolean; bumpRouteEpoch: boolean; retryAttach: boolean },
   ): void {
     this.reconnectCount = event.attempt;
     if (event.attempt > P2P_MAX_RECONNECT) {
@@ -169,6 +172,7 @@ export class AttachStateMachine {
       this.phase = 'connecting';
       return;
     }
+    flags.retryAttach = true;
     this.phase = this.phase === 'connecting' ? 'reconnecting' : 'connecting';
   }
 

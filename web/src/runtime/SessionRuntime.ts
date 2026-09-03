@@ -84,6 +84,10 @@ export class SessionRuntime {
       }
       if (result.forceRelay) {
         this.applyForceRelay();
+      } else if (result.retryAttach) {
+        // Self-driving retry: an attach timeout with budget remaining must
+        // schedule the next client.attach without any React/Jotai tick.
+        this.maybeStartP2PAttach();
       }
       for (const listener of this.attachOutcomeListeners) {
         listener(result);
