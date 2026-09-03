@@ -1,6 +1,6 @@
 import type { AttachInfo, ConnectionStatus } from '@/types';
 import type { AddressPlan } from '@/hooks/useAddressPlan';
-import type { WebSocketService } from '@/services/websocket';
+import type { RelayServerConnection } from '@/runtime/relayServerConnection';
 import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
 import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapter';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
@@ -24,7 +24,7 @@ export interface SessionRuntimeConfig {
   lastResize?: { cols: number; rows: number } | null;
   transportReady?: boolean;
   /** Relay-mode server WebSocket — runtime re-begins relay after server reconnect. */
-  serverConnection?: WebSocketService | null;
+  serverConnection?: RelayServerConnection | null;
 }
 
 export interface RuntimeMirrorSnapshot {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
-import type { AttachInfo } from '@/types';
+import type { RelayServerConnection } from '@/runtime/relayServerConnection';
+import type { AttachInfo, ConnectionStatus } from '@/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 
@@ -30,6 +31,27 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     routeIntentEpoch: 0,
     ...overrides,
   };
+}
+
+function makeRelayServerConnection(initialStatus: ConnectionStatus = 'disconnected') {
+  const listeners = new Set<(status: ConnectionStatus) => void>();
+  let current: ConnectionStatus = initialStatus;
+  const beginRelay = vi.fn();
+  return {
+    beginRelay,
+    isAuthenticated: () => current === 'authenticated',
+    getConnectionStatus: () => current,
+    emit(next: ConnectionStatus) {
+      current = next;
+      for (const cb of listeners) {
+        cb(current);
+      }
+    },
+    onConnectionChange(cb: (status: ConnectionStatus) => void) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+  } satisfies RelayServerConnection & { emit(status: ConnectionStatus): void };
 }
 
 describe('SessionRuntime', () => {
@@ -209,16 +231,7 @@ describe('SessionRuntime', () => {
   });
 
   it('re-begins relay after server websocket reconnect', () => {
-    const listeners = new Set<(status: string) => void>();
-    const beginRelay = vi.fn();
-    const serverConnection = {
-      beginRelay,
-      onConnectionChange: (cb: (status: string) => void) => {
-        listeners.add(cb);
-        return () => listeners.delete(cb);
-      },
-    } as unknown as import('@/services/websocket').WebSocketService;
-
+    const serverConnection = makeRelayServerConnection('authenticated');
     const rt = new SessionRuntime(makeConfig({
       forcedRelay: true,
       serverConnection,
@@ -227,15 +240,11 @@ describe('SessionRuntime', () => {
     rt.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     expect(rt.attachState.phase).toBe('attached');
 
-    for (const cb of listeners) {
-      cb('disconnected');
-    }
+    serverConnection.emit('disconnected');
     expect(rt.attachState.phase).toBe('reconnecting');
 
-    for (const cb of listeners) {
-      cb('authenticated');
-    }
-    expect(beginRelay).toHaveBeenCalledOnce();
+    serverConnection.emit('authenticated');
+    expect(serverConnection.beginRelay).toHaveBeenCalledOnce();
     expect(rt.attachState.phase).toBe('attached');
     rt.dispose();
   });

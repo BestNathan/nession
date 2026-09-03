@@ -9,14 +9,14 @@ import type { SessionRuntime, SessionRuntimeConfig } from '@/runtime/SessionRunt
 import type { ConnectionState } from '@/services/socket/types';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { FileOps } from '@/services/fileOps';
-import type { WebSocketService } from '@/services/websocket';
+import type { RelayServerConnection } from '@/runtime/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
   transportFirst: boolean;
   /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
   /** Relay-mode server lifecycle (beginRelay on reconnect). Required for hidden-viewport recovery. */
-  wsService?: WebSocketService;
+  wsService?: RelayServerConnection;
 }
 
 export interface UseSessionRuntimeResult {
