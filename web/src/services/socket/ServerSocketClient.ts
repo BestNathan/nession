@@ -59,13 +59,23 @@ export class ServerSocketClient implements SocketClient {
     });
   }
 
-  request<T>(
+  async request<T>(
     type: string,
     payload: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
-    void options;
-    return this.core.request<T>(type, payload);
+    if (this.disposed) {
+      return Promise.reject(new Error('ServerSocketClient disposed'));
+    }
+    const timeoutMs = options?.timeoutMs ?? 15_000;
+    if (!this.core.isAuthenticated()) {
+      const status = this.core.getConnectionStatus();
+      if (status === 'disconnected') {
+        return Promise.reject(new Error('Connection lost'));
+      }
+      await this.waitForConnection(timeoutMs);
+    }
+    return this.core.request<T>(type, payload, timeoutMs);
   }
 
   failPending(error: Error): void {

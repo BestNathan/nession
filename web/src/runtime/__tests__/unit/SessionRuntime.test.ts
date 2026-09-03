@@ -152,4 +152,40 @@ describe('SessionRuntime', () => {
     expect(rt.getP2PConnection()).toBeNull();
     rt.dispose();
   });
+
+  it('returns mirror snapshot from updateContext', () => {
+    const rt = new SessionRuntime(makeConfig());
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    const snapshot = rt.updateContext({ routeIntentEpoch: 1 });
+    expect(snapshot.phase).toBe('connecting');
+    expect(snapshot.transportGeneration).toBeGreaterThan(0);
+    rt.dispose();
+  });
+
+  it('opens one socket when route changes with same URL (configure + forceReconnect)', async () => {
+    let openCount = 0;
+    vi.stubGlobal('WebSocket', class {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      readyState = 0;
+      binaryType = 'arraybuffer';
+      onopen: ((ev: Event) => void) | null = null;
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: Event) => void) | null = null;
+      onclose: ((ev: CloseEvent) => void) | null = null;
+      send = vi.fn();
+      close = vi.fn();
+      constructor() {
+        openCount += 1;
+      }
+    });
+
+    const rt = new SessionRuntime(makeConfig());
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    const before = openCount;
+    rt.updateContext({ routeIntentEpoch: 1 });
+    expect(openCount - before).toBe(1);
+    rt.dispose();
+  });
 });

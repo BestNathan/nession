@@ -9,8 +9,6 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'rec
 
 export interface RequestOptions {
   timeoutMs?: number;
-  /** When true, retry once after reconnect (explicit opt-in only). */
-  retryOnReconnect?: boolean;
 }
 
 export interface MessageRouter {

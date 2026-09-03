@@ -116,7 +116,14 @@ export const switchAddressAtom = atom(
         get(attachInfoAtom),
       );
       if (autoUrl === currentOverride) {
+        const terminalState = get(terminalSessionStateAtom);
+        if (terminalState !== 'failed') {
+          set(manualOverrideAtom, null);
+          return;
+        }
         set(manualOverrideAtom, null);
+        set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
+        set(p2pConnectionAtom, null);
         return;
       }
     }

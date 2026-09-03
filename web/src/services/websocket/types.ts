@@ -28,7 +28,7 @@ export interface WebSocketServiceCore {
   onMessage(type: string, handler: (payload: unknown) => void): () => void;
 
   // ── Request/response ─────────────────────────────────────
-  request<T>(type: string, payload: unknown): Promise<T>;
+  request<T>(type: string, payload: unknown, timeoutMs?: number): Promise<T>;
   failPending(error: Error): void;
 
   // ── Utility ──────────────────────────────────────────────

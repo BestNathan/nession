@@ -297,4 +297,24 @@ describe('AgentSocketClient', () => {
     client.configure({ agentUrl: 'ws://b/ws' });
     await expect(p).rejects.toThrow('Connection lost');
   });
+
+  it('configure returns false when endpoint unchanged', async () => {
+    setupMockWebSocket(0);
+    const client = new AgentSocketClient({ agentUrl: 'ws://a/ws', connectionToken: 'tok' });
+    client.connect();
+    await flushTimers();
+    expect(client.configure({ agentUrl: 'ws://a/ws', connectionToken: 'tok' })).toBe(false);
+  });
+
+  it('forceReconnect after unchanged configure opens exactly one new socket', async () => {
+    setupMockWebSocket(0);
+    const client = new AgentSocketClient({ agentUrl: 'ws://a/ws', connectionToken: 'tok' });
+    client.connect();
+    await flushTimers();
+    const countBefore = instances.length;
+    expect(client.configure({ agentUrl: 'ws://a/ws', connectionToken: 'tok' })).toBe(false);
+    client.forceReconnect();
+    await flushTimers();
+    expect(instances.length - countBefore).toBe(1);
+  });
 });

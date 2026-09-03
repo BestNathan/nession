@@ -265,14 +265,14 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   // Request/response correlation
   // ──────────────────────────────────────────────────────────
 
-  async request<T>(type: string, payload: unknown): Promise<T> {
+  async request<T>(type: string, payload: unknown, timeoutMs?: number): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
     return this.router.request<T>(
       type,
       payload as Record<string, unknown>,
-      { timeoutMs: this.requestTimeout },
+      { timeoutMs: timeoutMs ?? this.requestTimeout },
     );
   }
 

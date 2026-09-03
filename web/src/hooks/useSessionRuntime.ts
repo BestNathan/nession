@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
 import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
-import { terminalSessionStateAtom } from '@/terminal/state/session';
+import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import type { SessionRuntime, SessionRuntimeConfig } from '@/runtime/SessionRuntime';
@@ -117,17 +117,6 @@ function useRuntimeConnectionSync(opts: {
       return;
     }
 
-    if (configOwner) {
-      sessionRuntimeRegistry.update(sessionId, runtimeConfig);
-    }
-
-    const conn = inP2PTransport ? runtime.getP2PConnection() : null;
-    setLocalP2p(conn);
-    setP2pConnection(conn);
-    const initial = conn?.connectionState ?? 'disconnected';
-    setConnectionState(initial);
-    setP2pState(initial);
-
     const unsubState = inP2PTransport
       ? runtime.subscribeConnectionState((next) => {
         setConnectionState(next);
@@ -159,7 +148,27 @@ function useRuntimeConnectionSync(opts: {
       }
     });
 
-    setTransportGeneration(runtime.currentTransportGeneration);
+    const snapshot = configOwner
+      ? sessionRuntimeRegistry.update(sessionId, runtimeConfig)
+      : null;
+
+    if (snapshot) {
+      setTerminalState(snapshot.phase);
+      setTransportGeneration(snapshot.transportGeneration);
+      const conn = inP2PTransport ? snapshot.p2pConnection : null;
+      setLocalP2p(conn);
+      setP2pConnection(conn);
+      setConnectionState(snapshot.connectionState);
+      setP2pState(snapshot.connectionState);
+    } else {
+      const conn = inP2PTransport ? runtime.getP2PConnection() : null;
+      setLocalP2p(conn);
+      setP2pConnection(conn);
+      const initial = conn?.connectionState ?? 'disconnected';
+      setConnectionState(initial);
+      setP2pState(initial);
+      setTransportGeneration(runtime.currentTransportGeneration);
+    }
 
     return () => {
       unsubState();
@@ -202,6 +211,8 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const [forcedRelayState, setForcedRelay] = useAtom(forcedRelayAtom);
   const effectiveMode = useAtomValue(effectiveModeAtom);
   const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
+  const lastResize = useAtomValue(lastResizeAtom);
+  const transportReady = useAtomValue(terminalTransportReadyAtom);
   const setP2pConnection = useSetAtom(p2pConnectionAtom);
   const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
@@ -232,6 +243,8 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
         : { urls: [], ready: true },
       transportFirst: options.transportFirst,
       routeIntentEpoch,
+      lastResize,
+      transportReady,
     };
   }, [
     sessionId,
@@ -245,6 +258,8 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     addressPlan.urls,
     options.transportFirst,
     routeIntentEpoch,
+    lastResize,
+    transportReady,
   ]);
 
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);

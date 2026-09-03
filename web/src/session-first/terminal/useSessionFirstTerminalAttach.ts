@@ -4,7 +4,7 @@ import type { P2PConnection } from '@/hooks/useP2PConnection';
 import type { ConnectionState } from '@/services/socket/types';
 import type { WebSocketService } from '@/services/websocket';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';
-import { forcedRelayAtom, manualOverrideAtom } from '@/atoms/session';
+import { forcedRelayAtom } from '@/atoms/session';
 import { effectiveModeAtom } from '@/atoms/connection';
 import {
   terminalSessionStateAtom,
@@ -66,15 +66,30 @@ function useAttachSessionLifecycle(opts: {
   const {
     sessionId, runtime, terminalState, setTerminalState, setReconnectCount, needsTransportReattachRef,
   } = opts;
+  const prevSessionIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!runtime) {
       return;
     }
-    runtime.attachController.reset();
-    runtime.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    if (prevSessionIdRef.current !== sessionId) {
+      prevSessionIdRef.current = sessionId;
+      const snapshot = runtime.getMirrorSnapshot();
+      if (snapshot.phase !== 'idle') {
+        setTerminalState(snapshot.phase);
+        needsTransportReattachRef.current = false;
+        return;
+      }
+      runtime.attachController.reset();
+      runtime.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      needsTransportReattachRef.current = false;
+      setReconnectCount(0);
+      return;
+    }
+    const snapshot = runtime.getMirrorSnapshot();
+    setTerminalState(snapshot.phase);
     needsTransportReattachRef.current = false;
-    setReconnectCount(0);
-  }, [sessionId, runtime, setReconnectCount, needsTransportReattachRef]);
+  }, [sessionId, runtime, setTerminalState, setReconnectCount, needsTransportReattachRef]);
 
   useEffect(() => {
     if (sessionId && terminalState === 'idle' && runtime) {
@@ -87,23 +102,19 @@ function useAttachSessionLifecycle(opts: {
 function useAttachDriverEffect(opts: {
   runtime: SessionRuntime | null | undefined;
   sessionId: string;
-  sessionName: string;
   effectiveMode: 'p2p' | 'relay';
   transportReady: boolean;
   terminalState: TerminalStatus;
   wsConnected: boolean;
   wsService: WebSocketService;
-  p2pConnection: P2PConnection | null;
-  p2pState: ConnectionState;
-  manualOverride: string | null;
   lastResize: { cols: number; rows: number } | null;
   setTerminalState: (s: TerminalStatus) => void;
   setReconnectCount: (n: number) => void;
   needsTransportReattachRef: MutableRefObject<boolean>;
 }): void {
   const {
-    runtime, sessionId, sessionName, effectiveMode, transportReady, terminalState,
-    wsConnected, wsService, p2pConnection, p2pState, manualOverride, lastResize,
+    runtime, sessionId, effectiveMode, transportReady, terminalState,
+    wsConnected, wsService, lastResize,
     setTerminalState, setReconnectCount, needsTransportReattachRef,
   } = opts;
 
@@ -144,51 +155,12 @@ function useAttachDriverEffect(opts: {
       const result = runtime.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
       setTerminalState(result.phase);
       setReconnectCount(result.reconnectCount);
-      return;
     }
-
-    if (
-      !p2pConnection
-      || p2pState !== 'connected'
-      || !canAttach
-      || !runtime.attachController.canStartAttach(transportReady, true, wsConnected, 'p2p')
-    ) {
-      return;
-    }
-
-    return runtime.attachController.startP2PAttach({
-      sessionName,
-      p2pConnection,
-      manualRoute: manualOverride !== null,
-      lastResize,
-    });
   }, [
-    runtime, transportReady, sessionId, sessionName, effectiveMode, wsConnected, wsService,
-    p2pConnection, p2pState, terminalState, manualOverride, lastResize,
+    runtime, transportReady, sessionId, effectiveMode, wsConnected, wsService,
+    terminalState, lastResize,
     setTerminalState, setReconnectCount, needsTransportReattachRef,
   ]);
-}
-
-function useP2pTransportLostPromote(opts: {
-  effectiveMode: 'p2p' | 'relay';
-  p2pState: ConnectionState;
-  terminalState: TerminalStatus;
-  runtime: SessionRuntime | null | undefined;
-  setTerminalState: (s: TerminalStatus) => void;
-}): void {
-  const { effectiveMode, p2pState, terminalState, runtime, setTerminalState } = opts;
-  useEffect(() => {
-    if (effectiveMode !== 'p2p' || !runtime) {
-      return;
-    }
-    if (
-      (p2pState === 'disconnected' || p2pState === 'reconnecting')
-      && terminalState === 'attached'
-    ) {
-      const result = runtime.attachController.dispatch({ type: 'TRANSPORT_LOST' });
-      setTerminalState(result.phase);
-    }
-  }, [effectiveMode, p2pState, terminalState, setTerminalState, runtime]);
 }
 
 /**
@@ -196,14 +168,10 @@ function useP2pTransportLostPromote(opts: {
  */
 export function useSessionFirstTerminalAttach({
   sessionId,
-  sessionName,
-  p2pConnection,
-  p2pState,
   wsService,
   runtime,
 }: UseSessionFirstTerminalAttachOptions) {
   const [effectiveMode] = useAtom(effectiveModeAtom);
-  const [manualOverride] = useAtom(manualOverrideAtom);
   const [transportReady] = useAtom(terminalTransportReadyAtom);
   const [terminalState, setTerminalState] = useAtom(terminalSessionStateAtom);
   const [lastResize] = useAtom(lastResizeAtom);
@@ -225,12 +193,9 @@ export function useSessionFirstTerminalAttach({
   }, [effectiveMode, terminalState, wsConnected, setTerminalState]);
 
   useAttachDriverEffect({
-    runtime, sessionId, sessionName, effectiveMode, transportReady, terminalState,
-    wsConnected, wsService, p2pConnection, p2pState, manualOverride, lastResize,
+    runtime, sessionId, effectiveMode, transportReady, terminalState,
+    wsConnected, wsService, lastResize,
     setTerminalState, setReconnectCount, needsTransportReattachRef,
-  });
-  useP2pTransportLostPromote({
-    effectiveMode, p2pState, terminalState, runtime, setTerminalState,
   });
 
   return { terminalState, reconnectCount };

@@ -1,4 +1,4 @@
-import { SessionRuntime, type SessionRuntimeConfig } from '@/runtime/SessionRuntime';
+import { SessionRuntime, type RuntimeMirrorSnapshot, type SessionRuntimeConfig } from '@/runtime/SessionRuntime';
 
 interface RegistryEntry {
   runtime: SessionRuntime;
@@ -31,13 +31,12 @@ export class SessionRuntimeRegistry {
   }
 
   /** Designated config owner — mutates runtime when the lease already exists. */
-  update(sessionId: string, config: SessionRuntimeConfig): SessionRuntime | null {
+  update(sessionId: string, config: SessionRuntimeConfig): RuntimeMirrorSnapshot | null {
     const existing = this.entries.get(sessionId);
     if (!existing) {
       return null;
     }
-    existing.runtime.updateContext(config);
-    return existing.runtime;
+    return existing.runtime.updateContext(config);
   }
 
   release(sessionId: string): void {

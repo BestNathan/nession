@@ -5,7 +5,7 @@ import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapt
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
-import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
+import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/runtime/AttachStateMachine';
 import { FileCapability } from '@/runtime/FileCapability';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
 
@@ -20,6 +20,15 @@ export interface SessionRuntimeConfig {
   transportFirst: boolean;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
+  lastResize?: { cols: number; rows: number } | null;
+  transportReady?: boolean;
+}
+
+export interface RuntimeMirrorSnapshot {
+  phase: AttachPhase;
+  transportGeneration: number;
+  connectionState: ConnectionState;
+  p2pConnection: P2PConnection | null;
 }
 
 export type SessionRuntimeEvent =
@@ -38,9 +47,14 @@ export class SessionRuntime {
   private fileCapability: FileCapability | null = null;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
+  private lastResize: { cols: number; rows: number } | null = null;
+  private transportReady = false;
+  /** Transport generation for which client.attach succeeded. */
+  private attachedTransportGeneration: number | null = null;
   private connectionUnsub: (() => void) | null = null;
   private readonly connectionStateListeners = new Set<(state: ConnectionState) => void>();
   private readonly runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
+  private readonly attachOutcomeListeners = new Set<(result: AttachTransitionResult) => void>();
   /** Guards against re-entrant / duplicate terminal-disconnect handling. */
   private disconnectHandling = false;
 
@@ -57,7 +71,33 @@ export class SessionRuntime {
       addressPlan: config.addressPlan,
       addressIndex: 0,
     });
+    this.lastResize = config.lastResize ?? null;
+    this.transportReady = config.transportReady ?? false;
+    this.attachController.subscribeOutcomes((result) => {
+      if (result.phase === 'attached') {
+        this.attachedTransportGeneration = this.transportGeneration;
+      }
+      for (const listener of this.attachOutcomeListeners) {
+        listener(result);
+      }
+    });
     this.syncAgentClient();
+  }
+
+  getMirrorSnapshot(): RuntimeMirrorSnapshot {
+    return {
+      phase: this.attachState.phase,
+      transportGeneration: this.transportGeneration,
+      connectionState: this.agentClient?.connectionState ?? 'disconnected',
+      p2pConnection: this.config.forcedRelay ? null : this.p2pAdapter,
+    };
+  }
+
+  subscribeAttachOutcomes(handler: (result: AttachTransitionResult) => void): () => void {
+    this.attachOutcomeListeners.add(handler);
+    return () => {
+      this.attachOutcomeListeners.delete(handler);
+    };
   }
 
   get activeUrl(): string | null {
@@ -90,13 +130,20 @@ export class SessionRuntime {
     return this.fileCapability;
   }
 
-  updateContext(next: Partial<SessionRuntimeConfig>): void {
+  updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const routeChanged =
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
+    const prevTransportReady = this.transportReady;
     this.config = { ...this.config, ...next };
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
+    }
+    if (next.lastResize !== undefined) {
+      this.lastResize = next.lastResize ?? null;
+    }
+    if (next.transportReady !== undefined) {
+      this.transportReady = next.transportReady;
     }
 
     this.addressPolicy.update({
@@ -111,19 +158,50 @@ export class SessionRuntime {
     if (routeChanged) {
       this.addressPolicy.resetIndex();
       this.handleRouteIntentChange();
-      return;
+      return this.getMirrorSnapshot();
     }
 
     this.syncAgentClient();
+    if (!prevTransportReady && this.transportReady) {
+      this.maybeStartP2PAttach();
+    }
+    return this.getMirrorSnapshot();
   }
 
   private handleRouteIntentChange(): void {
+    this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
     this.attachController.dispatch({ type: 'DISCONNECT' });
     const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     this.transportGeneration += 1;
     this.syncAgentClient({ forceReconnect: true });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+  }
+
+  private maybeStartP2PAttach(): void {
+    if (this.config.forcedRelay || !this.p2pAdapter) {
+      return;
+    }
+    if (this.p2pAdapter.connectionState !== 'connected') {
+      return;
+    }
+    const phase = this.attachState.phase;
+    if (phase === 'attached' && this.attachedTransportGeneration === this.transportGeneration) {
+      return;
+    }
+    if (phase === 'idle' || phase === 'failed') {
+      return;
+    }
+    const ready = this.config.transportFirst ? this.transportReady : true;
+    if (!this.attachController.canStartAttach(ready, true, false, 'p2p')) {
+      return;
+    }
+    this.attachController.startP2PAttach({
+      sessionName: this.config.sessionName,
+      p2pConnection: this.p2pAdapter,
+      manualRoute: this.config.manualOverride !== null,
+      lastResize: this.lastResize,
+    });
   }
 
   /** @deprecated Prefer internal handler; kept for unit tests. */
@@ -171,6 +249,7 @@ export class SessionRuntime {
   private applyCandidateDisconnect(): 'next-candidate' | 'force-relay' | 'transport-exhausted' | 'none' {
     const action = this.addressPolicy.onCandidateDisconnected();
     if (action.type === 'next-candidate') {
+      this.attachedTransportGeneration = null;
       this.transportGeneration += 1;
       this.syncAgentClient();
       this.emitRuntimeEvent({ type: 'next-candidate', activeUrl: this.activeUrl });
@@ -219,7 +298,16 @@ export class SessionRuntime {
     }
     this.connectionUnsub = this.agentClient.onConnectionStateChange((next) => {
       this.emitConnectionState(next);
-      if (next === 'disconnected') {
+      if (next === 'connected') {
+        this.maybeStartP2PAttach();
+      } else if (
+        (next === 'reconnecting' || next === 'connecting')
+        && this.attachState.phase === 'attached'
+      ) {
+        this.attachedTransportGeneration = null;
+        const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+        this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+      } else if (next === 'disconnected') {
         this.handleTerminalDisconnect();
       }
     });
@@ -251,12 +339,12 @@ export class SessionRuntime {
       client.connect();
       this.wireConnectionHandler();
     } else {
-      this.agentClient!.configure({
+      const rebuilt = this.agentClient!.configure({
         agentUrl: url,
         connectionToken: token,
         maxReconnectAttempts: maxAttempts,
       });
-      if (opts?.forceReconnect) {
+      if (opts?.forceReconnect && !rebuilt) {
         this.agentClient!.forceReconnect();
       }
     }
@@ -267,5 +355,8 @@ export class SessionRuntime {
     }
     this.p2pAdapter = createP2PConnectionAdapter(client);
     this.fileCapability = new FileCapability(client);
+    if (client.connectionState === 'connected') {
+      this.maybeStartP2PAttach();
+    }
   }
 }

@@ -424,4 +424,30 @@ describe('useSessionRuntime integration', () => {
     });
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
+
+  it('applies route-intent snapshot when config owner updates after subscribing', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    store.set(terminalSessionStateAtom, 'attached');
+
+    const { result, rerender } = renderHook(
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitForRuntime(() => result.current.runtime);
+    const rt = result.current.runtime!;
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    store.set(terminalSessionStateAtom, 'attached');
+
+    act(() => {
+      store.set(manualOverrideAtom, 'ws://shared-agent/ws');
+      store.set(routeIntentEpochAtom, store.get(routeIntentEpochAtom) + 1);
+    });
+    rerender();
+
+    await waitFor(() => {
+      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+    });
+  });
 });

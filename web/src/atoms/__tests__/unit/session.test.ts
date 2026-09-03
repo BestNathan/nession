@@ -189,4 +189,18 @@ describe('action atoms', () => {
     expect(store.get(manualOverrideAtom)).toBeNull();
     expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit + 1);
   });
+
+  it('switchAddressAtom reconnects when failed manual → Auto resolves to same URL', () => {
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    store.set(switchAddressAtom, 'ws://a/ws');
+    const epochAfterExplicit = store.get(p2pEpochAtom);
+    store.set(terminalSessionStateAtom, 'failed');
+
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit + 1);
+    expect(store.get(p2pConnectionAtom)).toBeNull();
+  });
 });

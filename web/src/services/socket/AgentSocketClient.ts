@@ -74,7 +74,7 @@ export class AgentSocketClient implements SocketClient {
    * Update endpoint identity. Bumps generation so stale socket events are ignored
    * and opens a fresh connection (mirrors useP2PConnection url/token effect).
    */
-  configure(next: Partial<AgentSocketClientConfig>): void {
+  configure(next: Partial<AgentSocketClientConfig>): boolean {
     const prevUrl = this.config.agentUrl;
     const prevToken = this.config.connectionToken;
     this.config = { ...this.config, ...next };
@@ -83,16 +83,18 @@ export class AgentSocketClient implements SocketClient {
     const tokenChanged =
       next.connectionToken !== undefined && next.connectionToken !== prevToken;
     if (!urlChanged && !tokenChanged) {
-      return;
+      return false;
     }
 
     this.userClosed = false;
     this.reconnectAttempt = 0;
     this.router.failPending(new Error('Connection lost'));
+    this.rejectWaiters(new Error('Connection lost'));
     this.clearReconnectTimer();
     this.teardownSocket();
     this.setState('connecting');
     this.openSocket();
+    return true;
   }
 
   send(message: SocketMessage): void {
@@ -111,7 +113,21 @@ export class AgentSocketClient implements SocketClient {
     payload: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
-    return this.router.request<T>(type, payload, options);
+    if (this.state === 'disconnected') {
+      return Promise.reject(new Error('Connection lost'));
+    }
+    const timeoutMs = options?.timeoutMs ?? 15_000;
+    if (this.state === 'connected') {
+      return this.router.request<T>(type, payload, { timeoutMs });
+    }
+    const start = Date.now();
+    return this.waitForConnection(timeoutMs).then(() => {
+      const remaining = timeoutMs - (Date.now() - start);
+      if (remaining <= 0) {
+        return Promise.reject(new Error(`Request timeout: ${type}`));
+      }
+      return this.router.request<T>(type, payload, { timeoutMs: remaining });
+    });
   }
 
   failPending(error: Error): void {
