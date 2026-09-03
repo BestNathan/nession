@@ -170,7 +170,7 @@ export function useTerminalOrchestration({
   const p2pEpoch = useAtomValue(p2pEpochAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, p2pState } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -182,6 +182,7 @@ export function useTerminalOrchestration({
     sessionId,
     sessionName,
     p2pConnection,
+    p2pState,
     wsService,
     runtime,
   });

@@ -151,7 +151,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   const isP2P = effectiveMode === 'p2p';
 
-  const { waitingForAddressPlan, p2pConnection, fileOps } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, p2pState, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -164,11 +164,11 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   // Terminal session state machine: drives client.attach (P2P) / beginRelay
   // (relay), the attach timeout, and the reconnect budget. Returns the live
-  // terminalState + reconnectCount so we can drive banner rendering without
-  // touching the protocol code.
+  // terminalState + reconnectCount so we can render the attempt count reactively.
   const { terminalState, reconnectCount } = useTerminalStateMachine({
     serverConnection: !isP2P ? wsService : undefined,
     p2pConnection,
+    p2pState,
   });
 
   // End relay synchronously before navigating away, so that the

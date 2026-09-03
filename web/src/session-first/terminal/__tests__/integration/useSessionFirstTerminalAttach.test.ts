@@ -76,15 +76,20 @@ function renderAttachHook(
   store: ReturnType<typeof makeStore>,
   p2p: ReturnType<typeof makeP2PConnection> | null,
   wsService: WebSocketService,
+  p2pState?: ConnectionState,
 ) {
+  const initialState = p2pState ?? (p2p ? p2p.conn.connectionState : 'disconnected');
   return renderHook(
-    () => useSessionFirstTerminalAttach({
-      sessionId: store.get(sessionIdAtom),
-      sessionName: store.get(sessionNameAtom),
-      p2pConnection: p2p?.conn ?? null,
-      wsService,
-    }),
+    ({ state }: { state?: ConnectionState } = { state: initialState }) =>
+      useSessionFirstTerminalAttach({
+        sessionId: store.get(sessionIdAtom),
+        sessionName: store.get(sessionNameAtom),
+        p2pConnection: p2p?.conn ?? null,
+        p2pState: state ?? initialState,
+        wsService,
+      }),
     {
+      initialProps: { state: initialState },
       wrapper: ({ children }: { children: ReactNode }) =>
         createElement(Provider, { store }, children),
     },
@@ -123,7 +128,24 @@ describe('useSessionFirstTerminalAttach', () => {
     act(() => {
       store.set(terminalTransportReadyAtom, true);
     });
-    rerender();
+    rerender({ state: 'connected' });
+
+    expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
+    expect(p2p.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ msg_type: 'client.attach' }),
+    );
+  });
+
+  it('P2P: sends client.attach when reactive p2pState transitions connecting → connected', () => {
+    const p2p = makeP2PConnection();
+    p2p.setConnectionState('connecting');
+    const wsService = makeServerConnection(false);
+    const store = makeStore({ mode: 'p2p', transportReady: true });
+
+    const { rerender } = renderAttachHook(store, p2p, wsService, 'connecting');
+    expect(p2p.sendMessage).not.toHaveBeenCalled();
+
+    rerender({ state: 'connected' });
 
     expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
     expect(p2p.sendMessage).toHaveBeenCalledWith(

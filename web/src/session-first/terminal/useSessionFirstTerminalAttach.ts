@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type SetStateAction } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { P2PConnection } from '@/hooks/useP2PConnection';
+import type { ConnectionState } from '@/services/socket/types';
 import type { WebSocketService } from '@/services/websocket';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';
 import { manualOverrideAtom, forcedRelayAtom } from '@/atoms/session';
@@ -24,6 +25,7 @@ export interface UseSessionFirstTerminalAttachOptions {
   sessionId: string;
   sessionName: string;
   p2pConnection: P2PConnection | null;
+  p2pState: ConnectionState;
   wsService: WebSocketService;
   runtime?: SessionRuntime | null;
 }
@@ -39,21 +41,28 @@ function useWsConnected(wsService: WebSocketService): boolean {
   return wsConnected;
 }
 
-function useP2pDisconnectPromote(
-  effectiveMode: 'p2p' | 'relay',
-  p2pState: string | undefined,
-  terminalState: TerminalStatus,
-  setTerminalState: (s: TerminalStatus) => void,
-): void {
+function useP2pDisconnectPromote(opts: {
+  effectiveMode: 'p2p' | 'relay';
+  p2pState: ConnectionState | undefined;
+  terminalState: TerminalStatus;
+  setTerminalState: (s: TerminalStatus) => void;
+  runtime: SessionRuntime | null | undefined;
+}): void {
+  const { effectiveMode, p2pState, terminalState, setTerminalState, runtime } = opts;
   useEffect(() => {
     if (effectiveMode !== 'p2p') { return; }
     if (
       (p2pState === 'disconnected' || p2pState === 'reconnecting')
       && terminalState === 'attached'
     ) {
-      setTerminalState('reconnecting');
+      if (runtime) {
+        const result = runtime.attachState.dispatch({ type: 'TRANSPORT_LOST' });
+        setTerminalState(result.phase);
+      } else {
+        setTerminalState('reconnecting');
+      }
     }
-  }, [effectiveMode, p2pState, terminalState, setTerminalState]);
+  }, [effectiveMode, p2pState, terminalState, setTerminalState, runtime]);
 }
 
 function useRelayFailedRecovery(
@@ -196,6 +205,7 @@ export function useSessionFirstTerminalAttach({
   sessionId,
   sessionName,
   p2pConnection,
+  p2pState,
   wsService,
   runtime,
 }: UseSessionFirstTerminalAttachOptions) {
@@ -215,9 +225,14 @@ export function useSessionFirstTerminalAttach({
   const needsTransportReattachRef = useRef(false);
 
   const wsConnected = useWsConnected(wsService);
-  const p2pState = p2pConnection?.connectionState;
 
-  useP2pDisconnectPromote(effectiveMode, p2pState, terminalState, setTerminalState);
+  useP2pDisconnectPromote({
+    effectiveMode,
+    p2pState,
+    terminalState,
+    setTerminalState,
+    runtime,
+  });
   useRelayFailedRecovery(effectiveMode, terminalState, wsConnected, setTerminalState);
 
   useEffect(() => {

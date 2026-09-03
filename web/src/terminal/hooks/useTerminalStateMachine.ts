@@ -21,6 +21,8 @@ export interface UseTerminalStateMachineOptions {
   serverConnection?: WebSocketService;
   /** Live socket from useP2PAttachTransport — avoids p2pConnectionAtom publish lag. */
   p2pConnection?: P2PConnection | null;
+  /** Reactive connection state from useP2PAttachTransport — do not read from p2pConnection getter. */
+  p2pState?: ConnectionState;
 }
 
 function useP2PAttachBridge(opts: {
@@ -260,7 +262,7 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
     setTerminalState, setReconnectCount, setForcedRelay, setP2pEpoch,
   });
 
-  const p2pState = p2pConnection?.connectionState;
+  const p2pState = options.p2pState ?? p2pConnection?.connectionState;
   useP2PAttachBridge({ mode, transportReady, p2pState, terminalState, setTerminalState });
 
   return { terminalState, reconnectCount };

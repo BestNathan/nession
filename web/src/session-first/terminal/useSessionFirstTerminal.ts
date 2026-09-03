@@ -81,7 +81,7 @@ export function useSessionFirstTerminal({
   const setBanner = useSetAtom(bannerAtomFamily(sessionId));
   const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
 
-  const { waitingForAddressPlan, p2pConnection } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, p2pState } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -92,6 +92,7 @@ export function useSessionFirstTerminal({
     sessionId,
     sessionName,
     p2pConnection,
+    p2pState,
     wsService,
   });
 
