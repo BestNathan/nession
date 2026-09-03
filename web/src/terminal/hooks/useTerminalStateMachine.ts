@@ -130,7 +130,10 @@ function useTerminalAttachProtocolEffect(opts: {
       case 'connecting':
         reconnectCountRef.current = 0;
         setReconnectCount(0);
-        if (mode === 'relay' && transportReady && serverConnection?.isConnected()) {
+        // isAuthenticated, not isConnected: a ws that is open but not yet
+        // authenticated must not fire beginRelay — the server would drop it and
+        // nothing would re-begin until the next loss cycle.
+        if (mode === 'relay' && transportReady && serverConnection?.isAuthenticated()) {
           setTerminalState('connected');
         }
         break;

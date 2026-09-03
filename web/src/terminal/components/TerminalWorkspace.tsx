@@ -30,6 +30,7 @@ import {
 } from '../../atoms/connection';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
+import { useRelayServerLifecycle } from '../hooks/useRelayServerLifecycle';
 import { ConnectionManager } from '../ConnectionManager';
 import { detectProfile, PROFILES } from '../DeviceProfile';
 import type { TerminalTransport } from '../transport/TerminalTransport';
@@ -268,34 +269,14 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // ── Relay-mode server-ws lifecycle ───────────────────────────────────
   // The state machine's P2P bridge covers socket drops only; in relay mode the
   // server WebSocket dropping must mirror the legacy view.onStateChange path:
-  // show the "Connection lost" banner once the server ws exhausts its reconnect
-  // budget, clear it (and let the state machine re-beginRelay) on re-auth.
-  const [relayLost, setRelayLost] = useState(false);
-  useEffect(() => {
-    if (effectiveMode !== 'relay' || !wsService) { return; }
-    return wsService.onConnectionChange((status) => {
-      if (status === 'authenticated') {
-        setRelayLost(false);
-        // Server ws authenticated after TerminalWorkspace mounted (rare — the
-        // state machine's 'connecting' branch handles the already-authed case
-        // via isConnected()). Hand off so beginRelay is actually sent.
-        setTerminalState((prev) => {
-          if (prev === 'connecting' || prev === 'reconnecting' || prev === 'failed') {
-            return 'connected';
-          }
-          return prev;
-        });
-      } else if (status === 'disconnected') {
-        setRelayLost(true);
-        setTerminalState((prev) => {
-          if (prev === 'attached' || prev === 'connected') {
-            return 'reconnecting';
-          }
-          return prev;
-        });
-      }
-    });
-  }, [effectiveMode, wsService, setTerminalState]);
+  // intra-budget reconnect (status 'connecting') and exhausted 'disconnected'
+  // both end the server-side relay loop, so both take the attach machine back
+  // to reconnecting; the banner appears only on the terminal disconnected.
+  const { relayLost } = useRelayServerLifecycle({
+    effectiveMode,
+    wsService,
+    setTerminalState,
+  });
 
   // ── Banner ───────────────────────────────────────────────────────────
   // Map the (P2P-driven) state machine + relay-lost flag onto the banner atoms

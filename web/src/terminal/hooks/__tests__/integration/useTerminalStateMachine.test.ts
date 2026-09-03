@@ -18,9 +18,10 @@ import type { WebSocketService } from '@/services/websocket';
 
 /** Minimal mock of the server WebSocketService — only the members the state
  *  machine touches in relay mode. */
-function makeServerConnection(isConnected: boolean) {
+function makeServerConnection(isConnected: boolean, isAuthenticated = isConnected) {
   return {
     isConnected: () => isConnected,
+    isAuthenticated: () => isAuthenticated,
     beginRelay: vi.fn(),
   } as unknown as WebSocketService;
 }
@@ -113,7 +114,7 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
-    // isConnected() is true → connecting promotes to connected immediately, and
+    // server ws authenticated → connecting promotes to connected immediately, and
     // the connected case fire-and-forgets beginRelay then attaches.
     expect(result.current.terminalState).toBe('attached');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
@@ -128,6 +129,20 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
+    expect(result.current.terminalState).toBe('connecting');
+    expect(serverConnection.beginRelay).not.toHaveBeenCalled();
+  });
+
+  it('relay: stays connecting while the ws is open but not yet authenticated', () => {
+    const serverConnection = makeServerConnection(true, false);
+    const store = makeStore({ mode: 'relay', sessionId: 'agent:sess' });
+
+    const { result } = renderWithStore(store, () =>
+      useTerminalStateMachine({ serverConnection }),
+    );
+
+    // isConnected() true, isAuthenticated() false — beginRelay would be dropped
+    // by the server pre-auth, so the machine must not promote to connected.
     expect(result.current.terminalState).toBe('connecting');
     expect(serverConnection.beginRelay).not.toHaveBeenCalled();
   });

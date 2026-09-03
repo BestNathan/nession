@@ -283,6 +283,63 @@ describe('SessionRuntime', () => {
 
 
 
+
+  describe('relay reconnect across intra-budget server-ws loss', () => {
+    it('re-begins exactly once across authenticated -> connecting -> connected -> authenticated', async () => {
+      const serverConnection = makeRelayServerConnection('authenticated');
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
+
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(rt.attachState.phase).toBe('attached');
+
+      // Recoverable loss: status leaves authenticated for connecting (intra-budget).
+      serverConnection.emit('connecting');
+      expect(rt.attachState.phase).toBe('reconnecting');
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+
+      // The open-but-not-yet-authenticated window must not begin relay.
+      serverConnection.emit('connected');
+      expect(rt.attachState.phase).toBe('reconnecting');
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+
+      serverConnection.emit('authenticated');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(rt.attachState.phase).toBe('attached');
+
+      // A full second loss cycle re-begins once more.
+      serverConnection.emit('connecting');
+      serverConnection.emit('authenticated');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(3);
+      expect(rt.attachState.phase).toBe('attached');
+      rt.dispose();
+    });
+
+    it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
+      const serverConnection = makeRelayServerConnection('authenticated');
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
+
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+
+      const events: string[] = [];
+      rt.subscribeRuntimeEvents((e) => events.push(e.type));
+      serverConnection.emit('connecting');
+      serverConnection.emit('connecting');
+      expect(rt.attachState.phase).toBe('reconnecting');
+      expect(events.filter((t) => t === 'route-intent-changed')).toHaveLength(1);
+
+      serverConnection.emit('authenticated');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      rt.dispose();
+    });
+  });
+
   describe('atomic P2P -> relay fallback (runtime-owned beginRelay)', () => {
     it('attach-error fallback begins relay immediately when the server ws is already authenticated', async () => {
       const serverConnection = makeRelayServerConnection('authenticated');

@@ -358,8 +358,11 @@ export class SessionRuntime {
     }
 
     this.relayServerUnsub = conn.onConnectionChange((status: ConnectionStatus) => {
-      if (status === 'disconnected') {
-        // Loss of the server WS ends the server-side relay forwarding loop.
+      // Recoverable loss is authenticated -> connecting (server core stays in
+      // 'connecting' through its intra-budget reconnect; 'disconnected' only
+      // fires once the budget is exhausted or on explicit disconnect). Either
+      // ends the server-side relay forwarding loop.
+      if (status === 'connecting' || status === 'disconnected') {
         if (this.attachState.phase === 'attached') {
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
