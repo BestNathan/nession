@@ -81,7 +81,9 @@ export class WebSocketService {
     }
     this.unregister(plugin.name);
     const installed = plugin.install(this.core);
-    const teardown = installed ?? plugin.uninstall?.();
+    // Legacy contract: when install() returns nothing, retain the plugin's
+    // uninstall() as the FUTURE teardown — never invoke it during registration.
+    const teardown = installed ?? (plugin.uninstall ? () => plugin.uninstall!() : undefined);
     if (!teardown) {
       throw new Error(
         `WebSocketService: plugin '${plugin.name}' must return a teardown from install() or implement uninstall()`,

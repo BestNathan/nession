@@ -207,6 +207,23 @@ describe('WebSocketService (facade)', () => {
     it('use() rejects a plugin that returns no teardown and has no uninstall', () => {
       expect(() => service.use({ name: 'bare', install: vi.fn() })).toThrow(/teardown/);
     });
+
+    it('legacy uninstall() fallback is deferred to unregister, not run at install time', () => {
+      const uninstall = vi.fn();
+      const legacy = { name: 'legacy', install: vi.fn(), uninstall };
+
+      service.use(legacy);
+
+      // install() returned void — the plugin's uninstall must be retained as
+      // the future teardown, never invoked during registration.
+      expect(legacy.install).toHaveBeenCalledTimes(1);
+      expect(uninstall).not.toHaveBeenCalled();
+      expect(service.getCapability('legacy')).toBe(legacy);
+
+      expect(service.unregister('legacy')).toBe(true);
+      expect(uninstall).toHaveBeenCalledTimes(1);
+      expect(service.getCapability('legacy')).toBeNull();
+    });
   });
 
   describe('connection management delegates to core', () => {
