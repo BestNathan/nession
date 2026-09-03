@@ -118,6 +118,12 @@ function useReconnectBanner(opts: {
         });
       } else if (status === 'disconnected') {
         setRelayLost(true);
+        setTerminalState((prev) => {
+          if (prev === 'attached') {
+            return 'reconnecting';
+          }
+          return prev;
+        });
       }
     });
   }, [effectiveMode, wsService, setTerminalState]);
@@ -178,6 +184,7 @@ export function useTerminalOrchestration({
     orderedUrls,
     manualOverride,
     transportFirst: true,
+    wsService,
   });
 
   const { terminalState, reconnectCount } = useSessionFirstTerminalAttach({

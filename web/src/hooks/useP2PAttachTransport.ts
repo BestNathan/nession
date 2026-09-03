@@ -2,6 +2,7 @@ import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import type { AttachInfo } from '../types';
 import type { AddressPlan } from './useAddressPlan';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { WebSocketService } from '@/services/websocket';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
@@ -10,6 +11,7 @@ interface UseP2PAttachTransportOptions {
   manualOverride: string | null;
   /** Session-first waits for xterm transport before attach. Legacy attaches on socket connect. */
   transportFirst?: boolean;
+  wsService?: WebSocketService;
 }
 
 interface UseP2PAttachTransportResult {
@@ -28,10 +30,12 @@ interface UseP2PAttachTransportResult {
  */
 export function useP2PAttachTransport({
   transportFirst = false,
+  wsService,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, transportKey } = useSessionRuntime({
     transportFirst,
     configOwner: true,
+    wsService,
   });
 
   return {

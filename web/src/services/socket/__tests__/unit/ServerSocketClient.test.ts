@@ -72,4 +72,18 @@ describe('ServerSocketClient', () => {
     client.dispose();
     expect(core.disconnect).toHaveBeenCalled();
   });
+
+  it('request passes remaining timeout budget to core.request', async () => {
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValueOnce(0).mockReturnValueOnce(12_000);
+
+    const authedCore = makeCore({
+      isAuthenticated: () => true,
+      getConnectionStatus: () => 'authenticated',
+    });
+    const client = new ServerSocketClient(authedCore);
+    await client.request('sessions.list', {}, { timeoutMs: 15_000 });
+    expect(authedCore.request).toHaveBeenCalledWith('sessions.list', {}, 3000);
+    now.mockRestore();
+  });
 });

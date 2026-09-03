@@ -40,6 +40,7 @@ describe('SessionAttachController', () => {
       p2pConnection: conn,
       manualRoute: false,
       lastResize: null,
+      transportGeneration: 0,
     });
 
     const attachId = (conn.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0].id as string;
@@ -68,6 +69,7 @@ describe('SessionAttachController', () => {
       p2pConnection: conn,
       manualRoute: false,
       lastResize: null,
+      transportGeneration: 0,
     });
 
     for (let i = 0; i <= 10; i += 1) {
@@ -76,11 +78,36 @@ describe('SessionAttachController', () => {
         p2pConnection: conn,
         manualRoute: false,
         lastResize: null,
+        transportGeneration: i,
       });
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
     }
 
     expect(sawForceRelay).toBe(true);
     expect(sm.phase).toBe('connecting');
+  });
+
+  it('does not send duplicate attach for the same transport generation', () => {
+    const sm = new AttachStateMachine({ transportFirst: true });
+    sm.dispatch({ type: 'SESSION_SELECTED' });
+    const controller = new SessionAttachController(sm);
+    const { conn } = makeP2pConn();
+
+    controller.startP2PAttach({
+      sessionName: 's1',
+      p2pConnection: conn,
+      manualRoute: false,
+      lastResize: null,
+      transportGeneration: 3,
+    });
+    controller.startP2PAttach({
+      sessionName: 's1',
+      p2pConnection: conn,
+      manualRoute: false,
+      lastResize: null,
+      transportGeneration: 3,
+    });
+
+    expect(conn.sendMessage).toHaveBeenCalledTimes(1);
   });
 });

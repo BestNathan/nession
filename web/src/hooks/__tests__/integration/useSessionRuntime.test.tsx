@@ -425,6 +425,20 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
 
+  it('legacy config owner does not overwrite connecting terminal state from runtime snapshot', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    store.set(terminalSessionStateAtom, 'connecting');
+
+    renderHook(
+      () => useSessionRuntime({ transportFirst: false, configOwner: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitFor(() => {
+      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+    });
+  });
+
   it('applies route-intent snapshot when config owner updates after subscribing', async () => {
     const store = makeStore('agent:a', 'token-a');
     store.set(terminalSessionStateAtom, 'attached');

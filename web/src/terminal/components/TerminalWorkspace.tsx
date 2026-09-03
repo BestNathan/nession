@@ -287,6 +287,12 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
         });
       } else if (status === 'disconnected') {
         setRelayLost(true);
+        setTerminalState((prev) => {
+          if (prev === 'attached' || prev === 'connected') {
+            return 'reconnecting';
+          }
+          return prev;
+        });
       }
     });
   }, [effectiveMode, wsService, setTerminalState]);

@@ -21,6 +21,7 @@ export interface StartP2PAttachParams {
   p2pConnection: P2PConnection;
   manualRoute: boolean;
   lastResize: { cols: number; rows: number } | null;
+  transportGeneration: number;
 }
 
 /**
@@ -29,6 +30,7 @@ export interface StartP2PAttachParams {
  */
 export class SessionAttachController {
   private attachGeneration = 0;
+  private inFlightTransportGen: number | null = null;
   private attachTimer: ReturnType<typeof setTimeout> | null = null;
   private messageUnsub: (() => void) | null = null;
   private readonly outcomeListeners = new Set<AttachOutcomeListener>();
@@ -54,7 +56,11 @@ export class SessionAttachController {
   }
 
   startP2PAttach(params: StartP2PAttachParams): () => void {
+    if (this.inFlightTransportGen === params.transportGeneration) {
+      return () => {};
+    }
     this.cancelActiveAttach();
+    this.inFlightTransportGen = params.transportGeneration;
     const gen = ++this.attachGeneration;
     const attachId = generateAttachId();
 
@@ -75,9 +81,11 @@ export class SessionAttachController {
         return;
       }
       if (msg.msg_type === 'ok') {
+        this.inFlightTransportGen = null;
         this.dispatch({ type: 'ATTACH_OK' });
         this.cancelActiveAttach();
       } else if (msg.msg_type === 'error') {
+        this.inFlightTransportGen = null;
         this.dispatch({ type: 'ATTACH_ERROR', manualRoute: params.manualRoute });
         this.cancelActiveAttach();
       }
@@ -89,6 +97,7 @@ export class SessionAttachController {
         return;
       }
       this.cancelMessageSubscription();
+      this.inFlightTransportGen = null;
       const attempt = this.attachState.reconnectCount + 1;
       this.dispatch({
         type: 'ATTACH_TIMEOUT',
@@ -110,6 +119,7 @@ export class SessionAttachController {
 
   cancelActiveAttach(): void {
     this.attachGeneration += 1;
+    this.inFlightTransportGen = null;
     this.cancelMessageSubscription();
     if (this.attachTimer) {
       clearTimeout(this.attachTimer);

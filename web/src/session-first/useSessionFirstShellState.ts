@@ -5,6 +5,7 @@ import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
 import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
 import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
 import { useSessionRuntime } from '@/hooks/useSessionRuntime';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { sessionIdAtom } from '@/atoms/session';
 import { mapDomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
@@ -21,7 +22,8 @@ export function useSessionFirstShellState() {
     handleSessionKilled,
   } = data;
   const clientSessionId = useAtomValue(sessionIdAtom);
-  const { fileOps } = useSessionRuntime({ transportFirst: true });
+  const wsService = useWebSocket();
+  const { fileOps } = useSessionRuntime({ transportFirst: true, wsService });
   const { attachDialogSession, requestAttach, confirmAttach, cancelAttach } = useSessionFirstAttach();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);

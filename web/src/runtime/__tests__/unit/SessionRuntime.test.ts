@@ -199,4 +199,44 @@ describe('SessionRuntime', () => {
     startSpy.mockRestore();
     rt.dispose();
   });
+
+  it('applies forceRelay internally without React subscriber', () => {
+    const rt = new SessionRuntime(makeConfig());
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
+    expect(rt.getP2PConnection()).toBeNull();
+    rt.dispose();
+  });
+
+  it('re-begins relay after server websocket reconnect', () => {
+    const listeners = new Set<(status: string) => void>();
+    const beginRelay = vi.fn();
+    const serverConnection = {
+      beginRelay,
+      onConnectionChange: (cb: (status: string) => void) => {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+    } as unknown as import('@/services/websocket').WebSocketService;
+
+    const rt = new SessionRuntime(makeConfig({
+      forcedRelay: true,
+      serverConnection,
+    }));
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
+    expect(rt.attachState.phase).toBe('attached');
+
+    for (const cb of listeners) {
+      cb('disconnected');
+    }
+    expect(rt.attachState.phase).toBe('reconnecting');
+
+    for (const cb of listeners) {
+      cb('authenticated');
+    }
+    expect(beginRelay).toHaveBeenCalledOnce();
+    expect(rt.attachState.phase).toBe('attached');
+    rt.dispose();
+  });
 });

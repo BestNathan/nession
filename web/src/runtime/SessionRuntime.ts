@@ -1,5 +1,6 @@
-import type { AttachInfo } from '@/types';
+import type { AttachInfo, ConnectionStatus } from '@/types';
 import type { AddressPlan } from '@/hooks/useAddressPlan';
+import type { WebSocketService } from '@/services/websocket';
 import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
 import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapter';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
@@ -22,6 +23,8 @@ export interface SessionRuntimeConfig {
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
   transportReady?: boolean;
+  /** Relay-mode server WebSocket — runtime re-begins relay after server reconnect. */
+  serverConnection?: WebSocketService | null;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -57,6 +60,8 @@ export class SessionRuntime {
   private readonly attachOutcomeListeners = new Set<(result: AttachTransitionResult) => void>();
   /** Guards against re-entrant / duplicate terminal-disconnect handling. */
   private disconnectHandling = false;
+  private relayServerUnsub: (() => void) | null = null;
+  private relayNeedsRebegin = false;
 
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
@@ -77,11 +82,19 @@ export class SessionRuntime {
       if (result.phase === 'attached') {
         this.attachedTransportGeneration = this.transportGeneration;
       }
+      if (result.forceRelay) {
+        this.applyForceRelay();
+      }
       for (const listener of this.attachOutcomeListeners) {
         listener(result);
       }
     });
     this.syncAgentClient();
+    this.wireRelayServerHandler();
+  }
+
+  get transportFirstMode(): boolean {
+    return this.config.transportFirst;
   }
 
   getMirrorSnapshot(): RuntimeMirrorSnapshot {
@@ -162,10 +175,24 @@ export class SessionRuntime {
     }
 
     this.syncAgentClient();
+    this.wireRelayServerHandler();
     if (!prevTransportReady && this.transportReady) {
       this.maybeStartP2PAttach();
     }
     return this.getMirrorSnapshot();
+  }
+
+  private applyForceRelay(): void {
+    if (this.config.forcedRelay) {
+      return;
+    }
+    this.config = { ...this.config, forcedRelay: true };
+    this.attachedTransportGeneration = null;
+    this.attachController.cancelActiveAttach();
+    this.transportGeneration += 1;
+    this.syncAgentClient();
+    this.wireRelayServerHandler();
+    this.emitRuntimeEvent({ type: 'force-relay' });
   }
 
   private handleRouteIntentChange(): void {
@@ -206,6 +233,7 @@ export class SessionRuntime {
       p2pConnection: this.p2pAdapter,
       manualRoute: this.config.manualOverride !== null,
       lastResize: this.lastResize,
+      transportGeneration: this.transportGeneration,
     });
   }
 
@@ -230,6 +258,7 @@ export class SessionRuntime {
 
   dispose(): void {
     this.teardownConnectionHandler();
+    this.teardownRelayServerHandler();
     this.attachController.cancelActiveAttach();
     this.agentClient?.dispose();
     this.agentClient = null;
@@ -294,6 +323,40 @@ export class SessionRuntime {
   private teardownConnectionHandler(): void {
     this.connectionUnsub?.();
     this.connectionUnsub = null;
+  }
+
+  private teardownRelayServerHandler(): void {
+    this.relayServerUnsub?.();
+    this.relayServerUnsub = null;
+  }
+
+  private wireRelayServerHandler(): void {
+    this.teardownRelayServerHandler();
+    const conn = this.config.serverConnection;
+    if (!this.config.forcedRelay || !conn || !this.config.attachInfo) {
+      return;
+    }
+
+    this.relayServerUnsub = conn.onConnectionChange((status: ConnectionStatus) => {
+      if (status === 'disconnected') {
+        if (this.attachState.phase === 'attached') {
+          this.relayNeedsRebegin = true;
+          const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+          this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+        }
+      } else if (status === 'authenticated' && this.relayNeedsRebegin) {
+        this.relayNeedsRebegin = false;
+        const resize = this.lastResize;
+        conn.beginRelay(
+          this.sessionId,
+          undefined,
+          resize?.cols,
+          resize?.rows,
+        );
+        const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
+        this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+      }
+    });
   }
 
   private wireConnectionHandler(): void {

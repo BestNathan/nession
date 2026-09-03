@@ -98,4 +98,19 @@ describe('SessionRuntimeRegistry', () => {
     vi.runAllTimers();
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
+
+  it('recreates runtime when transportFirst mode changes', () => {
+    const registry = new SessionRuntimeRegistry();
+    const legacy = registry.acquire('s1', makeConfig('s1'));
+    registry.release('s1');
+
+    const sessionFirstConfig = makeConfig('s1');
+    sessionFirstConfig.transportFirst = true;
+    const sessionFirst = registry.acquire('s1', sessionFirstConfig);
+
+    expect(sessionFirst).not.toBe(legacy);
+    expect(sessionFirst.transportFirstMode).toBe(true);
+    registry.release('s1');
+    vi.runAllTimers();
+  });
 });

@@ -127,6 +127,7 @@ function makeRuntime(opts: {
       p2pConnection: opts.p2p,
       manualRoute: opts.manualRoute ?? false,
       lastResize: null,
+      transportGeneration: transportGen,
     });
   };
 

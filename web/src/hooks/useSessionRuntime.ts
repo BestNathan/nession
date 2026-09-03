@@ -9,11 +9,14 @@ import type { SessionRuntime, SessionRuntimeConfig } from '@/runtime/SessionRunt
 import type { ConnectionState } from '@/services/socket/types';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { FileOps } from '@/services/fileOps';
+import type { WebSocketService } from '@/services/websocket';
 
 export interface UseSessionRuntimeOptions {
   transportFirst: boolean;
   /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
+  /** Relay-mode server lifecycle (beginRelay on reconnect). Required for hidden-viewport recovery. */
+  wsService?: WebSocketService;
 }
 
 export interface UseSessionRuntimeResult {
@@ -75,12 +78,88 @@ interface RuntimeConnectionSyncResult {
   p2pState: ConnectionState;
 }
 
+function applyRuntimeMirrorSnapshot(opts: {
+  snapshot: import('@/runtime/SessionRuntime').RuntimeMirrorSnapshot;
+  inP2PTransport: boolean;
+  mirrorAttachPhase: boolean;
+  setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+  setTransportGeneration: (n: number) => void;
+  setLocalP2p: (c: P2PConnection | null) => void;
+  setP2pConnection: (c: P2PConnection | null) => void;
+  setConnectionState: (s: ConnectionState) => void;
+  setP2pState: (s: ConnectionState) => void;
+}): void {
+  const {
+    snapshot, inP2PTransport, mirrorAttachPhase,
+    setTerminalState, setTransportGeneration,
+    setLocalP2p, setP2pConnection, setConnectionState, setP2pState,
+  } = opts;
+  if (mirrorAttachPhase) {
+    setTerminalState(snapshot.phase);
+  }
+  setTransportGeneration(snapshot.transportGeneration);
+  const conn = inP2PTransport ? snapshot.p2pConnection : null;
+  setLocalP2p(conn);
+  setP2pConnection(conn);
+  setConnectionState(snapshot.connectionState);
+  setP2pState(snapshot.connectionState);
+}
+
+function handleRuntimeEvent(
+  event: import('@/runtime/SessionRuntime').SessionRuntimeEvent,
+  ctx: {
+    runtime: SessionRuntime;
+    inP2PTransport: boolean;
+    mirrorAttachPhase: boolean;
+    setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+    setTransportGeneration: (n: number) => void;
+    setForcedRelay: (v: boolean) => void;
+    setLocalP2p: (c: P2PConnection | null) => void;
+    setP2pConnection: (c: P2PConnection | null) => void;
+  },
+): void {
+  const {
+    runtime, inP2PTransport, mirrorAttachPhase,
+    setTerminalState, setTransportGeneration, setForcedRelay, setLocalP2p, setP2pConnection,
+  } = ctx;
+  setTransportGeneration(runtime.currentTransportGeneration);
+  if (event.type === 'next-candidate') {
+    setTerminalState('connecting');
+    setLocalP2p(runtime.getP2PConnection());
+    setP2pConnection(runtime.getP2PConnection());
+    return;
+  }
+  if (event.type === 'force-relay') {
+    if (mirrorAttachPhase) {
+      setTerminalState('connecting');
+    }
+    setForcedRelay(true);
+    return;
+  }
+  if (event.type === 'transport-exhausted') {
+    if (mirrorAttachPhase) {
+      setTerminalState('failed');
+    }
+    return;
+  }
+  if (event.type === 'route-intent-changed') {
+    if (mirrorAttachPhase) {
+      setTerminalState(event.phase);
+    }
+    if (inP2PTransport) {
+      setLocalP2p(runtime.getP2PConnection());
+      setP2pConnection(runtime.getP2PConnection());
+    }
+  }
+}
+
 function useRuntimeConnectionSync(opts: {
   sessionId: string | null;
   runtime: SessionRuntime | null;
   runtimeConfig: SessionRuntimeConfig | null;
   inP2PTransport: boolean;
   configOwner: boolean;
+  mirrorAttachPhase: boolean;
   setP2pConnection: (c: P2PConnection | null) => void;
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
@@ -93,6 +172,7 @@ function useRuntimeConnectionSync(opts: {
     runtimeConfig,
     inP2PTransport,
     configOwner,
+    mirrorAttachPhase,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
@@ -129,23 +209,16 @@ function useRuntimeConnectionSync(opts: {
       : () => {};
 
     const unsubEvents = runtime.subscribeRuntimeEvents((event) => {
-      setTransportGeneration(runtime.currentTransportGeneration);
-      if (event.type === 'next-candidate') {
-        setTerminalState('connecting');
-        setLocalP2p(runtime.getP2PConnection());
-        setP2pConnection(runtime.getP2PConnection());
-      } else if (event.type === 'force-relay') {
-        setTerminalState('connecting');
-        setForcedRelay(true);
-      } else if (event.type === 'transport-exhausted') {
-        setTerminalState('failed');
-      } else if (event.type === 'route-intent-changed') {
-        setTerminalState(event.phase);
-        if (inP2PTransport) {
-          setLocalP2p(runtime.getP2PConnection());
-          setP2pConnection(runtime.getP2PConnection());
-        }
-      }
+      handleRuntimeEvent(event, {
+        runtime,
+        inP2PTransport,
+        mirrorAttachPhase,
+        setTerminalState,
+        setTransportGeneration,
+        setForcedRelay,
+        setLocalP2p,
+        setP2pConnection,
+      });
     });
 
     const snapshot = configOwner
@@ -153,13 +226,17 @@ function useRuntimeConnectionSync(opts: {
       : null;
 
     if (snapshot) {
-      setTerminalState(snapshot.phase);
-      setTransportGeneration(snapshot.transportGeneration);
-      const conn = inP2PTransport ? snapshot.p2pConnection : null;
-      setLocalP2p(conn);
-      setP2pConnection(conn);
-      setConnectionState(snapshot.connectionState);
-      setP2pState(snapshot.connectionState);
+      applyRuntimeMirrorSnapshot({
+        snapshot,
+        inP2PTransport,
+        mirrorAttachPhase,
+        setTerminalState,
+        setTransportGeneration,
+        setLocalP2p,
+        setP2pConnection,
+        setConnectionState,
+        setP2pState,
+      });
     } else {
       const conn = inP2PTransport ? runtime.getP2PConnection() : null;
       setLocalP2p(conn);
@@ -185,6 +262,7 @@ function useRuntimeConnectionSync(opts: {
     setTerminalState,
     setTransportGeneration,
     configOwner,
+    mirrorAttachPhase,
   ]);
 
   useEffect(() => {
@@ -245,6 +323,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       routeIntentEpoch,
       lastResize,
       transportReady,
+      serverConnection: !inP2PTransport && attachInfo ? options.wsService ?? null : null,
     };
   }, [
     sessionId,
@@ -257,6 +336,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     addressPlanReady,
     addressPlan.urls,
     options.transportFirst,
+    options.wsService,
     routeIntentEpoch,
     lastResize,
     transportReady,
@@ -270,6 +350,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     runtimeConfig,
     inP2PTransport,
     configOwner: options.configOwner ?? false,
+    mirrorAttachPhase: options.transportFirst,
     setP2pConnection,
     setP2pState,
     setForcedRelay,

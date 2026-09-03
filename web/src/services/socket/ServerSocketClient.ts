@@ -68,6 +68,7 @@ export class ServerSocketClient implements SocketClient {
       return Promise.reject(new Error('ServerSocketClient disposed'));
     }
     const timeoutMs = options?.timeoutMs ?? 15_000;
+    const start = Date.now();
     if (!this.core.isAuthenticated()) {
       const status = this.core.getConnectionStatus();
       if (status === 'disconnected') {
@@ -75,7 +76,11 @@ export class ServerSocketClient implements SocketClient {
       }
       await this.waitForConnection(timeoutMs);
     }
-    return this.core.request<T>(type, payload, timeoutMs);
+    const remaining = timeoutMs - (Date.now() - start);
+    if (remaining <= 0) {
+      return Promise.reject(new Error(`Request timeout: ${type}`));
+    }
+    return this.core.request<T>(type, payload, remaining);
   }
 
   failPending(error: Error): void {

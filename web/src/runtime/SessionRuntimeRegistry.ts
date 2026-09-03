@@ -3,6 +3,7 @@ import { SessionRuntime, type RuntimeMirrorSnapshot, type SessionRuntimeConfig }
 interface RegistryEntry {
   runtime: SessionRuntime;
   refs: number;
+  transportFirst: boolean;
 }
 
 /** Defer dispose one macrotask so React StrictMode effect replay can re-acquire. */
@@ -22,11 +23,16 @@ export class SessionRuntimeRegistry {
 
     const existing = this.entries.get(sessionId);
     if (existing) {
-      existing.refs += 1;
-      return existing.runtime;
+      if (existing.transportFirst !== config.transportFirst) {
+        existing.runtime.dispose();
+        this.entries.delete(sessionId);
+      } else {
+        existing.refs += 1;
+        return existing.runtime;
+      }
     }
     const runtime = new SessionRuntime(config);
-    this.entries.set(sessionId, { runtime, refs: 1 });
+    this.entries.set(sessionId, { runtime, refs: 1, transportFirst: config.transportFirst });
     return runtime;
   }
 
