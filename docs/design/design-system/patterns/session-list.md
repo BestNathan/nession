@@ -79,6 +79,69 @@ No Primitive color classes on the list or its empty states.
 
 Same SessionItem content on both platforms.
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+
+### Dominance
+
+- SessionList is **navigation chrome** — it must recede so the Terminal (or Workspace when active) dominates the frame (P1, P2).
+- The list never draws more visual weight than the active work surface in the shell split.
+
+### Information hierarchy
+
+- **Primary within the list:** the selected [SessionItem](session-item.md) name.
+- **Container chrome** (search, empty, error): `secondary` at most — never product-title scale.
+- No list-level "system status" that competes with row-level domain facts.
+
+### Alignment
+
+- Rows share one left gutter; optional search/filter aligns to the same inset.
+- Flat vertical stack — no Agent section headers breaking alignment.
+
+### Density
+
+- **Session navigation density** — comfortable, scannable rows ([visual-language.md](../../visual-language.md) §4).
+- List viewport scrolls; chrome above the list (search) is compact and optional.
+
+### Whitespace
+
+- Background shift separates navigation surface from app canvas — whitespace and surface shift before borders.
+- Empty and loading states use vertical whitespace; do not fill with Agent card grids.
+
+### Contrast
+
+- List background: navigation surface — quieter than primary work surface.
+- Empty/error copy: `secondary`; danger only for list-fetch failure, not per-Agent offline.
+
+### Surface treatment
+
+- Navigation surface: background shift vs canvas; hairline border only if shift alone is illegible (R-S5 — no elevation on healthy chrome).
+- No card wrapper around the entire list.
+
+### State-driven emphasis
+
+| Container state | Emphasis |
+|-----------------|----------|
+| `populated` | Default — quiet chrome, row selection carries accent |
+| `empty` | Informative copy at `secondary` — not alarm |
+| `loading` | Skeleton at `tertiary` — no flash of Agent grid |
+| `error` | List-level `conditional-prominent` — distinct from row Agent offline |
+| Partial Agent refresh miss | Rows stay; per-row reachability escalates on [SessionItem](session-item.md) only |
+
+### Anti-patterns
+
+- Agent-grouped sections or Agent card grid as primary nav.
+- Dropping Sessions when Agent is unreachable (hides the connectivity problem).
+- List-level error styling when only one Agent missed refresh.
+- Decorative color on the list chrome.
+- Search/filter that switches the list into Agent-parent grouping.
+
+### Canonical reference
+
+- Web: `/#/fixture` 1440×900 — left Sessions column with six rows ([#563](https://github.com/BestNathan/nession/pull/563)).
+- App: `/#/fixture/app` 390×844 — Sessions spatial layer (drawer/stack) ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Primary nav is a Session list, not an Agent card grid.

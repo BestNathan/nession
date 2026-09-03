@@ -57,6 +57,65 @@ No Primitive palette. No App Experience tokens in Web TSX (`experience.app.*`).
 
 App may reuse the *idea* of two surfaces, not this widget.
 
+## Visual Contract
+
+Derived from [visual-language.md](../../visual-language.md) and Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+
+### Dominance
+
+- SurfaceSwitcher is **secondary chrome** — compact, never taller or louder than [SessionHeader](session-header.md) title metadata.
+- Terminal remains default and visually dominant in the shell; switching to Workspace hides Terminal — the switcher itself must not imply equal visual weight to both surfaces at rest.
+
+### Information hierarchy
+
+- **Primary action in header region (Web):** one of two peer labels — `Terminal` (default emphasis when selected) or `Workspace` (auxiliary).
+- **Not present:** Agent status, tool tabs, or a third segment — those belong to other patterns.
+
+### Alignment
+
+- Inline in SessionHeader band or immediately beneath — trailing or centered per [composition.md](../../composition.md); never a full-width banner.
+
+### Density
+
+- Experience Web `control.sm` / `control.md` — **compact control density**, not `control.lg`.
+- Two segments only; no wrapping label stack.
+
+### Whitespace
+
+- Minimal horizontal padding inside the track; whitespace separates the switcher from Session title — not an enclosing card.
+
+### Contrast
+
+- Selected segment: `primary` accent within the control — the only accent in this widget.
+- Unselected: `secondary` text — no second accent color.
+
+### Surface treatment
+
+- Flat segmented control on header surface — no elevation, no shadow (healthy chrome never elevates, R-S5).
+- Not a ModeBar-style multi-tab pager.
+
+### State-driven emphasis
+
+| State | Emphasis |
+|-------|----------|
+| `terminal` selected | Terminal segment `primary`; Workspace `secondary` |
+| `workspace` selected | Workspace segment `primary`; user understands auxiliary surface |
+| No active Session | Control absent or inert — not a disabled alarm state |
+| Agent unhealthy | Does **not** add a third segment or recolor the switcher — tool `availability` is separate |
+
+### Anti-patterns
+
+- Terminal \| Workspace \| Files \| Agent as one control (ModeBar predecessor).
+- Side-by-side Terminal + Workspace as default layout.
+- App-shrunken copy of this widget as the spatial shell ([#473](https://github.com/BestNathan/nession/issues/473)).
+- Large segmented control that steals vertical space from the Terminal well.
+- Accent on both segments simultaneously.
+
+### Canonical reference
+
+- Web: `/#/fixture` 1440×900 — SurfaceSwitcher in terminal-native header ([#563](https://github.com/BestNathan/nession/pull/563)).
+- App: **not used** — spatial model replaces this pattern ([#568](https://github.com/BestNathan/nession/pull/568)).
+
 ## Acceptance
 
 - [ ] Exactly one of Terminal / Workspace is visible.
