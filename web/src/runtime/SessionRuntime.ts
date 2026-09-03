@@ -48,6 +48,8 @@ export class SessionRuntime {
   private agentClient: AgentSocketClient | null = null;
   private p2pAdapter: P2PConnection | null = null;
   private fileCapability: FileCapability | null = null;
+  /** Typed per-session capabilities (files today; future: process, port-forward). */
+  private readonly capabilities = new Map<string, { instance: unknown; dispose?: () => void }>();
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -152,6 +154,32 @@ export class SessionRuntime {
 
   getFileCapability(): FileCapability | null {
     return this.fileCapability;
+  }
+
+  /** Register a session capability. A prior instance under the same name is disposed. */
+  registerSessionCapability<T>(name: string, instance: T, dispose?: () => void): void {
+    const existing = this.capabilities.get(name);
+    if (existing) {
+      existing.dispose?.();
+    }
+    this.capabilities.set(name, { instance, dispose });
+  }
+
+  unregisterSessionCapability(name: string): void {
+    const entry = this.capabilities.get(name);
+    if (!entry) {
+      return;
+    }
+    this.capabilities.delete(name);
+    entry.dispose?.();
+  }
+
+  getSessionCapability<T>(name: string): T | null {
+    const entry = this.capabilities.get(name);
+    if (!entry) {
+      return null;
+    }
+    return entry.instance as T;
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -283,6 +311,9 @@ export class SessionRuntime {
     this.agentClient = null;
     this.p2pAdapter = null;
     this.fileCapability = null;
+    for (const name of [...this.capabilities.keys()]) {
+      this.unregisterSessionCapability(name);
+    }
     this.connectionStateListeners.clear();
     this.runtimeEventListeners.clear();
   }
@@ -464,6 +495,7 @@ export class SessionRuntime {
       this.agentClient = null;
       this.p2pAdapter = null;
       this.fileCapability = null;
+      this.unregisterSessionCapability('files');
       return;
     }
 
@@ -496,6 +528,7 @@ export class SessionRuntime {
     }
     this.p2pAdapter = createP2PConnectionAdapter(client);
     this.fileCapability = new FileCapability(client);
+    this.registerSessionCapability('files', this.fileCapability);
     if (client.connectionState === 'connected') {
       this.maybeStartP2PAttach();
     }
