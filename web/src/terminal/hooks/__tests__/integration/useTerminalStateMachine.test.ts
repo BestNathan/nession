@@ -9,7 +9,7 @@ import {
   ATTACH_TIMEOUT_MS,
 } from '@/terminal/hooks/useTerminalStateMachine';
 import { sessionIdAtom, sessionNameAtom, attachInfoAtom, forcedRelayAtom, manualOverrideAtom } from '@/atoms/session';
-import { p2pConnectionAtom } from '@/atoms/connection';
+import { p2pConnectionAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
 import type { WebSocketService } from '@/services/websocket';
@@ -246,6 +246,9 @@ describe('useTerminalStateMachine', () => {
 
     expect(store.get(forcedRelayAtom)).toBe(true);
     expect(result.current.terminalState).toBe('connecting');
+    // The route epoch is a user-route identity, not a fallback signal —
+    // falling back to relay must not bump it.
+    expect(store.get(routeIntentEpochAtom)).toBe(0);
   });
 
   it('p2p: exhausting the reconnect budget lands on failed with manual override', () => {
@@ -266,6 +269,31 @@ describe('useTerminalStateMachine', () => {
 
     expect(store.get(forcedRelayAtom)).toBe(false);
     expect(result.current.terminalState).toBe('failed');
+  });
+
+  it('p2p: attach error in auto mode falls back to relay without bumping routeIntentEpochAtom', () => {
+    const { conn, getHandlers } = makeP2PConnection();
+    const serverConnection = makeServerConnection(true);
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+    store.set(p2pConnectionAtom, conn);
+
+    const { result } = renderWithStore(store, () =>
+      useTerminalStateMachine({ serverConnection }),
+    );
+    expect(result.current.terminalState).toBe('connected');
+
+    const attachCall = (conn.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as { id: string };
+    act(() => {
+      for (const h of getHandlers()) {
+        h({ msg_type: 'error', id: attachCall.id, timestamp: 0, payload: { message: 'agent busy' } });
+      }
+    });
+
+    expect(store.get(forcedRelayAtom)).toBe(true);
+    expect(store.get(routeIntentEpochAtom)).toBe(0);
+    // Relay attach completes against the authenticated server connection.
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+    expect(result.current.terminalState).toBe('attached');
   });
 
   it('relay: reconnecting after P2P transport fallback begins relay attach', () => {
