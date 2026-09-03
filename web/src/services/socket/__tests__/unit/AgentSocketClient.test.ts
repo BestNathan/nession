@@ -258,6 +258,54 @@ describe('AgentSocketClient', () => {
     await expect(p).rejects.toThrow('Connection lost');
   });
 
+  it('close() rejects a correlated in-flight request immediately', async () => {
+    setupMockWebSocket();
+    const client = new AgentSocketClient({ agentUrl: 'ws://agent/ws' });
+    client.connect();
+    await flushTimers();
+
+    const rejections: unknown[] = [];
+    client.request('file.read', { path: '/x' }).catch((e) => rejections.push(e));
+
+    client.close();
+
+    await flushTimers();
+    expect(rejections).toHaveLength(1);
+    expect((rejections[0] as Error).message).toBe('Connection lost');
+  });
+
+  it('disconnect() fails pending requests immediately', async () => {
+    setupMockWebSocket();
+    const client = new AgentSocketClient({ agentUrl: 'ws://agent/ws' });
+    client.connect();
+    await flushTimers();
+
+    const rejections: unknown[] = [];
+    client.request('file.read', { path: '/x' }).catch((e) => rejections.push(e));
+
+    client.disconnect();
+
+    await flushTimers();
+    expect(rejections).toHaveLength(1);
+    expect((rejections[0] as Error).message).toBe('Connection lost');
+  });
+
+  it('dispose() rejects pending requests with the disposed error', async () => {
+    setupMockWebSocket();
+    const client = new AgentSocketClient({ agentUrl: 'ws://agent/ws' });
+    client.connect();
+    await flushTimers();
+
+    const rejections: unknown[] = [];
+    client.request('file.read', { path: '/x' }).catch((e) => rejections.push(e));
+
+    client.dispose();
+
+    await flushTimers();
+    expect(rejections).toHaveLength(1);
+    expect((rejections[0] as Error).message).toBe('MessageRouter disposed');
+  });
+
   it('resets reconnect budget when endpoint identity changes', async () => {
     setupMockWebSocket(0);
     const client = new AgentSocketClient({

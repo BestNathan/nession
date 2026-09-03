@@ -52,6 +52,7 @@ export class AgentSocketClient implements SocketClient {
     this.clearReconnectTimer();
     this.teardownSocket();
     this.setState('disconnected');
+    this.router.failPending(new Error('Connection lost'));
     this.rejectWaiters(new Error('Connection lost'));
   }
 
