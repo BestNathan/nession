@@ -1,122 +1,51 @@
-import { useEffect, useRef, useState } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import type { AttachInfo } from '../types';
-import { p2pEpochAtom } from '../atoms/connection';
-import { forcedRelayAtom } from '../atoms/session';
-import { terminalSessionStateAtom } from '../terminal/state/session';
-import { useP2PConnection, type P2PConnection } from './useP2PConnection';
-import { useAddressPlan, type AddressPlan } from './useAddressPlan';
+import type { AddressPlan } from './useAddressPlan';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { WebSocketService } from '@/services/websocket';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
   sessionName: string;
   orderedUrls: string[] | null;
   manualOverride: string | null;
+  /** Session-first waits for xterm transport before attach. Legacy attaches on socket connect. */
+  transportFirst?: boolean;
+  wsService?: WebSocketService;
 }
 
 interface UseP2PAttachTransportResult {
   addressPlan: AddressPlan;
   activeUrl: string | null;
   p2pConnection: P2PConnection | null;
+  p2pState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
+  fileOps: import('@/services/fileOps').FileOps | null;
+  runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
+  transportKey: string | null;
 }
 
 /**
- * P2P attach transport: address rotation + relay fallback.
- * Restores the behaviour removed with useP2PWithFallback (jotai migration).
+ * P2P attach transport: address rotation + relay fallback via shared SessionRuntime.
  */
 export function useP2PAttachTransport({
-  attachInfo,
-  sessionName,
-  orderedUrls,
-  manualOverride,
+  transportFirst = false,
+  wsService,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
-  const [forcedRelayState, setForcedRelayState] = useAtom(forcedRelayAtom);
-  const setP2pEpoch = useSetAtom(p2pEpochAtom);
-  const setTerminalState = useSetAtom(terminalSessionStateAtom);
-  const forcedRelay = manualOverride ? false : forcedRelayState;
-
-  const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
-  const [addressIndex, setAddressIndex] = useState(0);
-
-  const planUrlsKey = addressPlan.urls.join(',');
-  useEffect(() => {
-    setAddressIndex(0);
-    setForcedRelayState(false);
-  }, [planUrlsKey, setForcedRelayState]);
-
-  const prevManualRef = useRef(manualOverride);
-  useEffect(() => {
-    const prev = prevManualRef.current;
-    prevManualRef.current = manualOverride;
-    if (manualOverride && !prev) {
-      setForcedRelayState(false);
-    }
-  }, [manualOverride, setForcedRelayState]);
-
-  const isP2P = attachInfo?.mode === 'p2p' && !forcedRelay;
-  const activeUrl = isP2P && addressPlan.ready ? (addressPlan.urls[addressIndex] ?? null) : null;
-  const hasMoreCandidates = addressIndex + 1 < addressPlan.urls.length;
-  const singleLegacyFallback =
-    !manualOverride
-    && addressPlan.urls.length === 1
-    && addressPlan.urls[0] === attachInfo?.agent_address
-    && (orderedUrls === null || orderedUrls.length === 0);
-
-  const p2pConnection = useP2PConnection(
-    isP2P && activeUrl && attachInfo
-      ? {
-          agentUrl: activeUrl,
-          connectionToken: attachInfo.connection_token,
-          sessionName,
-          maxReconnectAttempts: manualOverride
-            ? 2
-            : (hasMoreCandidates ? 2 : (singleLegacyFallback ? 2 : 10)),
-        }
-      : null,
-  );
-
-  const p2pState = p2pConnection?.connectionState;
-  const startedRef = useRef<string | null>(null);
-  const attemptKey = `${addressIndex}:${activeUrl ?? ''}`;
-  useEffect(() => {
-    if (!isP2P || !addressPlan.ready || !activeUrl) {
-      return;
-    }
-    if (p2pState && p2pState !== 'disconnected') {
-      startedRef.current = attemptKey;
-      return;
-    }
-    if (p2pState === 'disconnected' && startedRef.current === attemptKey) {
-      if (addressIndex + 1 < addressPlan.urls.length) {
-        console.log(`[P2P] Address ${addressPlan.urls[addressIndex]} failed; trying next candidate`);
-        setP2pEpoch((epoch) => epoch + 1);
-        setTerminalState('connecting');
-        setAddressIndex((i) => i + 1);
-      } else if (!manualOverride) {
-        console.log('[P2P] All addresses exhausted; falling back to relay');
-        setP2pEpoch((epoch) => epoch + 1);
-        setTerminalState('connecting');
-        setForcedRelayState(true);
-      }
-    }
-  }, [
-    isP2P,
-    addressPlan,
-    activeUrl,
-    attemptKey,
-    p2pState,
-    addressIndex,
-    manualOverride,
-    setForcedRelayState,
-    setP2pEpoch,
-    setTerminalState,
-  ]);
+  const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, transportKey } = useSessionRuntime({
+    transportFirst,
+    configOwner: true,
+    wsService,
+  });
 
   return {
     addressPlan,
     activeUrl,
-    p2pConnection: isP2P ? p2pConnection : null,
-    waitingForAddressPlan: isP2P && !addressPlan.ready,
+    p2pConnection,
+    p2pState,
+    waitingForAddressPlan,
+    fileOps,
+    runtime,
+    transportKey,
   };
 }

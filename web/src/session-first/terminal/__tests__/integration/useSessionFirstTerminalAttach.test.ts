@@ -12,18 +12,13 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   forcedRelayAtom,
+  manualOverrideAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
-import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
-import type { WebSocketService } from '@/services/websocket';
-
-function makeServerConnection(isConnected: boolean) {
-  return {
-    isConnected: () => isConnected,
-    beginRelay: vi.fn(),
-    onConnectionChange: vi.fn(() => () => {}),
-  } as unknown as WebSocketService;
-}
+import type { P2PConnection, P2PMessage, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
+import { SessionAttachController } from '@/runtime/SessionAttachController';
+import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
 function makeP2PConnection() {
   let connState: ConnectionState = 'connected';
@@ -72,18 +67,119 @@ function makeStore(opts: {
   return store;
 }
 
-function renderAttachHook(
-  store: ReturnType<typeof makeStore>,
-  p2p: ReturnType<typeof makeP2PConnection> | null,
-  wsService: WebSocketService,
-) {
-  return renderHook(
-    () => useSessionFirstTerminalAttach({
-      sessionId: store.get(sessionIdAtom),
-      sessionName: store.get(sessionNameAtom),
-      p2pConnection: p2p?.conn ?? null,
-      wsService,
+interface MockP2pRuntime {
+  attachState: AttachStateMachine;
+  attachController: SessionAttachController;
+  getMirrorSnapshot(): {
+    phase: AttachPhase;
+    transportGeneration: number;
+    connectionState: ConnectionState;
+    p2pConnection: P2PConnection;
+  };
+  maybeStartP2PAttach(): void;
+  notifyP2pState(next: ConnectionState): void;
+  setTransportReady(value: boolean): void;
+}
+
+function makeRuntime(opts: {
+  p2p: P2PConnection;
+  sessionName?: string;
+  manualRoute?: boolean;
+  transportReady?: boolean;
+}): MockP2pRuntime {
+  const attachState = new AttachStateMachine({ transportFirst: true });
+  const attachController = new SessionAttachController(attachState);
+  let transportReady = opts.transportReady ?? true;
+  let attachedGen: number | null = null;
+  const transportGen = 0;
+
+  attachController.subscribeOutcomes((result) => {
+    if (result.phase === 'attached') {
+      attachedGen = transportGen;
+    }
+  });
+
+  const maybeStartP2PAttach = () => {
+    if (opts.p2p.connectionState !== 'connected') {
+      return;
+    }
+    const phase = attachState.phase;
+    if (phase === 'attached' && attachedGen === transportGen) {
+      return;
+    }
+    if (phase === 'idle' || phase === 'failed') {
+      return;
+    }
+    if (!attachController.canStartAttach(transportReady, true, false, 'p2p')) {
+      return;
+    }
+    attachController.startP2PAttach({
+      sessionName: opts.sessionName ?? 'sess',
+      p2pConnection: opts.p2p,
+      manualRoute: opts.manualRoute ?? false,
+      lastResize: null,
+      transportGeneration: transportGen,
+    });
+  };
+
+  return {
+    attachState,
+    attachController,
+    getMirrorSnapshot: () => ({
+      phase: attachState.phase as AttachPhase,
+      transportGeneration: transportGen,
+      connectionState: opts.p2p.connectionState,
+      p2pConnection: opts.p2p,
     }),
+    setTransportReady(value: boolean) {
+      transportReady = value;
+    },
+    maybeStartP2PAttach,
+    notifyP2pState(next: ConnectionState) {
+      if (attachState.phase !== 'attached') {
+        return;
+      }
+      if (next === 'reconnecting' || next === 'connecting' || next === 'disconnected') {
+        attachedGen = null;
+        attachController.dispatch({ type: 'TRANSPORT_LOST' });
+      }
+    },
+  } as MockP2pRuntime;
+}
+
+function asSessionRuntime(runtime: MockP2pRuntime | SessionRuntime): SessionRuntime {
+  return runtime as SessionRuntime;
+}
+
+function makeRelayRuntime(): SessionRuntime {
+  const attachState = new AttachStateMachine({ transportFirst: true });
+  return {
+    attachState,
+    attachController: new SessionAttachController(attachState),
+    getMirrorSnapshot: () => ({
+      phase: attachState.phase,
+      transportGeneration: 0,
+      connectionState: 'disconnected' as const,
+      p2pConnection: null,
+    }),
+  } as SessionRuntime;
+}
+
+function renderAttachHook(opts: {
+  store: ReturnType<typeof makeStore>;
+  p2p: ReturnType<typeof makeP2PConnection> | null;
+  runtime?: MockP2pRuntime | SessionRuntime | null;
+}) {
+  const { store, p2p } = opts;
+  const runtime = opts.runtime ?? (p2p
+    ? makeRuntime({ p2p: p2p.conn, sessionName: store.get(sessionNameAtom) })
+    : makeRelayRuntime());
+  return renderHook(
+    () =>
+      useSessionFirstTerminalAttach({
+        sessionId: store.get(sessionIdAtom),
+        runtime: asSessionRuntime(runtime),
+      }),
     {
       wrapper: ({ children }: { children: ReactNode }) =>
         createElement(Provider, { store }, children),
@@ -101,29 +197,19 @@ describe('useSessionFirstTerminalAttach', () => {
     vi.useRealTimers();
   });
 
-  it('P2P: does not send client.attach before transport is ready', () => {
+  it('P2P: mirrors runtime attach when transport becomes ready', () => {
     const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
     const store = makeStore({ mode: 'p2p', transportReady: false });
+    const runtime = makeRuntime({ p2p: p2p.conn, transportReady: false });
 
-    renderAttachHook(store, p2p, wsService);
-
-    expect(p2p.sendMessage).not.toHaveBeenCalled();
-    expect(store.get(terminalSessionStateAtom)).toBe('connecting');
-  });
-
-  it('P2P: sends client.attach only after transport ready and socket connected', () => {
-    const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
-    const store = makeStore({ mode: 'p2p', transportReady: false });
-
-    const { rerender } = renderAttachHook(store, p2p, wsService);
+    renderAttachHook({ store, p2p, runtime });
     expect(p2p.sendMessage).not.toHaveBeenCalled();
 
     act(() => {
       store.set(terminalTransportReadyAtom, true);
+      runtime.setTransportReady(true);
+      runtime.maybeStartP2PAttach();
     });
-    rerender();
 
     expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
     expect(p2p.sendMessage).toHaveBeenCalledWith(
@@ -131,12 +217,15 @@ describe('useSessionFirstTerminalAttach', () => {
     );
   });
 
-  it('P2P: attach ok transitions to attached', () => {
+  it('P2P: mirrors attach ok outcome to attached', () => {
     const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
     const store = makeStore({ mode: 'p2p', resize: { cols: 80, rows: 24 } });
+    const runtime = makeRuntime({ p2p: p2p.conn });
 
-    const { result } = renderAttachHook(store, p2p, wsService);
+    const { result } = renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.maybeStartP2PAttach();
+    });
 
     const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
     act(() => {
@@ -148,13 +237,16 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(result.current.terminalState).toBe('attached');
   });
 
-  it('P2P: attach timeout backs off into reconnecting', () => {
+  it('P2P: mirrors attach timeout outcome to reconnecting', () => {
     vi.useFakeTimers();
     const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
     const store = makeStore({ mode: 'p2p' });
+    const runtime = makeRuntime({ p2p: p2p.conn });
 
-    const { result } = renderAttachHook(store, p2p, wsService);
+    const { result } = renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.maybeStartP2PAttach();
+    });
 
     act(() => {
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
@@ -164,28 +256,34 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(result.current.reconnectCount).toBe(1);
   });
 
-  it('relay: beginRelay waits for transport ready and ws connected', () => {
-    const wsService = makeServerConnection(true);
-    const store = makeStore({ mode: 'relay', transportReady: false, resize: { cols: 100, rows: 30 } });
+  it('relay: driver sends no beginRelay; mirror reflects runtime RELAY_BEGIN_OK', () => {
+    const store = makeStore({ mode: 'relay', transportReady: true });
+    const runtime = makeRelayRuntime();
+    const { result } = renderAttachHook({ store, p2p: null, runtime });
 
-    const { rerender } = renderAttachHook(store, null, wsService);
-    expect(wsService.beginRelay).not.toHaveBeenCalled();
+    // The mirror promotes the idle session and reflects controller outcomes.
+    act(() => {
+      runtime.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    });
+    expect(store.get(terminalSessionStateAtom)).toBe('connecting');
 
     act(() => {
-      store.set(terminalTransportReadyAtom, true);
+      const outcome = runtime.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
+      expect(outcome.phase).toBe('attached');
     });
-    rerender();
-
-    expect(wsService.beginRelay).toHaveBeenCalledWith('agent:sess', undefined, 100, 30);
-    expect(store.get(terminalSessionStateAtom)).toBe('attached');
+    expect(result.current.terminalState).toBe('attached');
+    expect(runtime.attachState.phase).toBe('attached');
   });
 
-  it('P2P: re-sends client.attach after transport rebind while attached', () => {
+  it('P2P: runtime re-attach after transport rebind while attached', () => {
     const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
     const store = makeStore({ mode: 'p2p' });
+    const runtime = makeRuntime({ p2p: p2p.conn });
 
-    const { rerender } = renderAttachHook(store, p2p, wsService);
+    renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.maybeStartP2PAttach();
+    });
     expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
 
     const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
@@ -197,37 +295,114 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
 
     act(() => {
-      store.set(terminalTransportReadyAtom, false);
+      runtime.notifyP2pState('connecting');
+      runtime.maybeStartP2PAttach();
     });
-    rerender();
 
+    const secondAttach = p2p.sendMessage.mock.calls[1][0] as { id: string };
     act(() => {
-      store.set(terminalTransportReadyAtom, true);
+      for (const h of p2p.getHandlers()) {
+        h({ msg_type: 'ok', id: secondAttach.id, timestamp: 0, payload: {} });
+      }
     });
-    rerender();
 
     expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
-    expect(p2p.sendMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ msg_type: 'client.attach' }),
-    );
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
   });
 
-  it('P2P: exhausts reconnect budget then falls back to relay', () => {
+  it('P2P: mirrors force-relay outcome after reconnect budget exhausted', () => {
     vi.useFakeTimers();
     const p2p = makeP2PConnection();
-    const wsService = makeServerConnection(false);
     const store = makeStore({ mode: 'p2p' });
+    const runtime = makeRuntime({ p2p: p2p.conn });
 
-    const { result } = renderAttachHook(store, p2p, wsService);
+    const { result } = renderAttachHook({ store, p2p, runtime });
 
-    for (let i = 0; i <= P2P_MAX_RECONNECT; i++) {
+    for (let i = 0; i <= P2P_MAX_RECONNECT; i += 1) {
       act(() => {
+        runtime.maybeStartP2PAttach();
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
       });
     }
 
     expect(result.current.terminalState).toBe('connecting');
     expect(store.get(forcedRelayAtom)).toBe(true);
+  });
+
+  it('P2P: mirrors attach error on manual route to failed', () => {
+    const p2p = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p' });
+    store.set(manualOverrideAtom, 'ws://manual/ws');
+    const runtime = makeRuntime({ p2p: p2p.conn, manualRoute: true });
+
+    const { result } = renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.maybeStartP2PAttach();
+    });
+
+    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
+    act(() => {
+      for (const h of p2p.getHandlers()) {
+        h({ msg_type: 'error', id: attachCall.id, timestamp: 0, payload: { message: 'bad route' } });
+      }
+    });
+
+    expect(result.current.terminalState).toBe('failed');
+  });
+
+  it('P2P: mirrors transport disconnect while attached via runtime TRANSPORT_LOST', () => {
+    const p2p = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p' });
+    const runtime = makeRuntime({ p2p: p2p.conn });
+
+    renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.maybeStartP2PAttach();
+    });
+
+    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
+    act(() => {
+      for (const h of p2p.getHandlers()) {
+        h({ msg_type: 'ok', id: attachCall.id, timestamp: 0, payload: {} });
+      }
+    });
+    expect(store.get(terminalSessionStateAtom)).toBe('attached');
+
+    act(() => {
+      runtime.notifyP2pState('disconnected');
+    });
+
+    expect(store.get(terminalSessionStateAtom)).toBe('reconnecting');
+    expect(runtime.attachState.phase).toBe('reconnecting');
+  });
+
+  it('idle session promotes to connecting through runtime SESSION_SELECTED', () => {
+    const p2p = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p', transportReady: true });
+    store.set(terminalSessionStateAtom, 'idle');
+    const runtime = makeRuntime({ p2p: p2p.conn });
+
+    renderAttachHook({ store, p2p, runtime });
+
+    expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+    expect(runtime.attachState.phase).toBe('connecting');
+  });
+
+  it('remount mirrors runtime phase without resetting attach state', () => {
+    const p2p = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p' });
+    const runtime = makeRuntime({ p2p: p2p.conn });
+
+    const { unmount } = renderAttachHook({ store, p2p, runtime });
+    act(() => {
+      runtime.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      runtime.attachController.dispatch({ type: 'ATTACH_OK' });
+    });
+    expect(runtime.attachState.phase).toBe('attached');
+
+    unmount();
+    const { result } = renderAttachHook({ store, p2p, runtime });
+    expect(result.current.terminalState).toBe('attached');
+    expect(runtime.attachState.phase).toBe('attached');
   });
 });

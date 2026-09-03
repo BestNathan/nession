@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import type { ConnectionState, P2PConnection } from '../../hooks/useP2PConnection';
+import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '../../services/websocket';
 import { sessionIdAtom, sessionNameAtom, manualOverrideAtom, forcedRelayAtom } from '../../atoms/session';
-import { effectiveModeAtom, p2pConnectionAtom, p2pEpochAtom } from '../../atoms/connection';
+import { effectiveModeAtom, p2pConnectionAtom } from '../../atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom, type TerminalStatus } from '../state';
 
 let _msgCounter = 0;
@@ -21,6 +21,8 @@ export interface UseTerminalStateMachineOptions {
   serverConnection?: WebSocketService;
   /** Live socket from useP2PAttachTransport — avoids p2pConnectionAtom publish lag. */
   p2pConnection?: P2PConnection | null;
+  /** Reactive connection state from useP2PAttachTransport — do not read from p2pConnection getter. */
+  p2pState?: ConnectionState;
 }
 
 function useP2PAttachBridge(opts: {
@@ -112,12 +114,11 @@ function useTerminalAttachProtocolEffect(opts: {
   setTerminalState: (update: TerminalStatus | ((prev: TerminalStatus) => TerminalStatus)) => void;
   setReconnectCount: (n: number) => void;
   setForcedRelay: (update: boolean | ((prev: boolean) => boolean)) => void;
-  setP2pEpoch: (update: (epoch: number) => number) => void;
 }): void {
   const {
     mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection,
     manualOverride, transportReady, lastResizeRef, reconnectCountRef, attachTimerRef,
-    setTerminalState, setReconnectCount, setForcedRelay, setP2pEpoch,
+    setTerminalState, setReconnectCount, setForcedRelay,
   } = opts;
 
   useEffect(() => {
@@ -128,7 +129,10 @@ function useTerminalAttachProtocolEffect(opts: {
       case 'connecting':
         reconnectCountRef.current = 0;
         setReconnectCount(0);
-        if (mode === 'relay' && transportReady && serverConnection?.isConnected()) {
+        // isAuthenticated, not isConnected: a ws that is open but not yet
+        // authenticated must not fire beginRelay — the server would drop it and
+        // nothing would re-begin until the next loss cycle.
+        if (mode === 'relay' && transportReady && serverConnection?.isAuthenticated()) {
           setTerminalState('connected');
         }
         break;
@@ -167,7 +171,10 @@ function useTerminalAttachProtocolEffect(opts: {
             if (manualOverride) {
               setTerminalState('failed');
             } else {
-              setP2pEpoch((epoch) => epoch + 1);
+              // Auto-mode attach error falls back to relay. forcedRelay is the
+              // only signal needed: mode flips effectiveModeAtom to relay and
+              // the machine re-runs its relay branch. The route epoch stays a
+              // user-route identity (#593 SC8 — no p2pEpoch protocol reset).
               setForcedRelay(true);
             }
           }
@@ -205,7 +212,8 @@ function useTerminalAttachProtocolEffect(opts: {
           if (manualOverride) {
             setTerminalState('failed');
           } else {
-            setP2pEpoch((epoch) => epoch + 1);
+            // Budget exhausted in auto mode — relay fallback (see attach-error
+            // branch): forcedRelay alone signals the transport flip.
             setForcedRelay(true);
           }
           break;
@@ -221,7 +229,7 @@ function useTerminalAttachProtocolEffect(opts: {
     }
   }, [
     mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection,
-    manualOverride, setForcedRelay, setP2pEpoch, setTerminalState, setReconnectCount,
+    manualOverride, setForcedRelay, setTerminalState, setReconnectCount,
     transportReady, lastResizeRef, reconnectCountRef, attachTimerRef,
   ]);
 }
@@ -237,7 +245,6 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
   const [terminalState, setTerminalState] = useAtom(terminalSessionStateAtom);
   const [transportReady] = useAtom(terminalTransportReadyAtom);
   const setForcedRelay = useSetAtom(forcedRelayAtom);
-  const setP2pEpoch = useSetAtom(p2pEpochAtom);
   const [lastResize] = useAtom(lastResizeAtom);
   // Read via ref so ResizeObserver updates don't re-trigger the state machine
   // effect (which would cancel the attach timeout and restart the cycle).
@@ -257,10 +264,10 @@ export function useTerminalStateMachine(options: UseTerminalStateMachineOptions 
   useTerminalAttachProtocolEffect({
     mode, terminalState, sessionName, sessionId, serverConnection, p2pConnection,
     manualOverride, transportReady, lastResizeRef, reconnectCountRef, attachTimerRef,
-    setTerminalState, setReconnectCount, setForcedRelay, setP2pEpoch,
+    setTerminalState, setReconnectCount, setForcedRelay,
   });
 
-  const p2pState = p2pConnection?.connectionState;
+  const p2pState = options.p2pState ?? p2pConnection?.connectionState;
   useP2PAttachBridge({ mode, transportReady, p2pState, terminalState, setTerminalState });
 
   return { terminalState, reconnectCount };

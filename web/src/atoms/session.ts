@@ -1,8 +1,8 @@
 // web/src/atoms/session.ts
-import { atom, getDefaultStore } from 'jotai';
+import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from './connection';
+import { p2pConnectionAtom, p2pStateAtom, routeIntentEpochAtom } from './connection';
 import { terminalSessionStateAtom } from '../terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
@@ -116,28 +116,26 @@ export const switchAddressAtom = atom(
         get(attachInfoAtom),
       );
       if (autoUrl === currentOverride) {
+        const terminalState = get(terminalSessionStateAtom);
+        if (terminalState !== 'failed') {
+          set(manualOverrideAtom, null);
+          return;
+        }
         set(manualOverrideAtom, null);
+        set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
+        set(p2pConnectionAtom, null);
         return;
       }
     }
 
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
-    // Bump the epoch so useP2PConnection's connection object changes identity
+    // Bump the route epoch so SessionRuntime detects the route change and
     // and Terminal.tsx rebuilds its xterm view against the new socket — even
     // when the resolved activeUrl does not change (e.g. Auto → an explicit
     // route that Auto already resolved to).
-    set(p2pEpochAtom, get(p2pEpochAtom) + 1);
-    // Force full disconnect: clear connection + reset state to idle.
-    // The Terminal effect's idle case tears down any pending
-    // timeout/subscription.  useP2PConnection will react to activeUrl
-    // change and create a fresh socket, and the bridge picks up
-    // p2pState='connected' from the NEW socket.
+    set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
     set(p2pConnectionAtom, null);
-    set(terminalSessionStateAtom, 'idle');
-    setTimeout(() => {
-      getDefaultStore().set(terminalSessionStateAtom, 'connecting');
-    }, 0);
   },
 );
 

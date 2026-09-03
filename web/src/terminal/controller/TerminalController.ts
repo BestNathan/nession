@@ -1,10 +1,7 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import { getDefaultStore } from 'jotai';
-import type { ConnectionState } from '../../hooks/useP2PConnection';
-import { inputModeAtomFamily, type InputMode } from '../state/input';
-import { lastResizeAtom } from '../state/terminal';
-import { terminalTransportReadyAtom } from '../state/transport';
+import type { P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { InputMode } from '../state/input';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
@@ -20,6 +17,13 @@ import { MobileImeInput } from '../input/MobileImeInput';
 import type { FontSizeManager } from '../FontSizeManager';
 import type { DeviceProfile, TerminalScrollbackMode } from '../types';
 
+export interface TerminalControllerEvents {
+  onTransportReady?: (ready: boolean) => void;
+  onInputModeChange?: (sessionId: string, mode: InputMode) => void;
+  onResize?: (sessionId: string, cols: number, rows: number) => void;
+  onTitleChange?: (sessionId: string, title: string) => void;
+}
+
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
   fontSize?: number;
@@ -31,6 +35,7 @@ export interface TerminalControllerOptions {
    */
   deviceProfile?: DeviceProfile;
   scrollbackMode?: TerminalScrollbackMode;
+  events?: TerminalControllerEvents;
 }
 
 /**
@@ -80,6 +85,7 @@ export class TerminalController {
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
+  events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
   onStateChange: ((status: TerminalStatus) => void) | null = null;
@@ -100,6 +106,7 @@ export class TerminalController {
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
     this.scrollbackMode = options.scrollbackMode ?? 'legacy';
+    this.events = options.events;
     this.initInputRouter();
   }
 
@@ -189,11 +196,11 @@ export class TerminalController {
     };
     transport.onError = (err: Error) => { this.onError?.(err); };
     transport.onDisconnect = () => { this.onDisconnect?.(); };
-    getDefaultStore().set(terminalTransportReadyAtom, true);
+    this.events?.onTransportReady?.(true);
   }
 
   private teardownTransport(): void {
-    getDefaultStore().set(terminalTransportReadyAtom, false);
+    this.events?.onTransportReady?.(false);
     if (this.transport) {
       this.transport.onOutput = null;
       this.transport.onResize = null;
@@ -430,12 +437,16 @@ export class TerminalController {
 
   setInputMode(mode: InputMode): void {
     this.inputRouter?.setMode(mode);
-    // Sync to Jotai so React components react to the mode change.
-    getDefaultStore().set(inputModeAtomFamily(this.sessionId), mode);
+    this.events?.onInputModeChange?.(this.sessionId, mode);
   }
 
   getInputMode(): InputMode {
     return this.inputRouter?.getMode() ?? { type: 'terminal' };
+  }
+
+  /** Publish viewport cols/rows to the React layer (attach sizing, debounced PTY resize). */
+  publishViewportResize(cols: number, rows: number): void {
+    this.events?.onResize?.(this.sessionId, cols, rows);
   }
 
 }
@@ -490,7 +501,7 @@ export class ResizeController {
         // Publish to the atom the state machine reads on (re)attach so
         // client.attach / beginRelay carry the current viewport size. Covers
         // both the immediate first fire and the debounced subsequent fires.
-        getDefaultStore().set(lastResizeAtom, { cols, rows });
+        this.controller.publishViewportResize(cols, rows);
 
         if (this.isFirstFire) {
           this.isFirstFire = false;
@@ -527,7 +538,7 @@ export class ResizeController {
     if (cols < 2 || rows < 2) { return; }
     // Keep the atom fresh after a font-size zoom so a (re)attach uses the
     // recomputed cell count, not the stale pre-zoom size.
-    getDefaultStore().set(lastResizeAtom, { cols, rows });
+    this.controller.publishViewportResize(cols, rows);
     this.controller.resize(cols, rows);
   }
 

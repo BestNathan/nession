@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { useP2PAttachTransport } from '../../hooks/useP2PAttachTransport';
-import { createFileOps } from '../../services/fileOps';
+import { createAttachGate } from '../adapters/TransportAttachGate';
 import { AddressSelector } from '../../components/AddressSelector';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useTerminalSessions } from '../../hooks/useTerminalSessions';
@@ -30,6 +30,7 @@ import {
 } from '../../atoms/connection';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
+import { useRelayServerLifecycle } from '../hooks/useRelayServerLifecycle';
 import { ConnectionManager } from '../ConnectionManager';
 import { detectProfile, PROFILES } from '../DeviceProfile';
 import type { TerminalTransport } from '../transport/TerminalTransport';
@@ -151,11 +152,12 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   const isP2P = effectiveMode === 'p2p';
 
-  const { waitingForAddressPlan, p2pConnection } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, p2pState, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
     manualOverride,
+    transportFirst: false,
   });
 
   // Preview dialog state
@@ -163,11 +165,11 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   // Terminal session state machine: drives client.attach (P2P) / beginRelay
   // (relay), the attach timeout, and the reconnect budget. Returns the live
-  // terminalState + reconnectCount so we can drive banner rendering without
-  // touching the protocol code.
+  // terminalState + reconnectCount so we can render the attempt count reactively.
   const { terminalState, reconnectCount } = useTerminalStateMachine({
     serverConnection: !isP2P ? wsService : undefined,
     p2pConnection,
+    p2pState,
   });
 
   // End relay synchronously before navigating away, so that the
@@ -179,17 +181,6 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-
-  const sendMessage = p2pConnection?.sendMessage;
-  const onMessage = p2pConnection?.onMessage;
-  const waitForConnection = p2pConnection?.waitForConnection;
-  const fileOps = useMemo(
-    () =>
-      sendMessage && onMessage && waitForConnection
-        ? createFileOps({ sendMessage, onMessage, waitForConnection })
-        : null,
-    [sendMessage, onMessage, waitForConnection],
-  );
 
   // Source env files selected in the attach dialog once the session transport
   // is live. applySessionEnv routes through the server to the agent's tmux, so
@@ -234,8 +225,10 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
+  const isAttachedRef = useRef(createAttachGate(() => terminalState));
+  isAttachedRef.current = createAttachGate(() => terminalState);
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
@@ -243,7 +236,8 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
-    }) as unknown as TerminalTransport;
+      isAttached: () => isAttachedRef.current(),
+    });
   const transportFactory = useCallback(() => transportFactoryRef.current(), []);
 
   // One controller per session/mode — stable across terminalState transitions
@@ -275,28 +269,14 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // ── Relay-mode server-ws lifecycle ───────────────────────────────────
   // The state machine's P2P bridge covers socket drops only; in relay mode the
   // server WebSocket dropping must mirror the legacy view.onStateChange path:
-  // show the "Connection lost" banner once the server ws exhausts its reconnect
-  // budget, clear it (and let the state machine re-beginRelay) on re-auth.
-  const [relayLost, setRelayLost] = useState(false);
-  useEffect(() => {
-    if (effectiveMode !== 'relay' || !wsService) { return; }
-    return wsService.onConnectionChange((status) => {
-      if (status === 'authenticated') {
-        setRelayLost(false);
-        // Server ws authenticated after TerminalWorkspace mounted (rare — the
-        // state machine's 'connecting' branch handles the already-authed case
-        // via isConnected()). Hand off so beginRelay is actually sent.
-        setTerminalState((prev) => {
-          if (prev === 'connecting' || prev === 'reconnecting' || prev === 'failed') {
-            return 'connected';
-          }
-          return prev;
-        });
-      } else if (status === 'disconnected') {
-        setRelayLost(true);
-      }
-    });
-  }, [effectiveMode, wsService, setTerminalState]);
+  // intra-budget reconnect (status 'connecting') and exhausted 'disconnected'
+  // both end the server-side relay loop, so both take the attach machine back
+  // to reconnecting; the banner appears only on the terminal disconnected.
+  const { relayLost } = useRelayServerLifecycle({
+    effectiveMode,
+    wsService,
+    setTerminalState,
+  });
 
   // ── Banner ───────────────────────────────────────────────────────────
   // Map the (P2P-driven) state machine + relay-lost flag onto the banner atoms

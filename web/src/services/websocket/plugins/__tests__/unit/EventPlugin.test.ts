@@ -32,6 +32,7 @@ function createMockCore(): { core: WebSocketServiceCore; fireMessage: (type: str
       request: vi.fn(),
       generateMessageId: vi.fn(() => 'msg_ep_1'),
       getP2PConnectionInfo: vi.fn(),
+      failPending: vi.fn(),
     },
     fireMessage: (type: string, payload: unknown) => {
       const set = handlers.get(type);
@@ -82,6 +83,72 @@ describe('EventPlugin', () => {
 
   it('has name "events"', () => {
     expect(plugin.name).toBe('events');
+  });
+
+  describe('install teardown (registration API)', () => {
+    it('install returns a teardown that releases all seven core message subscriptions', () => {
+      const mock = createMockCore();
+      const fresh = new EventPlugin();
+      const teardown = fresh.install(mock.core);
+      expect(typeof teardown).toBe('function');
+      expect((mock.core.onMessage as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(7);
+
+      // Register one consumer per subscribed message family.
+      const agentsCb = vi.fn();
+      const sessionsCb = vi.fn();
+      const outputCb = vi.fn();
+      const resizeCb = vi.fn();
+      const commandsCb = vi.fn();
+      fresh.onAgentsChanged(agentsCb);
+      fresh.onSessionsChanged(sessionsCb);
+      fresh.onTerminalOutput('s1', outputCb);
+      fresh.onTerminalResize('s1', resizeCb);
+      fresh.onCommandsChanged(commandsCb);
+
+      teardown!();
+      // After teardown none of the seven core subscriptions may still deliver.
+      mock.fireMessage('client.agents.list.response', { agents: [{ id: 'a' }] });
+      mock.fireMessage('client.sessions.list.response', { sessions: [{ id: 's' }] });
+      mock.fireMessage('terminal.output', { session_id: 's1', data: 'aGk=' });
+      mock.fireMessage('terminal.resize', { session_id: 's1', cols: 10, rows: 5 });
+      mock.fireMessage('agents.changed', { agents: [{ id: 'a' }] });
+      mock.fireMessage('sessions.changed', { sessions: [{ id: 's' }] });
+      mock.fireMessage('server.commands.changed', {});
+      expect(agentsCb).not.toHaveBeenCalled();
+      expect(sessionsCb).not.toHaveBeenCalled();
+      expect(outputCb).not.toHaveBeenCalled();
+      expect(resizeCb).not.toHaveBeenCalled();
+      expect(commandsCb).not.toHaveBeenCalled();
+    });
+
+    it('teardown clears subscriber callback arrays (no zombie callbacks)', () => {
+      const mock = createMockCore();
+      const fresh = new EventPlugin();
+      const teardown = fresh.install(mock.core)!;
+
+      const agentsCb = vi.fn();
+      const outputCb = vi.fn();
+      fresh.onAgentsChanged(agentsCb);
+      fresh.onTerminalOutput('s1', outputCb);
+
+      teardown();
+      mock.fireMessage('agents.changed', { agents: [{ id: 'a' }] });
+      mock.fireMessage('terminal.output', { session_id: 's1', data: 'hi' });
+
+      expect(agentsCb).not.toHaveBeenCalled();
+      expect(outputCb).not.toHaveBeenCalled();
+    });
+
+    it('teardown is idempotent', () => {
+      const mock = createMockCore();
+      const fresh = new EventPlugin();
+      const teardown = fresh.install(mock.core)!;
+
+      expect(() => {
+        teardown();
+        teardown();
+      }).not.toThrow();
+    });
   });
 
   describe('install registers handlers', () => {

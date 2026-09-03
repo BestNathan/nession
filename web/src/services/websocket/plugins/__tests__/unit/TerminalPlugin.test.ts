@@ -15,6 +15,7 @@ function createMockCore(): WebSocketServiceCore {
     request: vi.fn(),
     generateMessageId: vi.fn(() => 'msg_test_123'),
     getP2PConnectionInfo: vi.fn(),
+    failPending: vi.fn(),
   };
 }
 

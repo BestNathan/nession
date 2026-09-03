@@ -1,9 +1,10 @@
 // web/src/atoms/connection.ts
 import { atom } from 'jotai';
-import type { P2PConnection, ConnectionState } from '../hooks/useP2PConnection';
+import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
+import { terminalSessionStateAtom } from '../terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 
@@ -12,12 +13,11 @@ import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
-/** Monotonic counter bumped by switchAddressAtom on every route switch. Its
- *  sole purpose is to force useP2PConnection's connection object identity to
- *  change — which in turn re-runs the p2pConnectionAtom effect and rebuilds
- *  Terminal.tsx's xterm view — even when the resolved activeUrl does not change
- *  (e.g. switching Auto → an explicit route that Auto already resolved to). */
-export const p2pEpochAtom = atom(0);
+/** User-initiated route switch epoch — resets P2P candidate index when changed. */
+export const routeIntentEpochAtom = atom(0);
+
+/** Runtime-owned transport generation — candidate rotation / endpoint switch. */
+export const transportGenerationAtom = atom(0);
 
 // ── Derived ─────────────────────────────────────────────────────
 
@@ -44,6 +44,9 @@ export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {
   return get(attachInfoAtom)?.mode === 'p2p' ? 'p2p' : 'relay';
 });
 
-export const isSwitchingAtom = atom((get) =>
-  get(manualOverrideAtom) !== null && get(p2pStateAtom) !== 'connected',
-);
+export const isSwitchingAtom = atom((get) => {
+  if (get(terminalSessionStateAtom) === 'failed') {
+    return false;
+  }
+  return get(manualOverrideAtom) !== null && get(p2pStateAtom) !== 'connected';
+});

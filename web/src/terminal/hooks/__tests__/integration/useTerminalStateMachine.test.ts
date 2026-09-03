@@ -9,18 +9,19 @@ import {
   ATTACH_TIMEOUT_MS,
 } from '@/terminal/hooks/useTerminalStateMachine';
 import { sessionIdAtom, sessionNameAtom, attachInfoAtom, forcedRelayAtom, manualOverrideAtom } from '@/atoms/session';
-import { p2pConnectionAtom } from '@/atoms/connection';
+import { p2pConnectionAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
-import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
+import type { P2PConnection, P2PMessage, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '@/services/websocket';
 
 // ── Test doubles ─────────────────────────────────────────────────────────────
 
 /** Minimal mock of the server WebSocketService — only the members the state
  *  machine touches in relay mode. */
-function makeServerConnection(isConnected: boolean) {
+function makeServerConnection(isConnected: boolean, isAuthenticated = isConnected) {
   return {
     isConnected: () => isConnected,
+    isAuthenticated: () => isAuthenticated,
     beginRelay: vi.fn(),
   } as unknown as WebSocketService;
 }
@@ -113,7 +114,7 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
-    // isConnected() is true → connecting promotes to connected immediately, and
+    // server ws authenticated → connecting promotes to connected immediately, and
     // the connected case fire-and-forgets beginRelay then attaches.
     expect(result.current.terminalState).toBe('attached');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
@@ -128,6 +129,20 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
+    expect(result.current.terminalState).toBe('connecting');
+    expect(serverConnection.beginRelay).not.toHaveBeenCalled();
+  });
+
+  it('relay: stays connecting while the ws is open but not yet authenticated', () => {
+    const serverConnection = makeServerConnection(true, false);
+    const store = makeStore({ mode: 'relay', sessionId: 'agent:sess' });
+
+    const { result } = renderWithStore(store, () =>
+      useTerminalStateMachine({ serverConnection }),
+    );
+
+    // isConnected() true, isAuthenticated() false — beginRelay would be dropped
+    // by the server pre-auth, so the machine must not promote to connected.
     expect(result.current.terminalState).toBe('connecting');
     expect(serverConnection.beginRelay).not.toHaveBeenCalled();
   });
@@ -231,6 +246,9 @@ describe('useTerminalStateMachine', () => {
 
     expect(store.get(forcedRelayAtom)).toBe(true);
     expect(result.current.terminalState).toBe('connecting');
+    // The route epoch is a user-route identity, not a fallback signal —
+    // falling back to relay must not bump it.
+    expect(store.get(routeIntentEpochAtom)).toBe(0);
   });
 
   it('p2p: exhausting the reconnect budget lands on failed with manual override', () => {
@@ -253,6 +271,31 @@ describe('useTerminalStateMachine', () => {
     expect(result.current.terminalState).toBe('failed');
   });
 
+  it('p2p: attach error in auto mode falls back to relay without bumping routeIntentEpochAtom', () => {
+    const { conn, getHandlers } = makeP2PConnection();
+    const serverConnection = makeServerConnection(true);
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+    store.set(p2pConnectionAtom, conn);
+
+    const { result } = renderWithStore(store, () =>
+      useTerminalStateMachine({ serverConnection }),
+    );
+    expect(result.current.terminalState).toBe('connected');
+
+    const attachCall = (conn.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as { id: string };
+    act(() => {
+      for (const h of getHandlers()) {
+        h({ msg_type: 'error', id: attachCall.id, timestamp: 0, payload: { message: 'agent busy' } });
+      }
+    });
+
+    expect(store.get(forcedRelayAtom)).toBe(true);
+    expect(store.get(routeIntentEpochAtom)).toBe(0);
+    // Relay attach completes against the authenticated server connection.
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+    expect(result.current.terminalState).toBe('attached');
+  });
+
   it('relay: reconnecting after P2P transport fallback begins relay attach', () => {
     const serverConnection = makeServerConnection(true);
     const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
@@ -265,5 +308,30 @@ describe('useTerminalStateMachine', () => {
 
     expect(result.current.terminalState).toBe('attached');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+  });
+
+  it('p2p: uses explicit p2pState prop for bridge transition', () => {
+    const { conn, sendMessage } = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+
+    const { result, rerender } = renderHook(
+      ({ p2pState }: { p2pState: ConnectionState }) =>
+        useTerminalStateMachine({ p2pConnection: conn, p2pState }),
+      {
+        initialProps: { p2pState: 'connecting' as ConnectionState },
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(Provider, { store }, children),
+      },
+    );
+
+    expect(result.current.terminalState).toBe('connecting');
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    rerender({ p2pState: 'connected' });
+
+    expect(result.current.terminalState).toBe('connected');
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ msg_type: 'client.attach' }),
+    );
   });
 });

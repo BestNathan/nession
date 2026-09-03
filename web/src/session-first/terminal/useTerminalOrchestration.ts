@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import type { P2PConnection } from '@/hooks/useP2PConnection';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
 import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type { EnvFileRef } from '@/types';
@@ -16,14 +16,16 @@ import {
 import {
   effectiveModeAtom,
   isSwitchingAtom,
-  p2pEpochAtom,
+  routeIntentEpochAtom,
+  transportGenerationAtom,
 } from '@/atoms/connection';
 import { useTerminal } from '@/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/session-first/terminal/useSessionFirstTerminalAttach';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
+import { createAttachGate } from '@/terminal/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/terminal/DeviceProfile';
 import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
-import { terminalSessionStateAtom, type TerminalStatus } from '@/terminal/state/session';
+import type { TerminalStatus } from '@/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/terminal/state/ui';
 
 function useSessionEnvSourcing(opts: {
@@ -64,13 +66,16 @@ function useTransportFactory(opts: {
   sessionId: string;
   p2pConnection: P2PConnection | null;
   wsService: WebSocketService;
+  isAttached: () => boolean;
 }) {
-  const { effectiveMode, sessionName, sessionId, p2pConnection, wsService } = opts;
+  const { effectiveMode, sessionName, sessionId, p2pConnection, wsService, isAttached } = opts;
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
+  const isAttachedRef = useRef(isAttached);
+  isAttachedRef.current = isAttached;
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
@@ -78,7 +83,8 @@ function useTransportFactory(opts: {
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
-    }) as unknown as TerminalTransport;
+      isAttached: () => isAttachedRef.current(),
+    });
   return useCallback(() => transportFactoryRef.current(), []);
 }
 
@@ -90,7 +96,6 @@ function useReconnectBanner(opts: {
   wsService: WebSocketService;
 }): ReconnectBanner {
   const { sessionId, terminalState, reconnectCount, effectiveMode, wsService } = opts;
-  const setTerminalState = useSetAtom(terminalSessionStateAtom);
   const setBanner = useSetAtom(bannerAtomFamily(sessionId));
   const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
   const [relayLost, setRelayLost] = useState(false);
@@ -101,20 +106,16 @@ function useReconnectBanner(opts: {
 
   useEffect(() => {
     if (effectiveMode !== 'relay' || !wsService) { return; }
+    // UI-only bookkeeping: attach phase transitions are driven by the
+    // SessionRuntime relay handler and mirrored through runtime events.
     return wsService.onConnectionChange((status) => {
       if (status === 'authenticated') {
         setRelayLost(false);
-        setTerminalState((prev) => {
-          if (prev === 'connecting' || prev === 'reconnecting' || prev === 'failed') {
-            return 'connecting';
-          }
-          return prev;
-        });
       } else if (status === 'disconnected') {
         setRelayLost(true);
       }
     });
-  }, [effectiveMode, wsService, setTerminalState]);
+  }, [effectiveMode, wsService]);
 
   const banner: ReconnectBanner =
     terminalState === 'reconnecting'
@@ -162,21 +163,22 @@ export function useTerminalOrchestration({
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [isSwitching] = useAtom(isSwitchingAtom);
   const [envRefs] = useAtom(envRefsAtom);
-  const p2pEpoch = useAtomValue(p2pEpochAtom);
+  const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
+  const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
     manualOverride,
+    transportFirst: true,
+    wsService,
   });
 
   const { terminalState, reconnectCount } = useSessionFirstTerminalAttach({
     sessionId,
-    sessionName,
-    p2pConnection,
-    wsService,
+    runtime,
   });
 
   const handleDisconnect = useEndRelayOnDisconnect({
@@ -185,6 +187,7 @@ export function useTerminalOrchestration({
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, p2pConnection, wsService });
   const transportFactory = useTransportFactory({
     effectiveMode, sessionName, sessionId, p2pConnection, wsService,
+    isAttached: createAttachGate(() => terminalState),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({
@@ -207,7 +210,7 @@ export function useTerminalOrchestration({
   const inputDisabled = banner !== 'none' || isSwitching;
   const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
-  const transportKey = `${p2pEpoch}:${activeUrl ?? ''}`;
+  const transportKey = runtimeTransportKey ?? `${routeIntentEpoch}:${transportGeneration}:${activeUrl ?? ''}`;
 
   useEffect(() => {
     if (!controller) { return; }

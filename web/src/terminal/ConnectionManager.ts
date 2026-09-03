@@ -1,7 +1,6 @@
-import type { ConnectionState, ConnectionOptions } from './types';
-import type { P2PMessage } from '../hooks/useP2PConnection';
-import { getDefaultStore } from 'jotai';
-import { terminalSessionStateAtom } from './state/session';
+import type { ConnectionOptions } from './types';
+import type { P2PConnectionState, P2PMessage } from '@/services/socket/p2pTypes';
+import type { TerminalTransport } from './transport/TerminalTransport';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -32,8 +31,8 @@ function decodeB64(b64: string): Uint8Array {
   return bytes;
 }
 
-export class ConnectionManager {
-  private mode: 'p2p' | 'relay';
+export class ConnectionManager implements TerminalTransport {
+  readonly mode: 'p2p' | 'relay';
   private sessionName: string;
   private p2pConnection?: ConnectionOptions['p2pConnection'];
   private serverConnection?: ConnectionOptions['serverConnection'];
@@ -52,8 +51,9 @@ export class ConnectionManager {
    * flushAllOutbound once the agent acks client.attach.
    */
   private pendingResize: { cols: number; rows: number } | null = null;
+  private isAttached: () => boolean;
 
-  onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
+  onStateChange: ((state: P2PConnectionState) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
@@ -64,6 +64,7 @@ export class ConnectionManager {
     this.sessionName = options.sessionName;
     this.p2pConnection = options.p2pConnection;
     this.serverConnection = options.serverConnection;
+    this.isAttached = options.isAttached ?? (() => false);
 
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.setupP2P();
@@ -74,8 +75,7 @@ export class ConnectionManager {
 
   send(data: string): void {
     if (this.disposed) { return; }
-    const state = getDefaultStore().get(terminalSessionStateAtom);
-    if (state !== 'attached') {
+    if (!this.isAttached()) {
       this.inputBuffer.push(data);
       return;
     }
@@ -123,8 +123,7 @@ export class ConnectionManager {
    */
   sendResize(cols: number, rows: number): void {
     if (this.disposed) { return; }
-    const state = getDefaultStore().get(terminalSessionStateAtom);
-    if (state !== 'attached') {
+    if (!this.isAttached()) {
       this.pendingResize = { cols, rows };
       return;
     }
@@ -219,8 +218,7 @@ export class ConnectionManager {
           // the client.attach error path instead.
           {
             const errMsg = ((msg.payload as Record<string, unknown>)?.message as string) || '';
-            const state = getDefaultStore().get(terminalSessionStateAtom);
-            if (state !== 'attached' && /not attached/i.test(errMsg)) {
+            if (!this.isAttached() && /not attached/i.test(errMsg)) {
               break;
             }
             this.onError?.(new Error(errMsg || 'Remote error'));
@@ -270,9 +268,9 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'authenticated') {
-        this.onStateChange?.('connected', 0);
+        this.onStateChange?.('connected');
       } else if (status === 'disconnected') {
-        this.onStateChange?.('lost', 0);
+        this.onStateChange?.('disconnected');
       }
     });
   }

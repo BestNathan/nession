@@ -1,10 +1,13 @@
 /**
- * WebSocketService — facade that delegates to plugins.
+ * WebSocketService — facade that delegates to registered capabilities.
  *
- * Creates a {@link WebSocketServiceCoreImpl} and installs three plugins:
+ * Creates a {@link WebSocketServiceCoreImpl} and registers the built-in
+ * plugins through {@link use} (#593 Goal/Scope 10), so extensions can add
+ * capabilities without touching the core or the facade:
  * - EventPlugin (event subscriptions: agents, sessions, commands, terminal)
  * - RequestPlugin (request/response: listAgents, createSession, env, etc.)
  * - TerminalPlugin (fire-and-forget terminal I/O and relay lifecycle)
+ * - ClaudeCodePlugin (extension.claude_code list/read RPCs)
  *
  * All public methods match the original monolithic WebSocketService API
  * to maintain full backward compatibility.
@@ -36,6 +39,8 @@ import { WebSocketServiceCoreImpl } from './core';
 import { EventPlugin } from './plugins/EventPlugin';
 import { RequestPlugin } from './plugins/RequestPlugin';
 import { TerminalPlugin } from './plugins/TerminalPlugin';
+import { ClaudeCodePlugin, type ClaudeCodeListRequest, type ClaudeCodeListResponse, type ClaudeCodeReadRequest, type ClaudeCodeReadResponse } from './plugins/ClaudeCodePlugin';
+import type { WebSocketPlugin } from './types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
 type AgentsChangeCallback = (agents: Agent[]) => void;
@@ -44,22 +49,87 @@ type CommandsChangeCallback = () => void;
 type TerminalOutputCallback = (data: Uint8Array) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
+interface RegisteredPlugin {
+  plugin: WebSocketPlugin;
+  /** Teardown returned by install(), or a wrapper over the legacy uninstall?. */
+  teardown: () => void;
+}
+
 export class WebSocketService {
   private readonly core: WebSocketServiceCoreImpl;
-  private readonly events: EventPlugin;
-  private readonly requests: RequestPlugin;
-  private readonly terminal: TerminalPlugin;
+  private readonly plugins = new Map<string, RegisteredPlugin>();
 
   constructor(url: string, authToken: string) {
     this.core = new WebSocketServiceCoreImpl(url, authToken);
 
-    this.events = new EventPlugin();
-    this.requests = new RequestPlugin();
-    this.terminal = new TerminalPlugin();
+    // Built-in capabilities register through the same API extensions use.
+    this.use(new EventPlugin());
+    this.use(new RequestPlugin());
+    this.use(new TerminalPlugin());
+    this.use(new ClaudeCodePlugin());
+  }
 
-    this.events.install(this.core);
-    this.requests.install(this.core);
-    this.terminal.install(this.core);
+  // ── Capability registration (#593 Goal/Scope 10) ──────────────
+
+  /**
+   * Install a capability plugin. A plugin of the same name is unregistered
+   * (its teardown runs) before the new one is installed.
+   */
+  use(plugin: WebSocketPlugin): void {
+    if (!plugin.name) {
+      throw new Error('WebSocketService: plugin name must not be empty');
+    }
+    this.unregister(plugin.name);
+    const installed = plugin.install(this.core);
+    // Legacy contract: when install() returns nothing, retain the plugin's
+    // uninstall() as the FUTURE teardown — never invoke it during registration.
+    const teardown = installed ?? (plugin.uninstall ? () => plugin.uninstall!() : undefined);
+    if (!teardown) {
+      throw new Error(
+        `WebSocketService: plugin '${plugin.name}' must return a teardown from install() or implement uninstall()`,
+      );
+    }
+    this.plugins.set(plugin.name, { plugin, teardown });
+  }
+
+  /** Uninstall a capability: runs its teardown and removes it. */
+  unregister(name: string): boolean {
+    const entry = this.plugins.get(name);
+    if (!entry) {
+      return false;
+    }
+    this.plugins.delete(name);
+    entry.teardown();
+    return true;
+  }
+
+  /** Access a registered capability instance (null when not registered). */
+  getCapability<T>(name: string): T | null {
+    return (this.plugins.get(name)?.plugin as T | undefined) ?? null;
+  }
+
+  private requirePlugin<T extends WebSocketPlugin>(name: string): T {
+    const entry = this.plugins.get(name);
+    if (!entry) {
+      throw new Error(`WebSocketService: plugin '${name}' is not registered`);
+    }
+    return entry.plugin as T;
+  }
+
+  private get events(): EventPlugin {
+    return this.requirePlugin<EventPlugin>('events');
+  }
+
+  private get requests(): RequestPlugin {
+    return this.requirePlugin<RequestPlugin>('requests');
+  }
+
+  private get terminal(): TerminalPlugin {
+    return this.requirePlugin<TerminalPlugin>('terminal');
+  }
+
+  private get claudeCode(): ClaudeCodePlugin {
+    return this.requirePlugin<ClaudeCodePlugin>('claude-code');
   }
 
   // ── Connection Management (delegated to core) ─────────────────
@@ -230,25 +300,14 @@ export class WebSocketService {
     return this.requests.queryAgentEnvState(sessionId);
   }
 
-  // ── Claude Code Extension (delegated to RequestPlugin) ────────
+  // ── Claude Code Extension (delegated to ClaudeCodePlugin) ───────
 
-  async claudeCodeList(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-  }): Promise<{ available: boolean; categories: { name: string; icon: string | null; files: { path: string; size: number; content_type: string }[] }[]; error?: string }> {
-    return this.requests.claudeCodeList(req);
+  async claudeCodeList(req: ClaudeCodeListRequest): Promise<ClaudeCodeListResponse> {
+    return this.claudeCode.claudeCodeList(req);
   }
 
-  async claudeCodeRead(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-    path: string;
-    offset?: number;
-    limit?: number;
-  }): Promise<{ content: string; content_type: string; total_size: number; offset: number; has_more: boolean; error?: string }> {
-    return this.requests.claudeCodeRead(req);
+  async claudeCodeRead(req: ClaudeCodeReadRequest): Promise<ClaudeCodeReadResponse> {
+    return this.claudeCode.claudeCodeRead(req);
   }
 
   // ── Quick Commands (delegated to RequestPlugin) ───────────────
