@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 function createEventsMock() {
   return {
     name: 'events',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     onAgentsChanged: vi.fn(() => vi.fn()),
     onSessionsChanged: vi.fn(() => vi.fn()),
     onCommandsChanged: vi.fn(() => vi.fn()),
@@ -18,7 +18,7 @@ function createEventsMock() {
 function createRequestsMock() {
   return {
     name: 'requests',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     listAgents: vi.fn(() => Promise.resolve([])),
     serverInfo: vi.fn(() => Promise.resolve({})),
     listSessions: vi.fn(() => Promise.resolve([])),
@@ -45,7 +45,7 @@ function createRequestsMock() {
 function createTerminalMock() {
   return {
     name: 'terminal',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
     sendTerminalInput: vi.fn(),
@@ -116,6 +116,60 @@ describe('WebSocketService (facade)', () => {
       expect(eventsInstance.install).toHaveBeenCalled();
       expect(requestsInstance.install).toHaveBeenCalled();
       expect(terminalInstance.install).toHaveBeenCalled();
+    });
+  });
+
+  describe('runtime plugin registration', () => {
+    it('use() registers a plugin and the facade delegates to it', () => {
+      const teardown = vi.fn();
+      const stub = {
+        name: 'stub',
+        install: vi.fn(() => teardown),
+        ping: vi.fn(() => 'pong'),
+      };
+      service.use(stub);
+
+      expect(service.getCapability('stub')).toBe(stub);
+      expect(service.getCapability<{ ping: () => string }>('stub')!.ping()).toBe('pong');
+      expect(service.getCapability('missing')).toBeNull();
+    });
+
+    it('registering a duplicate name runs the previous instance teardown before replacing it', () => {
+      const firstTeardown = vi.fn();
+      const first = { name: 'dup', install: vi.fn(() => firstTeardown) };
+      const secondTeardown = vi.fn();
+      const second = { name: 'dup', install: vi.fn(() => secondTeardown) };
+
+      service.use(first);
+      service.use(second);
+
+      expect(firstTeardown).toHaveBeenCalledTimes(1);
+      expect(service.getCapability('dup')).toBe(second);
+      expect(secondTeardown).not.toHaveBeenCalled();
+    });
+
+    it('unregister(name) removes a capability; subsequent facade methods throw', () => {
+      // Replace the built-in terminal plugin with a stub whose install records
+      // its own teardown so we can verify release semantics on a real method.
+      const released = vi.fn();
+      service.use({ name: 'terminal', install: vi.fn(() => released) });
+
+      expect(service.unregister('terminal')).toBe(true);
+      expect(released).toHaveBeenCalledTimes(1);
+      expect(() => service.sendRelayInput('s', 'data')).toThrow(/not registered/);
+      expect(() => service.onAgentsChanged(() => {})).not.toThrow();
+    });
+
+    it('unregister returns false for an unknown name', () => {
+      expect(service.unregister('nope')).toBe(false);
+    });
+
+    it('use() rejects a plugin with an empty name', () => {
+      expect(() => service.use({ name: '', install: vi.fn() })).toThrow(/name must not be empty/);
+    });
+
+    it('use() rejects a plugin that returns no teardown and has no uninstall', () => {
+      expect(() => service.use({ name: 'bare', install: vi.fn() })).toThrow(/teardown/);
     });
   });
 

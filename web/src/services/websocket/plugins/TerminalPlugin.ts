@@ -16,8 +16,12 @@ export class TerminalPlugin implements WebSocketPlugin {
 
   private core!: WebSocketServiceCore;
 
-  install(core: WebSocketServiceCore): void {
+  install(core: WebSocketServiceCore): () => void {
     this.core = core;
+    // No message subscriptions — nothing to unwind. The facade removes the
+    // plugin from its registry on unregister, after which all delegation
+    // throws; a retained direct plugin reference is out of contract.
+    return () => {};
   }
 
   // ── Relay lifecycle ───────────────────────────────────────────

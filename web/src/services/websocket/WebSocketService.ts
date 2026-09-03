@@ -36,6 +36,7 @@ import { WebSocketServiceCoreImpl } from './core';
 import { EventPlugin } from './plugins/EventPlugin';
 import { RequestPlugin } from './plugins/RequestPlugin';
 import { TerminalPlugin } from './plugins/TerminalPlugin';
+import type { WebSocketPlugin } from './types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
 type AgentsChangeCallback = (agents: Agent[]) => void;
@@ -44,22 +45,80 @@ type CommandsChangeCallback = () => void;
 type TerminalOutputCallback = (data: Uint8Array) => void;
 type TerminalResizeCallback = (cols: number, rows: number) => void;
 
+interface RegisteredPlugin {
+  plugin: WebSocketPlugin;
+  /** Teardown returned by install(), or a wrapper over the legacy uninstall?. */
+  teardown: () => void;
+}
+
 export class WebSocketService {
   private readonly core: WebSocketServiceCoreImpl;
-  private readonly events: EventPlugin;
-  private readonly requests: RequestPlugin;
-  private readonly terminal: TerminalPlugin;
+  private readonly plugins = new Map<string, RegisteredPlugin>();
 
   constructor(url: string, authToken: string) {
     this.core = new WebSocketServiceCoreImpl(url, authToken);
 
-    this.events = new EventPlugin();
-    this.requests = new RequestPlugin();
-    this.terminal = new TerminalPlugin();
+    // Built-in capabilities register through the same API extensions use.
+    this.use(new EventPlugin());
+    this.use(new RequestPlugin());
+    this.use(new TerminalPlugin());
+  }
 
-    this.events.install(this.core);
-    this.requests.install(this.core);
-    this.terminal.install(this.core);
+  // ── Capability registration (#593 Goal/Scope 10) ──────────────
+
+  /**
+   * Install a capability plugin. A plugin of the same name is unregistered
+   * (its teardown runs) before the new one is installed.
+   */
+  use(plugin: WebSocketPlugin): void {
+    if (!plugin.name) {
+      throw new Error('WebSocketService: plugin name must not be empty');
+    }
+    this.unregister(plugin.name);
+    const installed = plugin.install(this.core);
+    const teardown = installed ?? plugin.uninstall?.();
+    if (!teardown) {
+      throw new Error(
+        `WebSocketService: plugin '${plugin.name}' must return a teardown from install() or implement uninstall()`,
+      );
+    }
+    this.plugins.set(plugin.name, { plugin, teardown });
+  }
+
+  /** Uninstall a capability: runs its teardown and removes it. */
+  unregister(name: string): boolean {
+    const entry = this.plugins.get(name);
+    if (!entry) {
+      return false;
+    }
+    this.plugins.delete(name);
+    entry.teardown();
+    return true;
+  }
+
+  /** Access a registered capability instance (null when not registered). */
+  getCapability<T>(name: string): T | null {
+    return (this.plugins.get(name)?.plugin as T | undefined) ?? null;
+  }
+
+  private requirePlugin<T extends WebSocketPlugin>(name: string): T {
+    const entry = this.plugins.get(name);
+    if (!entry) {
+      throw new Error(`WebSocketService: plugin '${name}' is not registered`);
+    }
+    return entry.plugin as T;
+  }
+
+  private get events(): EventPlugin {
+    return this.requirePlugin<EventPlugin>('events');
+  }
+
+  private get requests(): RequestPlugin {
+    return this.requirePlugin<RequestPlugin>('requests');
+  }
+
+  private get terminal(): TerminalPlugin {
+    return this.requirePlugin<TerminalPlugin>('terminal');
   }
 
   // ── Connection Management (delegated to core) ─────────────────
