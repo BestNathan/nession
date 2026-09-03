@@ -39,10 +39,10 @@ describe('SessionRuntimeRegistry', () => {
     const config = makeConfig('s1');
     const a = registry.acquire('s1', config);
     const b = registry.acquire('s1', config);
-    expect(a).toBe(b);
-    registry.release('s1');
+    expect(a.runtime).toBe(b.runtime);
+    a.release();
     expect(registry.get('s1')).not.toBeNull();
-    registry.release('s1');
+    b.release();
     vi.runAllTimers();
     expect(registry.get('s1')).toBeNull();
   });
@@ -58,19 +58,19 @@ describe('SessionRuntimeRegistry', () => {
     secondaryConfig.manualOverride = 'ws://secondary/ws';
     registry.acquire('s1', secondaryConfig);
 
-    expect(rt.activeUrl).toBe('ws://owner/ws');
-    registry.release('s1');
-    registry.release('s1');
+    expect(rt.runtime.activeUrl).toBe('ws://owner/ws');
+    rt.release();
+    registry.acquire('s1', secondaryConfig).release();
     vi.runAllTimers();
   });
 
   it('update applies config from designated owner', () => {
     const registry = new SessionRuntimeRegistry();
     const config = makeConfig('s1');
-    registry.acquire('s1', config);
+    const lease = registry.acquire('s1', config);
     registry.update('s1', { ...config, manualOverride: 'ws://updated/ws' });
     expect(registry.get('s1')!.activeUrl).toBe('ws://updated/ws');
-    registry.release('s1');
+    lease.release();
     vi.runAllTimers();
   });
 
@@ -78,22 +78,22 @@ describe('SessionRuntimeRegistry', () => {
     const registry = new SessionRuntimeRegistry();
     const config = makeConfig('s1');
     const first = registry.acquire('s1', config);
-    registry.release('s1');
+    first.release();
     expect(registry.get('s1')).not.toBeNull();
     const second = registry.acquire('s1', config);
-    expect(first).toBe(second);
+    expect(first.runtime).toBe(second.runtime);
     vi.runAllTimers();
     expect(registry.get('s1')).not.toBeNull();
-    registry.release('s1');
+    second.release();
     vi.runAllTimers();
     expect(registry.get('s1')).toBeNull();
   });
 
   it('dispose removes runtime after final release', () => {
     const registry = new SessionRuntimeRegistry();
-    const rt = registry.acquire('s1', makeConfig('s1'));
-    const disposeSpy = vi.spyOn(rt, 'dispose');
-    registry.release('s1');
+    const lease = registry.acquire('s1', makeConfig('s1'));
+    const disposeSpy = vi.spyOn(lease.runtime, 'dispose');
+    lease.release();
     expect(disposeSpy).not.toHaveBeenCalled();
     vi.runAllTimers();
     expect(disposeSpy).toHaveBeenCalledOnce();
@@ -102,15 +102,47 @@ describe('SessionRuntimeRegistry', () => {
   it('recreates runtime when transportFirst mode changes', () => {
     const registry = new SessionRuntimeRegistry();
     const legacy = registry.acquire('s1', makeConfig('s1'));
-    registry.release('s1');
+    legacy.release();
 
     const sessionFirstConfig = makeConfig('s1');
     sessionFirstConfig.transportFirst = true;
     const sessionFirst = registry.acquire('s1', sessionFirstConfig);
 
-    expect(sessionFirst).not.toBe(legacy);
-    expect(sessionFirst.transportFirstMode).toBe(true);
-    registry.release('s1');
+    expect(sessionFirst.runtime).not.toBe(legacy.runtime);
+    expect(sessionFirst.runtime.transportFirstMode).toBe(true);
+    sessionFirst.release();
     vi.runAllTimers();
+  });
+
+  it('double release of the same lease is a no-op', () => {
+    const registry = new SessionRuntimeRegistry();
+    const lease = registry.acquire('s1', makeConfig('s1'));
+    const disposeSpy = vi.spyOn(lease.runtime, 'dispose');
+    lease.release();
+    lease.release();
+    vi.runAllTimers();
+    expect(disposeSpy).toHaveBeenCalledOnce();
+    expect(registry.get('s1')).toBeNull();
+  });
+
+  it('stale release from a pre-recreate lease cannot decrement the replacement runtime', () => {
+    const registry = new SessionRuntimeRegistry();
+    const stale = registry.acquire('s1', makeConfig('s1'));
+    stale.release();
+    // Deferred dispose still pending — entry exists with zero leases.
+
+    const sessionFirstConfig = makeConfig('s1');
+    sessionFirstConfig.transportFirst = true;
+    const replacement = registry.acquire('s1', sessionFirstConfig);
+    expect(replacement.runtime.transportFirstMode).toBe(true);
+
+    // Old holder's cleanup fires late against the replacement entry.
+    stale.release();
+    vi.runAllTimers();
+    expect(registry.get('s1')).not.toBeNull();
+
+    replacement.release();
+    vi.runAllTimers();
+    expect(registry.get('s1')).toBeNull();
   });
 });

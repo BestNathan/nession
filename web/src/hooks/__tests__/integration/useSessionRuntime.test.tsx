@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act, cleanup, waitFor } from '@testing-library/react';
 import { createElement, StrictMode, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useSessionRuntime } from '@/hooks/useSessionRuntime';
@@ -102,11 +102,11 @@ function wrapper(store: ReturnType<typeof createStore>, strict = false) {
   return W;
 }
 
-function releaseAllRuntimes(): void {
-  for (const sid of ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay']) {
-    sessionRuntimeRegistry.release(sid);
-    sessionRuntimeRegistry.release(sid);
-    sessionRuntimeRegistry.release(sid);
+const SESSION_IDS = ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay'];
+
+function expectRegistryEmpty(): void {
+  for (const sid of SESSION_IDS) {
+    expect(sessionRuntimeRegistry.get(sid)).toBeNull();
   }
 }
 
@@ -118,12 +118,15 @@ describe('useSessionRuntime integration', () => {
   });
 
   afterEach(async () => {
-    releaseAllRuntimes();
+    // Unmount mounted trees so every hook's effect cleanup releases its
+    // registry lease, then wait out the deferred-dispose macrotask.
+    cleanup();
     await act(async () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 5);
       });
     });
+    expectRegistryEmpty();
     vi.clearAllMocks();
     globalThis.WebSocket = OriginalWebSocket;
   });

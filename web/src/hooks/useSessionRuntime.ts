@@ -56,11 +56,11 @@ function useRuntimeOwnership(
       return;
     }
 
-    const rt = sessionRuntimeRegistry.acquire(sessionId, config);
-    setRuntime(rt);
+    const lease = sessionRuntimeRegistry.acquire(sessionId, config);
+    setRuntime(lease.runtime);
 
     return () => {
-      sessionRuntimeRegistry.release(sessionId);
+      lease.release();
       if (!sessionRuntimeRegistry.get(sessionId)) {
         setRuntime(null);
       }
