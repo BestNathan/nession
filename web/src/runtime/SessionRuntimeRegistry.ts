@@ -12,6 +12,7 @@ export class SessionRuntimeRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly pendingDispose = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** Ref-count lease only — does not mutate an existing runtime's config. */
   acquire(sessionId: string, config: SessionRuntimeConfig): SessionRuntime {
     const pending = this.pendingDispose.get(sessionId);
     if (pending) {
@@ -22,12 +23,21 @@ export class SessionRuntimeRegistry {
     const existing = this.entries.get(sessionId);
     if (existing) {
       existing.refs += 1;
-      existing.runtime.updateContext(config);
       return existing.runtime;
     }
     const runtime = new SessionRuntime(config);
     this.entries.set(sessionId, { runtime, refs: 1 });
     return runtime;
+  }
+
+  /** Designated config owner — mutates runtime when the lease already exists. */
+  update(sessionId: string, config: SessionRuntimeConfig): SessionRuntime | null {
+    const existing = this.entries.get(sessionId);
+    if (!existing) {
+      return null;
+    }
+    existing.runtime.updateContext(config);
+    return existing.runtime;
   }
 
   release(sessionId: string): void {

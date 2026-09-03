@@ -12,7 +12,7 @@ import {
   forcedRelayAtom,
   manualOverrideAtom,
 } from '@/atoms/session';
-import { routeIntentEpochAtom } from '@/atoms/connection';
+import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
@@ -103,7 +103,7 @@ function wrapper(store: ReturnType<typeof createStore>, strict = false) {
 }
 
 function releaseAllRuntimes(): void {
-  for (const sid of ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay']) {
+  for (const sid of ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay']) {
     sessionRuntimeRegistry.release(sid);
     sessionRuntimeRegistry.release(sid);
     sessionRuntimeRegistry.release(sid);
@@ -253,7 +253,7 @@ describe('useSessionRuntime integration', () => {
 
     expect(result.current.p2pConnection).toBeNull();
     expect(result.current.p2pState).toBe('disconnected');
-    expect(result.current.runtime).toBeNull();
+    expect(result.current.runtime).not.toBeNull();
   });
 
   async function waitForRuntime(getRuntime: () => SessionRuntime | null): Promise<void> {
@@ -404,5 +404,24 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     expect(store.get(terminalSessionStateAtom)).toBe('failed');
+    expect(store.get(isSwitchingAtom)).toBe(false);
+  });
+
+  it('retains runtime in relay mode so attach can drive beginRelay', async () => {
+    const store = makeStore('agent:relay', 'token-a');
+    store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:relay' });
+
+    const { result } = renderHook(
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.runtime).not.toBeNull();
+    });
+    await waitFor(() => {
+      expect(result.current.p2pConnection).toBeNull();
+    });
+    expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
 });

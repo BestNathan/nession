@@ -5,7 +5,7 @@ import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapt
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
-import { AttachStateMachine } from '@/runtime/AttachStateMachine';
+import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
 import { FileCapability } from '@/runtime/FileCapability';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
 
@@ -25,7 +25,8 @@ export interface SessionRuntimeConfig {
 export type SessionRuntimeEvent =
   | { type: 'next-candidate'; activeUrl: string | null }
   | { type: 'force-relay' }
-  | { type: 'transport-exhausted'; manualRoute: boolean };
+  | { type: 'transport-exhausted'; manualRoute: boolean }
+  | { type: 'route-intent-changed'; phase: AttachPhase };
 
 export class SessionRuntime {
   readonly sessionId: string;
@@ -109,9 +110,20 @@ export class SessionRuntime {
 
     if (routeChanged) {
       this.addressPolicy.resetIndex();
+      this.handleRouteIntentChange();
+      return;
     }
 
     this.syncAgentClient();
+  }
+
+  private handleRouteIntentChange(): void {
+    this.attachController.cancelActiveAttach();
+    this.attachController.dispatch({ type: 'DISCONNECT' });
+    const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    this.transportGeneration += 1;
+    this.syncAgentClient({ forceReconnect: true });
+    this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }
 
   /** @deprecated Prefer internal handler; kept for unit tests. */
@@ -213,11 +225,11 @@ export class SessionRuntime {
     });
   }
 
-  private syncAgentClient(): void {
+  private syncAgentClient(opts?: { forceReconnect?: boolean }): void {
     const url = this.addressPolicy.activeUrl;
     const token = this.config.attachInfo?.connection_token;
 
-    if (!url || !this.config.attachInfo) {
+    if (!url || !this.config.attachInfo || this.config.forcedRelay) {
       this.teardownConnectionHandler();
       this.agentClient?.dispose();
       this.agentClient = null;
@@ -244,6 +256,9 @@ export class SessionRuntime {
         connectionToken: token,
         maxReconnectAttempts: maxAttempts,
       });
+      if (opts?.forceReconnect) {
+        this.agentClient!.forceReconnect();
+      }
     }
 
     const client = this.agentClient;

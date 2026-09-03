@@ -4,6 +4,7 @@ import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/ser
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
+import { terminalSessionStateAtom } from '../terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 
@@ -53,6 +54,9 @@ export const effectiveModeAtom = atom<'p2p' | 'relay'>((get) => {
   return get(attachInfoAtom)?.mode === 'p2p' ? 'p2p' : 'relay';
 });
 
-export const isSwitchingAtom = atom((get) =>
-  get(manualOverrideAtom) !== null && get(p2pStateAtom) !== 'connected',
-);
+export const isSwitchingAtom = atom((get) => {
+  if (get(terminalSessionStateAtom) === 'failed') {
+    return false;
+  }
+  return get(manualOverrideAtom) !== null && get(p2pStateAtom) !== 'connected';
+});

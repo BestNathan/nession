@@ -47,6 +47,33 @@ describe('SessionRuntimeRegistry', () => {
     expect(registry.get('s1')).toBeNull();
   });
 
+  it('secondary acquire does not mutate existing runtime config', () => {
+    const registry = new SessionRuntimeRegistry();
+    const ownerConfig = makeConfig('s1');
+    ownerConfig.manualOverride = 'ws://owner/ws';
+    const rt = registry.acquire('s1', ownerConfig);
+    registry.update('s1', ownerConfig);
+
+    const secondaryConfig = makeConfig('s1');
+    secondaryConfig.manualOverride = 'ws://secondary/ws';
+    registry.acquire('s1', secondaryConfig);
+
+    expect(rt.activeUrl).toBe('ws://owner/ws');
+    registry.release('s1');
+    registry.release('s1');
+    vi.runAllTimers();
+  });
+
+  it('update applies config from designated owner', () => {
+    const registry = new SessionRuntimeRegistry();
+    const config = makeConfig('s1');
+    registry.acquire('s1', config);
+    registry.update('s1', { ...config, manualOverride: 'ws://updated/ws' });
+    expect(registry.get('s1')!.activeUrl).toBe('ws://updated/ws');
+    registry.release('s1');
+    vi.runAllTimers();
+  });
+
   it('StrictMode replay re-acquire cancels deferred dispose', () => {
     const registry = new SessionRuntimeRegistry();
     const config = makeConfig('s1');

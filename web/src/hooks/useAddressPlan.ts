@@ -2,27 +2,22 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import type { AttachInfo, ProbedAddress } from '../types';
 import { orderAddressesByLatency } from '../services/addressSelection';
 
-/** Shared async probe cache — dedupes browser latency tests across hook instances. */
+/** In-flight probe dedupe — shares one browser latency test across hook instances. */
 const inflightProbes = new Map<string, Promise<string[]>>();
-const resolvedProbes = new Map<string, string[]>();
 
 function probeAddresses(
   asyncKey: string,
   candidates: ProbedAddress[],
   agentAddress: string | null,
 ): Promise<string[]> {
-  const cached = resolvedProbes.get(asyncKey);
-  if (cached) {
-    return Promise.resolve(cached);
-  }
   let inflight = inflightProbes.get(asyncKey);
   if (!inflight) {
     inflight = orderAddressesByLatency(candidates).then((urls) => {
-      const finalUrls =
-        urls.length > 0 ? urls : agentAddress ? [agentAddress] : [];
-      resolvedProbes.set(asyncKey, finalUrls);
       inflightProbes.delete(asyncKey);
-      return finalUrls;
+      return urls.length > 0 ? urls : agentAddress ? [agentAddress] : [];
+    }).catch((err) => {
+      inflightProbes.delete(asyncKey);
+      throw err;
     });
     inflightProbes.set(asyncKey, inflight);
   }

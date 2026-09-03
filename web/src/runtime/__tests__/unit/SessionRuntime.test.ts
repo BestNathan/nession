@@ -92,12 +92,27 @@ describe('SessionRuntime', () => {
     unsub();
   });
 
-  it('resets address index when route epoch changes', () => {
+  it('resets address index and attach phase when route epoch changes', () => {
     const rt = new SessionRuntime(makeConfig());
     expect(rt.onCandidateDisconnected()).toBe('next-candidate');
     expect(rt.activeUrl).toBe('ws://b/ws');
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
     rt.updateContext({ routeIntentEpoch: 1 });
     expect(rt.activeUrl).toBe('ws://a/ws');
+    expect(rt.attachState.phase).toBe('connecting');
+    rt.dispose();
+  });
+
+  it('route intent change emits route-intent-changed event', () => {
+    const rt = new SessionRuntime(makeConfig());
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    const events: string[] = [];
+    rt.subscribeRuntimeEvents((e) => events.push(e.type));
+    rt.updateContext({ routeIntentEpoch: 1, manualOverride: 'ws://a/ws' });
+    expect(rt.attachState.phase).toBe('connecting');
+    expect(events).toContain('route-intent-changed');
     rt.dispose();
   });
 

@@ -1,5 +1,5 @@
 // web/src/atoms/session.ts
-import { atom, getDefaultStore } from 'jotai';
+import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
 import { p2pConnectionAtom, p2pStateAtom, routeIntentEpochAtom } from './connection';
@@ -128,16 +128,7 @@ export const switchAddressAtom = atom(
     // when the resolved activeUrl does not change (e.g. Auto → an explicit
     // route that Auto already resolved to).
     set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
-    // Force full disconnect: clear connection + reset state to idle.
-    // The Terminal effect's idle case tears down any pending
-    // timeout/subscription.  useP2PConnection will react to activeUrl
-    // change and create a fresh socket, and the bridge picks up
-    // p2pState='connected' from the NEW socket.
     set(p2pConnectionAtom, null);
-    set(terminalSessionStateAtom, 'idle');
-    setTimeout(() => {
-      getDefaultStore().set(terminalSessionStateAtom, 'connecting');
-    }, 0);
   },
 );
 

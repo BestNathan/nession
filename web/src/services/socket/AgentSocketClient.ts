@@ -59,6 +59,17 @@ export class AgentSocketClient implements SocketClient {
     this.close();
   }
 
+  /** Re-open the current endpoint (route-intent change with unchanged URL). */
+  forceReconnect(): void {
+    this.userClosed = false;
+    this.reconnectAttempt = 0;
+    this.router.failPending(new Error('Connection lost'));
+    this.clearReconnectTimer();
+    this.teardownSocket();
+    this.setState('connecting');
+    this.openSocket();
+  }
+
   /**
    * Update endpoint identity. Bumps generation so stale socket events are ignored
    * and opens a fresh connection (mirrors useP2PConnection url/token effect).

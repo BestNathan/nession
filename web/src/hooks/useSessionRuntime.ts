@@ -12,7 +12,7 @@ import type { FileOps } from '@/services/fileOps';
 
 export interface UseSessionRuntimeOptions {
   transportFirst: boolean;
-  /** When true, this hook instance drives runtime.updateContext (single owner). */
+  /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
 }
 
@@ -35,7 +35,6 @@ function useForcedRelayReset(planUrlsKey: string, setForcedRelay: (v: boolean) =
 
 function useRuntimeOwnership(
   sessionId: string | null,
-  isP2P: boolean,
   attachSessionId: string | undefined,
   runtimeConfig: SessionRuntimeConfig | null,
 ): SessionRuntime | null {
@@ -44,7 +43,7 @@ function useRuntimeOwnership(
   const [runtime, setRuntime] = useState<SessionRuntime | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !isP2P || !attachSessionId) {
+    if (!sessionId || !attachSessionId || attachSessionId !== sessionId) {
       setRuntime(null);
       return;
     }
@@ -63,7 +62,7 @@ function useRuntimeOwnership(
         setRuntime(null);
       }
     };
-  }, [sessionId, isP2P, attachSessionId]);
+  }, [sessionId, attachSessionId]);
 
   if (!sessionId || !runtime || runtime.sessionId !== sessionId) {
     return null;
@@ -80,7 +79,7 @@ function useRuntimeConnectionSync(opts: {
   sessionId: string | null;
   runtime: SessionRuntime | null;
   runtimeConfig: SessionRuntimeConfig | null;
-  isP2P: boolean;
+  inP2PTransport: boolean;
   configOwner: boolean;
   setP2pConnection: (c: P2PConnection | null) => void;
   setP2pState: (s: ConnectionState) => void;
@@ -92,7 +91,7 @@ function useRuntimeConnectionSync(opts: {
     sessionId,
     runtime,
     runtimeConfig,
-    isP2P,
+    inP2PTransport,
     configOwner,
     setP2pConnection,
     setP2pState,
@@ -119,24 +118,26 @@ function useRuntimeConnectionSync(opts: {
     }
 
     if (configOwner) {
-      runtime.updateContext(runtimeConfig);
+      sessionRuntimeRegistry.update(sessionId, runtimeConfig);
     }
 
-    const conn = runtime.getP2PConnection();
+    const conn = inP2PTransport ? runtime.getP2PConnection() : null;
     setLocalP2p(conn);
     setP2pConnection(conn);
-    const initial = conn?.connectionState ?? 'connecting';
+    const initial = conn?.connectionState ?? 'disconnected';
     setConnectionState(initial);
     setP2pState(initial);
 
-    const unsubState = runtime.subscribeConnectionState((next) => {
-      setConnectionState(next);
-      setP2pState(next);
-      if (next === 'connecting') {
-        setLocalP2p(runtime.getP2PConnection());
-        setP2pConnection(runtime.getP2PConnection());
-      }
-    });
+    const unsubState = inP2PTransport
+      ? runtime.subscribeConnectionState((next) => {
+        setConnectionState(next);
+        setP2pState(next);
+        if (next === 'connecting') {
+          setLocalP2p(runtime.getP2PConnection());
+          setP2pConnection(runtime.getP2PConnection());
+        }
+      })
+      : () => {};
 
     const unsubEvents = runtime.subscribeRuntimeEvents((event) => {
       setTransportGeneration(runtime.currentTransportGeneration);
@@ -149,6 +150,12 @@ function useRuntimeConnectionSync(opts: {
         setForcedRelay(true);
       } else if (event.type === 'transport-exhausted') {
         setTerminalState('failed');
+      } else if (event.type === 'route-intent-changed') {
+        setTerminalState(event.phase);
+        if (inP2PTransport) {
+          setLocalP2p(runtime.getP2PConnection());
+          setP2pConnection(runtime.getP2PConnection());
+        }
       }
     });
 
@@ -162,6 +169,7 @@ function useRuntimeConnectionSync(opts: {
     sessionId,
     runtime,
     runtimeConfig,
+    inP2PTransport,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
@@ -171,17 +179,17 @@ function useRuntimeConnectionSync(opts: {
   ]);
 
   useEffect(() => {
-    if (!isP2P) {
+    if (!inP2PTransport) {
       setLocalP2p(null);
       setConnectionState('disconnected');
       setP2pConnection(null);
       setP2pState('disconnected');
     }
-  }, [isP2P, setP2pConnection, setP2pState]);
+  }, [inP2PTransport, setP2pConnection, setP2pState]);
 
   return {
-    p2pConnection: isP2P ? p2pConnection : null,
-    p2pState: isP2P ? connectionState : 'disconnected',
+    p2pConnection: inP2PTransport ? p2pConnection : null,
+    p2pState: inP2PTransport ? connectionState : 'disconnected',
   };
 }
 
@@ -206,10 +214,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
 
   useForcedRelayReset(planUrlsKey, setForcedRelay);
 
-  const isP2P = effectiveMode === 'p2p' && attachInfo?.mode === 'p2p' && !forcedRelay;
+  const inP2PTransport = effectiveMode === 'p2p' && attachInfo?.mode === 'p2p' && !forcedRelay;
 
   const runtimeConfig = useMemo((): SessionRuntimeConfig | null => {
-    if (!sessionId || !isP2P || !attachInfo) {
+    if (!sessionId || !attachInfo) {
       return null;
     }
     return {
@@ -218,8 +226,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       attachInfo,
       orderedUrls,
       manualOverride,
-      forcedRelay,
-      addressPlan: { urls: addressPlan.urls, ready: addressPlanReady },
+      forcedRelay: inP2PTransport ? forcedRelay : true,
+      addressPlan: inP2PTransport
+        ? { urls: addressPlan.urls, ready: addressPlanReady }
+        : { urls: [], ready: true },
       transportFirst: options.transportFirst,
       routeIntentEpoch,
     };
@@ -230,25 +240,20 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     orderedUrls,
     manualOverride,
     forcedRelay,
-    isP2P,
+    inP2PTransport,
     addressPlanReady,
     addressPlan.urls,
     options.transportFirst,
     routeIntentEpoch,
   ]);
 
-  const runtime = useRuntimeOwnership(
-    sessionId,
-    isP2P,
-    attachInfo?.session_id,
-    runtimeConfig,
-  );
+  const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);
 
   const { p2pConnection, p2pState } = useRuntimeConnectionSync({
     sessionId,
     runtime,
     runtimeConfig,
-    isP2P,
+    inP2PTransport,
     configOwner: options.configOwner ?? false,
     setP2pConnection,
     setP2pState,
@@ -258,20 +263,20 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   });
 
   const fileOps: FileOps | null = useMemo(() => {
-    if (!isP2P || !runtime || runtime.sessionId !== sessionId || !p2pConnection) {
+    if (!inP2PTransport || !runtime || runtime.sessionId !== sessionId || !p2pConnection) {
       return null;
     }
     return runtime.getFileCapability()?.toFileOps() ?? null;
-  }, [isP2P, runtime, sessionId, p2pConnection]);
+  }, [inP2PTransport, runtime, sessionId, p2pConnection]);
 
   return {
     runtime,
     p2pConnection,
     p2pState,
     fileOps,
-    activeUrl: runtime?.sessionId === sessionId ? runtime.activeUrl ?? null : null,
+    activeUrl: runtime?.sessionId === sessionId && inP2PTransport ? runtime.activeUrl ?? null : null,
     transportKey: runtime?.sessionId === sessionId ? runtime.transportKey : null,
-    waitingForAddressPlan: isP2P ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
+    waitingForAddressPlan: inP2PTransport ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
     addressPlan,
   };
 }
