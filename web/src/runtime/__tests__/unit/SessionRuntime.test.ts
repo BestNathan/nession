@@ -188,4 +188,15 @@ describe('SessionRuntime', () => {
     expect(openCount - before).toBe(1);
     rt.dispose();
   });
+
+  it('does not start P2P attach when transportFirst is false (legacy state machine owns attach)', () => {
+    const rt = new SessionRuntime(makeConfig({ transportFirst: false }));
+    const startSpy = vi.spyOn(rt.attachController, 'startP2PAttach');
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    rt.updateContext({ transportReady: true });
+
+    expect(startSpy).not.toHaveBeenCalled();
+    startSpy.mockRestore();
+    rt.dispose();
+  });
 });

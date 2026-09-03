@@ -179,6 +179,11 @@ export class SessionRuntime {
   }
 
   private maybeStartP2PAttach(): void {
+    // Legacy TerminalWorkspace (transportFirst: false) owns client.attach via
+    // useTerminalStateMachine — runtime only manages the socket here.
+    if (!this.config.transportFirst) {
+      return;
+    }
     if (this.config.forcedRelay || !this.p2pAdapter) {
       return;
     }
