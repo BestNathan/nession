@@ -55,6 +55,15 @@ function createTerminalMock() {
   };
 }
 
+function createClaudeCodeMock() {
+  return {
+    name: 'claude-code',
+    install: vi.fn(() => vi.fn()),
+    claudeCodeList: vi.fn(() => Promise.resolve({ available: false, categories: [] })),
+    claudeCodeRead: vi.fn(() => Promise.resolve({ content: '', content_type: 'text/plain', total_size: 0, offset: 0, has_more: false })),
+  };
+}
+
 vi.mock( '@/services/websocket/plugins/EventPlugin', () => {
   const Mock = vi.fn(function (this: Record<string, unknown>) { Object.assign(this, createEventsMock()); });
   return { EventPlugin: Mock };
@@ -68,6 +77,11 @@ vi.mock( '@/services/websocket/plugins/RequestPlugin', () => {
 vi.mock( '@/services/websocket/plugins/TerminalPlugin', () => {
   const Mock = vi.fn(function (this: Record<string, unknown>) { Object.assign(this, createTerminalMock()); });
   return { TerminalPlugin: Mock };
+});
+
+vi.mock( '@/services/websocket/plugins/ClaudeCodePlugin', () => {
+  const Mock = vi.fn(function (this: Record<string, unknown>) { Object.assign(this, createClaudeCodeMock()); });
+  return { ClaudeCodePlugin: Mock };
 });
 
 // Build fresh core mock functions each time, and expose them for assertion.
@@ -93,6 +107,7 @@ import { WebSocketService } from '@/services/websocket/WebSocketService';
 import { EventPlugin } from '@/services/websocket/plugins/EventPlugin';
 import { RequestPlugin } from '@/services/websocket/plugins/RequestPlugin';
 import { TerminalPlugin } from '@/services/websocket/plugins/TerminalPlugin';
+import { ClaudeCodePlugin } from '@/services/websocket/plugins/ClaudeCodePlugin';
 
 describe('WebSocketService (facade)', () => {
   let service: WebSocketService;
@@ -109,13 +124,34 @@ describe('WebSocketService (facade)', () => {
   });
 
   describe('constructor', () => {
-    it('installs all three plugins', () => {
+    it('registers all built-in plugins through use()', () => {
       expect(EventPlugin).toHaveBeenCalledTimes(1);
       expect(RequestPlugin).toHaveBeenCalledTimes(1);
       expect(TerminalPlugin).toHaveBeenCalledTimes(1);
+      expect(ClaudeCodePlugin).toHaveBeenCalledTimes(1);
       expect(eventsInstance.install).toHaveBeenCalled();
       expect(requestsInstance.install).toHaveBeenCalled();
       expect(terminalInstance.install).toHaveBeenCalled();
+      expect(service.getCapability('events')).toBe(eventsInstance);
+      expect(service.getCapability('requests')).toBe(requestsInstance);
+      expect(service.getCapability('terminal')).toBe(terminalInstance);
+      expect(service.getCapability('claude-code')).not.toBeNull();
+    });
+  });
+
+  describe('claude-code capability delegation', () => {
+    it('claudeCodeList delegates to the claude-code plugin', async () => {
+      const claudeInstance = service.getCapability<{ claudeCodeList: ReturnType<typeof vi.fn> }>('claude-code')!;
+      const req = { agent_id: 'a1', scope: 'global' as const };
+      await service.claudeCodeList(req);
+      expect(claudeInstance.claudeCodeList).toHaveBeenCalledWith(req);
+    });
+
+    it('claudeCodeRead delegates to the claude-code plugin', async () => {
+      const claudeInstance = service.getCapability<{ claudeCodeRead: ReturnType<typeof vi.fn> }>('claude-code')!;
+      const req = { agent_id: 'a1', scope: 'global' as const, path: '/x.txt' };
+      await service.claudeCodeRead(req);
+      expect(claudeInstance.claudeCodeRead).toHaveBeenCalledWith(req);
     });
   });
 

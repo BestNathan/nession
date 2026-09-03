@@ -1,10 +1,13 @@
 /**
- * WebSocketService — facade that delegates to plugins.
+ * WebSocketService — facade that delegates to registered capabilities.
  *
- * Creates a {@link WebSocketServiceCoreImpl} and installs three plugins:
+ * Creates a {@link WebSocketServiceCoreImpl} and registers the built-in
+ * plugins through {@link use} (#593 Goal/Scope 10), so extensions can add
+ * capabilities without touching the core or the facade:
  * - EventPlugin (event subscriptions: agents, sessions, commands, terminal)
  * - RequestPlugin (request/response: listAgents, createSession, env, etc.)
  * - TerminalPlugin (fire-and-forget terminal I/O and relay lifecycle)
+ * - ClaudeCodePlugin (extension.claude_code list/read RPCs)
  *
  * All public methods match the original monolithic WebSocketService API
  * to maintain full backward compatibility.
@@ -36,6 +39,7 @@ import { WebSocketServiceCoreImpl } from './core';
 import { EventPlugin } from './plugins/EventPlugin';
 import { RequestPlugin } from './plugins/RequestPlugin';
 import { TerminalPlugin } from './plugins/TerminalPlugin';
+import { ClaudeCodePlugin, type ClaudeCodeListRequest, type ClaudeCodeListResponse, type ClaudeCodeReadRequest, type ClaudeCodeReadResponse } from './plugins/ClaudeCodePlugin';
 import type { WebSocketPlugin } from './types';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
@@ -62,6 +66,7 @@ export class WebSocketService {
     this.use(new EventPlugin());
     this.use(new RequestPlugin());
     this.use(new TerminalPlugin());
+    this.use(new ClaudeCodePlugin());
   }
 
   // ── Capability registration (#593 Goal/Scope 10) ──────────────
@@ -119,6 +124,10 @@ export class WebSocketService {
 
   private get terminal(): TerminalPlugin {
     return this.requirePlugin<TerminalPlugin>('terminal');
+  }
+
+  private get claudeCode(): ClaudeCodePlugin {
+    return this.requirePlugin<ClaudeCodePlugin>('claude-code');
   }
 
   // ── Connection Management (delegated to core) ─────────────────
@@ -289,25 +298,14 @@ export class WebSocketService {
     return this.requests.queryAgentEnvState(sessionId);
   }
 
-  // ── Claude Code Extension (delegated to RequestPlugin) ────────
+  // ── Claude Code Extension (delegated to ClaudeCodePlugin) ───────
 
-  async claudeCodeList(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-  }): Promise<{ available: boolean; categories: { name: string; icon: string | null; files: { path: string; size: number; content_type: string }[] }[]; error?: string }> {
-    return this.requests.claudeCodeList(req);
+  async claudeCodeList(req: ClaudeCodeListRequest): Promise<ClaudeCodeListResponse> {
+    return this.claudeCode.claudeCodeList(req);
   }
 
-  async claudeCodeRead(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-    path: string;
-    offset?: number;
-    limit?: number;
-  }): Promise<{ content: string; content_type: string; total_size: number; offset: number; has_more: boolean; error?: string }> {
-    return this.requests.claudeCodeRead(req);
+  async claudeCodeRead(req: ClaudeCodeReadRequest): Promise<ClaudeCodeReadResponse> {
+    return this.claudeCode.claudeCodeRead(req);
   }
 
   // ── Quick Commands (delegated to RequestPlugin) ───────────────
