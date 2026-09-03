@@ -61,7 +61,7 @@ export class SessionRuntime {
   /** Guards against re-entrant / duplicate terminal-disconnect handling. */
   private disconnectHandling = false;
   private relayServerUnsub: (() => void) | null = null;
-  private relayNeedsRebegin = false;
+  private disposed = false;
 
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
@@ -88,6 +88,12 @@ export class SessionRuntime {
         // Self-driving retry: an attach timeout with budget remaining must
         // schedule the next client.attach without any React/Jotai tick.
         this.maybeStartP2PAttach();
+      } else if (result.phase === 'connecting' || result.phase === 'reconnecting') {
+        // A relay attach opportunity appeared (SESSION_SELECTED, relay loss,
+        // failed recovery). Deferred a tick: this listener runs inside the
+        // controller's outcome emission, and RELAY_BEGIN_OK would otherwise be
+        // delivered to React mirrors before the outcome being processed here.
+        this.requestRelayAttach();
       }
       for (const listener of this.attachOutcomeListeners) {
         listener(result);
@@ -95,6 +101,7 @@ export class SessionRuntime {
     });
     this.syncAgentClient();
     this.wireRelayServerHandler();
+    this.driveRelayAttach();
   }
 
   get transportFirstMode(): boolean {
@@ -183,6 +190,9 @@ export class SessionRuntime {
     if (!prevTransportReady && this.transportReady) {
       this.maybeStartP2PAttach();
     }
+    // A relay attach may be due now: forced-relay context just applied, or the
+    // xterm viewport became ready while relay attach was pending.
+    this.driveRelayAttach();
     return this.getMirrorSnapshot();
   }
 
@@ -191,12 +201,16 @@ export class SessionRuntime {
       return;
     }
     this.config = { ...this.config, forcedRelay: true };
+    this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
     this.transportGeneration += 1;
     this.syncAgentClient();
     this.wireRelayServerHandler();
     this.emitRuntimeEvent({ type: 'force-relay' });
+    // The P2P → relay transport flip is complete; relay attach follows in the
+    // same tick unless the server WS is not authenticated yet.
+    this.requestRelayAttach();
   }
 
   private handleRouteIntentChange(): void {
@@ -261,6 +275,7 @@ export class SessionRuntime {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.teardownConnectionHandler();
     this.teardownRelayServerHandler();
     this.attachController.cancelActiveAttach();
@@ -294,8 +309,9 @@ export class SessionRuntime {
       return 'next-candidate';
     }
     if (action.type === 'force-relay') {
-      this.transportGeneration += 1;
-      this.emitRuntimeEvent({ type: 'force-relay' });
+      // Same atomic transition as attach-error fallback — policy flip, P2P
+      // teardown, and relay attach all happen inside applyForceRelay.
+      this.applyForceRelay();
       return 'force-relay';
     }
     if (action.type === 'transport-exhausted') {
@@ -343,22 +359,72 @@ export class SessionRuntime {
 
     this.relayServerUnsub = conn.onConnectionChange((status: ConnectionStatus) => {
       if (status === 'disconnected') {
+        // Loss of the server WS ends the server-side relay forwarding loop.
         if (this.attachState.phase === 'attached') {
-          this.relayNeedsRebegin = true;
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
-      } else if (status === 'authenticated' && this.relayNeedsRebegin) {
-        this.relayNeedsRebegin = false;
-        const resize = this.lastResize;
-        conn.beginRelay(
-          this.sessionId,
-          undefined,
-          resize?.cols,
-          resize?.rows,
-        );
-        const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
-        this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+      } else if (status === 'authenticated') {
+        // Server WS (re)established — begin (or re-begin) relay if attach is due.
+        this.driveRelayAttach();
+      }
+    });
+  }
+
+  /**
+   * Runtime-owned relay attach: begin relay when relay-capable, the viewport is
+   * ready, and the attach phase is eligible. Called from updateContext,
+   * applyForceRelay, the authenticated status event, and (deferred) outcome
+   * transitions; phase guards make it idempotent per loss cycle.
+   */
+  private driveRelayAttach(): void {
+    if (!this.config.transportFirst) {
+      return; // legacy React driver owns relay attach
+    }
+    const conn = this.config.serverConnection;
+    if (!conn || !this.config.attachInfo) {
+      return;
+    }
+    if (!this.config.forcedRelay) {
+      return; // P2P transport active — nothing to drive
+    }
+    if (!this.transportReady) {
+      return; // session-first waits for the xterm viewport
+    }
+    const phase = this.attachState.phase;
+    if (phase === 'attached' || phase === 'idle') {
+      return;
+    }
+    if (phase === 'failed') {
+      // Relay-context recovery: a failed session re-attaches through relay.
+      this.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    }
+    if (conn.isAuthenticated()) {
+      this.beginRelayOnce();
+    }
+  }
+
+  private beginRelayOnce(): void {
+    const conn = this.config.serverConnection;
+    if (!conn || this.attachState.phase === 'attached') {
+      return;
+    }
+    const resize = this.lastResize;
+    conn.beginRelay(this.sessionId, undefined, resize?.cols, resize?.rows);
+    const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
+    this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+  }
+
+  /**
+   * Defer relay attach by one microtask. Outcome-driven callers run inside the
+   * controller's outcome emission; dispatching RELAY_BEGIN_OK synchronously
+   * would deliver the resulting 'attached' outcome to React mirrors before the
+   * outcome being processed, leaving the mirror on the pre-transition phase.
+   */
+  private requestRelayAttach(): void {
+    queueMicrotask(() => {
+      if (!this.disposed) {
+        this.driveRelayAttach();
       }
     });
   }

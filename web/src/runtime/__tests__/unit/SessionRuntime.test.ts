@@ -44,6 +44,13 @@ function countClientAttach(): number {
   return count;
 }
 
+
+/** Flush one or two microtask hops (requestRelayAttach defers relay attach). */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function makeAttachInfo(): AttachInfo {
   return {
     mode: 'p2p',
@@ -275,6 +282,69 @@ describe('SessionRuntime', () => {
   });
 
 
+
+  describe('atomic P2P -> relay fallback (runtime-owned beginRelay)', () => {
+    it('attach-error fallback begins relay immediately when the server ws is already authenticated', async () => {
+      const serverConnection = makeRelayServerConnection('authenticated');
+      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await flushMicrotasks();
+      // P2P transport active — no relay attach yet.
+      expect(serverConnection.beginRelay).not.toHaveBeenCalled();
+      expect(rt.attachState.phase).toBe('connecting');
+
+      rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(rt.attachState.phase).toBe('attached');
+      expect(rt.activeUrl).toBeNull();
+      expect(rt.getP2PConnection()).toBeNull();
+      rt.dispose();
+    });
+
+    it('defers beginRelay while the server ws is reconnecting, then begins exactly once on authenticated', async () => {
+      const serverConnection = makeRelayServerConnection('connecting');
+      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).not.toHaveBeenCalled();
+      expect(rt.attachState.phase).toBe('connecting');
+
+      serverConnection.emit('authenticated');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(rt.attachState.phase).toBe('attached');
+
+      // A second authenticated (no loss in between) must not re-begin.
+      serverConnection.emit('authenticated');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      rt.dispose();
+    });
+
+    it('candidate/address exhaustion routes through applyForceRelay (single force-relay event, p2p torn down)', async () => {
+      const serverConnection = makeRelayServerConnection('authenticated');
+      const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
+      const events: string[] = [];
+      rt.subscribeRuntimeEvents((e) => events.push(e.type));
+
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      await flushMicrotasks();
+
+      expect(events.filter((t) => t === 'force-relay')).toHaveLength(1);
+      expect(rt.activeUrl).toBeNull();
+      expect(rt.getP2PConnection()).toBeNull();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(rt.attachState.phase).toBe('attached');
+      rt.dispose();
+    });
+  });
+
   describe('self-driving attach retry', () => {
     afterEach(() => {
       vi.useRealTimers();
@@ -339,21 +409,28 @@ describe('SessionRuntime', () => {
     });
   });
 
-  it('re-begins relay after server websocket reconnect', () => {
+  it('re-begins relay after server websocket reconnect', async () => {
     const serverConnection = makeRelayServerConnection('authenticated');
     const rt = new SessionRuntime(makeConfig({
       forcedRelay: true,
+      transportReady: true,
       serverConnection,
     }));
+
+    // Relay attach is runtime-driven: SESSION_SELECTED → connecting, and the
+    // already-authenticated server WS begins relay without any React driver.
     rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-    rt.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
+    await flushMicrotasks();
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
     expect(rt.attachState.phase).toBe('attached');
 
     serverConnection.emit('disconnected');
     expect(rt.attachState.phase).toBe('reconnecting');
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
 
     serverConnection.emit('authenticated');
-    expect(serverConnection.beginRelay).toHaveBeenCalledOnce();
+    await flushMicrotasks();
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
     expect(rt.attachState.phase).toBe('attached');
     rt.dispose();
   });

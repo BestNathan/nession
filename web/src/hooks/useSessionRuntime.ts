@@ -323,7 +323,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       routeIntentEpoch,
       lastResize,
       transportReady,
-      serverConnection: !inP2PTransport && attachInfo ? options.wsService ?? null : null,
+      // Retained even while P2P is active: the runtime needs the relay-capable
+      // server WS handle in hand when a fallback happens with the Terminal
+      // config-owner subtree unmounted.
+      serverConnection: attachInfo ? options.wsService ?? null : null,
     };
   }, [
     sessionId,

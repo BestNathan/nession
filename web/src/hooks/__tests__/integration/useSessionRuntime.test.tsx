@@ -442,6 +442,75 @@ describe('useSessionRuntime integration', () => {
     });
   });
 
+
+  it('relay fallback with an already-authenticated server ws attaches through the runtime without a React subscriber', async () => {
+    const relayListeners = new Set<(status: import('@/types').ConnectionStatus) => void>();
+    const beginRelay = vi.fn();
+    const wsService = {
+      beginRelay,
+      isAuthenticated: () => true,
+      getConnectionStatus: () => 'authenticated' as const,
+      onConnectionChange: (cb: (status: import('@/types').ConnectionStatus) => void) => {
+        relayListeners.add(cb);
+        return () => relayListeners.delete(cb);
+      },
+    } satisfies import('@/runtime/relayServerConnection').RelayServerConnection;
+
+    const store = makeStore('agent:a', 'token-a');
+    const { result } = renderHook(
+      () => useSessionRuntime({ transportFirst: true, configOwner: true, wsService }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.runtime).not.toBeNull();
+    });
+
+    act(() => {
+      result.current.runtime!.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    });
+    act(() => {
+      const ws = lastWs();
+      ws._readyState = WS.OPEN;
+      ws.onopen?.(new Event('open'));
+    });
+    await waitFor(() => {
+      expect(result.current.p2pState).toBe('connected');
+    });
+
+    // Agent rejects the attach → auto-route fallback must flip to relay inside
+    // the runtime and begin relay against the already-authenticated server ws.
+    const attachCall = lastWs().send.mock.calls.find((call: unknown[]) => {
+      const raw = String(call[0]);
+      try {
+        return JSON.parse(raw).msg_type === 'client.attach';
+      } catch {
+        return false;
+      }
+    })?.[0] as string | undefined;
+    expect(attachCall).toBeTruthy();
+
+    act(() => {
+      const parsed = JSON.parse(attachCall as string) as { id: string };
+      const ws = lastWs();
+      ws.onmessage?.({ data: JSON.stringify({
+        msg_type: 'error', id: parsed.id, timestamp: 0,
+        payload: { message: 'agent rejected attach' },
+      }) } as MessageEvent);
+    });
+
+    await waitFor(() => {
+      expect(store.get(forcedRelayAtom)).toBe(true);
+    });
+    await waitFor(() => {
+      expect(beginRelay).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(store.get(terminalSessionStateAtom)).toBe('attached');
+    });
+    expect(result.current.p2pConnection).toBeNull();
+  });
+
   it('applies route-intent snapshot when config owner updates after subscribing', async () => {
     const store = makeStore('agent:a', 'token-a');
     store.set(terminalSessionStateAtom, 'attached');

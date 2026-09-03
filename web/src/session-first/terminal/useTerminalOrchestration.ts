@@ -25,7 +25,7 @@ import { ConnectionManager } from '@/terminal/ConnectionManager';
 import { createAttachGate } from '@/terminal/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/terminal/DeviceProfile';
 import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
-import { terminalSessionStateAtom, type TerminalStatus } from '@/terminal/state/session';
+import type { TerminalStatus } from '@/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/terminal/state/ui';
 
 function useSessionEnvSourcing(opts: {
@@ -96,7 +96,6 @@ function useReconnectBanner(opts: {
   wsService: WebSocketService;
 }): ReconnectBanner {
   const { sessionId, terminalState, reconnectCount, effectiveMode, wsService } = opts;
-  const setTerminalState = useSetAtom(terminalSessionStateAtom);
   const setBanner = useSetAtom(bannerAtomFamily(sessionId));
   const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
   const [relayLost, setRelayLost] = useState(false);
@@ -107,26 +106,16 @@ function useReconnectBanner(opts: {
 
   useEffect(() => {
     if (effectiveMode !== 'relay' || !wsService) { return; }
+    // UI-only bookkeeping: attach phase transitions are driven by the
+    // SessionRuntime relay handler and mirrored through runtime events.
     return wsService.onConnectionChange((status) => {
       if (status === 'authenticated') {
         setRelayLost(false);
-        setTerminalState((prev) => {
-          if (prev === 'connecting' || prev === 'reconnecting' || prev === 'failed') {
-            return 'connecting';
-          }
-          return prev;
-        });
       } else if (status === 'disconnected') {
         setRelayLost(true);
-        setTerminalState((prev) => {
-          if (prev === 'attached') {
-            return 'reconnecting';
-          }
-          return prev;
-        });
       }
     });
-  }, [effectiveMode, wsService, setTerminalState]);
+  }, [effectiveMode, wsService]);
 
   const banner: ReconnectBanner =
     terminalState === 'reconnecting'
@@ -178,7 +167,7 @@ export function useTerminalOrchestration({
   const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, p2pState, transportKey: runtimeTransportKey } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -189,10 +178,6 @@ export function useTerminalOrchestration({
 
   const { terminalState, reconnectCount } = useSessionFirstTerminalAttach({
     sessionId,
-    sessionName,
-    p2pConnection,
-    p2pState,
-    wsService,
     runtime,
   });
 
