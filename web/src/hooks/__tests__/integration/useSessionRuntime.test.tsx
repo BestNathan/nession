@@ -9,6 +9,7 @@ import {
   sessionNameAtom,
   attachInfoAtom,
   orderedUrlsAtom,
+  forcedRelayAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { AttachInfo } from '@/types';
@@ -224,5 +225,26 @@ describe('useSessionRuntime integration', () => {
 
     expect(seen.length).toBeGreaterThan(0);
     expect(new Set(seen).size).toBe(1);
+  });
+
+  it('clears P2P state when forced to relay', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    const { result, rerender } = renderHook(
+      () => useSessionRuntime({ transportFirst: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.p2pConnection).not.toBeNull();
+    });
+
+    act(() => {
+      store.set(forcedRelayAtom, true);
+    });
+    rerender();
+
+    expect(result.current.p2pConnection).toBeNull();
+    expect(result.current.p2pState).toBe('disconnected');
+    expect(result.current.runtime).toBeNull();
   });
 });

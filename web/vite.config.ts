@@ -85,10 +85,10 @@ export default defineConfig(({ mode }) => {
       provider: 'v8',
       reporter: ['text', 'html'],
       thresholds: {
-        lines: 78,
+        lines: 80,
         functions: 72,
         branches: 65,
-        statements: 76,
+        statements: 78,
       },
       include: ['src/**/*.{ts,tsx}'],
       exclude: [

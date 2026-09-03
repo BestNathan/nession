@@ -266,4 +266,29 @@ describe('useTerminalStateMachine', () => {
     expect(result.current.terminalState).toBe('attached');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
   });
+
+  it('p2p: uses explicit p2pState prop for bridge transition', () => {
+    const { conn, sendMessage } = makeP2PConnection();
+    const store = makeStore({ mode: 'p2p', sessionId: 'agent:sess', sessionName: 'sess' });
+
+    const { result, rerender } = renderHook(
+      ({ p2pState }: { p2pState: ConnectionState }) =>
+        useTerminalStateMachine({ p2pConnection: conn, p2pState }),
+      {
+        initialProps: { p2pState: 'connecting' as ConnectionState },
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(Provider, { store }, children),
+      },
+    );
+
+    expect(result.current.terminalState).toBe('connecting');
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    rerender({ p2pState: 'connected' });
+
+    expect(result.current.terminalState).toBe('connected');
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ msg_type: 'client.attach' }),
+    );
+  });
 });

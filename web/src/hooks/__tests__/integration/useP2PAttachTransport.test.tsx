@@ -12,8 +12,10 @@ vi.mock('@/hooks/useSessionRuntime', () => ({
     addressPlan: { ready: true, urls: ['ws://a/ws'] },
     activeUrl: 'ws://a/ws',
     p2pConnection: null,
+    p2pState: 'disconnected' as const,
     waitingForAddressPlan: false,
     fileOps: null,
+    runtime: null,
   })),
 }));
 
@@ -66,6 +68,7 @@ describe('useP2PAttachTransport', () => {
     );
 
     expect(result.current.activeUrl).toBe('ws://a/ws');
+    expect(result.current.p2pState).toBe('disconnected');
     expect(result.current.waitingForAddressPlan).toBe(false);
   });
 });

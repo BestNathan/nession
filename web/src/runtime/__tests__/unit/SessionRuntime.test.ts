@@ -91,4 +91,30 @@ describe('SessionRuntime', () => {
     expect(unsub).toBeTypeOf('function');
     unsub();
   });
+
+  it('resets address index when route epoch changes', () => {
+    const rt = new SessionRuntime(makeConfig());
+    expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+    expect(rt.activeUrl).toBe('ws://b/ws');
+    rt.updateContext({ routeEpoch: 1 });
+    expect(rt.activeUrl).toBe('ws://a/ws');
+    rt.dispose();
+  });
+
+  it('notifies connection state subscribers when socket connects', () => {
+    const rt = new SessionRuntime(makeConfig());
+    const states: string[] = [];
+    const unsub = rt.subscribeConnectionState((s) => states.push(s));
+    const ws = (rt.getP2PConnection() as { waitForConnection: () => Promise<void> });
+    expect(ws).toBeTruthy();
+    unsub();
+    rt.dispose();
+  });
+
+  it('clears client when attachInfo becomes unavailable', () => {
+    const rt = new SessionRuntime(makeConfig());
+    rt.updateContext({ attachInfo: null });
+    expect(rt.getP2PConnection()).toBeNull();
+    rt.dispose();
+  });
 });

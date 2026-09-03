@@ -95,4 +95,32 @@ describe('AddressAttachPolicy', () => {
     expect(policy.activeUrl).toBe('ws://manual/ws');
     expect(policy.onCandidateDisconnected()).toEqual({ type: 'none' });
   });
+
+  it('update resets index when plan urls change', () => {
+    const policy = new AddressAttachPolicy({
+      attachInfo: makeAttachInfo(),
+      orderedUrls: ['ws://a/ws', 'ws://b/ws'],
+      manualOverride: null,
+      forcedRelay: false,
+      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressIndex: 0,
+    });
+    policy.onCandidateDisconnected();
+    expect(policy.activeUrl).toBe('ws://b/ws');
+    policy.update({ addressPlan: makePlan(['ws://c/ws', 'ws://d/ws']) });
+    expect(policy.activeUrl).toBe('ws://c/ws');
+  });
+
+  it('uses long reconnect budget for single legacy fallback', () => {
+    const attachInfo = makeAttachInfo();
+    const policy = new AddressAttachPolicy({
+      attachInfo,
+      orderedUrls: null,
+      manualOverride: null,
+      forcedRelay: false,
+      addressPlan: makePlan([attachInfo.agent_address ?? 'ws://a/ws']),
+      addressIndex: 0,
+    });
+    expect(policy.maxReconnectAttempts()).toBe(2);
+  });
 });
