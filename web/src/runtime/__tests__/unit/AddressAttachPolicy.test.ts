@@ -81,4 +81,18 @@ describe('AddressAttachPolicy', () => {
     });
     expect(policy.maxReconnectAttempts()).toBe(2);
   });
+
+  it('manual override stays P2P with explicit url and no rotation', () => {
+    const policy = new AddressAttachPolicy({
+      attachInfo: makeAttachInfo(),
+      orderedUrls: ['ws://a/ws', 'ws://b/ws'],
+      manualOverride: 'ws://manual/ws',
+      forcedRelay: false,
+      addressPlan: makePlan(['ws://a/ws', 'ws://b/ws']),
+      addressIndex: 0,
+    });
+    expect(policy.isP2P).toBe(true);
+    expect(policy.activeUrl).toBe('ws://manual/ws');
+    expect(policy.onCandidateDisconnected()).toEqual({ type: 'none' });
+  });
 });

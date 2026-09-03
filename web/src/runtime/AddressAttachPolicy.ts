@@ -28,9 +28,12 @@ export class AddressAttachPolicy {
 
   get activeUrl(): string | null {
     const { attachInfo, forcedRelay, manualOverride, addressPlan } = this.config;
-    const isP2P = attachInfo?.mode === 'p2p' && !forcedRelay && !manualOverride;
+    const isP2P = attachInfo?.mode === 'p2p' && !forcedRelay;
     if (!isP2P || !addressPlan.ready) {
       return null;
+    }
+    if (manualOverride) {
+      return manualOverride;
     }
     return addressPlan.urls[this.addressIndex] ?? null;
   }
@@ -40,8 +43,8 @@ export class AddressAttachPolicy {
   }
 
   get isP2P(): boolean {
-    const { attachInfo, forcedRelay, manualOverride } = this.config;
-    return attachInfo?.mode === 'p2p' && !forcedRelay && !manualOverride;
+    const { attachInfo, forcedRelay } = this.config;
+    return attachInfo?.mode === 'p2p' && !forcedRelay;
   }
 
   update(config: Partial<AddressAttachPolicyConfig>): AddressPolicyAction {

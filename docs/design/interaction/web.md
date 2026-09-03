@@ -71,3 +71,9 @@ ConnectionManager (terminal I/O only; no Jotai reads)
 - **Session-first** and **legacy `TerminalWorkspace`** both acquire the same registry entry (`transportFirst: true|false`).
 - React hooks (`useSessionRuntime`, `useP2PAttachTransport`) mirror transport state into Jotai; terminal code must not import hook types or call `getDefaultStore()` directly.
 - `ConnectionManager` gates outbound input/resize via an explicit `isAttached()` callback wired from the attach state machine.
+
+### Follow-ups (post-#593)
+
+- **Server vs P2P routing:** `WebSocketService` relay path and `AgentSocketClient` P2P path still use separate send surfaces; unifying them under one `MessageRouter` per connection mode is tracked separately.
+- **`p2pEpoch`:** route-rotation still bumps a Jotai epoch for hook consumers; a future pass can drive reconnect purely from `SessionRuntime` context updates.
+- **AttachStateMachine:** session-first attach dispatches through `runtime.attachState`; legacy Dashboard attach remains on the prior driver until migrated.

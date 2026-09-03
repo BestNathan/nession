@@ -5,12 +5,141 @@ import { effectiveModeAtom, p2pEpochAtom, p2pConnectionAtom, p2pStateAtom } from
 import { terminalSessionStateAtom } from '@/terminal/state/session';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import type { SessionRuntime, SessionRuntimeConfig } from '@/runtime/SessionRuntime';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { FileOps } from '@/services/fileOps';
 
 export interface UseSessionRuntimeOptions {
   transportFirst: boolean;
+}
+
+function useForcedRelayReset(planUrlsKey: string, setForcedRelay: (v: boolean) => void): void {
+  useEffect(() => {
+    setForcedRelay(false);
+  }, [planUrlsKey, setForcedRelay]);
+}
+
+function useRuntimeOwnership(
+  sessionId: string | null,
+  isP2P: boolean,
+  attachSessionId: string | undefined,
+  runtimeConfig: SessionRuntimeConfig | null,
+): SessionRuntime | null {
+  const configRef = useRef(runtimeConfig);
+  configRef.current = runtimeConfig;
+  const [runtime, setRuntime] = useState<SessionRuntime | null>(null);
+
+  useEffect(() => {
+    if (!sessionId || !isP2P || !attachSessionId) {
+      setRuntime(null);
+      return;
+    }
+    const config = configRef.current;
+    if (!config) {
+      setRuntime(null);
+      return;
+    }
+
+    const rt = sessionRuntimeRegistry.acquire(sessionId, config);
+    setRuntime(rt);
+
+    return () => {
+      sessionRuntimeRegistry.release(sessionId);
+      if (!sessionRuntimeRegistry.get(sessionId)) {
+        setRuntime(null);
+      }
+    };
+  }, [sessionId, isP2P, attachSessionId]);
+
+  return runtime;
+}
+
+function useRuntimeConnectionSync(opts: {
+  runtime: SessionRuntime | null;
+  runtimeConfig: SessionRuntimeConfig | null;
+  planUrlsKey: string;
+  isP2P: boolean;
+  setP2pConnection: (c: P2PConnection | null) => void;
+  setP2pState: (s: import('@/services/socket/types').ConnectionState) => void;
+  setForcedRelay: (v: boolean) => void;
+  setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+  setP2pEpoch: (update: (epoch: number) => number) => void;
+}): P2PConnection | null {
+  const {
+    runtime,
+    runtimeConfig,
+    planUrlsKey,
+    isP2P,
+    setP2pConnection,
+    setP2pState,
+    setForcedRelay,
+    setTerminalState,
+    setP2pEpoch,
+  } = opts;
+  const [p2pConnection, setLocalP2p] = useState<P2PConnection | null>(null);
+  const startedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!runtime || !runtimeConfig) {
+      return;
+    }
+    runtime.updateContext(runtimeConfig);
+
+    const conn = runtime.getP2PConnection();
+    setLocalP2p(conn);
+    setP2pConnection(conn);
+    const initial = conn?.connectionState ?? 'connecting';
+    setP2pState(initial);
+
+    const attemptKey = `${runtime.activeUrl ?? ''}:${planUrlsKey}`;
+    if (initial !== 'disconnected') {
+      startedKeyRef.current = attemptKey;
+    }
+
+    const unsubState = runtime.subscribeConnectionState((next) => {
+      setP2pState(next);
+      if (next !== 'disconnected') {
+        startedKeyRef.current = attemptKey;
+        return;
+      }
+      if (startedKeyRef.current !== attemptKey) {
+        return;
+      }
+      const action = runtime.onCandidateDisconnected();
+      if (action === 'next-candidate') {
+        setP2pEpoch((e) => e + 1);
+        setTerminalState('connecting');
+      } else if (action === 'force-relay') {
+        setP2pEpoch((e) => e + 1);
+        setTerminalState('connecting');
+        setForcedRelay(true);
+      }
+    });
+
+    return () => {
+      unsubState();
+    };
+  }, [
+    runtime,
+    runtimeConfig,
+    planUrlsKey,
+    setP2pConnection,
+    setP2pState,
+    setForcedRelay,
+    setTerminalState,
+    setP2pEpoch,
+  ]);
+
+  useEffect(() => {
+    if (!isP2P) {
+      setLocalP2p(null);
+      setP2pConnection(null);
+      setP2pState('disconnected');
+      startedKeyRef.current = null;
+    }
+  }, [isP2P, setP2pConnection, setP2pState]);
+
+  return isP2P ? p2pConnection : null;
 }
 
 export function useSessionRuntime(options: UseSessionRuntimeOptions) {
@@ -30,78 +159,26 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions) {
   const forcedRelay = manualOverride ? false : forcedRelayState;
   const addressPlan = useAddressPlan(attachInfo, { orderedUrls, manualUrl: manualOverride });
   const planUrlsKey = addressPlan.urls.join(',');
+  const addressPlanReady = addressPlan.ready;
 
-  useEffect(() => {
-    setForcedRelay(false);
-  }, [planUrlsKey, setForcedRelay]);
+  useForcedRelayReset(planUrlsKey, setForcedRelay);
 
   const isP2P = effectiveMode === 'p2p' && attachInfo?.mode === 'p2p' && !forcedRelay;
 
-  const [runtime, setRuntime] = useState<SessionRuntime | null>(null);
-  const [p2pConnection, setLocalP2p] = useState<P2PConnection | null>(null);
-  const startedKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
+  const runtimeConfig = useMemo((): SessionRuntimeConfig | null => {
     if (!sessionId || !isP2P || !attachInfo) {
-      setRuntime(null);
-      setLocalP2p(null);
-      setP2pConnection(null);
-      setP2pState('disconnected');
-      startedKeyRef.current = null;
-      return;
+      return null;
     }
-
-    const rt = sessionRuntimeRegistry.acquire(sessionId, {
+    return {
       sessionId,
       sessionName,
       attachInfo,
       orderedUrls,
       manualOverride,
       forcedRelay,
-      addressPlan,
+      addressPlan: { urls: addressPlan.urls, ready: addressPlanReady },
       transportFirst: options.transportFirst,
       routeEpoch,
-    });
-    setRuntime(rt);
-
-    const conn = rt.getP2PConnection();
-    setLocalP2p(conn);
-    setP2pConnection(conn);
-    const initial = conn?.connectionState ?? 'connecting';
-    setP2pState(initial);
-
-    const attemptKey = `${rt.activeUrl ?? ''}:${planUrlsKey}`;
-    if (initial !== 'disconnected') {
-      startedKeyRef.current = attemptKey;
-    }
-
-    const unsubState = rt.subscribeConnectionState((next) => {
-      setP2pState(next);
-      if (next !== 'disconnected') {
-        startedKeyRef.current = attemptKey;
-        return;
-      }
-      if (startedKeyRef.current !== attemptKey) {
-        return;
-      }
-      const action = rt.onCandidateDisconnected();
-      if (action === 'next-candidate') {
-        setP2pEpoch((e) => e + 1);
-        setTerminalState('connecting');
-      } else if (action === 'force-relay') {
-        setP2pEpoch((e) => e + 1);
-        setTerminalState('connecting');
-        setForcedRelay(true);
-      }
-    });
-
-    return () => {
-      unsubState();
-      sessionRuntimeRegistry.release(sessionId);
-      if (!sessionRuntimeRegistry.get(sessionId)) {
-        setP2pConnection(null);
-        setP2pState('disconnected');
-      }
     };
   }, [
     sessionId,
@@ -111,16 +188,30 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions) {
     manualOverride,
     forcedRelay,
     isP2P,
-    addressPlan,
-    planUrlsKey,
-    routeEpoch,
+    addressPlanReady,
+    addressPlan.urls,
     options.transportFirst,
+    routeEpoch,
+  ]);
+
+  const runtime = useRuntimeOwnership(
+    sessionId,
+    isP2P,
+    attachInfo?.session_id,
+    runtimeConfig,
+  );
+
+  const p2pConnection = useRuntimeConnectionSync({
+    runtime,
+    runtimeConfig,
+    planUrlsKey,
+    isP2P,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
     setP2pEpoch,
-  ]);
+  });
 
   const fileOps: FileOps | null = useMemo(
     () => (isP2P && runtime ? runtime.getFileCapability()?.toFileOps() ?? null : null),
@@ -129,10 +220,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions) {
 
   return {
     runtime,
-    p2pConnection: isP2P ? p2pConnection : null,
+    p2pConnection,
     fileOps,
     activeUrl: runtime?.activeUrl ?? null,
-    waitingForAddressPlan: isP2P ? (runtime?.waitingForAddressPlan ?? !addressPlan.ready) : false,
+    waitingForAddressPlan: isP2P ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
     addressPlan,
   };
 }

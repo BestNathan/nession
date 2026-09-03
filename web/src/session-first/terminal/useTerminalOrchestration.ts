@@ -170,7 +170,7 @@ export function useTerminalOrchestration({
   const p2pEpoch = useAtomValue(p2pEpochAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -183,6 +183,7 @@ export function useTerminalOrchestration({
     sessionName,
     p2pConnection,
     wsService,
+    runtime,
   });
 
   const handleDisconnect = useEndRelayOnDisconnect({

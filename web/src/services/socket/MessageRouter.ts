@@ -60,7 +60,12 @@ export class MessageRouterImpl implements MessageRouter {
     if (pending) {
       clearTimeout(pending.timer);
       this.pending.delete(message.id);
-      pending.resolve(message.payload);
+      if (message.msg_type === 'error') {
+        const errMsg = ((message.payload as Record<string, unknown>)?.message as string) || 'Remote error';
+        pending.reject(new Error(errMsg));
+      } else {
+        pending.resolve(message.payload);
+      }
       return;
     }
     const set = this.handlers.get(message.msg_type);

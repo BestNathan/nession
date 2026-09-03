@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { SessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import type { SessionRuntimeConfig } from '@/runtime/SessionRuntime';
 import type { AttachInfo } from '@/types';
@@ -24,7 +24,13 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
 }
 
 describe('SessionRuntimeRegistry', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -37,17 +43,22 @@ describe('SessionRuntimeRegistry', () => {
     registry.release('s1');
     expect(registry.get('s1')).not.toBeNull();
     registry.release('s1');
+    vi.runAllTimers();
     expect(registry.get('s1')).toBeNull();
   });
 
-  it('StrictMode double acquire/release keeps one runtime until both release', () => {
+  it('StrictMode replay re-acquire cancels deferred dispose', () => {
     const registry = new SessionRuntimeRegistry();
     const config = makeConfig('s1');
     const first = registry.acquire('s1', config);
+    registry.release('s1');
+    expect(registry.get('s1')).not.toBeNull();
     const second = registry.acquire('s1', config);
     expect(first).toBe(second);
+    vi.runAllTimers();
+    expect(registry.get('s1')).not.toBeNull();
     registry.release('s1');
-    registry.release('s1');
+    vi.runAllTimers();
     expect(registry.get('s1')).toBeNull();
   });
 
@@ -56,6 +67,8 @@ describe('SessionRuntimeRegistry', () => {
     const rt = registry.acquire('s1', makeConfig('s1'));
     const disposeSpy = vi.spyOn(rt, 'dispose');
     registry.release('s1');
+    expect(disposeSpy).not.toHaveBeenCalled();
+    vi.runAllTimers();
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
 });

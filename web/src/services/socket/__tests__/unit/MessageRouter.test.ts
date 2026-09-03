@@ -44,6 +44,17 @@ describe('MessageRouterImpl', () => {
     expect(binHandler).toHaveBeenCalledWith(buf);
   });
 
+  it('rejects correlated error responses', async () => {
+    const p = router.request('file.read', { path: '/missing' });
+    router.handleIncoming({
+      msg_type: 'error',
+      id: 'id-1',
+      timestamp: 0,
+      payload: { message: 'Not found' },
+    });
+    await expect(p).rejects.toThrow('Not found');
+  });
+
   it('rejects pending requests on dispose', async () => {
     const p = router.request('file.read', {});
     router.dispose();

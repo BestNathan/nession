@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type SetStateAction
 import { useAtom, useSetAtom } from 'jotai';
 import type { P2PConnection } from '@/hooks/useP2PConnection';
 import type { WebSocketService } from '@/services/websocket';
+import type { SessionRuntime } from '@/runtime/SessionRuntime';
 import { manualOverrideAtom, forcedRelayAtom } from '@/atoms/session';
 import { effectiveModeAtom, p2pEpochAtom } from '@/atoms/connection';
 import {
@@ -24,6 +25,7 @@ export interface UseSessionFirstTerminalAttachOptions {
   sessionName: string;
   p2pConnection: P2PConnection | null;
   wsService: WebSocketService;
+  runtime?: SessionRuntime | null;
 }
 
 function useWsConnected(wsService: WebSocketService): boolean {
@@ -80,6 +82,26 @@ interface P2pAttachCtx {
   setTerminalState: (value: SetStateAction<TerminalStatus>) => void;
   setForcedRelay: (v: boolean) => void;
   setP2pEpoch: (update: (epoch: number) => number) => void;
+  runtime: SessionRuntime | null | undefined;
+}
+
+function applyAttachTransition(
+  ctx: Pick<P2pAttachCtx, 'setTerminalState' | 'setForcedRelay' | 'setP2pEpoch' | 'setReconnectCount' | 'reconnectCountRef' | 'runtime'>,
+  event: import('@/runtime/AttachStateMachine').AttachEvent,
+): void {
+  if (!ctx.runtime) {
+    return;
+  }
+  const result = ctx.runtime.attachState.dispatch(event);
+  ctx.setTerminalState(result.phase);
+  ctx.setReconnectCount(result.reconnectCount);
+  ctx.reconnectCountRef.current = result.reconnectCount;
+  if (result.forceRelay) {
+    ctx.setForcedRelay(true);
+  }
+  if (result.bumpRouteEpoch) {
+    ctx.setP2pEpoch((epoch) => epoch + 1);
+  }
 }
 
 function runP2pAttach(ctx: P2pAttachCtx): (() => void) | undefined {
@@ -99,11 +121,17 @@ function runP2pAttach(ctx: P2pAttachCtx): (() => void) | undefined {
   const unsub = ctx.p2pConnection.onMessage((msg) => {
     if (gen !== ctx.attachGenerationRef.current || msg.id !== attachId) { return; }
     if (msg.msg_type === 'ok') {
-      ctx.reconnectCountRef.current = 0;
-      ctx.setReconnectCount(0);
-      ctx.setTerminalState('attached');
+      if (ctx.runtime) {
+        applyAttachTransition(ctx, { type: 'ATTACH_OK' });
+      } else {
+        ctx.reconnectCountRef.current = 0;
+        ctx.setReconnectCount(0);
+        ctx.setTerminalState('attached');
+      }
     } else if (msg.msg_type === 'error') {
-      if (ctx.manualOverride) {
+      if (ctx.runtime) {
+        applyAttachTransition(ctx, { type: 'ATTACH_ERROR', manualRoute: !!ctx.manualOverride });
+      } else if (ctx.manualOverride) {
         ctx.setTerminalState('failed');
       } else {
         ctx.setP2pEpoch((epoch) => epoch + 1);
@@ -121,7 +149,13 @@ function runP2pAttach(ctx: P2pAttachCtx): (() => void) | undefined {
     ctx.reconnectCountRef.current = count;
     ctx.setReconnectCount(count);
     if (count > P2P_MAX_RECONNECT) {
-      if (ctx.manualOverride) {
+      if (ctx.runtime) {
+        applyAttachTransition(ctx, {
+          type: 'ATTACH_TIMEOUT',
+          manualRoute: !!ctx.manualOverride,
+          attempt: count,
+        });
+      } else if (ctx.manualOverride) {
         ctx.setTerminalState('failed');
       } else {
         ctx.setP2pEpoch((epoch) => epoch + 1);
@@ -130,8 +164,15 @@ function runP2pAttach(ctx: P2pAttachCtx): (() => void) | undefined {
       }
       return;
     }
-    // Toggle state so a timeout while already reconnecting still re-triggers attach.
-    ctx.setTerminalState((prev) => (prev === 'connecting' ? 'reconnecting' : 'connecting'));
+    if (ctx.runtime) {
+      applyAttachTransition(ctx, {
+        type: 'ATTACH_TIMEOUT',
+        manualRoute: !!ctx.manualOverride,
+        attempt: count,
+      });
+    } else {
+      ctx.setTerminalState((prev) => (prev === 'connecting' ? 'reconnecting' : 'connecting'));
+    }
   }, ATTACH_TIMEOUT_MS);
 
   return () => {
@@ -156,6 +197,7 @@ export function useSessionFirstTerminalAttach({
   sessionName,
   p2pConnection,
   wsService,
+  runtime,
 }: UseSessionFirstTerminalAttachOptions) {
   const [effectiveMode] = useAtom(effectiveModeAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
@@ -182,21 +224,31 @@ export function useSessionFirstTerminalAttach({
     reconnectCountRef.current = 0;
     setReconnectCount(0);
     needsTransportReattachRef.current = false;
-  }, [sessionId]);
+    runtime?.attachState.reset();
+    runtime?.attachState.dispatch({ type: 'SESSION_SELECTED' });
+  }, [sessionId, runtime]);
 
   useEffect(() => {
     if (sessionId && terminalState === 'idle') {
-      setTerminalState('connecting');
+      if (runtime) {
+        const result = runtime.attachState.dispatch({ type: 'SESSION_SELECTED' });
+        setTerminalState(result.phase);
+      } else {
+        setTerminalState('connecting');
+      }
     }
-  }, [sessionId, terminalState, setTerminalState]);
+  }, [sessionId, terminalState, setTerminalState, runtime]);
 
   useEffect(() => {
     if (!transportReady) {
       if (terminalState === 'attached') {
         needsTransportReattachRef.current = true;
+        runtime?.attachState.dispatch({ type: 'TRANSPORT_LOST' });
       }
       return;
     }
+
+    runtime?.attachState.dispatch({ type: 'TRANSPORT_READY' });
 
     if (!sessionId) { return; }
 
@@ -216,7 +268,13 @@ export function useSessionFirstTerminalAttach({
       if (terminalState === 'attached' && !transportReattach) { return; }
 
       wsService.beginRelay(sessionId, undefined, lastResize?.cols, lastResize?.rows);
-      setTerminalState('attached');
+      if (runtime) {
+        const result = runtime.attachState.dispatch({ type: 'RELAY_BEGIN_OK' });
+        setTerminalState(result.phase);
+        setReconnectCount(result.reconnectCount);
+      } else {
+        setTerminalState('attached');
+      }
       reconnectCountRef.current = 0;
       setReconnectCount(0);
       return;
@@ -237,6 +295,7 @@ export function useSessionFirstTerminalAttach({
       setTerminalState,
       setForcedRelay,
       setP2pEpoch,
+      runtime,
     });
   }, [
     transportReady,
@@ -253,6 +312,7 @@ export function useSessionFirstTerminalAttach({
     setTerminalState,
     setForcedRelay,
     setP2pEpoch,
+    runtime,
   ]);
 
   return { terminalState, reconnectCount };

@@ -18,6 +18,7 @@ interface UseP2PAttachTransportResult {
   p2pConnection: P2PConnection | null;
   waitingForAddressPlan: boolean;
   fileOps: import('@/services/fileOps').FileOps | null;
+  runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
 }
 
 /**
@@ -26,7 +27,7 @@ interface UseP2PAttachTransportResult {
 export function useP2PAttachTransport({
   transportFirst = false,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
-  const { addressPlan, activeUrl, p2pConnection, waitingForAddressPlan, fileOps } = useSessionRuntime({
+  const { addressPlan, activeUrl, p2pConnection, waitingForAddressPlan, fileOps, runtime } = useSessionRuntime({
     transportFirst,
   });
 
@@ -36,5 +37,6 @@ export function useP2PAttachTransport({
     p2pConnection,
     waitingForAddressPlan,
     fileOps,
+    runtime,
   };
 }
