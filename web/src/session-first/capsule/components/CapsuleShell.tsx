@@ -5,10 +5,10 @@ import {
   capsuleShellCapsuleRadiusClass,
   capsuleShellContentGapClass,
   capsuleShellDockBottomClass,
+  capsuleShellInnerClass,
   capsuleShellInnerPadClass,
   capsuleShellPillRadiusClass,
   capsuleShellSurfaceClass,
-  capsuleShellWebInnerClass,
   capsuleShellWebOuterClass,
 } from '@/session-first/capsule/capsuleStyles';
 import type {
@@ -66,7 +66,7 @@ export function CapsuleShell({
         data-testid="capsule-shell"
         className={cn(
           'flex min-h-[length:var(--control-md)]',
-          isApp ? 'w-full' : capsuleShellWebInnerClass,
+          capsuleShellInnerClass,
           capsuleShellSurfaceClass,
           usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
