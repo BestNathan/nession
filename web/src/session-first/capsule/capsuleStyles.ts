@@ -33,7 +33,8 @@ export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
 /** Single-row web pill ends */
 export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-radius)]';
 
-export const capsuleShellWebInnerClass =
+/** Inner (interactive) shell: full-width, clips children to the capsule corners. */
+export const capsuleShellInnerClass =
   'pointer-events-auto w-full overflow-hidden';
 
 export const capsuleShellInnerSizeClass =
