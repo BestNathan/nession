@@ -99,7 +99,7 @@ export function useSessionFirstTerminal({
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
   transportFactoryRef.current = () =>
     new ConnectionManager({
@@ -108,7 +108,7 @@ export function useSessionFirstTerminal({
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
-    }) as unknown as TerminalTransport;
+    });
   const transportFactory = useCallback(() => transportFactoryRef.current(), []);
 
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));

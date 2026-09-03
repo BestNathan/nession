@@ -121,6 +121,16 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('emits transport-exhausted for manual route disconnect', () => {
+    const rt = new SessionRuntime(makeConfig({ manualOverride: 'ws://manual/ws' }));
+    const events: string[] = [];
+    rt.subscribeRuntimeEvents((e) => events.push(e.type));
+    expect(rt.onCandidateDisconnected()).toBe('transport-exhausted');
+    expect(rt.attachState.phase).toBe('failed');
+    expect(events).toEqual(['transport-exhausted']);
+    rt.dispose();
+  });
+
   it('clears client when attachInfo becomes unavailable', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.updateContext({ attachInfo: null });

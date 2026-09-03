@@ -224,7 +224,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
   const isAttachedRef = useRef(createAttachGate(() => terminalState));
   isAttachedRef.current = createAttachGate(() => terminalState);
@@ -236,7 +236,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
       isAttached: () => isAttachedRef.current(),
-    }) as unknown as TerminalTransport;
+    });
   const transportFactory = useCallback(() => transportFactoryRef.current(), []);
 
   // One controller per session/mode — stable across terminalState transitions

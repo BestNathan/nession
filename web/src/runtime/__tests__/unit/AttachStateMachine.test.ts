@@ -38,6 +38,13 @@ describe('AttachStateMachine', () => {
     expect(result.phase).toBe('connecting');
   });
 
+  it('TRANSPORT_EXHAUSTED fails on manual route', () => {
+    const sm = new AttachStateMachine({ transportFirst: true });
+    sm.dispatch({ type: 'SESSION_SELECTED' });
+    const result = sm.dispatch({ type: 'TRANSPORT_EXHAUSTED', manualRoute: true });
+    expect(result.phase).toBe('failed');
+  });
+
   it('ATTACH_OK reaches attached', () => {
     const sm = new AttachStateMachine({ transportFirst: false });
     sm.dispatch({ type: 'SESSION_SELECTED' });

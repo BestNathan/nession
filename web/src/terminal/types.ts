@@ -4,9 +4,6 @@ import type { WebSocketService } from '../services/websocket';
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
 
-/** Connection state tracked internally by ConnectionManager. */
-export type ConnectionState = 'connected' | 'reconnecting' | 'lost';
-
 /** Options passed to ConnectionManager constructor. */
 export interface ConnectionOptions {
   mode: 'p2p' | 'relay';

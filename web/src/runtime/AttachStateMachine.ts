@@ -9,6 +9,7 @@ export type AttachEvent =
   | { type: 'SESSION_SELECTED' }
   | { type: 'TRANSPORT_READY' }
   | { type: 'TRANSPORT_LOST' }
+  | { type: 'TRANSPORT_EXHAUSTED'; manualRoute: boolean }
   | { type: 'P2P_CONNECTED' }
   | { type: 'ATTACH_OK' }
   | { type: 'ATTACH_ERROR'; manualRoute: boolean }
@@ -77,6 +78,9 @@ export class AttachStateMachine {
       case 'TRANSPORT_LOST':
         this.onTransportLost();
         break;
+      case 'TRANSPORT_EXHAUSTED':
+        this.onTransportExhausted(event.manualRoute);
+        break;
       case 'P2P_CONNECTED':
         this.onP2PConnected();
         break;
@@ -132,6 +136,12 @@ export class AttachStateMachine {
   private onAttachOk(): void {
     this.phase = 'attached';
     this.reconnectCount = 0;
+  }
+
+  private onTransportExhausted(manualRoute: boolean): void {
+    if (manualRoute) {
+      this.phase = 'failed';
+    }
   }
 
   private onAttachError(manualRoute: boolean, flags: { forceRelay: boolean; bumpRouteEpoch: boolean }): void {

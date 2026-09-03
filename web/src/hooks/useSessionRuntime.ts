@@ -12,6 +12,8 @@ import type { FileOps } from '@/services/fileOps';
 
 export interface UseSessionRuntimeOptions {
   transportFirst: boolean;
+  /** When true, this hook instance drives runtime.updateContext (single owner). */
+  configOwner?: boolean;
 }
 
 export interface UseSessionRuntimeResult {
@@ -79,6 +81,7 @@ function useRuntimeConnectionSync(opts: {
   runtime: SessionRuntime | null;
   runtimeConfig: SessionRuntimeConfig | null;
   isP2P: boolean;
+  configOwner: boolean;
   setP2pConnection: (c: P2PConnection | null) => void;
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
@@ -90,6 +93,7 @@ function useRuntimeConnectionSync(opts: {
     runtime,
     runtimeConfig,
     isP2P,
+    configOwner,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
@@ -114,7 +118,9 @@ function useRuntimeConnectionSync(opts: {
       return;
     }
 
-    runtime.updateContext(runtimeConfig);
+    if (configOwner) {
+      runtime.updateContext(runtimeConfig);
+    }
 
     const conn = runtime.getP2PConnection();
     setLocalP2p(conn);
@@ -141,6 +147,8 @@ function useRuntimeConnectionSync(opts: {
       } else if (event.type === 'force-relay') {
         setTerminalState('connecting');
         setForcedRelay(true);
+      } else if (event.type === 'transport-exhausted') {
+        setTerminalState('failed');
       }
     });
 
@@ -159,6 +167,7 @@ function useRuntimeConnectionSync(opts: {
     setForcedRelay,
     setTerminalState,
     setTransportGeneration,
+    configOwner,
   ]);
 
   useEffect(() => {
@@ -240,6 +249,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     runtime,
     runtimeConfig,
     isP2P,
+    configOwner: options.configOwner ?? false,
     setP2pConnection,
     setP2pState,
     setForcedRelay,

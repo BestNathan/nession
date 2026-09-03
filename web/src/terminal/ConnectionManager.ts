@@ -1,5 +1,6 @@
-import type { ConnectionState, ConnectionOptions } from './types';
-import type { P2PMessage } from '@/services/socket/p2pTypes';
+import type { ConnectionOptions } from './types';
+import type { P2PConnectionState, P2PMessage } from '@/services/socket/p2pTypes';
+import type { TerminalTransport } from './transport/TerminalTransport';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -30,8 +31,8 @@ function decodeB64(b64: string): Uint8Array {
   return bytes;
 }
 
-export class ConnectionManager {
-  private mode: 'p2p' | 'relay';
+export class ConnectionManager implements TerminalTransport {
+  readonly mode: 'p2p' | 'relay';
   private sessionName: string;
   private p2pConnection?: ConnectionOptions['p2pConnection'];
   private serverConnection?: ConnectionOptions['serverConnection'];
@@ -52,7 +53,7 @@ export class ConnectionManager {
   private pendingResize: { cols: number; rows: number } | null = null;
   private isAttached: () => boolean;
 
-  onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
+  onStateChange: ((state: P2PConnectionState) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;
@@ -267,9 +268,9 @@ export class ConnectionManager {
     this.relayUnsubState = svc.onConnectionChange((status) => {
       if (this.disposed) { return; }
       if (status === 'authenticated') {
-        this.onStateChange?.('connected', 0);
+        this.onStateChange?.('connected');
       } else if (status === 'disconnected') {
-        this.onStateChange?.('lost', 0);
+        this.onStateChange?.('disconnected');
       }
     });
   }

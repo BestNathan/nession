@@ -52,7 +52,7 @@ describe('useP2PAttachTransport', () => {
       { wrapper: wrapper(store) },
     );
 
-    expect(useSessionRuntime).toHaveBeenCalledWith({ transportFirst: true });
+    expect(useSessionRuntime).toHaveBeenCalledWith({ transportFirst: true, configOwner: true });
   });
 
   it('returns runtime transport fields', () => {

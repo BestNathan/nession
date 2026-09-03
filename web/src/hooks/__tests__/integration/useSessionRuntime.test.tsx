@@ -10,6 +10,7 @@ import {
   attachInfoAtom,
   orderedUrlsAtom,
   forcedRelayAtom,
+  manualOverrideAtom,
 } from '@/atoms/session';
 import { routeIntentEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
@@ -130,7 +131,7 @@ describe('useSessionRuntime integration', () => {
   it('exposes reactive p2pState when websocket connects (auto route)', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -155,7 +156,7 @@ describe('useSessionRuntime integration', () => {
     const store = makeStore('agent:a', 'token-a');
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -192,7 +193,7 @@ describe('useSessionRuntime integration', () => {
 
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -221,7 +222,7 @@ describe('useSessionRuntime integration', () => {
 
     renderHook(
       () => {
-        const rt = useSessionRuntime({ transportFirst: true });
+        const rt = useSessionRuntime({ transportFirst: true, configOwner: true });
         if (rt.runtime) {
           seen.push(rt.runtime);
         }
@@ -237,7 +238,7 @@ describe('useSessionRuntime integration', () => {
   it('clears P2P state when forced to relay', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -283,7 +284,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     const shell = renderHook(() => useSessionRuntime({ transportFirst: true }), { wrapper: wrapper(store) });
-    const terminal = renderHook(() => useSessionRuntime({ transportFirst: true }), { wrapper: wrapper(store) });
+    const terminal = renderHook(() => useSessionRuntime({ transportFirst: true, configOwner: true }), { wrapper: wrapper(store) });
 
     await waitForRuntimeWs(() => shell.result.current.runtime);
     const shared = shell.result.current.runtime!;
@@ -326,7 +327,7 @@ describe('useSessionRuntime integration', () => {
 
     const epochBefore = store.get(routeIntentEpochAtom);
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -359,7 +360,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -374,5 +375,34 @@ describe('useSessionRuntime integration', () => {
     expect(store.get(forcedRelayAtom)).toBe(true);
     rerender();
     expect(result.current.p2pConnection).toBeNull();
+  });
+
+  it('mirrors transport-exhausted to failed terminal state on manual route', async () => {
+    addressPlanState.urls = ['ws://manual/ws'];
+
+    const store = makeStore('agent:manual-fail', 'token-a');
+    store.set(sessionIdAtom, 'agent:manual-fail');
+    store.set(manualOverrideAtom, 'ws://manual/ws');
+    store.set(attachInfoAtom, {
+      ...makeAttachInfo('agent:manual-fail', 'token-a'),
+      agent_address: 'ws://manual/ws',
+      addresses: [
+        { url: 'ws://manual/ws', label: 'Manual', network_type: 'lan', priority: 10, status: 'reachable' },
+      ],
+    });
+
+    const { result, rerender } = renderHook(
+      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      { wrapper: wrapper(store) },
+    );
+
+    await waitForRuntime(() => result.current.runtime);
+
+    act(() => {
+      expect(result.current.runtime!.onCandidateDisconnected()).toBe('transport-exhausted');
+    });
+    rerender();
+
+    expect(store.get(terminalSessionStateAtom)).toBe('failed');
   });
 });

@@ -2,6 +2,33 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import type { AttachInfo, ProbedAddress } from '../types';
 import { orderAddressesByLatency } from '../services/addressSelection';
 
+/** Shared async probe cache — dedupes browser latency tests across hook instances. */
+const inflightProbes = new Map<string, Promise<string[]>>();
+const resolvedProbes = new Map<string, string[]>();
+
+function probeAddresses(
+  asyncKey: string,
+  candidates: ProbedAddress[],
+  agentAddress: string | null,
+): Promise<string[]> {
+  const cached = resolvedProbes.get(asyncKey);
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+  let inflight = inflightProbes.get(asyncKey);
+  if (!inflight) {
+    inflight = orderAddressesByLatency(candidates).then((urls) => {
+      const finalUrls =
+        urls.length > 0 ? urls : agentAddress ? [agentAddress] : [];
+      resolvedProbes.set(asyncKey, finalUrls);
+      inflightProbes.delete(asyncKey);
+      return finalUrls;
+    });
+    inflightProbes.set(asyncKey, inflight);
+  }
+  return inflight;
+}
+
 /** Outcome of resolving which P2P endpoint(s) to try for an attach. */
 export interface AddressPlan {
   /** Ordered candidate URLs to attempt, best-first. */
@@ -96,12 +123,10 @@ export function useAddressPlan(
     activeKeyRef.current = asyncKey;
 
     let cancelled = false;
-    void orderAddressesByLatency(inputs.candidates).then((urls) => {
+    void probeAddresses(asyncKey, inputs.candidates, inputs.agentAddress).then((finalUrls) => {
       if (cancelled || activeKeyRef.current !== asyncKey) {
         return;
       }
-      const finalUrls =
-        urls.length > 0 ? urls : inputs.agentAddress ? [inputs.agentAddress] : [];
       setAsyncUrls(finalUrls);
     });
 

@@ -42,6 +42,9 @@ export class MessageRouterImpl implements MessageRouter {
   }
 
   request<T>(type: string, payload: Record<string, unknown>, options: RequestOptions = {}): Promise<T> {
+    if (this.disposed) {
+      return Promise.reject(new Error('MessageRouter disposed'));
+    }
     const id = this.deps.generateId();
     const msg: SocketMessage = { msg_type: type, id, timestamp: Date.now(), payload };
     const timeoutMs = options.timeoutMs ?? 15_000;
@@ -51,7 +54,13 @@ export class MessageRouterImpl implements MessageRouter {
         reject(new Error(`Request timeout: ${type}`));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-      this.deps.send(msg);
+      try {
+        this.send(msg);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

@@ -93,7 +93,7 @@ describe('AddressAttachPolicy', () => {
     });
     expect(policy.isP2P).toBe(true);
     expect(policy.activeUrl).toBe('ws://manual/ws');
-    expect(policy.onCandidateDisconnected()).toEqual({ type: 'none' });
+    expect(policy.onCandidateDisconnected()).toEqual({ type: 'transport-exhausted', manualRoute: true });
   });
 
   it('update resets index when plan urls change', () => {

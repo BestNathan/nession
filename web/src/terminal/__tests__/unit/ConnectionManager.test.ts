@@ -275,7 +275,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('maps relay connection status to onStateChange (authenticated → connected, disconnected → lost)', () => {
+    it('maps relay connection status to onStateChange (authenticated → connected, disconnected → disconnected)', () => {
       const ws = makeMockWs();
       let stateCb: (status: string) => void = () => {};
       (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
@@ -284,8 +284,8 @@ describe('ConnectionManager', () => {
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
-      const calls: Array<[string, number]> = [];
-      cm.onStateChange = (s, attempt) => calls.push([s, attempt]);
+      const calls: string[] = [];
+      cm.onStateChange = (s) => calls.push(s);
 
       stateCb('authenticated');
       stateCb('disconnected');
@@ -293,8 +293,8 @@ describe('ConnectionManager', () => {
       stateCb('connected');
 
       expect(calls).toEqual([
-        ['connected', 0],
-        ['lost', 0],
+        'connected',
+        'disconnected',
       ]);
       cm.dispose();
     });

@@ -72,7 +72,7 @@ function useTransportFactory(opts: {
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
   const isAttachedRef = useRef(isAttached);
   isAttachedRef.current = isAttached;
@@ -84,7 +84,7 @@ function useTransportFactory(opts: {
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
       isAttached: () => isAttachedRef.current(),
-    }) as unknown as TerminalTransport;
+    });
   return useCallback(() => transportFactoryRef.current(), []);
 }
 

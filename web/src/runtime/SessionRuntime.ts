@@ -24,7 +24,8 @@ export interface SessionRuntimeConfig {
 
 export type SessionRuntimeEvent =
   | { type: 'next-candidate'; activeUrl: string | null }
-  | { type: 'force-relay' };
+  | { type: 'force-relay' }
+  | { type: 'transport-exhausted'; manualRoute: boolean };
 
 export class SessionRuntime {
   readonly sessionId: string;
@@ -114,7 +115,7 @@ export class SessionRuntime {
   }
 
   /** @deprecated Prefer internal handler; kept for unit tests. */
-  onCandidateDisconnected(): 'next-candidate' | 'force-relay' | 'none' {
+  onCandidateDisconnected(): 'next-candidate' | 'force-relay' | 'transport-exhausted' | 'none' {
     return this.applyCandidateDisconnect();
   }
 
@@ -155,7 +156,7 @@ export class SessionRuntime {
     }
   }
 
-  private applyCandidateDisconnect(): 'next-candidate' | 'force-relay' | 'none' {
+  private applyCandidateDisconnect(): 'next-candidate' | 'force-relay' | 'transport-exhausted' | 'none' {
     const action = this.addressPolicy.onCandidateDisconnected();
     if (action.type === 'next-candidate') {
       this.transportGeneration += 1;
@@ -167,6 +168,17 @@ export class SessionRuntime {
       this.transportGeneration += 1;
       this.emitRuntimeEvent({ type: 'force-relay' });
       return 'force-relay';
+    }
+    if (action.type === 'transport-exhausted') {
+      this.attachController.dispatch({
+        type: 'TRANSPORT_EXHAUSTED',
+        manualRoute: action.manualRoute,
+      });
+      this.emitRuntimeEvent({
+        type: 'transport-exhausted',
+        manualRoute: action.manualRoute,
+      });
+      return 'transport-exhausted';
     }
     return 'none';
   }

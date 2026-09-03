@@ -9,7 +9,6 @@ export { PROFILES, detectProfile } from './DeviceProfile';
 export type {
   DeviceProfile,
   ConnectionOptions,
-  ConnectionState,
   ReconnectBanner,
 } from './types';
 

@@ -4,7 +4,8 @@ import type { AddressPlan } from '@/hooks/useAddressPlan';
 export type AddressPolicyAction =
   | { type: 'none' }
   | { type: 'next-candidate' }
-  | { type: 'force-relay' };
+  | { type: 'force-relay' }
+  | { type: 'transport-exhausted'; manualRoute: boolean };
 
 export interface AddressAttachPolicyConfig {
   attachInfo: AttachInfo | null;
@@ -65,8 +66,11 @@ export class AddressAttachPolicy {
 
   onCandidateDisconnected(): AddressPolicyAction {
     const { attachInfo, manualOverride, addressPlan } = this.config;
-    if (!attachInfo || manualOverride) {
+    if (!attachInfo) {
       return { type: 'none' };
+    }
+    if (manualOverride) {
+      return { type: 'transport-exhausted', manualRoute: true };
     }
     if (this.addressIndex + 1 < addressPlan.urls.length) {
       this.addressIndex += 1;

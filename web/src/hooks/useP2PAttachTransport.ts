@@ -31,6 +31,7 @@ export function useP2PAttachTransport({
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, transportKey } = useSessionRuntime({
     transportFirst,
+    configOwner: true,
   });
 
   return {
