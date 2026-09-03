@@ -73,7 +73,7 @@ export class AgentSocketClient implements SocketClient {
 
   /**
    * Update endpoint identity. Bumps generation so stale socket events are ignored
-   * and opens a fresh connection (mirrors useP2PConnection url/token effect).
+   * and opens a fresh connection (mirrors the legacy url/token reconnect semantics).
    */
   configure(next: Partial<AgentSocketClientConfig>): boolean {
     const prevUrl = this.config.agentUrl;

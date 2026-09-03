@@ -15,7 +15,7 @@ import {
   manualOverrideAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
-import type { P2PConnection, P2PMessage, ConnectionState } from '@/hooks/useP2PConnection';
+import type { P2PConnection, P2PMessage, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';

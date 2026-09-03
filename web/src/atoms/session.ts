@@ -130,7 +130,7 @@ export const switchAddressAtom = atom(
 
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
-    // Bump the epoch so useP2PConnection's connection object changes identity
+    // Bump the route epoch so SessionRuntime detects the route change and
     // and Terminal.tsx rebuilds its xterm view against the new socket — even
     // when the resolved activeUrl does not change (e.g. Auto → an explicit
     // route that Auto already resolved to).

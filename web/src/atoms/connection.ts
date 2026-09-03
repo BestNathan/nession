@@ -19,16 +19,6 @@ export const routeIntentEpochAtom = atom(0);
 /** Runtime-owned transport generation — candidate rotation / endpoint switch. */
 export const transportGenerationAtom = atom(0);
 
-/** @deprecated Alias for {@link routeIntentEpochAtom}. */
-export const p2pEpochAtom = atom(
-  (get) => get(routeIntentEpochAtom),
-  (get, set, update: number | ((prev: number) => number)) => {
-    const prev = get(routeIntentEpochAtom);
-    const next = typeof update === 'function' ? update(prev) : update;
-    set(routeIntentEpochAtom, next);
-  },
-);
-
 // ── Derived ─────────────────────────────────────────────────────
 
 /** Currently active P2P URL.
