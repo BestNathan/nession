@@ -1,6 +1,6 @@
 // web/src/atoms/connection.ts
 import { atom } from 'jotai';
-import type { P2PConnection, ConnectionState } from '../hooks/useP2PConnection';
+import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
@@ -12,11 +12,7 @@ import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
-/** Monotonic counter bumped by switchAddressAtom on every route switch. Its
- *  sole purpose is to force useP2PConnection's connection object identity to
- *  change — which in turn re-runs the p2pConnectionAtom effect and rebuilds
- *  Terminal.tsx's xterm view — even when the resolved activeUrl does not change
- *  (e.g. switching Auto → an explicit route that Auto already resolved to). */
+/** @deprecated Route identity is owned by SessionRuntime; kept for compat during migration. */
 export const p2pEpochAtom = atom(0);
 
 // ── Derived ─────────────────────────────────────────────────────

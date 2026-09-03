@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import type { P2PConnection } from '@/hooks/useP2PConnection';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
 import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type { EnvFileRef } from '@/types';
@@ -21,6 +21,7 @@ import {
 import { useTerminal } from '@/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/session-first/terminal/useSessionFirstTerminalAttach';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
+import { createAttachGate } from '@/terminal/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/terminal/DeviceProfile';
 import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
 import { terminalSessionStateAtom, type TerminalStatus } from '@/terminal/state/session';
@@ -64,13 +65,16 @@ function useTransportFactory(opts: {
   sessionId: string;
   p2pConnection: P2PConnection | null;
   wsService: WebSocketService;
+  isAttached: () => boolean;
 }) {
-  const { effectiveMode, sessionName, sessionId, p2pConnection, wsService } = opts;
+  const { effectiveMode, sessionName, sessionId, p2pConnection, wsService, isAttached } = opts;
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
     }) as unknown as TerminalTransport,
   );
+  const isAttachedRef = useRef(isAttached);
+  isAttachedRef.current = isAttached;
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
@@ -78,6 +82,7 @@ function useTransportFactory(opts: {
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
+      isAttached: () => isAttachedRef.current(),
     }) as unknown as TerminalTransport;
   return useCallback(() => transportFactoryRef.current(), []);
 }
@@ -170,6 +175,7 @@ export function useTerminalOrchestration({
     sessionName,
     orderedUrls,
     manualOverride,
+    transportFirst: true,
   });
 
   const { terminalState, reconnectCount } = useSessionFirstTerminalAttach({
@@ -185,6 +191,7 @@ export function useTerminalOrchestration({
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, p2pConnection, wsService });
   const transportFactory = useTransportFactory({
     effectiveMode, sessionName, sessionId, p2pConnection, wsService,
+    isAttached: createAttachGate(() => terminalState),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({

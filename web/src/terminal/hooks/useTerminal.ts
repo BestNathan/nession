@@ -2,6 +2,7 @@
 import { useMemo, useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { TerminalController } from '../controller/TerminalController';
+import { bindTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { DeviceProfile, TerminalScrollbackMode } from '../types';
@@ -95,11 +96,17 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     const generation = ++controllerEffectGenerationRef.current;
     activeControllerRef.current = controller;
 
+    let unbindAdapter: (() => void) | undefined;
+    if (controller) {
+      unbindAdapter = bindTerminalRuntimeAdapter(controller);
+    }
+
     if (previous && previous !== controller) {
       previous.dispose();
     }
 
     return () => {
+      unbindAdapter?.();
       const retiring = controller;
       const cleanupGeneration = generation;
       queueMicrotask(() => {

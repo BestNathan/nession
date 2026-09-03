@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import type { ConnectionState, P2PConnection } from '../../hooks/useP2PConnection';
+import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '../../services/websocket';
 import { sessionIdAtom, sessionNameAtom, manualOverrideAtom, forcedRelayAtom } from '../../atoms/session';
 import { effectiveModeAtom, p2pConnectionAtom, p2pEpochAtom } from '../../atoms/connection';

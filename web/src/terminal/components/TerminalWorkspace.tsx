@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { useP2PAttachTransport } from '../../hooks/useP2PAttachTransport';
-import { createFileOps } from '../../services/fileOps';
+import { createAttachGate } from '../adapters/TransportAttachGate';
 import { AddressSelector } from '../../components/AddressSelector';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useTerminalSessions } from '../../hooks/useTerminalSessions';
@@ -151,11 +151,12 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   const isP2P = effectiveMode === 'p2p';
 
-  const { waitingForAddressPlan, p2pConnection } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
     manualOverride,
+    transportFirst: false,
   });
 
   // Preview dialog state
@@ -179,17 +180,6 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-
-  const sendMessage = p2pConnection?.sendMessage;
-  const onMessage = p2pConnection?.onMessage;
-  const waitForConnection = p2pConnection?.waitForConnection;
-  const fileOps = useMemo(
-    () =>
-      sendMessage && onMessage && waitForConnection
-        ? createFileOps({ sendMessage, onMessage, waitForConnection })
-        : null,
-    [sendMessage, onMessage, waitForConnection],
-  );
 
   // Source env files selected in the attach dialog once the session transport
   // is live. applySessionEnv routes through the server to the agent's tmux, so
@@ -236,6 +226,8 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
     }) as unknown as TerminalTransport,
   );
+  const isAttachedRef = useRef(createAttachGate(() => terminalState));
+  isAttachedRef.current = createAttachGate(() => terminalState);
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
@@ -243,6 +235,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
+      isAttached: () => isAttachedRef.current(),
     }) as unknown as TerminalTransport;
   const transportFactory = useCallback(() => transportFactoryRef.current(), []);
 

@@ -1,12 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
 import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
 import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
-import { p2pConnectionAtom } from '@/atoms/connection';
+import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import { sessionIdAtom } from '@/atoms/session';
-import { createFileOps } from '@/services/fileOps';
 import { mapDomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
@@ -22,7 +21,7 @@ export function useSessionFirstShellState() {
     handleSessionKilled,
   } = data;
   const clientSessionId = useAtomValue(sessionIdAtom);
-  const p2pConnection = useAtomValue(p2pConnectionAtom);
+  const { fileOps } = useSessionRuntime({ transportFirst: true });
   const { attachDialogSession, requestAttach, confirmAttach, cancelAttach } = useSessionFirstAttach();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,13 +47,6 @@ export function useSessionFirstShellState() {
         attachFailedId: null,
       })
     : null;
-
-  const fileOps = useMemo(() => {
-    const { sendMessage, onMessage, waitForConnection } = p2pConnection ?? {};
-    return sendMessage && onMessage && waitForConnection
-      ? createFileOps({ sendMessage, onMessage, waitForConnection })
-      : null;
-  }, [p2pConnection]);
 
   const onKilled = useCallback(() => {
     if (sessionToKill?.session_id === selectedId) {

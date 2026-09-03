@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getDefaultStore } from 'jotai';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
-import { terminalSessionStateAtom } from '@/terminal/state/session';
-import type { P2PConnection, P2PMessage } from '@/hooks/useP2PConnection';
+import type { P2PConnection, P2PMessage } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '@/services/websocket';
+
+const attached = { isAttached: () => true };
 
 function makeMockP2P(): P2PConnection {
   return {
@@ -33,20 +33,17 @@ function makeMockWs(): WebSocketService {
 describe('ConnectionManager', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    // send() buffers input until the session state machine is 'attached'.
-    getDefaultStore().set(terminalSessionStateAtom, 'attached');
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    getDefaultStore().set(terminalSessionStateAtom, 'idle');
   });
 
   describe('P2P mode', () => {
     it('send routes data as terminal.input message with base64 encoding', () => {
       const p2p = makeMockP2P();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
       });
       cm.send('hello');
       expect(p2p.sendMessage).toHaveBeenCalledWith(
@@ -60,18 +57,19 @@ describe('ConnectionManager', () => {
 
     it('buffers input until attached and flushes on the next send', () => {
       const p2p = makeMockP2P();
+      let isAttached = false;
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        p2pConnection: p2p,
+        isAttached: () => isAttached,
       });
 
-      // Not attached yet → input is buffered, nothing is sent (would race
-      // ahead of client.attach).
-      getDefaultStore().set(terminalSessionStateAtom, 'connecting');
       cm.send('hello');
       expect(p2p.sendMessage).not.toHaveBeenCalled();
 
-      // Once attached, the next send flushes the buffered input first.
-      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      isAttached = true;
       cm.send('world');
       expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
       expect((p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
@@ -84,7 +82,7 @@ describe('ConnectionManager', () => {
     it('send is a no-op after dispose', () => {
       const p2p = makeMockP2P();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
       });
       cm.dispose();
       cm.send('hello');
@@ -94,7 +92,7 @@ describe('ConnectionManager', () => {
     it('keepalive pings are sent every 30 seconds', () => {
       const p2p = makeMockP2P();
       new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
       });
       vi.advanceTimersByTime(30_000);
       expect(p2p.sendMessage).toHaveBeenCalledWith(
@@ -105,7 +103,7 @@ describe('ConnectionManager', () => {
     it('keepalive stops after dispose', () => {
       const p2p = makeMockP2P();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
       });
       cm.dispose();
       const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length;
@@ -120,7 +118,7 @@ describe('ConnectionManager', () => {
       p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
 
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', p2pConnection: p2p,
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', p2pConnection: p2p, ...attached,
       });
       cm.onResize = onResize;
 
@@ -151,6 +149,7 @@ describe('ConnectionManager', () => {
         sessionName: 'test',
         sessionId: 'sess-1',
         p2pConnection: mockP2P,
+        ...attached,
       });
 
       manager.sendResize(120, 40);
@@ -166,21 +165,21 @@ describe('ConnectionManager', () => {
 
     it('buffers sendResize until attached and coalesces to the latest size', () => {
       const p2p = makeMockP2P();
+      let isAttached = false;
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        p2pConnection: p2p,
+        isAttached: () => isAttached,
       });
 
-      // Not attached yet → resize is stashed, nothing is sent (would race
-      // ahead of client.attach and hit the agent's not_attached error).
-      getDefaultStore().set(terminalSessionStateAtom, 'connected');
       cm.sendResize(80, 24);
       cm.sendResize(100, 30);
       cm.sendResize(120, 40);
       expect(p2p.sendMessage).not.toHaveBeenCalled();
 
-      // Once attached, flushPendingResize sends exactly ONE resize — the
-      // latest coalesced value — collapsing the burst to a single message.
-      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      isAttached = true;
       cm.flushPendingResize();
       const resizeCalls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
         (c) => c[0].msg_type === 'terminal.resize',
@@ -195,16 +194,20 @@ describe('ConnectionManager', () => {
 
     it('flushAllOutbound sends buffered input first, then coalesced resize', () => {
       const p2p = makeMockP2P();
+      let isAttached = false;
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        p2pConnection: p2p,
+        isAttached: () => isAttached,
       });
 
-      getDefaultStore().set(terminalSessionStateAtom, 'connected');
       cm.send('hello');
       cm.sendResize(120, 40);
       expect(p2p.sendMessage).not.toHaveBeenCalled();
 
-      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      isAttached = true;
       cm.flushAllOutbound();
 
       const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
@@ -222,15 +225,16 @@ describe('ConnectionManager', () => {
       const p2p = makeMockP2P();
       p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
 
+      let isAttached = false;
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p,
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        p2pConnection: p2p,
+        isAttached: () => isAttached,
       });
       cm.onError = onError;
 
-      // State is still 'connected' (attach not yet acked) — a not_attached
-      // error from a stale in-flight resize should be swallowed, not surfaced
-      // as a user-visible toast.
-      getDefaultStore().set(terminalSessionStateAtom, 'connected');
       messageHandler({
         msg_type: 'error',
         id: 'some-id',
@@ -239,8 +243,7 @@ describe('ConnectionManager', () => {
       } as P2PMessage);
       expect(onError).not.toHaveBeenCalled();
 
-      // Same error after attached is a real problem — surfaces normally.
-      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      isAttached = true;
       messageHandler({
         msg_type: 'error',
         id: 'some-id',
@@ -256,7 +259,7 @@ describe('ConnectionManager', () => {
     it('send routes data via serverConnection.sendRelayInput', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
       cm.send('hello');
       expect(ws.sendRelayInput).toHaveBeenCalledWith('test', 'hello');
@@ -266,7 +269,7 @@ describe('ConnectionManager', () => {
     it('subscribes to terminal output on construction', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
       expect(ws.onTerminalOutput).toHaveBeenCalledWith('test', expect.any(Function));
       cm.dispose();
@@ -279,7 +282,7 @@ describe('ConnectionManager', () => {
         (cb: (status: string) => void) => { stateCb = cb; return () => {}; },
       );
       const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
       const calls: Array<[string, number]> = [];
       cm.onStateChange = (s, attempt) => calls.push([s, attempt]);
@@ -299,7 +302,7 @@ describe('ConnectionManager', () => {
     it('should send terminal.resize message in relay mode via sendRelayResize', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws, ...attached,
       });
 
       cm.sendResize(120, 40);
@@ -335,17 +338,19 @@ describe('ConnectionManager', () => {
 
     it('buffers sendResize until attached in relay mode too (same outbound gate)', () => {
       const ws = makeMockWs();
+      let isAttached = false;
       const cm = new ConnectionManager({
-        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        mode: 'relay',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        serverConnection: ws,
+        isAttached: () => isAttached,
       });
 
-      // Not attached yet → resize is stashed, nothing is sent.
-      getDefaultStore().set(terminalSessionStateAtom, 'connected');
       cm.sendResize(120, 40);
       expect(ws.sendRelayResize).not.toHaveBeenCalled();
 
-      // Once attached, flush sends the coalesced value.
-      getDefaultStore().set(terminalSessionStateAtom, 'attached');
+      isAttached = true;
       cm.flushPendingResize();
       expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();

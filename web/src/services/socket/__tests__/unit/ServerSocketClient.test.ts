@@ -24,11 +24,11 @@ function makeCore(overrides: Partial<WebSocketServiceCore> = {}): WebSocketServi
     }),
     send: vi.fn(),
     onMessage: vi.fn(() => () => {}),
-    request: vi.fn(<T,>(type: string, payload: unknown) => {
+    request: vi.fn(async <T,>(type: string, payload: unknown): Promise<T> => {
       void type;
       void payload;
-      return Promise.resolve({ ok: true } as T);
-    }),
+      return { ok: true } as T;
+    }) as WebSocketServiceCore['request'],
     generateMessageId: vi.fn(() => 'msg-1'),
     getP2PConnectionInfo: vi.fn(() => null),
     ...overrides,

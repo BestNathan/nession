@@ -1,4 +1,4 @@
-import type { P2PConnection } from '../hooks/useP2PConnection';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '../services/websocket';
 
 /** Banner state surfaced to the React layer for UI rendering. */
@@ -16,6 +16,8 @@ export interface ConnectionOptions {
   serverConnection?: WebSocketService;
   /** Manual relay endpoint URL from the attach dialog. */
   relayUrl?: string | null;
+  /** When false, input/resize is buffered until attach completes. */
+  isAttached?: () => boolean;
 }
 
 /** Device class for responsive rendering. */

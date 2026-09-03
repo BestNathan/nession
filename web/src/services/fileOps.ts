@@ -1,4 +1,5 @@
-import type { P2PConnection } from '../hooks/useP2PConnection';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { MessageRouter } from '@/services/socket/types';
 
 /**
  * Minimal transport slice fileOps needs from a P2PConnection. These three
@@ -55,14 +56,14 @@ function generateId(): string {
   return `file-${Date.now()}-${++msgCounter}`;
 }
 
-function base64Encode(s: string): string {
+export function base64Encode(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {binary += String.fromCharCode(bytes[i]);}
   return btoa(binary);
 }
 
-function base64Decode(b64: string): string {
+export function base64Decode(b64: string): string {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {bytes[i] = binary.charCodeAt(i);}
@@ -116,6 +117,42 @@ function sendRequest<T>(
 
 // --- Public API ---
 
+export function createFileOpsFromRouter(router: MessageRouter & Pick<P2PConnection, 'waitForConnection'>): FileOps {
+  const capability = {
+    listDir: (path: string) => router.request<{ entries: FileEntry[] }>('file.list', { path }),
+    readFile: (path: string, options?: { offset?: number; limit?: number }) =>
+      router.request<FileData>('file.read', { path, ...options }),
+    writeFile: (path: string, content: string) =>
+      router.request<{ path: string; written: number }>('file.write', { path, content: base64Encode(content) }),
+    deleteFile: (path: string, recursive = false) =>
+      router.request<{ path: string; success: boolean }>('file.delete', { path, recursive }),
+    createDir: (path: string) =>
+      router.request<{ path: string; success: boolean }>('file.create_dir', { path }),
+    renameFile: (from: string, to: string) =>
+      router.request<{ from: string; to: string; success: boolean }>('file.rename', { from, to }),
+    getCwd: (sessionId: string) =>
+      router.request<{ path: string }>('file.cwd', { session_id: sessionId }),
+    uploadFile: (path: string, file: File) => {
+      return new Promise<{ path: string; written: number }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = reader.result as string;
+          const b64 = content.split(',')[1];
+          router.request<{ path: string; written: number }>('file.write', { path, content: b64 })
+            .then(resolve)
+            .catch(reject);
+        };
+        reader.onerror = () => reject(new Error('Failed to read file for upload'));
+        reader.readAsDataURL(file);
+      });
+    },
+    base64Decode,
+    base64Encode,
+  };
+  return capability;
+}
+
+/** @deprecated Prefer createFileOpsFromRouter via SessionRuntime FileCapability */
 export function createFileOps(p2p: FileTransport) {
   return {
     listDir: (path: string): Promise<{ entries: FileEntry[] }> =>

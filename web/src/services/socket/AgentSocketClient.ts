@@ -1,4 +1,5 @@
 import { MessageRouterImpl } from './MessageRouter';
+import type { P2PMessage } from './p2pTypes';
 import {
   buildAgentWsUrl,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
@@ -18,6 +19,7 @@ export class AgentSocketClient implements SocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
   private readonly waiters = new Set<ConnectionWaiter>();
+  private readonly legacyHandlers = new Set<(msg: P2PMessage) => void>();
   private idCounter = 0;
   /** User-initiated close — suppress auto-reconnect until endpoint reconfigured. */
   private userClosed = false;
@@ -103,6 +105,24 @@ export class AgentSocketClient implements SocketClient {
     return this.router.onBinary(handler);
   }
 
+  /** Fan-out for legacy P2PConnection.onMessage consumers (terminal, attach). */
+  onLegacyMessage(handler: (msg: P2PMessage) => void): () => void {
+    this.legacyHandlers.add(handler);
+    return () => {
+      this.legacyHandlers.delete(handler);
+    };
+  }
+
+  private dispatchLegacy(msg: P2PMessage): void {
+    for (const h of this.legacyHandlers) {
+      try {
+        h(msg);
+      } catch (e) {
+        console.error('[AgentSocketClient] Legacy handler error:', e);
+      }
+    }
+  }
+
   onConnectionStateChange(handler: (state: ConnectionState) => void): () => void {
     this.stateListeners.add(handler);
     return () => {
@@ -143,6 +163,7 @@ export class AgentSocketClient implements SocketClient {
     this.teardownSocket();
     this.router.dispose();
     this.stateListeners.clear();
+    this.legacyHandlers.clear();
     this.rejectWaiters(new Error('Connection lost'));
   }
 
@@ -174,10 +195,17 @@ export class AgentSocketClient implements SocketClient {
       }
       try {
         if (typeof event.data === 'string') {
-          const msg: SocketMessage = JSON.parse(event.data);
+          const msg: P2PMessage = JSON.parse(event.data);
           this.router.handleIncoming(msg);
+          this.dispatchLegacy(msg);
         } else if (event.data instanceof ArrayBuffer) {
           this.router.handleBinary(event.data);
+          this.dispatchLegacy({
+            msg_type: '__binary__',
+            id: '',
+            timestamp: 0,
+            payload: event.data,
+          });
         }
       } catch (err) {
         console.error('[AgentSocketClient] Message parse error:', err);
@@ -206,8 +234,8 @@ export class AgentSocketClient implements SocketClient {
         return;
       }
 
-      this.setState('reconnecting');
       this.reconnectAttempt = attempt + 1;
+      this.setState('reconnecting');
 
       const baseDelay = this.config.reconnectBaseDelay ?? DEFAULT_RECONNECT_BASE_DELAY;
       const delay = reconnectDelayMs(attempt, baseDelay);

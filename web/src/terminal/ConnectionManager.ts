@@ -1,7 +1,5 @@
 import type { ConnectionState, ConnectionOptions } from './types';
-import type { P2PMessage } from '../hooks/useP2PConnection';
-import { getDefaultStore } from 'jotai';
-import { terminalSessionStateAtom } from './state/session';
+import type { P2PMessage } from '@/services/socket/p2pTypes';
 
 let _msgCounter = 0;
 function generateId(): string {
@@ -52,6 +50,7 @@ export class ConnectionManager {
    * flushAllOutbound once the agent acks client.attach.
    */
   private pendingResize: { cols: number; rows: number } | null = null;
+  private isAttached: () => boolean;
 
   onStateChange: ((state: ConnectionState, attempt: number) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
@@ -64,6 +63,7 @@ export class ConnectionManager {
     this.sessionName = options.sessionName;
     this.p2pConnection = options.p2pConnection;
     this.serverConnection = options.serverConnection;
+    this.isAttached = options.isAttached ?? (() => false);
 
     if (this.mode === 'p2p' && this.p2pConnection) {
       this.setupP2P();
@@ -74,8 +74,7 @@ export class ConnectionManager {
 
   send(data: string): void {
     if (this.disposed) { return; }
-    const state = getDefaultStore().get(terminalSessionStateAtom);
-    if (state !== 'attached') {
+    if (!this.isAttached()) {
       this.inputBuffer.push(data);
       return;
     }
@@ -123,8 +122,7 @@ export class ConnectionManager {
    */
   sendResize(cols: number, rows: number): void {
     if (this.disposed) { return; }
-    const state = getDefaultStore().get(terminalSessionStateAtom);
-    if (state !== 'attached') {
+    if (!this.isAttached()) {
       this.pendingResize = { cols, rows };
       return;
     }
@@ -219,8 +217,7 @@ export class ConnectionManager {
           // the client.attach error path instead.
           {
             const errMsg = ((msg.payload as Record<string, unknown>)?.message as string) || '';
-            const state = getDefaultStore().get(terminalSessionStateAtom);
-            if (state !== 'attached' && /not attached/i.test(errMsg)) {
+            if (!this.isAttached() && /not attached/i.test(errMsg)) {
               break;
             }
             this.onError?.(new Error(errMsg || 'Remote error'));
