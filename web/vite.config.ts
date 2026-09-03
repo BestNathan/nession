@@ -1,10 +1,19 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-export default defineConfig({
+/** Override in web/.env.development.local, e.g. http://staging.nession.nhome.local */
+function devWsProxyTarget(mode: string): string {
+  const env = loadEnv(mode, __dirname, '')
+  return env.NESSION_DEV_WS_PROXY ?? 'http://localhost:19090'
+}
+
+export default defineConfig(({ mode }) => {
+  const devWsProxy = devWsProxyTarget(mode)
+
+  return {
   plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
@@ -15,12 +24,12 @@ export default defineConfig({
     port: 13000,
     proxy: {
       '/ws': {
-        target: 'ws://localhost:19090',
+        target: devWsProxy,
         ws: true,
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:19090',
+        target: devWsProxy,
         changeOrigin: true,
       },
     },
@@ -33,12 +42,12 @@ export default defineConfig({
     port: 4173,
     proxy: {
       '/ws': {
-        target: 'ws://localhost:19090',
+        target: devWsProxy,
         ws: true,
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:19090',
+        target: devWsProxy,
         changeOrigin: true,
       },
     },
@@ -76,10 +85,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       thresholds: {
-        lines: 78,
+        lines: 80,
         functions: 72,
         branches: 65,
-        statements: 76,
+        statements: 78,
       },
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
@@ -120,4 +129,5 @@ export default defineConfig({
       ],
     },
   },
+  }
 })

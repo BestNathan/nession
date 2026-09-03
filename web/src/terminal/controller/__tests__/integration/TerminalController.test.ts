@@ -4,6 +4,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { TerminalController } from '@/terminal/controller/TerminalController';
 import type { TerminalSession, TerminalStatus } from '@/terminal/state/session';
 import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
+import { CapsuleOcclusionScroll } from '@/terminal/capsule/occlusionScroll';
 
 // xterm.open() requires window.matchMedia in jsdom (same stub as TerminalView.test.ts).
 Object.defineProperty(window, 'matchMedia', {
@@ -206,7 +207,7 @@ describe('TerminalController', () => {
 
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     controller.write('abc');
-    expect(writeSpy).toHaveBeenCalledWith('abc');
+    expect(writeSpy).toHaveBeenCalledWith('abc', expect.any(Function));
   });
 
   it('paste delegates to xterm.paste', () => {
@@ -250,7 +251,7 @@ describe('TerminalController', () => {
     // Output from the transport lands in the xterm display.
     const writeSpy = vi.spyOn(controller.terminal!, 'write');
     transport.onOutput!(new Uint8Array([104, 105]));
-    expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]));
+    expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]), expect.any(Function));
   });
 
   it('writes transport output to the terminal in arrival order', () => {
@@ -265,8 +266,8 @@ describe('TerminalController', () => {
     transport.onOutput!(new Uint8Array([2]));
 
     expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]));
+    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
     writeSpy.mockRestore();
     controller.detach();
   });
@@ -380,7 +381,7 @@ describe('TerminalController', () => {
   });
 
   it('resizes immediately on the first ResizeObserver fire', async () => {
-    const restore = installCapturingResizeObserver();
+      const restore = installCapturingResizeObserver();
     try {
       const transport = makeTransport();
       const controller = new TerminalController(makeSession(), () => transport);
@@ -397,6 +398,80 @@ describe('TerminalController', () => {
 
       // 1024/8=128, 600/16=37 (8×16 fallback cell size in jsdom).
       expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+    } finally {
+      restore();
+    }
+  });
+
+  it('installs local capsule scrolling only for the local-buffer policy', async () => {
+    const restore = installCapturingResizeObserver();
+    const bindSpy = vi.spyOn(CapsuleOcclusionScroll.prototype, 'bind');
+    try {
+      const shell = host();
+      shell.setAttribute('data-terminal-capsule-host', '');
+      const legacyViewport = document.createElement('div');
+      shell.appendChild(legacyViewport);
+      const legacy = new TerminalController(makeSession(), () => makeTransport());
+      legacy.attach(legacyViewport);
+      await flush();
+      expect(bindSpy).not.toHaveBeenCalled();
+      legacy.dispose();
+
+      bindSpy.mockClear();
+      const localShell = host();
+      localShell.setAttribute('data-terminal-capsule-host', '');
+      const localViewport = document.createElement('div');
+      localShell.appendChild(localViewport);
+      const local = new TerminalController(
+        makeSession(),
+        () => makeTransport(),
+        { rendererType: 'canvas', scrollbackMode: 'local-buffer' },
+      );
+      const wheelHandlerSpy = vi.spyOn(local.terminal!, 'attachCustomWheelEventHandler');
+      local.attach(localViewport);
+      await flush();
+      expect(bindSpy).toHaveBeenCalledTimes(1);
+      expect(wheelHandlerSpy).toHaveBeenCalled();
+      local.dispose();
+    } finally {
+      bindSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it('keeps the xterm browser-buffer position while output arrives in history', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const shell = host();
+      shell.setAttribute('data-terminal-capsule-host', '');
+      shell.setAttribute('data-terminal-scrollback-mode', 'local-buffer');
+      const viewport = document.createElement('div');
+      shell.appendChild(viewport);
+      const controller = new TerminalController(
+        makeSession(),
+        () => makeTransport(),
+        { rendererType: 'canvas', scrollbackMode: 'local-buffer' },
+      );
+      controller.attach(viewport);
+      await flush();
+
+      controller.write(Array.from({ length: 80 }, (_, i) => `line-${i}`).join('\r\n'));
+      await flush();
+
+      const terminal = controller.terminal!;
+      const bottom = terminal.buffer.active.viewportY;
+      const event = new WheelEvent('wheel', { deltaY: -80, cancelable: true });
+      terminal.element!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(terminal.buffer.active.viewportY).toBeLessThan(bottom);
+
+      const scrollToBottom = vi.spyOn(terminal, 'scrollToBottom');
+      controller.write('\r\nnew-output');
+      await flush();
+
+      expect(scrollToBottom).not.toHaveBeenCalled();
+      expect(terminal.buffer.active.viewportY).toBeLessThan(terminal.buffer.active.length - terminal.rows);
+      controller.dispose();
     } finally {
       restore();
     }

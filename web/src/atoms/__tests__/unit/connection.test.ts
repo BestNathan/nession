@@ -59,5 +59,8 @@ describe('derived atoms', () => {
     expect(store.get(isSwitchingAtom)).toBe(true);
     store.set(p2pStateAtom, 'connected');
     expect(store.get(isSwitchingAtom)).toBe(false);
+    store.set(p2pStateAtom, 'disconnected');
+    store.set(terminalSessionStateAtom, 'failed');
+    expect(store.get(isSwitchingAtom)).toBe(false);
   });
 });

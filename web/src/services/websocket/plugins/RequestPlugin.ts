@@ -34,8 +34,12 @@ export class RequestPlugin implements WebSocketPlugin {
 
   private core!: WebSocketServiceCore;
 
-  install(core: WebSocketServiceCore): void {
+  install(core: WebSocketServiceCore): () => void {
     this.core = core;
+    // No message subscriptions — nothing to unwind. The facade removes the
+    // plugin from its registry on unregister, after which all delegation
+    // throws; a retained direct plugin reference is out of contract.
+    return () => {};
   }
 
   // ── Helpers ───────────────────────────────────────────────────
@@ -283,27 +287,6 @@ export class RequestPlugin implements WebSocketPlugin {
   }
 
   // ── Claude Code Extension ────────────────────────────────────
-
-  async claudeCodeList(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-  }): Promise<{ available: boolean; categories: { name: string; icon: string | null; files: { path: string; size: number; content_type: string }[] }[]; error?: string }> {
-    this.requireAuth();
-    return this.core.request('extension.claude_code.list', req);
-  }
-
-  async claudeCodeRead(req: {
-    agent_id: string;
-    scope: 'global' | 'project';
-    session_id?: string;
-    path: string;
-    offset?: number;
-    limit?: number;
-  }): Promise<{ content: string; content_type: string; total_size: number; offset: number; has_more: boolean; error?: string }> {
-    this.requireAuth();
-    return this.core.request('extension.claude_code.read', req);
-  }
 
   // ── Quick Commands (issue #95) ────────────────────────────────
 

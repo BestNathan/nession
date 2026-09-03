@@ -1,11 +1,8 @@
-import type { P2PConnection } from '../hooks/useP2PConnection';
+import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { WebSocketService } from '../services/websocket';
 
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
-
-/** Connection state tracked internally by ConnectionManager. */
-export type ConnectionState = 'connected' | 'reconnecting' | 'lost';
 
 /** Options passed to ConnectionManager constructor. */
 export interface ConnectionOptions {
@@ -16,10 +13,15 @@ export interface ConnectionOptions {
   serverConnection?: WebSocketService;
   /** Manual relay endpoint URL from the attach dialog. */
   relayUrl?: string | null;
+  /** When false, input/resize is buffered until attach completes. */
+  isAttached?: () => boolean;
 }
 
 /** Device class for responsive rendering. */
 export type DeviceProfile = 'mobile' | 'desktop';
+
+/** Scrollback ownership for the terminal surface. */
+export type TerminalScrollbackMode = 'local-buffer' | 'legacy';
 
 /** Device profile configuration. */
 export interface DeviceProfileConfig {

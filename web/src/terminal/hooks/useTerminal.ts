@@ -1,11 +1,10 @@
 // web/src/terminal/hooks/useTerminal.ts
-import { useMemo } from 'react';
-import { useAtomValue } from 'jotai';
+import { useMemo, useEffect, useRef } from 'react';
 import { TerminalController } from '../controller/TerminalController';
+import { bindTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
-import type { DeviceProfile } from '../types';
-import { p2pEpochAtom } from '../../atoms/connection';
+import type { DeviceProfile, TerminalScrollbackMode } from '../types';
 
 export interface UseTerminalOptions {
   sessionId: string;
@@ -17,6 +16,15 @@ export interface UseTerminalOptions {
   scrollback?: number;
   /** Device class — 'mobile' enables the IME-friendly input textarea. */
   deviceProfile?: DeviceProfile;
+  /** Whether history is owned by xterm's browser buffer or the legacy path. */
+  scrollbackMode?: TerminalScrollbackMode;
+}
+
+function isCurrentControllerGeneration(
+  generationRef: { current: number },
+  generation: number,
+): boolean {
+  return generationRef.current === generation;
 }
 
 /**
@@ -30,8 +38,11 @@ export interface UseTerminalOptions {
  * the caller (a ref-backed wrapper) so frequently-changing connection objects
  * never recreate the controller.
  *
- * The p2pEpoch is included so that switching addresses (which bumps the epoch)
- * recreates the controller and remounts xterm with the new transport.
+ * Address switches never recreate the controller: the legacy pane passes no
+ * transportEpoch to TerminalViewport, and the session-first pane gates its
+ * viewport rebuild on `transportKey` (routeIntentEpoch:transportGeneration:
+ * activeUrl), not on the controller. Recreating the controller here would
+ * dispose xterm on every route rotation.
  */
 export function useTerminal(options: UseTerminalOptions): TerminalController | null {
   const {
@@ -43,19 +54,11 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     fontSize,
     scrollback,
     deviceProfile,
+    scrollbackMode = 'legacy',
   } = options;
 
-  // p2pEpoch bumps when the user switches addresses — the transport factory
-  // captures a ref to the latest p2pConnection, but the controller's cached
-  // transport (built once at attach) still points at the old WebSocket.
-  // Recreating the controller forces a fresh attach with the new transport.
-  const p2pEpoch = useAtomValue(p2pEpochAtom);
-
-  return useMemo(() => {
+  const controller = useMemo(() => {
     if (!sessionId) { return null; }
-    // Reference p2pEpoch so the memo is invalidated when the address changes,
-    // forcing a new controller to be created with the updated transport.
-    void p2pEpoch;
     const session: TerminalSession = {
       id: sessionId,
       name: sessionName,
@@ -68,7 +71,50 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     return new TerminalController(
       session,
       transportFactory,
-      { rendererType: rendererType ?? 'canvas', fontSize, scrollback, deviceProfile },
+      {
+        rendererType: rendererType ?? 'canvas',
+        fontSize,
+        scrollback,
+        deviceProfile,
+        scrollbackMode,
+      },
     );
-  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, p2pEpoch]);
+  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, scrollbackMode]);
+
+  // Dispose replaced controllers (session switch). Never dispose synchronously
+  // in cleanup: StrictMode replays effects as unmount→remount and would
+  // otherwise destroy xterm before the same controller is re-used.
+  const activeControllerRef = useRef<TerminalController | null>(null);
+  const controllerEffectGenerationRef = useRef(0);
+  useEffect(() => {
+    const previous = activeControllerRef.current;
+    const generation = ++controllerEffectGenerationRef.current;
+    activeControllerRef.current = controller;
+
+    let unbindAdapter: (() => void) | undefined;
+    if (controller) {
+      unbindAdapter = bindTerminalRuntimeAdapter(controller);
+    }
+
+    if (previous && previous !== controller) {
+      previous.dispose();
+    }
+
+    return () => {
+      unbindAdapter?.();
+      const retiring = controller;
+      const cleanupGeneration = generation;
+      queueMicrotask(() => {
+        if (
+          activeControllerRef.current === retiring
+          && isCurrentControllerGeneration(controllerEffectGenerationRef, cleanupGeneration)
+        ) {
+          retiring?.dispose();
+          activeControllerRef.current = null;
+        }
+      });
+    };
+  }, [controller]);
+
+  return controller;
 }

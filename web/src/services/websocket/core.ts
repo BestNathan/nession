@@ -20,14 +20,9 @@ import type {
   AuthResponse,
 } from '../../types';
 import type { WebSocketServiceCore } from './types';
+import { MessageRouterImpl } from '../socket/MessageRouter';
 
 type ConnectionChangeCallback = (status: ConnectionStatus) => void;
-
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: unknown) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
 
 export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   // ── WebSocket state ────────────────────────────────────────
@@ -48,13 +43,12 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   // ── Message IDs ────────────────────────────────────────────
   private messageId = 0;
 
-  // ── Request correlation ────────────────────────────────────
-  private readonly pendingRequests = new Map<string, PendingRequest>();
-  private readonly requestTimeout = 10_000; // 10 seconds
+  // ── Request/response correlation (shared MessageRouter) ──
+  private readonly router: MessageRouterImpl;
+  private readonly requestTimeout = 10_000;
 
   // ── Callbacks ──────────────────────────────────────────────
   private readonly connectionChangeCallbacks: ConnectionChangeCallback[] = [];
-  private readonly messageHandlers = new Map<string, Set<(payload: unknown) => void>>();
 
   // ── In-flight connect promise ──────────────────────────────
   // Lets concurrent callers await the same attempt (refs #71 #4).
@@ -64,6 +58,10 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
     this.url = url;
     this.authToken = authToken;
     this.clientId = this.getOrCreateClientId();
+    this.router = new MessageRouterImpl({
+      send: (msg) => this.send(msg as WebSocketMessage),
+      generateId: () => this.generateMessageId(),
+    });
   }
 
   // ──────────────────────────────────────────────────────────
@@ -198,6 +196,14 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
     return this.connectionStatus;
   }
 
+  getUrl(): string {
+    return this.url;
+  }
+
+  getAuthToken(): string {
+    return this.authToken;
+  }
+
   onConnectionChange(callback: ConnectionChangeCallback): () => void {
     this.connectionChangeCallbacks.push(callback);
     return () => {
@@ -246,62 +252,28 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
    * Returns an unsubscribe function.
    */
   onMessage(type: string, handler: (payload: unknown) => void): () => void {
-    let handlers = this.messageHandlers.get(type);
-    if (!handlers) {
-      handlers = new Set();
-      this.messageHandlers.set(type, handlers);
-    }
-    handlers.add(handler);
+    return this.router.subscribe(type, (payload) => {
+      handler(payload);
+    });
+  }
 
-    return () => {
-      const set = this.messageHandlers.get(type);
-      if (set) {
-        set.delete(handler);
-        if (set.size === 0) {
-          this.messageHandlers.delete(type);
-        }
-      }
-    };
+  failPending(error: Error): void {
+    this.router.failPending(error);
   }
 
   // ──────────────────────────────────────────────────────────
   // Request/response correlation
   // ──────────────────────────────────────────────────────────
 
-  async request<T>(type: string, payload: unknown): Promise<T> {
+  async request<T>(type: string, payload: unknown, timeoutMs?: number): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
-
-    const id = this.generateMessageId();
-    const message: WebSocketMessage = {
-      msg_type: type,
-      id,
-      timestamp: Date.now(),
-      payload: payload as Record<string, unknown>,
-    };
-
-    return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout: ${type}`));
-      }, this.requestTimeout);
-
-      this.pendingRequests.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject: reject as (reason: unknown) => void,
-        timeout,
-      });
-
-      try {
-        this.ws!.send(JSON.stringify(message));
-      } catch (err) {
-        clearTimeout(timeout);
-        this.pendingRequests.delete(id);
-        const msg = err instanceof Error ? err.message : String(err);
-        reject(new Error(`Failed to serialize message: ${msg}`));
-      }
-    });
+    return this.router.request<T>(
+      type,
+      payload as Record<string, unknown>,
+      { timeoutMs: timeoutMs ?? this.requestTimeout },
+    );
   }
 
   // ──────────────────────────────────────────────────────────
@@ -369,37 +341,26 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   private handleRawMessage(data: string): void {
     try {
       const message: WebSocketMessage = JSON.parse(data);
+      const wasPending = this.router.hasPending(message.id);
+      this.router.handleIncoming(message);
 
-      // 1. Check if this is a response to a pending request
-      if (this.pendingRequests.has(message.id)) {
-        const pending = this.pendingRequests.get(message.id)!;
-        clearTimeout(pending.timeout);
-        this.pendingRequests.delete(message.id);
-        pending.resolve(message.payload);
+      if (wasPending) {
         return;
       }
 
-      // 2. Dispatch to registered handlers by msg_type
-      const handlers = this.messageHandlers.get(message.msg_type);
-      if (handlers) {
-        for (const handler of handlers) {
-          handler(message.payload);
-        }
+      if (this.router.hasHandlers(message.msg_type)) {
         return;
       }
 
-      // 3. Handle well-known ack / error types that no plugin registered for
       if (message.msg_type === 'error') {
         const errMsg = (message.payload as Record<string, unknown>)?.message as string | undefined;
         console.error('[relay] Server error:', errMsg ?? 'unknown error', message.payload);
         return;
       }
       if (message.msg_type === 'ok') {
-        // Fire-and-forget acknowledgements — no action needed.
         return;
       }
 
-      // 4. No handler — log a warning
       console.warn('Unhandled message type:', message.msg_type, message.payload);
     } catch (error) {
       console.error('Failed to parse WebSocket message:', error);
@@ -423,10 +384,6 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   // ──────────────────────────────────────────────────────────
 
   private rejectAllPendingRequests(error: Error): void {
-    this.pendingRequests.forEach((pending) => {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-    });
-    this.pendingRequests.clear();
+    this.router.failPending(error);
   }
 }

@@ -109,7 +109,11 @@ vi.mock('@/components/env/AttachDialog', () => ({
     ) : null,
 }));
 vi.mock('@/hooks/useWebSocket', () => ({
-  useWebSocket: () => ({ requestAttach: vi.fn() }),
+  useWebSocket: () => ({
+    requestAttach: vi.fn(),
+    beginRelay: vi.fn(),
+    onConnectionChange: vi.fn(() => () => {}),
+  }),
 }));
 
 const deepLink = vi.hoisted(() => ({

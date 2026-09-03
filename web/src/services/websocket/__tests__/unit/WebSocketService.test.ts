@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 function createEventsMock() {
   return {
     name: 'events',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     onAgentsChanged: vi.fn(() => vi.fn()),
     onSessionsChanged: vi.fn(() => vi.fn()),
     onCommandsChanged: vi.fn(() => vi.fn()),
@@ -18,7 +18,7 @@ function createEventsMock() {
 function createRequestsMock() {
   return {
     name: 'requests',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     listAgents: vi.fn(() => Promise.resolve([])),
     serverInfo: vi.fn(() => Promise.resolve({})),
     listSessions: vi.fn(() => Promise.resolve([])),
@@ -45,13 +45,22 @@ function createRequestsMock() {
 function createTerminalMock() {
   return {
     name: 'terminal',
-    install: vi.fn(),
+    install: vi.fn(() => vi.fn()),
     beginRelay: vi.fn(),
     endRelay: vi.fn(),
     sendTerminalInput: vi.fn(),
     sendTerminalResize: vi.fn(),
     sendRelayInput: vi.fn(),
     sendRelayResize: vi.fn(),
+  };
+}
+
+function createClaudeCodeMock() {
+  return {
+    name: 'claude-code',
+    install: vi.fn(() => vi.fn()),
+    claudeCodeList: vi.fn(() => Promise.resolve({ available: false, categories: [] })),
+    claudeCodeRead: vi.fn(() => Promise.resolve({ content: '', content_type: 'text/plain', total_size: 0, offset: 0, has_more: false })),
   };
 }
 
@@ -68,6 +77,11 @@ vi.mock( '@/services/websocket/plugins/RequestPlugin', () => {
 vi.mock( '@/services/websocket/plugins/TerminalPlugin', () => {
   const Mock = vi.fn(function (this: Record<string, unknown>) { Object.assign(this, createTerminalMock()); });
   return { TerminalPlugin: Mock };
+});
+
+vi.mock( '@/services/websocket/plugins/ClaudeCodePlugin', () => {
+  const Mock = vi.fn(function (this: Record<string, unknown>) { Object.assign(this, createClaudeCodeMock()); });
+  return { ClaudeCodePlugin: Mock };
 });
 
 // Build fresh core mock functions each time, and expose them for assertion.
@@ -93,6 +107,7 @@ import { WebSocketService } from '@/services/websocket/WebSocketService';
 import { EventPlugin } from '@/services/websocket/plugins/EventPlugin';
 import { RequestPlugin } from '@/services/websocket/plugins/RequestPlugin';
 import { TerminalPlugin } from '@/services/websocket/plugins/TerminalPlugin';
+import { ClaudeCodePlugin } from '@/services/websocket/plugins/ClaudeCodePlugin';
 
 describe('WebSocketService (facade)', () => {
   let service: WebSocketService;
@@ -109,13 +124,105 @@ describe('WebSocketService (facade)', () => {
   });
 
   describe('constructor', () => {
-    it('installs all three plugins', () => {
+    it('registers all built-in plugins through use()', () => {
       expect(EventPlugin).toHaveBeenCalledTimes(1);
       expect(RequestPlugin).toHaveBeenCalledTimes(1);
       expect(TerminalPlugin).toHaveBeenCalledTimes(1);
+      expect(ClaudeCodePlugin).toHaveBeenCalledTimes(1);
       expect(eventsInstance.install).toHaveBeenCalled();
       expect(requestsInstance.install).toHaveBeenCalled();
       expect(terminalInstance.install).toHaveBeenCalled();
+      expect(service.getCapability('events')).toBe(eventsInstance);
+      expect(service.getCapability('requests')).toBe(requestsInstance);
+      expect(service.getCapability('terminal')).toBe(terminalInstance);
+      expect(service.getCapability('claude-code')).not.toBeNull();
+    });
+  });
+
+  describe('claude-code capability delegation', () => {
+    it('claudeCodeList delegates to the claude-code plugin', async () => {
+      const claudeInstance = service.getCapability<{ claudeCodeList: ReturnType<typeof vi.fn> }>('claude-code')!;
+      const req = { agent_id: 'a1', scope: 'global' as const };
+      await service.claudeCodeList(req);
+      expect(claudeInstance.claudeCodeList).toHaveBeenCalledWith(req);
+    });
+
+    it('claudeCodeRead delegates to the claude-code plugin', async () => {
+      const claudeInstance = service.getCapability<{ claudeCodeRead: ReturnType<typeof vi.fn> }>('claude-code')!;
+      const req = { agent_id: 'a1', scope: 'global' as const, path: '/x.txt' };
+      await service.claudeCodeRead(req);
+      expect(claudeInstance.claudeCodeRead).toHaveBeenCalledWith(req);
+    });
+  });
+
+  describe('runtime plugin registration', () => {
+    it('use() registers a plugin and the facade delegates to it', () => {
+      const teardown = vi.fn();
+      const stub = {
+        name: 'stub',
+        install: vi.fn(() => teardown),
+        ping: vi.fn(() => 'pong'),
+      };
+      service.use(stub);
+
+      expect(service.getCapability('stub')).toBe(stub);
+      expect(service.getCapability<{ ping: () => string }>('stub')!.ping()).toBe('pong');
+      expect(service.getCapability('missing')).toBeNull();
+    });
+
+    it('registering a duplicate name runs the previous instance teardown before replacing it', () => {
+      const firstTeardown = vi.fn();
+      const first = { name: 'dup', install: vi.fn(() => firstTeardown) };
+      const secondTeardown = vi.fn();
+      const second = { name: 'dup', install: vi.fn(() => secondTeardown) };
+
+      service.use(first);
+      service.use(second);
+
+      expect(firstTeardown).toHaveBeenCalledTimes(1);
+      expect(service.getCapability('dup')).toBe(second);
+      expect(secondTeardown).not.toHaveBeenCalled();
+    });
+
+    it('unregister(name) removes a capability; subsequent facade methods throw', () => {
+      // Replace the built-in terminal plugin with a stub whose install records
+      // its own teardown so we can verify release semantics on a real method.
+      const released = vi.fn();
+      service.use({ name: 'terminal', install: vi.fn(() => released) });
+
+      expect(service.unregister('terminal')).toBe(true);
+      expect(released).toHaveBeenCalledTimes(1);
+      expect(() => service.sendRelayInput('s', 'data')).toThrow(/not registered/);
+      expect(() => service.onAgentsChanged(() => {})).not.toThrow();
+    });
+
+    it('unregister returns false for an unknown name', () => {
+      expect(service.unregister('nope')).toBe(false);
+    });
+
+    it('use() rejects a plugin with an empty name', () => {
+      expect(() => service.use({ name: '', install: vi.fn() })).toThrow(/name must not be empty/);
+    });
+
+    it('use() rejects a plugin that returns no teardown and has no uninstall', () => {
+      expect(() => service.use({ name: 'bare', install: vi.fn() })).toThrow(/teardown/);
+    });
+
+    it('legacy uninstall() fallback is deferred to unregister, not run at install time', () => {
+      const uninstall = vi.fn();
+      const legacy = { name: 'legacy', install: vi.fn(), uninstall };
+
+      service.use(legacy);
+
+      // install() returned void — the plugin's uninstall must be retained as
+      // the future teardown, never invoked during registration.
+      expect(legacy.install).toHaveBeenCalledTimes(1);
+      expect(uninstall).not.toHaveBeenCalled();
+      expect(service.getCapability('legacy')).toBe(legacy);
+
+      expect(service.unregister('legacy')).toBe(true);
+      expect(uninstall).toHaveBeenCalledTimes(1);
+      expect(service.getCapability('legacy')).toBeNull();
     });
   });
 

@@ -42,46 +42,68 @@ export class EventPlugin implements WebSocketPlugin {
   private terminalOutputCallbacks = new Map<string, TerminalOutputCallback[]>();
   private terminalResizeCallbacks = new Map<string, TerminalResizeCallback[]>();
 
-  install(core: WebSocketServiceCore) {
-    core.onMessage('client.agents.list.response', (payload) => {
-      const p = payload as Record<string, unknown>;
-      if (p.agents) {
-        this.notifyAgentsChange(p.agents as Agent[]);
+  install(core: WebSocketServiceCore): () => void {
+    // Retain every core unsubscribe so the registration API can release the
+    // plugin's message subscriptions on unregister / replacement.
+    const teardowns = [
+      core.onMessage('client.agents.list.response', (payload) => {
+        const p = payload as Record<string, unknown>;
+        if (p.agents) {
+          this.notifyAgentsChange(p.agents as Agent[]);
+        }
+      }),
+
+      core.onMessage('client.sessions.list.response', (payload) => {
+        const p = payload as Record<string, unknown>;
+        if (p.sessions) {
+          this.notifySessionsChange(p.sessions as Session[]);
+        }
+      }),
+
+      core.onMessage('terminal.output', (payload) => {
+        this.handleTerminalOutput(payload as Record<string, unknown>);
+      }),
+
+      core.onMessage('terminal.resize', (payload) => {
+        this.handleTerminalResize(payload as Record<string, unknown>);
+      }),
+
+      core.onMessage('agents.changed', (payload) => {
+        const p = payload as Record<string, unknown>;
+        if (p.agents) {
+          this.notifyAgentsChange(p.agents as Agent[]);
+        }
+      }),
+
+      core.onMessage('sessions.changed', (payload) => {
+        const p = payload as Record<string, unknown>;
+        if (p.sessions) {
+          this.notifySessionsChange(p.sessions as Session[]);
+        }
+      }),
+
+      core.onMessage('server.commands.changed', () => {
+        this.notifyCommandsChange();
+      }),
+    ];
+
+    let released = false;
+    return () => {
+      if (released) {
+        return;
       }
-    });
-
-    core.onMessage('client.sessions.list.response', (payload) => {
-      const p = payload as Record<string, unknown>;
-      if (p.sessions) {
-        this.notifySessionsChange(p.sessions as Session[]);
+      released = true;
+      for (const teardown of teardowns) {
+        teardown();
       }
-    });
-
-    core.onMessage('terminal.output', (payload) => {
-      this.handleTerminalOutput(payload as Record<string, unknown>);
-    });
-
-    core.onMessage('terminal.resize', (payload) => {
-      this.handleTerminalResize(payload as Record<string, unknown>);
-    });
-
-    core.onMessage('agents.changed', (payload) => {
-      const p = payload as Record<string, unknown>;
-      if (p.agents) {
-        this.notifyAgentsChange(p.agents as Agent[]);
-      }
-    });
-
-    core.onMessage('sessions.changed', (payload) => {
-      const p = payload as Record<string, unknown>;
-      if (p.sessions) {
-        this.notifySessionsChange(p.sessions as Session[]);
-      }
-    });
-
-    core.onMessage('server.commands.changed', () => {
-      this.notifyCommandsChange();
-    });
+      // Drop subscriber callbacks so a released plugin can never notify stale
+      // consumers (e.g. React components that missed their unmount cleanup).
+      this.agentsChangeCallbacks = [];
+      this.sessionsChangeCallbacks = [];
+      this.commandsChangeCallbacks = [];
+      this.terminalOutputCallbacks.clear();
+      this.terminalResizeCallbacks.clear();
+    };
   }
 
   onAgentsChanged(callback: AgentsChangeCallback): () => void {

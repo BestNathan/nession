@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
-import { useP2PConnection } from '../../hooks/useP2PConnection';
-import { useAddressPlan } from '../../hooks/useAddressPlan';
-import { createFileOps } from '../../services/fileOps';
+import { useP2PAttachTransport } from '../../hooks/useP2PAttachTransport';
+import { createAttachGate } from '../adapters/TransportAttachGate';
 import { AddressSelector } from '../../components/AddressSelector';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useTerminalSessions } from '../../hooks/useTerminalSessions';
@@ -28,10 +27,10 @@ import { currentAgentLatenciesAtom } from '../../atoms/probe';
 import {
   effectiveModeAtom,
   isSwitchingAtom,
-  p2pConnectionAtom,
 } from '../../atoms/connection';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalStateMachine } from '../hooks/useTerminalStateMachine';
+import { useRelayServerLifecycle } from '../hooks/useRelayServerLifecycle';
 import { ConnectionManager } from '../ConnectionManager';
 import { detectProfile, PROFILES } from '../DeviceProfile';
 import type { TerminalTransport } from '../transport/TerminalTransport';
@@ -138,7 +137,6 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const [isSwitching] = useAtom(isSwitchingAtom);
   const [renderer] = useAtom(rendererAtom);
   const [envRefs] = useAtom(envRefsAtom);
-  const [p2pConnection] = useAtom(p2pConnectionAtom);
 
   const wsService = useWebSocket();
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
@@ -154,40 +152,24 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
 
   const isP2P = effectiveMode === 'p2p';
 
-  const addressPlan = useAddressPlan(attachInfo, {
+  const { waitingForAddressPlan, p2pConnection, p2pState, fileOps } = useP2PAttachTransport({
+    attachInfo,
+    sessionName,
     orderedUrls,
-    manualUrl: manualOverride,
+    manualOverride,
+    transportFirst: false,
   });
-  const activeUrl = addressPlan.ready ? addressPlan.urls[0] ?? null : null;
 
   // Preview dialog state
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Drive the P2P WebSocket. useP2PConnection writes p2pConnectionAtom +
-  // p2pStateAtom from its ws events, and we read them back below. The options
-  // are derived purely from atoms: activeUrl (manual override or best candidate)
-  // is the endpoint, forcedRelay flips effectiveMode to relay which nulls
-  // activeUrl.
-  useP2PConnection(
-    isP2P && activeUrl && attachInfo && addressPlan.ready
-      ? {
-          agentUrl: activeUrl,
-          connectionToken: attachInfo.connection_token,
-          sessionName,
-          // A manual address fails fast (2 attempts) — the user picked it, so
-          // there's nothing to rotate to. Auto candidates get the full backoff
-          // budget so a flaky-but-working endpoint gets a fair chance.
-          maxReconnectAttempts: manualOverride ? 2 : 10,
-        }
-      : null,
-  );
-
   // Terminal session state machine: drives client.attach (P2P) / beginRelay
   // (relay), the attach timeout, and the reconnect budget. Returns the live
-  // terminalState + reconnectCount so we can drive banner rendering without
-  // touching the protocol code.
+  // terminalState + reconnectCount so we can render the attempt count reactively.
   const { terminalState, reconnectCount } = useTerminalStateMachine({
     serverConnection: !isP2P ? wsService : undefined,
+    p2pConnection,
+    p2pState,
   });
 
   // End relay synchronously before navigating away, so that the
@@ -199,17 +181,6 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     }
     onBack();
   }, [effectiveMode, wsService, sessionId, onBack]);
-
-  const sendMessage = p2pConnection?.sendMessage;
-  const onMessage = p2pConnection?.onMessage;
-  const waitForConnection = p2pConnection?.waitForConnection;
-  const fileOps = useMemo(
-    () =>
-      sendMessage && onMessage && waitForConnection
-        ? createFileOps({ sendMessage, onMessage, waitForConnection })
-        : null,
-    [sendMessage, onMessage, waitForConnection],
-  );
 
   // Source env files selected in the attach dialog once the session transport
   // is live. applySessionEnv routes through the server to the agent's tmux, so
@@ -254,8 +225,10 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const transportFactoryRef = useRef<() => TerminalTransport>(
     () => new ConnectionManager({
       mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }) as unknown as TerminalTransport,
+    }),
   );
+  const isAttachedRef = useRef(createAttachGate(() => terminalState));
+  isAttachedRef.current = createAttachGate(() => terminalState);
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
@@ -263,7 +236,8 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
       sessionId,
       p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? wsService : undefined,
-    }) as unknown as TerminalTransport;
+      isAttached: () => isAttachedRef.current(),
+    });
   const transportFactory = useCallback(() => transportFactoryRef.current(), []);
 
   // One controller per session/mode — stable across terminalState transitions
@@ -283,6 +257,7 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
     fontSize: PROFILES[deviceProfile].fontSize,
     scrollback: PROFILES[deviceProfile].scrollback,
     deviceProfile,
+    scrollbackMode: 'legacy',
   });
 
   // Issue #51: never mount xterm in P2P mode before the socket exists —
@@ -290,28 +265,18 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // created without a live p2pConnection would be inert forever (the transport
   // is built once at attach). Relay mode is always safe to mount.
   const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
-  const waitingForAddressPlan = isP2P && !addressPlan.ready;
 
   // ── Relay-mode server-ws lifecycle ───────────────────────────────────
   // The state machine's P2P bridge covers socket drops only; in relay mode the
   // server WebSocket dropping must mirror the legacy view.onStateChange path:
-  // show the "Connection lost" banner once the server ws exhausts its reconnect
-  // budget, clear it (and let the state machine re-beginRelay) on re-auth.
-  const [relayLost, setRelayLost] = useState(false);
-  useEffect(() => {
-    if (effectiveMode !== 'relay' || !wsService) { return; }
-    return wsService.onConnectionChange((status) => {
-      if (status === 'authenticated') {
-        setRelayLost(false);
-        // Server ws authenticated after TerminalWorkspace mounted (rare — the
-        // state machine's 'connecting' branch handles the already-authed case
-        // via isConnected()). Hand off so beginRelay is actually sent.
-        setTerminalState((prev) => (prev === 'connecting' ? 'connected' : prev));
-      } else if (status === 'disconnected') {
-        setRelayLost(true);
-      }
-    });
-  }, [effectiveMode, wsService, setTerminalState]);
+  // intra-budget reconnect (status 'connecting') and exhausted 'disconnected'
+  // both end the server-side relay loop, so both take the attach machine back
+  // to reconnecting; the banner appears only on the terminal disconnected.
+  const { relayLost } = useRelayServerLifecycle({
+    effectiveMode,
+    wsService,
+    setTerminalState,
+  });
 
   // ── Banner ───────────────────────────────────────────────────────────
   // Map the (P2P-driven) state machine + relay-lost flag onto the banner atoms
@@ -359,7 +324,9 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   ) : modeGateOk ? (
     <TerminalPane sessionId={sessionId} controller={controller} reconnectAttempt={reconnectCount} />
   ) : (
-    <div className="flex-1 min-h-0" />
+    <div className="flex-1 min-h-0 flex items-center justify-center">
+      <Loader2 className="size-8 animate-spin text-muted-foreground" />
+    </div>
   );
 
   return (

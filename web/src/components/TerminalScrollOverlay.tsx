@@ -25,7 +25,7 @@ export function TerminalScrollOverlay({
   onScrollToBottom,
 }: TerminalScrollOverlayProps) {
   return (
-    <div className="absolute bottom-2 right-2 z-10 flex flex-col gap-0.5 rounded-lg border bg-background/80 backdrop-blur-sm p-1 shadow-md">
+    <div className="absolute right-2 z-20 flex flex-col gap-0.5 rounded-lg border bg-background/80 backdrop-blur-sm p-1 shadow-md bottom-[calc(var(--terminal-capsule-occlusion,0px)+0.5rem)]">
       <Tooltip>
         <TooltipTrigger
           render={

@@ -60,10 +60,13 @@ describe('useCapsuleDockClearance', () => {
     });
 
     const dockRef = { current: dock };
+    const listener = vi.fn();
+    host.addEventListener('terminal-capsule-occlusion', listener);
     renderHook(() => useCapsuleDockClearance(dockRef));
 
-    expect(host.style.getPropertyValue('--terminal-capsule-clearance')).toBe('68px');
+    expect(host.style.getPropertyValue('--terminal-capsule-occlusion')).toBe('68px');
     expect(observe).toHaveBeenCalledWith(dock);
     expect(observe).toHaveBeenCalledWith(host);
+    expect(listener).toHaveBeenCalled();
   });
 });

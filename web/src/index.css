@@ -165,6 +165,8 @@ html {
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.922 0 0);
+  /* xterm well + fake-terminal occlusion band — Catppuccin, not Zinc chrome */
+  --terminal-background: var(--terminal-well-background);
   background-color: var(--background);
   color: var(--foreground);
 }
@@ -172,6 +174,29 @@ html {
 .session-first-shell :focus-visible {
   outline: var(--focus-ring-width) solid var(--ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* Terminal capsule — fake-terminal band (same bg as xterm; hides lines when pinned to bottom) */
+[data-terminal-capsule-host] {
+  position: relative;
+  flex: 1 1 0%;
+  min-height: 0;
+  background: var(--terminal-well-background);
+}
+
+[data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer'] {
+  --terminal-content-bottom-inset: var(--terminal-capsule-occlusion, 0px);
+}
+
+[data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer']::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: var(--terminal-content-bottom-inset, 0px);
+  z-index: 5;
+  background: var(--terminal-well-background);
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */

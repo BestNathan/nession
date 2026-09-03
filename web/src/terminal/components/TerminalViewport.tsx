@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useLayoutEffect } from 'react';
 import type { TerminalController } from '../controller/TerminalController';
 
 /**
@@ -9,24 +9,31 @@ import type { TerminalController } from '../controller/TerminalController';
  * and the container is cleared. The terminal-coloured background paints
  * whatever part of the container is not covered by the xterm mount element.
  */
-export function TerminalViewport({ controller }: { controller: TerminalController | null }) {
+export function TerminalViewport({
+  controller,
+  transportEpoch = 0,
+}: {
+  controller: TerminalController | null;
+  /** Bump when the P2P socket identity changes so ConnectionManager rebinds. */
+  transportEpoch?: string | number;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || !controller) { return; }
     controller.attach(container);
     return () => {
       controller.detach();
-      container.innerHTML = '';
     };
-  }, [controller]);
+  }, [controller, transportEpoch]);
 
   return (
     <div
       ref={containerRef}
       data-terminal-viewport
-      className="h-full w-full box-border bg-terminal-background pb-[length:var(--terminal-capsule-clearance,0px)]"
+      className="h-full w-full box-border bg-terminal-background"
+      style={{ paddingBottom: 'var(--terminal-content-bottom-inset, 0px)' }}
     />
   );
 }

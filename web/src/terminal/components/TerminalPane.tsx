@@ -23,9 +23,11 @@ export function TerminalPane({ sessionId, controller, reconnectAttempt }: Termin
   const viewModel = useAtomValue(terminalViewModelAtomFamily(sessionId));
 
   return (
-    <div className="flex-1 min-w-0 min-h-0 relative">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <TerminalBanner banner={viewModel.banner} reconnectAttempt={reconnectAttempt} />
-      <TerminalViewport controller={controller} />
+      <div className="relative min-h-0 flex-1">
+        <TerminalViewport controller={controller} />
+      </div>
       <TerminalInputOverlay sessionId={sessionId} />
     </div>
   );

@@ -20,6 +20,21 @@ import { WebglAddon } from '@xterm/addon-webgl';
  *    that don't honour the hint but still expose the extension).
  */
 export function detectWebGLSupport(): boolean {
+  if (cachedWebGLSupport !== null) {
+    return cachedWebGLSupport;
+  }
+  cachedWebGLSupport = probeWebGLSupport();
+  return cachedWebGLSupport;
+}
+
+/** @internal Test-only reset for detectWebGLSupport memoization. */
+export function resetWebGLSupportCacheForTests(): void {
+  cachedWebGLSupport = null;
+}
+
+let cachedWebGLSupport: boolean | null = null;
+
+function probeWebGLSupport(): boolean {
   try {
     const canvas = document.createElement('canvas');
 
@@ -43,13 +58,20 @@ export function detectWebGLSupport(): boolean {
           renderer,
         )
       ) {
+        releaseProbeContext(gl);
         return false;
       }
     }
+    releaseProbeContext(gl);
     return true;
   } catch {
     return false;
   }
+}
+
+function releaseProbeContext(gl: WebGLRenderingContext | WebGL2RenderingContext): void {
+  const ext = gl.getExtension('WEBGL_lose_context');
+  ext?.loseContext();
 }
 
 export class Renderer {

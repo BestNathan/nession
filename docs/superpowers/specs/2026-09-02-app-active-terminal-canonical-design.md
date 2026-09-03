@@ -55,7 +55,7 @@ Approved answer: **App is a spatial model, not a responsive shrink.** The 3-page
 
 ### 终端主体
 
-- 头部以下、胶囊以上全屏;胶囊停靠时 `--terminal-capsule-clearance` 契约已由 `useCapsuleDockClearance` 发布(已有,保持)。
+- 头部以下、胶囊以上全屏;胶囊停靠时 `--terminal-capsule-occlusion` 契约已由 `useCapsuleDockClearance` 发布(已有,保持)。xterm 占满 well 高度,内容可在胶囊下滚动。
 - **tap-to-focus**(terminal-surface.md 核心特性):点终端任意处 → 聚焦隐藏 IME textarea → 唤起软键盘。这是 App 终端与 Web 终端的体验分界。
 - **TerminalScrollOverlay**(App-only):终端内浮动的点按控件 — 页顶 / 页底 / 跳底。Web 滚轮场景不渲染。参考 legacy `MobileTerminalLayout` 的既有实现,不复制双套逻辑。
 - 字体/scrollback 用现有 `DeviceProfile.mobile`(10px / 10k scrollback)。

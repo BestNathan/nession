@@ -1,9 +1,7 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import { getDefaultStore } from 'jotai';
-import type { ConnectionState } from '../../hooks/useP2PConnection';
-import { inputModeAtomFamily, type InputMode } from '../state/input';
-import { lastResizeAtom } from '../state/terminal';
+import type { P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { InputMode } from '../state/input';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import { InputRouter } from '../input/InputRouter';
@@ -13,10 +11,18 @@ import { CommandInputHandler } from '../input/CommandInputHandler';
 import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
+import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
 import { MobileImeInput } from '../input/MobileImeInput';
 import type { FontSizeManager } from '../FontSizeManager';
-import type { DeviceProfile } from '../types';
+import type { DeviceProfile, TerminalScrollbackMode } from '../types';
+
+export interface TerminalControllerEvents {
+  onTransportReady?: (ready: boolean) => void;
+  onInputModeChange?: (sessionId: string, mode: InputMode) => void;
+  onResize?: (sessionId: string, cols: number, rows: number) => void;
+  onTitleChange?: (sessionId: string, title: string) => void;
+}
 
 export interface TerminalControllerOptions {
   rendererType: 'webgl' | 'canvas';
@@ -28,6 +34,8 @@ export interface TerminalControllerOptions {
    * a real, cursor-anchored element to attach to.
    */
   deviceProfile?: DeviceProfile;
+  scrollbackMode?: TerminalScrollbackMode;
+  events?: TerminalControllerEvents;
 }
 
 /**
@@ -73,8 +81,11 @@ export class TerminalController {
   private inputRouter: InputRouter | null = null;
   private inputSourceManager: InputSourceManager;
   private mobileIme: MobileImeInput | null = null;
+  private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
   private useMobileIme: boolean;
+  private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
+  events?: TerminalControllerEvents;
 
   /** Callbacks → Jotai */
   onStateChange: ((status: TerminalStatus) => void) | null = null;
@@ -94,6 +105,8 @@ export class TerminalController {
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
+    this.scrollbackMode = options.scrollbackMode ?? 'legacy';
+    this.events = options.events;
     this.initInputRouter();
   }
 
@@ -124,38 +137,104 @@ export class TerminalController {
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
+  /** True when xterm is open in the DOM and transport handlers are wired. */
+  isViewportAttached(): boolean {
+    return this.attached;
+  }
+
   /** Create xterm, mount on `element`, and wire the transport to it. */
   attach(element: HTMLElement): void {
+    const terminal = this.instance.terminal;
+    if (this.instance.isDisposed) {
+      return;
+    }
+
+    // Same container — transport-only rewire (P2P socket / route changed).
+    if (this.attached && terminal.element?.parentElement === element) {
+      this.rewireTransport(terminal);
+      return;
+    }
+
+    // Reparent to a new viewport container (React remount).
+    if (this.attached && terminal.element?.parentElement !== element) {
+      this.teardownTransport();
+      this.capsuleOcclusionScroll?.dispose();
+      this.capsuleOcclusionScroll = null;
+      this.instance.detach();
+      this.attached = false;
+    }
     if (this.attached) { return; }
 
-    const transport = this.transportFactory();
-    this.instance.onCellSizeChange = () => {
-      this.resizeController?.remeasure();
-    };
-    const terminal = this.instance.terminal;
-
-    this.transport = transport;
-    this._terminal = terminal;
-    this.attached = true;
-
     this.instance.attach(element);
+    if (!terminal.element) {
+      this.teardownTransport();
+      return;
+    }
 
-    // Transport → xterm: display output as it arrives.
-    transport.onOutput = (data: Uint8Array) => { terminal.write(data); };
-    // Remote (tmux → agent) resize → local xterm grid.
+    this.attached = true;
+    this._terminal = terminal;
+    this.rewireTransport(terminal);
+    this.wireTerminalUi(element, terminal);
+  }
+
+  /** Swap ConnectionManager after P2P reconnect without tearing down xterm. */
+  private rewireTransport(terminal: Terminal): void {
+    this.teardownTransport();
+    const transport = this.transportFactory();
+    this.transport = transport;
+    transport.onOutput = (data: Uint8Array) => {
+      const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
+      terminal.write(data, () => {
+        if (follow) {
+          this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+        }
+      });
+    };
     transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
-    // Transport connection state → domain TerminalStatus callback.
     transport.onStateChange = (state: ConnectionState) => {
       this.onStateChange?.(mapConnectionState(state));
     };
-    // Transport failure / disconnect → facade callbacks.
     transport.onError = (err: Error) => { this.onError?.(err); };
     transport.onDisconnect = () => { this.onDisconnect?.(); };
+    this.events?.onTransportReady?.(true);
+  }
+
+  private teardownTransport(): void {
+    this.events?.onTransportReady?.(false);
+    if (this.transport) {
+      this.transport.onOutput = null;
+      this.transport.onResize = null;
+      this.transport.onStateChange = null;
+      this.transport.onError = null;
+      this.transport.onDisconnect = null;
+      this.transport.dispose();
+      this.transport = null;
+    }
+  }
+
+  private wireTerminalUi(element: HTMLElement, terminal: Terminal): void {
+    this.instance.onCellSizeChange = () => {
+      this.resizeController?.remeasure();
+    };
+
+    const capsuleHost = element.closest('[data-terminal-capsule-host]');
+    if (this.scrollbackMode === 'local-buffer' && capsuleHost instanceof HTMLElement) {
+      this.capsuleOcclusionScroll = new CapsuleOcclusionScroll(
+        terminal,
+        capsuleHost,
+        () => this.cellDimensions.height,
+      );
+      requestAnimationFrame(() => {
+        if (!this.attached || !this.capsuleOcclusionScroll) { return; }
+        this.capsuleOcclusionScroll.bind();
+      });
+    }
 
     terminal.onTitleChange((title: string) => { this.onTitleChange?.(title); });
 
-    // Input routing: terminal mode is the default, so register + activate the
-    // terminal handler now. Keyboard input flows xterm → handler → transport.
+    const transport = this.transport;
+    if (!transport) { return; }
+
     const router = this.inputRouter ?? this.initInputRouter();
     const terminalHandler = new TerminalInputHandler(
       transport,
@@ -168,8 +247,6 @@ export class TerminalController {
     router.register(terminalHandler);
     terminalHandler.activate();
 
-    // Mobile: give the soft keyboard / IME a real cursor-anchored textarea.
-    // Must come after instance.attach() — it reaches into terminal.element.
     if (this.useMobileIme && terminal.element) {
       this.mobileIme = new MobileImeInput(terminal, terminal.element, {
         onSend: (text) => {
@@ -178,7 +255,6 @@ export class TerminalController {
       });
     }
 
-    // Observe the container after first render so it has laid out.
     this.resizeController = new ResizeController(this);
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
@@ -198,32 +274,34 @@ export class TerminalController {
     this.mobileIme?.dispose();
     this.mobileIme = null;
 
-    // Break transport→terminal closures before disposing either side.
-    if (this.transport) {
-      this.transport.onOutput = null;
-      this.transport.onResize = null;
-      this.transport.onStateChange = null;
-      this.transport.onError = null;
-      this.transport.onDisconnect = null;
-    }
+    this.capsuleOcclusionScroll?.dispose();
+    this.capsuleOcclusionScroll = null;
 
-    // Deactivate the active input handler (unsubscribes xterm onData) and drop
-    // the router so the terminal handler's closures are released before dispose.
+    this.teardownTransport();
+
     this.inputRouter?.setMode({ type: 'terminal' });
     this.inputRouter = null;
 
     this.instance.detach();
     this._terminal = null;
+  }
 
-    this.transport?.dispose();
-    this.transport = null;
+  /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
+  dispose(): void {
+    this.detach();
+    this.instance.dispose();
   }
 
   // ── Data flow ───────────────────────────────────────────────────────────
 
   /** Write data to the xterm display (e.g. from an external source). */
   write(data: string | Uint8Array): void {
-    this._terminal?.write(data);
+    const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
+    this._terminal?.write(data, () => {
+      if (follow) {
+        this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
+      }
+    });
   }
 
   /**
@@ -320,12 +398,30 @@ export class TerminalController {
 
   // ── Scroll / font-size / cell dimensions ─────────────────────────────────
 
-  /** Scroll the xterm viewport to the bottom. */
-  scrollToBottom(): void { this.instance.scrollToBottom(); }
+  /** Scroll the xterm viewport to the live bottom (above capsule occlusion when present). */
+  scrollToBottom(): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollToMarginBottom();
+      return;
+    }
+    this.instance.scrollToBottom();
+  }
   /** Scroll the xterm viewport by whole pages (negative = up). */
-  scrollPages(pages: number): void { this.instance.scrollPages(pages); }
+  scrollPages(pages: number): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollPages(pages);
+      return;
+    }
+    this.instance.scrollPages(pages);
+  }
   /** Scroll the xterm viewport by lines (negative = up). */
-  scrollLines(lines: number): void { this.instance.scrollLines(lines); }
+  scrollLines(lines: number): void {
+    if (this.capsuleOcclusionScroll) {
+      this.capsuleOcclusionScroll.scrollLines(lines);
+      return;
+    }
+    this.instance.scrollLines(lines);
+  }
 
   /** Font-size manager while attached; null after detach(). */
   get fontSizeManager(): FontSizeManager | null {
@@ -341,12 +437,16 @@ export class TerminalController {
 
   setInputMode(mode: InputMode): void {
     this.inputRouter?.setMode(mode);
-    // Sync to Jotai so React components react to the mode change.
-    getDefaultStore().set(inputModeAtomFamily(this.sessionId), mode);
+    this.events?.onInputModeChange?.(this.sessionId, mode);
   }
 
   getInputMode(): InputMode {
     return this.inputRouter?.getMode() ?? { type: 'terminal' };
+  }
+
+  /** Publish viewport cols/rows to the React layer (attach sizing, debounced PTY resize). */
+  publishViewportResize(cols: number, rows: number): void {
+    this.events?.onResize?.(this.sessionId, cols, rows);
   }
 
 }
@@ -401,7 +501,7 @@ export class ResizeController {
         // Publish to the atom the state machine reads on (re)attach so
         // client.attach / beginRelay carry the current viewport size. Covers
         // both the immediate first fire and the debounced subsequent fires.
-        getDefaultStore().set(lastResizeAtom, { cols, rows });
+        this.controller.publishViewportResize(cols, rows);
 
         if (this.isFirstFire) {
           this.isFirstFire = false;
@@ -438,7 +538,7 @@ export class ResizeController {
     if (cols < 2 || rows < 2) { return; }
     // Keep the atom fresh after a font-size zoom so a (re)attach uses the
     // recomputed cell count, not the stale pre-zoom size.
-    getDefaultStore().set(lastResizeAtom, { cols, rows });
+    this.controller.publishViewportResize(cols, rows);
     this.controller.resize(cols, rows);
   }
 

@@ -1,8 +1,20 @@
 import type { WebSocketMessage, ConnectionStatus, AttachInfo } from '../../types';
 
+/**
+ * A WebSocket capability. Registered on the facade via `WebSocketService.use()`.
+ *
+ * `install` receives the core and must return a teardown that releases every
+ * subscription the plugin made (e.g. the unsubscribe handles returned by
+ * `core.onMessage`). The facade stores the teardown and runs it on `unregister`
+ * or when a plugin of the same name replaces this one.
+ *
+ * @deprecated Legacy fallback: if `install` returns nothing, the facade falls
+ * back to calling `uninstall()`. New plugins should return a teardown from
+ * `install` instead.
+ */
 export interface WebSocketPlugin {
   name: string;
-  install(service: WebSocketServiceCore): void;
+  install(service: WebSocketServiceCore): (() => void) | void;
   uninstall?(): void;
 }
 
@@ -28,7 +40,8 @@ export interface WebSocketServiceCore {
   onMessage(type: string, handler: (payload: unknown) => void): () => void;
 
   // ── Request/response ─────────────────────────────────────
-  request<T>(type: string, payload: unknown): Promise<T>;
+  request<T>(type: string, payload: unknown, timeoutMs?: number): Promise<T>;
+  failPending(error: Error): void;
 
   // ── Utility ──────────────────────────────────────────────
   generateMessageId(): string;
