@@ -71,7 +71,7 @@ describe('CapsuleCommandsRow', () => {
     expect(document.querySelector('[data-slot="popover-content"]')).toBeInTheDocument();
     expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
   });
 
   it('keeps more trigger outside the scrollable quick-key row', () => {

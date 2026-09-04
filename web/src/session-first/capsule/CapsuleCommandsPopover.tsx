@@ -11,13 +11,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import {
   capsuleCaptionTextClass,
   capsuleIconButtonClass,
   capsulePopoverBodyClass,
@@ -32,8 +25,6 @@ import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
 import { PhysKeyRow } from '@/session-first/capsule/PhysKeyRow';
 import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
 
-type CapsuleCommandsPresentation = 'popover' | 'sheet';
-
 interface CapsuleCommandsPopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,8 +32,6 @@ interface CapsuleCommandsPopoverProps {
   disabled?: boolean;
   showPhysKeys: boolean;
   trigger?: React.ReactElement;
-  /** Sheet avoids mobile popover touch-dismiss flicker on the more trigger. */
-  presentation?: CapsuleCommandsPresentation;
 }
 
 interface CapsuleCommandsPanelBodyProps {
@@ -144,7 +133,6 @@ export function CapsuleCommandsPopover({
   disabled = false,
   showPhysKeys,
   trigger,
-  presentation = 'popover',
 }: CapsuleCommandsPopoverProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const commands = useCapsuleCommands(sendText);
@@ -170,33 +158,20 @@ export function CapsuleCommandsPopover({
       dialogOpen={dialogOpen}
       setDialogOpen={setDialogOpen}
       {...commands}
+      handleRun={(command) => {
+        commands.handleRun(command);
+        onOpenChange(false);
+      }}
+      handlePhysKey={(seq) => {
+        commands.handlePhysKey(seq);
+        onOpenChange(false);
+      }}
+      sendChain={() => {
+        commands.sendChain();
+        onOpenChange(false);
+      }}
     />
   );
-
-  if (presentation === 'sheet') {
-    return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetTrigger
-          nativeButton
-          disabled={disabled}
-          render={triggerElement}
-        />
-        <SheetContent
-          side="bottom"
-          overlayBlur={false}
-          className={cn(
-            capsulePopoverPanelClass,
-            'w-full max-w-none rounded-t-xl pb-[env(safe-area-inset-bottom)]',
-          )}
-        >
-          <SheetHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60 text-left')}>
-            <SheetTitle>Commands</SheetTitle>
-          </SheetHeader>
-          {panelBody}
-        </SheetContent>
-      </Sheet>
-    );
-  }
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -212,7 +187,7 @@ export function CapsuleCommandsPopover({
         className={capsulePopoverPanelClass}
       >
         <PopoverHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60')}>
-          <PopoverTitle>Commands</PopoverTitle>
+          <PopoverTitle>Quick commands</PopoverTitle>
         </PopoverHeader>
         {panelBody}
       </PopoverContent>
