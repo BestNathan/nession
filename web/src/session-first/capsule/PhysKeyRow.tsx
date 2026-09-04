@@ -89,7 +89,7 @@ export function PhysKeyRow({
 
     return (
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
         className={capsulePhysKeyButtonClass}
         disabled={disabled}
@@ -116,7 +116,7 @@ export function PhysKeyRow({
             <DropdownMenuTrigger
               render={
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   className={capsulePhysKeyButtonClass}
                   disabled={disabled}

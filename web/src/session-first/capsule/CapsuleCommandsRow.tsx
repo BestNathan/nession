@@ -43,7 +43,7 @@ export function CapsuleCommandsRow({
           <Button
             key={keyDef.label}
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="sm"
             disabled={disabled}
             data-testid={`capsule-quick-key-${keyDef.label}`}
