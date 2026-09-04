@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ButtonHTMLAttributes } from 'react';
+import { forwardRef, useCallback, useState, type ButtonHTMLAttributes } from 'react';
 import { MoreHorizontal, Terminal } from 'lucide-react';
 import { PRESETS } from '@/components/quickCommands';
 import { Button } from '@/components/ui/button';
@@ -151,6 +151,29 @@ export function CapsuleCommandsPopover({
   );
 
   const triggerElement = trigger ?? defaultTrigger;
+  const {
+    handleRun: runCommand,
+    handlePhysKey: sendPhysKey,
+    sendChain: sendCommandChain,
+  } = commands;
+  const handleRun = useCallback(
+    (command: Parameters<typeof runCommand>[0]) => {
+      runCommand(command);
+      onOpenChange(false);
+    },
+    [runCommand, onOpenChange],
+  );
+  const handlePhysKey = useCallback(
+    (seq: string) => {
+      sendPhysKey(seq);
+      onOpenChange(false);
+    },
+    [sendPhysKey, onOpenChange],
+  );
+  const sendChain = useCallback(() => {
+    sendCommandChain();
+    onOpenChange(false);
+  }, [sendCommandChain, onOpenChange]);
   const panelBody = (
     <CapsuleCommandsPanelBody
       disabled={disabled}
@@ -158,18 +181,9 @@ export function CapsuleCommandsPopover({
       dialogOpen={dialogOpen}
       setDialogOpen={setDialogOpen}
       {...commands}
-      handleRun={(command) => {
-        commands.handleRun(command);
-        onOpenChange(false);
-      }}
-      handlePhysKey={(seq) => {
-        commands.handlePhysKey(seq);
-        onOpenChange(false);
-      }}
-      sendChain={() => {
-        commands.sendChain();
-        onOpenChange(false);
-      }}
+      handleRun={handleRun}
+      handlePhysKey={handlePhysKey}
+      sendChain={sendChain}
     />
   );
 

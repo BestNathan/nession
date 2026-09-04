@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { fireEvent, render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsPopover';
+import { CHAIN_LONG_PRESS_MS } from '@/session-first/capsule/physKeys';
 
 vi.mock('@/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
@@ -26,6 +27,10 @@ describe('CapsuleCommandsPopover', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('hides phys keys when showPhysKeys is false', () => {
@@ -90,6 +95,57 @@ describe('CapsuleCommandsPopover', () => {
     );
     await userEvent.click(screen.getByText('Ctrl+C'));
     expect(sendText).toHaveBeenCalledWith('\x03');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('sends a visible physical key once and closes after execution', async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={onOpenChange}
+        sendText={sendText}
+        showPhysKeys
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('phys-key-Esc'));
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith('\x1b');
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('closes after sending a chain built through long-press start and add', () => {
+    vi.useFakeTimers();
+    const onOpenChange = vi.fn();
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={onOpenChange}
+        sendText={sendText}
+        showPhysKeys
+      />,
+    );
+
+    const firstKey = screen.getByTestId('phys-key-Esc');
+    fireEvent.pointerDown(firstKey);
+    act(() => {
+      vi.advanceTimersByTime(CHAIN_LONG_PRESS_MS);
+    });
+    fireEvent.pointerLeave(firstKey);
+    expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
+
+    const secondKey = screen.getByTestId('phys-key-Tab');
+    fireEvent.pointerDown(secondKey);
+    fireEvent.pointerUp(secondKey);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith('\x1b\t');
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
