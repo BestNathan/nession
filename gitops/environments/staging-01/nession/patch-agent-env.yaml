@@ -1,0 +1,16 @@
+# Agent env vars that reference this environment's public agent host.
+# AGENT_SERVER_URL needs no patch — no nameSuffix means the in-namespace
+# service is plain nession-server in every environment.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-agent
+spec:
+  template:
+    spec:
+      containers:
+        - name: nession-agent
+          env:
+            - name: AGENT_CONNECT_URL
+              value: "ws://staging-01.agent.nession.nhome.local/ws"

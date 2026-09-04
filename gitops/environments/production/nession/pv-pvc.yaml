@@ -1,0 +1,66 @@
+# production zero-copy storage (issue #592, G3).
+#
+# Before the cutover, server/agent reached these directories through the
+# shared PV nession-nfs + subPath on PVC nession-server-data:
+#   server /data        → /mnt/share/k8s/production
+#   agent  /data        → /mnt/share/k8s/production   (server+agent share one NESSION_HOME)
+#   agent  /root/.claude → /mnt/share/k8s/nession/claude-home (base-level subPath)
+# New PVs below point directly at those SAME directories — existing data is
+# untouched by the cutover. The old shared PV/PVCs stay in the cluster until
+# Phase 6 teardown (Prune=false annotated at cutover; not part of this tree).
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prod-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 10Gi
+  nfs:
+    server: 192.168.2.105
+    path: /mnt/share/k8s/production
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prod-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: prod-data
+  resources:
+    requests:
+      storage: 5Gi
+---
+# claude-home becomes production-owned (matches the historical shared dir);
+# every other environment has its own claude-home directory.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prod-claude-home
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 10Gi
+  nfs:
+    server: 192.168.2.105
+    path: /mnt/share/k8s/nession/claude-home
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prod-claude-home
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: prod-claude-home
+  resources:
+    requests:
+      storage: 10Gi

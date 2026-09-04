@@ -1,0 +1,29 @@
+# Point per-env storage claims at this environment's PV/PVC pairs.
+# Base mounts carry no subPath; each PV path is the environment's own dir.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-server
+spec:
+  template:
+    spec:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: preprod-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-agent
+spec:
+  template:
+    spec:
+      volumes:
+        - name: claude-home
+          persistentVolumeClaim:
+            claimName: preprod-claude-home
+        - name: data
+          persistentVolumeClaim:
+            claimName: preprod-data

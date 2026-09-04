@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nession-agent
+spec:
+  selector:
+    app: nession
+    component: agent
+  ports:
+    - name: http
+      port: 10080
+      targetPort: 10080
+    - name: agent-ws
+      port: 19090
+      targetPort: 19090
+  type: ClusterIP

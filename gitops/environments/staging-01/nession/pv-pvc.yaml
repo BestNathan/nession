@@ -1,0 +1,57 @@
+# Per-environment NFS PV/PVC pairs — no subPath anywhere.
+# Directories must exist on the NFS server before first sync (bootstrap checklist).
+# staging-01 starts empty: fresh /mnt/share/k8s/staging-01{,/claude-home}.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: staging-01-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 10Gi
+  nfs:
+    server: 192.168.2.105
+    path: /mnt/share/k8s/staging-01
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: staging-01-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: staging-01-data
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: staging-01-claude-home
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 10Gi
+  nfs:
+    server: 192.168.2.105
+    path: /mnt/share/k8s/staging-01/claude-home
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: staging-01-claude-home
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: staging-01-claude-home
+  resources:
+    requests:
+      storage: 10Gi

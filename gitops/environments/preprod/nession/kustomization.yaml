@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# preprod — release-validation environment: own namespace, own NFS dirs, starts empty.
+namespace: nession-preprod
+
+commonLabels:
+  env: preprod
+
+resources:
+  - ../../../base/nession
+  - pv-pvc.yaml
+
+images:
+- name: ghcr.io/bestnathan/nession-agent
+  newName: ghcr.io/bestnathan/nession
+  newTag: agent-0.35.0
+- name: ghcr.io/bestnathan/nession-server
+  newName: ghcr.io/bestnathan/nession
+  newTag: server-0.35.0
+- name: ghcr.io/bestnathan/nession-ui
+  newName: ghcr.io/bestnathan/nession
+  newTag: ui-0.35.0
+
+patchesStrategicMerge:
+- patch-imagepullsecrets.yaml
+- patch-claims.yaml
+
+patches:
+- path: patch-ingress.yaml
+- path: patch-agent-env.yaml

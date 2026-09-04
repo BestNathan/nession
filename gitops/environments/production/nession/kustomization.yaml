@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# production — live environment, namespace nession (unchanged).
+# Zero-copy storage: new PVs point directly at the existing NFS dirs that
+# were previously reached via subPath on the shared PV; no subPath anywhere.
+# Ingress hosts come from base (they are production's own) — no patch here.
+namespace: nession
+
+commonLabels:
+  env: production
+
+resources:
+  - ../../../base/nession
+  - pv-pvc.yaml
+
+images:
+- name: ghcr.io/bestnathan/nession-agent
+  newName: ghcr.io/bestnathan/nession
+  newTag: agent-0.35.0
+- name: ghcr.io/bestnathan/nession-server
+  newName: ghcr.io/bestnathan/nession
+  newTag: server-0.35.0
+- name: ghcr.io/bestnathan/nession-ui
+  newName: ghcr.io/bestnathan/nession
+  newTag: ui-0.35.0
+
+patchesStrategicMerge:
+- patch-imagepullsecrets.yaml
+- patch-claims.yaml

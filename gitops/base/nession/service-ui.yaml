@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nession-ui
+spec:
+  selector:
+    app: nession
+    component: ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  type: ClusterIP

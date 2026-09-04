@@ -1,0 +1,27 @@
+# Production — deploys environments/production/nession into namespace nession.
+# App name is deliberately unchanged from the pre-cutover app: renaming would
+# delete this Application (resources-finalizer!) and cascade-delete all
+# production resources before the new app rebuilt them.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nession.git
+    targetRevision: gitops
+    path: environments/production/nession
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

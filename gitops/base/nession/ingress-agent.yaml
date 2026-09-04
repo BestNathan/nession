@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nession-agent
+  annotations:
+    higress.io/domain: "agent.nession.nhome.local agent.nession.bestnathan.top"
+    higress.io/upstream-read-timeout: "86400"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: higress
+  rules:
+    - host: agent.nession.nhome.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-agent
+                port:
+                  number: 10080
+    - host: agent.nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-agent
+                port:
+                  number: 10080

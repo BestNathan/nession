@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-ui
+  labels:
+    app: nession
+    component: ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nession
+      component: ui
+  template:
+    metadata:
+      labels:
+        app: nession
+        component: ui
+    spec:
+      containers:
+        - name: nession-ui
+          image: ghcr.io/bestnathan/nession-ui:main
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+      # imagePullSecrets not needed — ghcr.io/bestnathan/nession is public

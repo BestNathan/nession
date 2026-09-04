@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nession-ui
+  annotations:
+    higress.io/domain: "ui.nession.nhome.local ui.nession.bestnathan.top"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: higress
+  rules:
+    - host: ui.nession.nhome.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-ui
+                port:
+                  number: 80
+    - host: ui.nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-ui
+                port:
+                  number: 80

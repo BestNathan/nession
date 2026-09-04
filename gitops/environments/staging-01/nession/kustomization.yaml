@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# staging-01 — fresh environment: own namespace, own NFS dirs, starts empty.
+namespace: nession-staging-01
+
+commonLabels:
+  env: staging-01
+
+resources:
+  - ../../../base/nession
+  - pv-pvc.yaml
+
+images:
+- name: ghcr.io/bestnathan/nession-agent
+  newName: ghcr.io/bestnathan/nession
+  newTag: agent-cfb4cc9
+- name: ghcr.io/bestnathan/nession-server
+  newName: ghcr.io/bestnathan/nession
+  newTag: server-cfb4cc9
+- name: ghcr.io/bestnathan/nession-ui
+  newName: ghcr.io/bestnathan/nession
+  newTag: ui-cfb4cc9
+
+patchesStrategicMerge:
+- patch-imagepullsecrets.yaml
+- patch-claims.yaml
+
+patches:
+- path: patch-ingress.yaml
+- path: patch-agent-env.yaml

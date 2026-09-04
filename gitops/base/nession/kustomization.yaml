@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Env-agnostic base: deployments, services, ingress, secret.
+# namespace / env labels / PV-PVC / claimNames are set per environment
+# under ../environments/<env>/nession — never add shared storage here.
+
+commonLabels:
+  app: nession
+
+resources:
+  - secret.yaml
+  - deployment-server.yaml
+  - service-server.yaml
+  - ingress-server.yaml
+  - deployment-agent.yaml
+  - service-agent.yaml
+  - ingress-agent.yaml
+  - deployment-ui.yaml
+  - service-ui.yaml
+  - ingress-ui.yaml

@@ -1,0 +1,30 @@
+# Point production mounts at the zero-copy PV/PVC pairs. Volume names and
+# mount paths are unchanged from base; only claimNames differ from the old
+# shared-PVC setup, and subPath is gone (PV path is the final directory).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-server
+spec:
+  template:
+    spec:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prod-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-agent
+spec:
+  template:
+    spec:
+      volumes:
+        - name: claude-home
+          persistentVolumeClaim:
+            claimName: prod-claude-home
+        - name: data
+          persistentVolumeClaim:
+            claimName: prod-data
