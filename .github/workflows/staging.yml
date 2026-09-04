@@ -6,19 +6,15 @@ on:
     # None of these reach a staging image: staging builds only the .prebuilt
     # Dockerfiles, which copy deploy/*, the zigbuild binary and web/dist.
     #
-    # k8s/** matters most. update-staging-kustomize writes a kustomize commit
-    # to main after every build; syncing that commit back into staging would
-    # trigger another build, which writes another commit — a self-sustaining
-    # loop that also kept main permanently ahead of staging.
-    #
     # A push mixing these with code still builds — paths-ignore only skips a
-    # push whose entire file set is ignored.
+    # push whose entire file set is ignored. (Deploys no longer write to main:
+    # deploy-staging-gitops pushes a deploy commit to the gitops branch, which
+    # this workflow's paths-ignore cannot loop on.)
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.claude/**'
       - '.githooks/**'
-      - 'k8s/**'
       - '.github/**'
       - 'LICENSE'
   # Escape hatch for the case paths-ignore skipped a build you actually want
@@ -27,9 +23,10 @@ on:
   # treats the version as changed and would force a full production release.
   workflow_dispatch:
 
-# Serialize staging runs. update-staging-kustomize rebase-merges a PR into
-# main; two concurrent runs would race there. Do not cancel in progress —
-# a cancelled run can leave a pushed chore/** branch and an open PR behind.
+# Serialize staging runs. deploy-staging-gitops pushes to the gitops branch;
+# the gitops-writer concurrency group (shared across workflows) plus the
+# rebase-retry loop in scripts/gitops-commit.sh handle cross-workflow races.
+# Do not cancel in progress.
 concurrency:
   group: staging-${{ github.ref }}
   cancel-in-progress: false
@@ -451,58 +448,15 @@ jobs:
               ${IMG}:${prefix}-${SHORT_SHA}-amd64 ${IMG}:${prefix}-${SHORT_SHA}-arm64
           done
 
-  update-staging-kustomize:
+  # Deploy to the retained staging environment (gitops/environments/staging).
+  # ArgoCD consumes the gitops branch; no more kustomize commits on main.
+  deploy-staging-gitops:
     needs: [versions, merge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - run: |
-          cd k8s/overlays/staging
-          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
-          SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
-          kustomize edit set image \
-            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${SHORT_SHA} \
-            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${SHORT_SHA} \
-            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${SHORT_SHA}
-
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create a branch for the kustomize update
-          BRANCH_NAME="chore/update-staging-kustomize-${{ needs.versions.outputs.short_sha }}"
-          git checkout -b "$BRANCH_NAME"
-
-          git add k8s/overlays/staging/kustomization.yaml
-          if git diff --staged --quiet; then
-            echo "No change to staging overlay — skipping."
-          else
-            git commit -m "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }}) [skip ci]"
-            git push -u origin "$BRANCH_NAME"
-
-            # Create PR with auto-merge
-            gh pr create \
-              --title "chore: update staging image tags (sha=${{ needs.versions.outputs.short_sha }})" \
-              --body "Automated staging kustomize update from CI workflow." \
-              --base main \
-              --head "$BRANCH_NAME"
-
-            # Merge directly. These chore/** PRs trigger no CI, so GitHub
-            # reports them CLEAN immediately and REJECTS auto-merge with
-            # "Pull request is in clean status (enablePullRequestAutoMerge)".
-            # Whether --auto happens to succeed is a race against GitHub
-            # computing mergeStateStatus, so never rely on it here.
-            # --rebase, not --squash: preserves the [skip ci] commit message
-            # verbatim so this merge cannot re-trigger the workflow.
-            PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq .number)
-            gh pr merge "$PR_NUMBER" --rebase
-          fi
+      - run: ./scripts/gitops-commit.sh staging "${{ needs.versions.outputs.short_sha }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

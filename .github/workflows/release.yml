@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
 
-# Serialize releases. update-prod-kustomize rebase-merges a PR into main, and
-# staging.yml's update-staging-kustomize does the same — both are unserialized
-# against each other, but at least two releases cannot race. Never cancel: a
-# half-finished release can have pushed images and an open kustomize PR.
+# Serialize releases. promote-production writes the gitops branch; the
+# gitops-writer concurrency group (shared across workflows) plus the
+# rebase-retry loop in scripts/gitops-commit.sh handle cross-workflow races.
+# Never cancel: a half-finished release can have pushed images but no deploy.
 concurrency:
   group: release-main
   cancel-in-progress: false
@@ -538,70 +538,24 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════
   # Update production kustomize
   # ═══════════════════════════════════════════════════════════════════
-  update-prod-kustomize:
+  # Production promotion — write a deploy commit to the gitops branch.
+  # This job runs under GitHub Environment `production`: configure required
+  # reviewers there and promotion pauses for approval before touching gitops.
+  promote-production:
     needs: [version-check, merge]
     if: needs.version-check.outputs.version_changed == 'true'
+    environment: production
+    concurrency:
+      group: gitops-writer
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
-      # Check out main's current tip, not github.sha: main may have advanced
-      # since this run started (staging.yml rebase-merges its own kustomize PR
-      # into main), and branching from a stale commit makes the rebase-merge
-      # below replay onto an unexpected base.
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - run: |
-          cd k8s/overlays/production
-          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
-          RUST_VER="${{ needs.version-check.outputs.rust_version }}"
-          WEB_VER="${{ needs.version-check.outputs.web_version }}"
-          kustomize edit set image \
-            ghcr.io/${OWNER_LOWER}/nession-server=ghcr.io/${OWNER_LOWER}/nession:server-${RUST_VER} \
-            ghcr.io/${OWNER_LOWER}/nession-agent=ghcr.io/${OWNER_LOWER}/nession:agent-${RUST_VER} \
-            ghcr.io/${OWNER_LOWER}/nession-ui=ghcr.io/${OWNER_LOWER}/nession:ui-${WEB_VER}
-
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create a branch for the kustomize update.
-          # Include the short SHA: version-check deliberately allows retrying
-          # the same version (tag-absent escape hatch), and a version-only
-          # branch name would collide with the branch/PR left behind by the
-          # previous failed attempt.
-          RUST_VER="${{ needs.version-check.outputs.rust_version }}"
-          BRANCH_NAME="chore/update-prod-kustomize-v${RUST_VER}-${{ needs.version-check.outputs.short_sha }}"
-          git checkout -b "$BRANCH_NAME"
-
-          git add k8s/overlays/production/kustomization.yaml
-          if git diff --staged --quiet; then
-            echo "No change to production overlay — skipping."
-          else
-            git commit -m "chore: update prod image tags to v${RUST_VER} [skip ci]"
-            git push -u origin "$BRANCH_NAME"
-
-            # Create PR with auto-merge
-            gh pr create \
-              --title "chore: update prod image tags to v${RUST_VER}" \
-              --body "Automated production kustomize update from release workflow." \
-              --base main \
-              --head "$BRANCH_NAME"
-
-            # Merge directly. These chore/** PRs trigger no CI, so GitHub
-            # reports them CLEAN immediately and REJECTS auto-merge with
-            # "Pull request is in clean status (enablePullRequestAutoMerge)".
-            # Whether --auto happens to succeed is a race against GitHub
-            # computing mergeStateStatus, so never rely on it here.
-            # --rebase, not --squash: preserves the [skip ci] commit message
-            # verbatim so this merge cannot re-trigger the workflow.
-            PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq .number)
-            gh pr merge "$PR_NUMBER" --rebase
-          fi
+      # RUST_VER == WEB_VER guaranteed by version-check; server/agent/ui all
+      # tag from it. gitops-commit.sh refuses non-semver refs for production.
+      - run: ./scripts/gitops-commit.sh production "${{ needs.version-check.outputs.rust_version }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
