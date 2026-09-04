@@ -42,6 +42,7 @@ export const composer = {
   terminalClearanceGap: "0.375rem",
   captionFontSize: "0.625rem",
   popoverWidth: "20rem",
+  popoverViewportInset: "1.5rem",
   popoverMaxHeight: "45vh",
   popoverListMaxHeight: "38vh",
   popoverBodyMaxHeight: "42vh",

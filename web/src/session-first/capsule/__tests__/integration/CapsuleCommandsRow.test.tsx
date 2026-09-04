@@ -46,7 +46,7 @@ describe('CapsuleCommandsRow', () => {
     expect(screen.getByTestId('capsule-commands-more')).toBeInTheDocument();
   });
 
-  it('opens commands sheet when more trigger is clicked', async () => {
+  it('opens anchored popover when more trigger is clicked', async () => {
     const onCommandsOpenChange = vi.fn();
     render(
       <CapsuleCommandsRow
@@ -60,7 +60,7 @@ describe('CapsuleCommandsRow', () => {
     expect(onCommandsOpenChange.mock.calls[0]?.[0]).toBe(true);
   });
 
-  it('uses bottom sheet for mobile more menu', () => {
+  it('uses anchored popover for mobile more menu', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -68,9 +68,10 @@ describe('CapsuleCommandsRow', () => {
         onCommandsOpenChange={vi.fn()}
       />,
     );
-    const sheet = document.querySelector('[data-slot="sheet-content"][data-side="bottom"]');
-    expect(sheet).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="popover-content"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
   });
 
   it('keeps more trigger outside the scrollable quick-key row', () => {

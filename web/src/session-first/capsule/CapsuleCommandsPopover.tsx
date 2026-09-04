@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ButtonHTMLAttributes } from 'react';
+import { forwardRef, useCallback, useState, type ButtonHTMLAttributes } from 'react';
 import { MoreHorizontal, Terminal } from 'lucide-react';
 import { PRESETS } from '@/components/quickCommands';
 import { Button } from '@/components/ui/button';
@@ -10,13 +10,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
 import {
   capsuleCaptionTextClass,
   capsuleIconButtonClass,
@@ -32,8 +25,6 @@ import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
 import { PhysKeyRow } from '@/session-first/capsule/PhysKeyRow';
 import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
 
-type CapsuleCommandsPresentation = 'popover' | 'sheet';
-
 interface CapsuleCommandsPopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,8 +32,6 @@ interface CapsuleCommandsPopoverProps {
   disabled?: boolean;
   showPhysKeys: boolean;
   trigger?: React.ReactElement;
-  /** Sheet avoids mobile popover touch-dismiss flicker on the more trigger. */
-  presentation?: CapsuleCommandsPresentation;
 }
 
 interface CapsuleCommandsPanelBodyProps {
@@ -144,7 +133,6 @@ export function CapsuleCommandsPopover({
   disabled = false,
   showPhysKeys,
   trigger,
-  presentation = 'popover',
 }: CapsuleCommandsPopoverProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const commands = useCapsuleCommands(sendText);
@@ -163,6 +151,29 @@ export function CapsuleCommandsPopover({
   );
 
   const triggerElement = trigger ?? defaultTrigger;
+  const {
+    handleRun: runCommand,
+    handlePhysKey: sendPhysKey,
+    sendChain: sendCommandChain,
+  } = commands;
+  const handleRun = useCallback(
+    (command: Parameters<typeof runCommand>[0]) => {
+      runCommand(command);
+      onOpenChange(false);
+    },
+    [runCommand, onOpenChange],
+  );
+  const handlePhysKey = useCallback(
+    (seq: string) => {
+      sendPhysKey(seq);
+      onOpenChange(false);
+    },
+    [sendPhysKey, onOpenChange],
+  );
+  const sendChain = useCallback(() => {
+    sendCommandChain();
+    onOpenChange(false);
+  }, [sendCommandChain, onOpenChange]);
   const panelBody = (
     <CapsuleCommandsPanelBody
       disabled={disabled}
@@ -170,33 +181,11 @@ export function CapsuleCommandsPopover({
       dialogOpen={dialogOpen}
       setDialogOpen={setDialogOpen}
       {...commands}
+      handleRun={handleRun}
+      handlePhysKey={handlePhysKey}
+      sendChain={sendChain}
     />
   );
-
-  if (presentation === 'sheet') {
-    return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetTrigger
-          nativeButton
-          disabled={disabled}
-          render={triggerElement}
-        />
-        <SheetContent
-          side="bottom"
-          overlayBlur={false}
-          className={cn(
-            capsulePopoverPanelClass,
-            'w-full max-w-none rounded-t-xl pb-[env(safe-area-inset-bottom)]',
-          )}
-        >
-          <SheetHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60 text-left')}>
-            <SheetTitle>Commands</SheetTitle>
-          </SheetHeader>
-          {panelBody}
-        </SheetContent>
-      </Sheet>
-    );
-  }
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -212,7 +201,7 @@ export function CapsuleCommandsPopover({
         className={capsulePopoverPanelClass}
       >
         <PopoverHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60')}>
-          <PopoverTitle>Commands</PopoverTitle>
+          <PopoverTitle>Quick commands</PopoverTitle>
         </PopoverHeader>
         {panelBody}
       </PopoverContent>

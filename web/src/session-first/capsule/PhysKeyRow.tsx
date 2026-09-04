@@ -7,19 +7,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
 import {
   capsuleDropdownItemClass,
   capsuleDropdownMinWidthClass,
   capsulePhysKeyButtonClass,
-  capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
+  capsulePhysKeyOverflowClass,
   capsulePhysKeyRowClass,
+  capsulePhysKeyScrollClass,
 } from '@/session-first/capsule/capsuleStyles';
 import {
   ARROW_KEYS,
   CHAIN_LONG_PRESS_MS,
   LEFT_KEYS,
+  QUICK_MOBILE_KEYS,
   type PhysKey,
 } from '@/session-first/capsule/physKeys';
 
@@ -40,10 +41,13 @@ export function PhysKeyRow({
   onChainStart,
   onChainAdd,
 }: PhysKeyRowProps) {
-  const hasOverflow = LEFT_KEYS.length > 10;
-  const visibleCount = hasOverflow ? 9 : LEFT_KEYS.length;
-  const visibleKeys = LEFT_KEYS.slice(0, visibleCount);
-  const dropdownKeys = hasOverflow ? LEFT_KEYS.slice(visibleCount) : [];
+  const visibleKeys = QUICK_MOBILE_KEYS;
+  const dropdownKeys = [
+    ...LEFT_KEYS.filter(
+      (keyDef) => !visibleKeys.some((visibleKey) => visibleKey.seq === keyDef.seq),
+    ),
+    ...ARROW_KEYS,
+  ];
 
   const KeyButton = ({ keyDef }: { keyDef: PhysKey }) => {
     const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,11 +111,14 @@ export function PhysKeyRow({
 
   return (
     <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
-      <div className={cn('grid flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}>
+      <div data-testid="phys-key-scroll" className={capsulePhysKeyScrollClass}>
         {visibleKeys.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
-        {hasOverflow ? (
+      </div>
+
+      {dropdownKeys.length > 0 ? (
+        <div className={capsulePhysKeyOverflowClass}>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -120,6 +127,7 @@ export function PhysKeyRow({
                   size="sm"
                   className={capsulePhysKeyButtonClass}
                   disabled={disabled}
+                  data-testid="phys-key-overflow"
                   aria-label="More keys"
                 >
                   <MoreHorizontal className={capsulePhysKeyIconClass} />
@@ -138,17 +146,8 @@ export function PhysKeyRow({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : null}
-      </div>
-
-      <div className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}>
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[0]} />
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[1]} />
-        <KeyButton keyDef={ARROW_KEYS[2]} />
-        <KeyButton keyDef={ARROW_KEYS[3]} />
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

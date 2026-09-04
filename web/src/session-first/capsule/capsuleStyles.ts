@@ -62,7 +62,7 @@ export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--composer-toolbar
 export const capsuleShellContentGapClass = 'gap-[length:var(--composer-shell-content-gap)]';
 
 export const capsulePopoverPanelClass =
-  'z-[length:var(--composer-popover-z-index)] max-h-[length:var(--composer-popover-max-height)] w-[length:var(--composer-popover-width)] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
+  'z-[length:var(--composer-popover-z-index)] max-h-[length:var(--composer-popover-max-height)] w-[length:var(--composer-popover-width)] max-w-[calc(100vw-var(--composer-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
 
 export const capsulePopoverHeaderClass =
   'gap-[length:var(--composer-popover-gap)] border-b border-border/60 p-[length:var(--composer-popover-pad)]';
@@ -95,7 +95,10 @@ export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-ico
 export const capsulePhysKeyRowClass =
   'flex justify-between gap-[length:var(--composer-popover-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
 
-export const capsulePhysKeyGridGapClass = 'gap-[length:var(--composer-phys-key-grid-gap)]';
+export const capsulePhysKeyScrollClass =
+  'flex min-w-0 flex-1 items-center gap-[length:var(--composer-phys-key-grid-gap)] overflow-x-auto scrollbar-none';
+
+export const capsulePhysKeyOverflowClass = 'shrink-0';
 
 export const capsuleChainBarClass =
   'flex items-center gap-[length:var(--composer-popover-gap)] border-b border-border/60 bg-primary/10 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-popover-inner-pad)] text-[length:var(--composer-font-size)]';
