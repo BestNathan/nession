@@ -1,0 +1,64 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# staging — the retained legacy staging environment (owner decision 2026-09-05).
+# This is the target of the staging-branch auto-deploy flow; NOT a fresh env.
+# It deliberately keeps the old model: shared namespace nession, nameSuffix
+# -staging, subPath-isolated data on the original shared storage, and the
+# historical shared claude-home dir (defect preserved by design — this env is
+# a frozen replica of the pre-cutover staging overlay, only its ArgoCD source
+# moves from main to gitops).
+# Storage: the base-era PV/PVC files are re-included here; nameSuffix renames
+# them to the live -staging names and kustomize nameReference rewrites the
+# deployment claim refs — byte-identical to the old overlay.
+namespace: nession
+
+nameSuffix: -staging
+
+commonLabels:
+  env: staging
+
+resources:
+  - ../../../base/nession
+  - pv-nfs.yaml
+  - pvc-claude-tools.yaml
+  - pvc-server-data.yaml
+
+images:
+- name: ghcr.io/bestnathan/nession-agent
+  newName: ghcr.io/bestnathan/nession
+  newTag: agent-cfb4cc9
+- name: ghcr.io/bestnathan/nession-server
+  newName: ghcr.io/bestnathan/nession
+  newTag: server-cfb4cc9
+- name: ghcr.io/bestnathan/nession-ui
+  newName: ghcr.io/bestnathan/nession
+  newTag: ui-cfb4cc9
+
+patchesStrategicMerge:
+- patch-imagepullsecrets.yaml
+
+patches:
+- path: patch-ingress.yaml
+- path: patch-agent-env.yaml
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/0/subPath
+      value: staging
+  target:
+    kind: Deployment
+    name: nession-server
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/1/subPath
+      value: staging
+  target:
+    kind: Deployment
+    name: nession-agent
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/0/subPath
+      value: nession/claude-home
+  target:
+    kind: Deployment
+    name: nession-agent

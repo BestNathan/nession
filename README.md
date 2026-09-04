@@ -1,19 +1,21 @@
 # gitops — Nession deployment desired state
 
 Orphan branch consumed by ArgoCD. **Application source lives on `main`; this
-branch carries deployment desired state only** (issue #592). Deployment
-history on this branch doubles as the audit log:
+branch carries deployment desired state only** (issue #592, scoped 2026-09-05
+to deployment decoupling — the development flow keeps its staging-branch
+gates and staging→main releases). Deployment history doubles as audit log:
 
 ```
-deploy(staging-01): abc1234    ← manual deploy of a validated main commit
-deploy(preprod): 0.36.0        ← release promotion
+deploy(staging): abc1234       ← staging-branch auto-deploy (retained flow)
+deploy(staging-01): abc1234    ← manual deploy of a validated commit
 deploy(production): 0.36.0     ← release promotion (Environment approval)
 ```
 
 ## Who writes here
 
+- `.github/workflows/staging.yml` (on `main`) — staging-branch push auto-deploys `staging` at the built SHA.
 - `.github/workflows/deploy.yml` (on `main`) — manual `workflow_dispatch` deploys to any environment at an exact SHA.
-- `.github/workflows/release.yml` (on `main`) — release promotions to preprod/production at SemVer tags.
+- `.github/workflows/release.yml` (on `main`) — release promotions to production at SemVer tags (Environment approval).
 - Humans — only for rollback (`git revert` a deploy commit + ArgoCD re-sync).
 
 `gitops-guard` CI rejects any non-desired-state path (`argocd/`, `base/`,
@@ -47,21 +49,22 @@ records (ApplicationSet will replace the static child apps before staging-02).
 4. ArgoCD child app (`argocd/apps/`) or ApplicationSet entry.
 5. Wait for sync, verify pods Running and data dirs visible.
 
-## Cutover (Phase 2) checklist
+## Cutover checklist (executed 2026-09-05)
 
-1. Record pre-cutover state: `kubectl -n argocd get applications -o yaml`,
-   `kubectl get pv,pvc -A`, `kubectl -n nession get pods -o wide`.
-2. Protect legacy shared storage from ArgoCD prune (not part of this tree):
-   ```
-   kubectl annotate pv nession-nfs argocd.argoproj.io/sync-options=Prune=false
-   kubectl -n nession annotate pvc nession-server-data claude-tools argocd.argoproj.io/sync-options=Prune=false
-   ```
-3. Re-point the root app once:
-   `kubectl apply -f argocd/app-of-apps.yaml` (source → `gitops`).
-4. Verify: production zero-copy rollout (existing data visible under
-   `/data` and `/root/.claude`), `nession-staging-01`/`nession-preprod`
-   namespaces created, legacy `-staging` resources pruned (expected blast
-   radius — their data stays orphaned on NFS under `/mnt/share/k8s/staging`
-   until Phase 6 teardown).
-5. Rollback if broken: `kubectl apply -f <pre-cutover app-of-apps backup>` —
-   NFS data is never touched by the cutover either way.
+1. ✅ Recorded pre-cutover state (apps / PV / PVC / pods).
+2. ✅ `Prune=false` annotated on the out-of-band legacy PVs/PVCs
+   (`nession-nfs{-server,-staging,-staging-server}`, `claude-tools{,-staging}`,
+   `nession-server-data{,-staging}`) — they stay until Phase 6 teardown.
+3. ✅ NFS dirs created for `staging-01`/`preprod` (`/mnt/share/k8s/<env>[/claude-home]`).
+4. ✅ New namespaces + `ghcr-secret` created for `nession-staging-01`/`nession-preprod`.
+5. ⏳ Nitops handover: delete `apps/nession.yaml` + `apps/nession-staging.yaml`
+   from the nitops repo (apps app-of-apps relinquishes nession).
+6. ⏳ Apply root app once:
+   `kubectl apply -f argocd/app-of-apps.yaml` (source → `gitops`) — nession
+   apps become self-managed from this branch.
+7. Verify: production zero-copy rollout (existing data visible under `/data`
+   and `/root/.claude`); `staging` env adopted with no pod churn (byte-identical
+   manifests); `nession-staging-01`/`nession-preprod` namespaces sync.
+
+Rollback if broken: `kubectl apply -f <pre-cutover apps backup>` — NFS data is
+never touched by the cutover either way.

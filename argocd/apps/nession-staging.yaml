@@ -1,0 +1,27 @@
+# staging — the retained legacy staging environment (owner decision 2026-09-05).
+# Target of the staging-branch auto-deploy flow. Deliberately replicates the
+# old overlay byte-for-byte (namespace nession, nameSuffix -staging, subPath
+# storage, shared claude-home); only its source moves from main to gitops.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nession.git
+    targetRevision: gitops
+    path: environments/staging/nession
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
