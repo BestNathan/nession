@@ -183,6 +183,7 @@ export function CapsuleCommandsPopover({
         />
         <SheetContent
           side="bottom"
+          overlayBlur={false}
           className={cn(
             capsulePopoverPanelClass,
             'w-full max-w-none rounded-t-xl pb-[env(safe-area-inset-bottom)]',
