@@ -78,23 +78,22 @@ describe('CapsuleCommandsPopover', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('renders bottom sheet when presentation is sheet', () => {
+  it('closes after running a built-in command', async () => {
+    const onOpenChange = vi.fn();
     render(
       <CapsuleCommandsPopover
         open
-        onOpenChange={vi.fn()}
+        onOpenChange={onOpenChange}
         sendText={sendText}
-        showPhysKeys
-        presentation="sheet"
-        trigger={<button type="button" data-testid="capsule-commands-more">More</button>}
+        showPhysKeys={false}
       />,
     );
-    const sheet = document.querySelector('[data-slot="sheet-content"][data-side="bottom"]');
-    expect(sheet).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Ctrl+C'));
+    expect(sendText).toHaveBeenCalledWith('\x03');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('keeps the mobile commands sheet backdrop clear', () => {
+  it('renders the anchored popover when presentation is sheet', () => {
     render(
       <CapsuleCommandsPopover
         open
@@ -105,8 +104,9 @@ describe('CapsuleCommandsPopover', () => {
         trigger={<button type="button" data-testid="capsule-commands-more">More</button>}
       />,
     );
-    const overlay = document.querySelector('[data-slot="sheet-overlay"]');
-    expect(overlay).toBeInTheDocument();
-    expect(overlay?.className).not.toContain('backdrop-blur-xs');
+    expect(document.querySelector('[data-slot="popover-content"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
   });
 });
