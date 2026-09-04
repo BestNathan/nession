@@ -45,7 +45,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
-  it('shows phys keys when showPhysKeys is true', () => {
+  it('shows compact primary phys keys and keeps arrows in overflow', async () => {
     render(
       <CapsuleCommandsPopover
         open
@@ -60,6 +60,15 @@ describe('CapsuleCommandsPopover', () => {
     expect(scroll).toHaveClass('flex-1');
     expect(screen.getByTestId('phys-key-overflow')).toBeInTheDocument();
     expect(screen.getByTestId('phys-key-Ctrl+C')).toBeInTheDocument();
+
+    for (const label of ['↑', '←', '↓', '→']) {
+      expect(screen.queryByTestId(`phys-key-${label}`)).not.toBeInTheDocument();
+    }
+
+    await userEvent.click(screen.getByTestId('phys-key-overflow'));
+    for (const label of ['↑', '←', '↓', '→']) {
+      expect(await screen.findByRole('menuitem', { name: label })).toBeInTheDocument();
+    }
   });
 
   it('runs preset command on click', async () => {

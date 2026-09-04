@@ -7,12 +7,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
 import {
   capsuleDropdownItemClass,
   capsuleDropdownMinWidthClass,
   capsulePhysKeyButtonClass,
-  capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyOverflowClass,
   capsulePhysKeyRowClass,
@@ -148,15 +146,6 @@ export function PhysKeyRow({
             </DropdownMenu>
           </div>
         ) : null}
-      </div>
-
-      <div className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}>
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[0]} />
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[1]} />
-        <KeyButton keyDef={ARROW_KEYS[2]} />
-        <KeyButton keyDef={ARROW_KEYS[3]} />
       </div>
     </div>
   );
