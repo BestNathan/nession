@@ -1,6 +1,12 @@
 import { ChevronUp, ChevronDown, ArrowDownToLine } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import {
+  capsuleComposerGridGapClass,
+  capsuleScrollOverlayButtonClass,
+  capsuleScrollOverlaySurfaceClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { cn } from '@/lib/utils';
 
 interface TerminalScrollOverlayProps {
   /** Scroll the terminal scrollback by pages (negative = towards history). */
@@ -25,14 +31,21 @@ export function TerminalScrollOverlay({
   onScrollToBottom,
 }: TerminalScrollOverlayProps) {
   return (
-    <div className="absolute right-2 z-20 flex flex-col gap-0.5 rounded-lg border bg-background/80 backdrop-blur-sm p-1 shadow-md bottom-[calc(var(--terminal-capsule-occlusion,0px)+0.5rem)]">
+    <div
+      className={cn(
+        'absolute right-2 z-20 flex flex-col',
+        capsuleComposerGridGapClass,
+        capsuleScrollOverlaySurfaceClass,
+        'bottom-[calc(var(--terminal-capsule-occlusion,0px)+0.5rem)]',
+      )}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9"
+              className={capsuleScrollOverlayButtonClass}
               aria-label="Scroll up one page"
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => onScrollPages(-1)}
@@ -51,7 +64,7 @@ export function TerminalScrollOverlay({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9"
+              className={capsuleScrollOverlayButtonClass}
               aria-label="Scroll down one page"
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => onScrollPages(1)}
@@ -70,7 +83,7 @@ export function TerminalScrollOverlay({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9"
+              className={capsuleScrollOverlayButtonClass}
               aria-label="Scroll to bottom"
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => onScrollToBottom()}

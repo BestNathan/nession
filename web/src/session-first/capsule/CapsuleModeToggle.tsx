@@ -1,7 +1,8 @@
-import { capsuleModeToggleItemClass } from '@/session-first/capsule/capsuleStyles';
+import { capsuleModeToggleItemClass, capsuleModeToggleGroupClass } from '@/session-first/capsule/capsuleStyles';
 import { Keyboard, PenLine } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { CapsuleMode } from '@/session-first/capsule/types';
+import { cn } from '@/lib/utils';
 
 interface CapsuleModeToggleProps {
   mode: CapsuleMode;
@@ -20,10 +21,10 @@ export function CapsuleModeToggle({ mode, onModeChange, disabled = false }: Caps
         }
       }}
       disabled={disabled}
-      variant="outline"
+      variant="default"
       size="sm"
       spacing={0}
-      className="shrink-0"
+      className={cn('shrink-0', capsuleModeToggleGroupClass)}
       data-testid="capsule-mode-toggle"
     >
       <ToggleGroupItem

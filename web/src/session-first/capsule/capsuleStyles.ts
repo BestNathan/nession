@@ -21,8 +21,11 @@ export const capsuleSecondaryIconButtonClass =
 export const capsuleControlRowClass =
   'flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
 
-export const capsuleShellSurfaceClass =
-  'border border-border bg-[color:var(--terminal-capsule-surface)] text-foreground shadow-lg backdrop-blur-sm';
+/** Floating control surface — elevation only, no border (visual-language §3, terminal-capsule § Surface treatment). */
+export const capsuleFloatingSurfaceClass =
+  'bg-[color:var(--terminal-capsule-surface)] text-foreground shadow-md backdrop-blur-md';
+
+export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 
 export const capsuleShellInnerPadClass =
   'px-[length:var(--composer-shell-pad-x)] py-[length:var(--composer-shell-pad-y)]';
@@ -101,7 +104,15 @@ export const capsuleMiniButtonClass =
   'h-[length:var(--composer-mini-control-height)] text-[length:var(--composer-caption-font-size)]';
 
 export const capsuleQuickKeyButtonClass =
-  'shrink-0 font-mono text-[length:var(--composer-font-size)] min-h-[length:var(--control-md)]';
+  'shrink-0 rounded-[calc(var(--radius-capsule)/2)] px-[length:var(--composer-popover-item-pad-x)] font-mono text-[length:var(--composer-font-size)] text-muted-foreground min-h-[length:var(--control-md)] hover:bg-accent/50 hover:text-foreground active:bg-accent/70 data-pressed:bg-accent/60';
+
+export const capsuleModeToggleGroupClass =
+  'rounded-[calc(var(--radius-capsule)/2)] bg-muted/40 p-[length:var(--composer-control-gap)]';
+
+export const capsuleScrollOverlaySurfaceClass =
+  `${capsuleFloatingSurfaceClass} rounded-[var(--radius-capsule)] p-[length:var(--composer-popover-inner-pad)]`;
+
+export const capsuleScrollOverlayButtonClass = capsuleSecondaryIconButtonClass;
 
 export const capsuleDropdownMinWidthClass =
   'min-w-[length:var(--composer-dropdown-min-width)]';
