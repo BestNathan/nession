@@ -8,19 +8,19 @@ commonLabels:
   env: staging-01
 
 resources:
-  - ../../../base/nession
-  - pv-pvc.yaml
+- ../../../base/nession
+- pv-pvc.yaml
 
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-cfb4cc9
+  newTag: agent-b64dff2
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-cfb4cc9
+  newTag: server-b64dff2
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-cfb4cc9
+  newTag: ui-b64dff2
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
