@@ -134,7 +134,7 @@ describe('CapsuleCommandsPopover', () => {
     act(() => {
       vi.advanceTimersByTime(CHAIN_LONG_PRESS_MS);
     });
-    fireEvent.pointerLeave(firstKey);
+    fireEvent.pointerUp(firstKey);
     expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
 
     const secondKey = screen.getByTestId('phys-key-Tab');
