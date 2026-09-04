@@ -1,5 +1,17 @@
 # GitOps 多环境发布模型 Implementation Plan (issue #592)
 
+> ⚠ **Scope amended 2026-09-05 (owner decisions recorded on issue #592).** This
+> plan's development-flow half was withdrawn: no feature→main, no release-please,
+> no quality/e2e retarget — the staging-branch gate, staging→main releases and
+> version-bump ritual are fully retained. What shipped is the deployment
+> decoupling (Phase 0-2 + the amended Phase 3 executed 2026-09-05): `gitops`
+> orphan branch consumed by ArgoCD, self-managed `nession-root` app-of-apps
+> (after the nitops handover), per-env overlays incl. the retained byte-identical
+> `environments/staging`, production zero-copy PVs, and staging.yml/release.yml
+> writing gitops deploy commits (`scripts/gitops-commit.sh`; production behind
+> Environment approval). `environments/staging-01` serves on-demand SHA deploys
+> (`deploy.yml`); `preprod` is dormant. Phases below marked 🔒 executed 2026-09-05.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 标 🔒 的任务/步骤只能由仓库 owner 执行(集群或 GitHub 设置权限),agent 执行到该处即停下汇报。
 
 **Goal:** 把 ArgoCD 消费的 desired state 从 `main` 迁到孤儿 `gitops` 分支,改为目录式多环境(staging-01/preprod/production),feature 分支经门禁直入 `main`,release-please 批量 SemVer 发布,生产 promotion 走 GitHub Environment 审批。

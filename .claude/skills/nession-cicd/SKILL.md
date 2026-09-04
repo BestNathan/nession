@@ -210,16 +210,23 @@ So the choice is not "rebase is broken" — it is that rebase makes correctness 
 
 **`--squash` is wrong for a further reason:** N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured historically: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
-### ArgoCD tracks `main`, not the `staging` branch
+### ArgoCD tracks the `gitops` orphan branch (since issue #592 cutover, 2026-09-05)
 
-Worth knowing independently of merge strategy, because it explains why `staging.yml` writes to `main`:
+Desired state left `main` entirely — the `gitops` branch holds the app-of-apps
+(`argocd/`), the env-agnostic base and one overlay per environment. The
+self-managed `nession-root` Application owns the children:
 
-| App | path | targetRevision |
+| App | path (on `gitops`) | notes |
 |---|---|---|
-| `nession` | `k8s/overlays/production` | `main` |
-| `nession-staging` | `k8s/overlays/staging` | `main` |
+| `nession` | `environments/production/nession` | zero-copy PVs; promotion needs Environment approval |
+| `nession-staging` | `environments/staging/nession` | retained legacy staging env, byte-identical to the old overlay |
+| `nession-staging-01` | `environments/staging-01/nession` | on-demand SHA deploys (`deploy.yml`) |
+| `nession-preprod` | `environments/preprod/nession` | dormant |
 
-The `staging` **branch** is not the deploy source for the staging **environment** — `staging.yml` builds on a push to `staging` but writes the overlay tag to `main`, and only that write reaches the cluster. Measured 2026-08-18: the `staging` branch's own overlay said `agent-67afd56` while the running staging pods were on `agent-aeb25f8`, the value from `main`. A consequence worth remembering: the overlay file on the `staging` branch is inert, so never "fix" a stale-looking tag there.
+Deploys are bot commits (`deploy(<env>): <ref>`) written by
+`scripts/gitops-commit.sh` from `staging.yml` / `release.yml` / `deploy.yml` —
+never a kustomize commit on `main`. Rollback is `git revert` of a deploy
+commit on `gitops`; ArgoCD syncs back.
 
 **If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway worktree off `origin/main`:
 
@@ -261,7 +268,7 @@ gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait o
 
 Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
 
-**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no `k8s/overlays/production` update, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
+**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no production deploy commit, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
 
 So the rule is:
 
@@ -298,13 +305,9 @@ Two consequences to accept:
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so nothing can de-duplicate them, and they ride into `main` on the release as noise. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
-### Why `main` and `staging` diverge between releases
+### Why `main` and `staging` never diverge anymore
 
-`staging.yml` writes `chore: update staging image tags` commits to **`main`**, not to `staging` (it checks out `ref: main` while running on a push to `staging`). So `main` gains a commit `staging` lacks after every staging build, and the two diverge between releases.
-
-Those kustomize commits touch only `k8s/overlays/staging/kustomization.yaml`, while feature work touches `crates/` and `web/src/` — **disjoint paths, so the release does not conflict.** Verified 2026-08-18 by dry-running the release merge in the steady state (`staging` ahead by one feature commit, `main` ahead by one kustomize commit): clean.
-
-That only holds while feature branches never carry a snapshot of the overlay file. **The overlay files under `k8s/overlays/**` are CI-owned on `main`; a feature branch must never touch them.** The 0.29.0 release conflict came from exactly that: a branch cut from `main` inherited a previous overlay bump and carried it into `staging`, where it then collided with `main`'s newer value.
+Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch, never on `main` — so `main` and `staging` only differ by unreleased feature work. The old mechanism (staging.yml writing kustomize commits to `main`) and its whole conflict class (0.29.0, overlay snapshots riding feature branches into release PRs) are gone: `main` is no longer a deploy target for anything.
 
 | Step | Method | Effect |
 |------|--------|--------|
@@ -367,16 +370,16 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 2. Builds web UI (`npm ci && npm run build`)
 3. Builds Rust binaries natively for amd64 AND arm64
 4. Creates multi-arch Docker images tagged with **hash** (`server-{sha}`, `agent-{sha}`, `ui-{sha}`)
-5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
-6. ArgoCD detects the kustomize change and syncs to staging k8s
+5. `deploy-staging-gitops` writes `deploy(staging): <sha>` to `gitops/environments/staging` via `scripts/gitops-commit.sh`
+6. ArgoCD detects the gitops change and syncs the staging environment
 
 **After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`), bump the version if warranted, then sync `main` → `staging` last. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
-3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags
+3. `promote-production` waits for GitHub Environment `production` approval, then writes `deploy(production): <version>` to `gitops/environments/production`
 4. ArgoCD syncs to production k8s
 
-**No manual steps after merge.** CI → ArgoCD is fully automatic.
+**No manual steps after merge** (except approving the production Environment). CI → ArgoCD is fully automatic.
 
 ## Quick Reference
 
@@ -400,8 +403,9 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 | `.github/workflows/quality.yml` | PR quality gate (rust-check + web-check) |
 | `.github/workflows/staging.yml` | Staging build + deploy (push to staging) |
 | `.github/workflows/release.yml` | Release build + deploy (push to main) |
-| `k8s/overlays/staging/kustomization.yaml` | Staging image tags (auto-updated by staging.yml) |
-| `k8s/overlays/production/kustomization.yaml` | Production image tags (auto-updated by release.yml) |
+| `.github/workflows/deploy.yml` | Manual SHA deploy to any gitops env (dispatch) |
+| `scripts/gitops-commit.sh` | The only gitops writer (deploy commits) |
+| `gitops` branch `environments/<env>/nession/kustomization.yaml` | Per-env image tags (deploy commits) |
 
 ### Observing Deployments
 
@@ -432,8 +436,9 @@ Merge to staging:
   → build-amd64 + build-arm64 (parallel): cargo zigbuild --release
   → docker: build + push hash-tagged images (server-{sha}-{arch}, etc.)
   → merge: docker buildx imagetools create (multi-arch manifests)
-  → update-staging-kustomize: commit hash-based tags to main (with [skip ci])
-  → ArgoCD: auto-sync to staging k8s
+  → deploy-staging-gitops: scripts/gitops-commit.sh staging <sha>
+    (gitops commit "deploy(staging): <sha>")
+  → ArgoCD: auto-sync staging environment from gitops
 
 Merge to main (release PR merged with --merge, then optional version bump):
   → release.yml:
@@ -442,8 +447,9 @@ Merge to main (release PR merged with --merge, then optional version bump):
   → merge: multi-arch version manifests
   → build-macos: native macOS binaries
   → create-release: GitHub Release with all binaries
-  → update-prod-kustomize: commit version-based tags to main
-  → ArgoCD: auto-sync to production k8s
+  → promote-production (Environment `production` approval gate):
+    scripts/gitops-commit.sh production <version>
+  → ArgoCD: auto-sync production from gitops
 ```
 
 ## Common Mistakes
