@@ -93,4 +93,20 @@ describe('CapsuleCommandsPopover', () => {
     expect(sheet).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
   });
+
+  it('keeps the mobile commands sheet backdrop clear', () => {
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={vi.fn()}
+        sendText={sendText}
+        showPhysKeys
+        presentation="sheet"
+        trigger={<button type="button" data-testid="capsule-commands-more">More</button>}
+      />,
+    );
+    const overlay = document.querySelector('[data-slot="sheet-overlay"]');
+    expect(overlay).toBeInTheDocument();
+    expect(overlay?.className).not.toContain('backdrop-blur-xs');
+  });
 });
