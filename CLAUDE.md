@@ -67,12 +67,9 @@ nession/
 │   ├── entrypoint-agent.sh
 │   └── nginx.conf.template
 │
-├── k8s/                      # Kubernetes manifests (kustomize)
-│   ├── kustomization.yaml
-│   ├── namespace.yaml, secret.yaml, pvc.yaml
-│   ├── deployment-{server,agent,ui}.yaml
-│   ├── service-{server,agent,ui}.yaml
-│   └── ingress-{server,agent,ui}.yaml
+├── (gitops branch)           # ArgoCD desired state — k8s/ + argocd/ moved to the
+│                             # gitops orphan branch (issue #592); main carries
+│                             # application source only
 │
 ├── Dockerfile.server         # Multi-stage: Rust build + nginx + UI
 ├── Dockerfile.agent          # Multi-stage: Rust build + nginx + UI + tmux
@@ -285,11 +282,27 @@ Triggered by push to `main` or PR. See `.github/workflows/docker-publish.yml`.
 
 ### Deploying to Kubernetes
 
-Deploys are automatic: CI updates the overlay image tags and ArgoCD syncs. `k8s/` has no top-level kustomization — always target an overlay.
+**ArgoCD consumes the `gitops` orphan branch — not `main`** (issue #592, scoped
+2026-09-05: the development flow keeps its staging-branch gates and
+staging→main releases; only deployment desired state moved). The branch holds
+`base/nession` (env-agnostic manifests), `environments/<env>/nession` (one
+kustomize overlay per env) and `argocd/` (self-managed app-of-apps). Deploys
+are bot commits on `gitops`:
+
+- **staging branch push** → `staging.yml` builds sha images → `deploy-staging-gitops`
+  writes `deploy(staging): <sha>` to `gitops/environments/staging` → ArgoCD syncs.
+- **staging→main release** (version bump) → `release.yml` builds version images →
+  `promote-production` writes `deploy(production): <ver>` **after GitHub
+  Environment `production` approval** → ArgoCD syncs.
+- **Manual SHA deploy** to any env dir (e.g. `staging-01`): dispatch `deploy.yml`.
+
+All three go through `scripts/gitops-commit.sh` (gitops-writer concurrency +
+rebase-retry). Never edit the `gitops` branch by hand except rollback
+(`git revert` a deploy commit — ArgoCD syncs back). Inspect overlays with:
 
 ```bash
-kubectl kustomize k8s/overlays/staging        # inspect before applying
-kubectl apply -k k8s/overlays/production      # bootstrapping / ArgoCD down only
+git show gitops:environments/production/nession/kustomization.yaml   # current prod tags
+git clone -b gitops <repo> /tmp/gitops                                # full tree
 ```
 
 Service ports:
@@ -350,7 +363,8 @@ git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "..."
 gh pr merge <PR-NUMBER> --merge   # no --auto
 
-# 8. WATCH RELEASE — wait for release.yml to finish writing the prod overlay tag
+# 8. WATCH RELEASE — wait for release.yml's promote-production (Environment
+#    approval pauses it) to write the gitops deploy commit, then ArgoCD rollout
 ./scripts/deploy-watch.sh prod
 
 # 9. SYNC — main → staging. Always a fast-forward; no force push.
@@ -367,7 +381,7 @@ Those orphans are usually harmless, because a later rebase skips them by patch-i
 
 `--squash` is worse still: N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
-**⚠ Step 9 is not optional, and it goes last.** Steps 7 and 8 both add commits to `main` (the bump, then `release.yml`'s `chore: update prod image tags`), so syncing before them leaves `staging` two commits behind for no reason. Sync once `main` has stopped moving — it is still a fast-forward, since `staging`'s tip is an ancestor of everything added after it.
+**⚠ Step 9 is not optional, and it goes last.** Steps 7 and 8 both add commits to `main` (the bump, then `release.yml`'s `promote-production` gitops deploy commit — on the `gitops` branch, not main), so syncing before them leaves `staging` two commits behind for no reason. Sync once `main` has stopped moving — it is still a fast-forward, since `staging`'s tip is an ancestor of everything added after it.
 
 Branching from `origin/main` (step 1 worktree base) is only correct while `main` is not behind `staging`. Skip the sync and `main` starts missing unreleased work; new worktrees then lack code they need to build on.
 
@@ -387,7 +401,7 @@ gh pr merge <PR-NUMBER> --merge
 
 Then sync step 9 as usual. Measured 2026-08-17 on the 0.29.0 release: `staging → main` reported `mergeable: false`, conflicting on `k8s/overlays/staging/kustomization.yaml`; the cherry-pick branch merged cleanly. Note `mergeable: false` blocks every merge method alike, so switching method never routes around a real conflict. That particular conflict came from the rebase flow rewriting an inherited overlay commit, which `--merge` no longer does — so a release conflict should now be rare enough to treat as a genuine content clash worth reading carefully.
 
-**⚠ Step 7 is mandatory when the release contains runtime changes.** 15 of `release.yml`'s 16 jobs are gated on `version_changed` — only `version-check` itself runs — so a release merge that carries no version bump builds nothing — no images, no GitHub Release, no production overlay update. "No bump" means "merged to `main`, not released to production". Test-only or docs-only releases can skip it; anything touching `crates/` or `web/src/` runtime code cannot.
+**⚠ Step 7 is mandatory when the release contains runtime changes.** 15 of `release.yml`'s 16 jobs are gated on `version_changed` — only `version-check` itself runs — so a release merge that carries no version bump builds nothing — no images, no GitHub Release, no production deploy commit. "No bump" means "merged to `main`, not released to production". Test-only or docs-only releases can skip it; anything touching `crates/` or `web/src/` runtime code cannot.
 
 **⚠ All four version files move together.** `release.yml` tags server/agent from `Cargo.toml` and ui from `web/package.json`; `version-check` now fails the run if the two disagree.
 
@@ -420,9 +434,7 @@ Every branch comes off `main` (via worktree — never `git checkout -b` in proje
 - **The PR body never enters git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body, and each commit keeps its own message. Only squash ever used the body, and nothing squashes. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
-- **Never let a feature branch *edit* `k8s/overlays/**`.** Those files are CI-owned on `main` (`staging.yml` and `release.yml` write them), so a hand edit races the workflow that owns them. Overlay edits, if ever needed by hand, go direct to `main`.
-
-  What is *no longer* a problem: a branch cut from `main` inherits whatever overlay commit was current, and under `--merge` that commit reaches `staging` with its **original SHA** — shared ancestry, not a divergent edit, so it cannot conflict at release. That inheritance is exactly what broke the 0.29.0 release while the repo rebased. Measured with `git merge-tree`: with a *rebased* copy of an overlay commit on `staging`, `staging → main` conflicted on `k8s/overlays/staging/kustomization.yaml` (exit 1); the same tree without it merged clean (exit 0).
+- **Never let a feature branch *edit* desired state.** Deploy commits live only on the `gitops` branch and are written solely by `scripts/gitops-commit.sh` (staging.yml / release.yml / deploy.yml) or by a human rollback (`git revert`). A branch touching `gitops` desired state would race the workflows that own it. (The old `k8s/overlays/**` on main is gone — moved to `gitops` in issue #592; the conflict class it caused at release died with it, because deploy commits never touch `main`.)
 - **After every release, sync `main` → `staging`.** It is a fast-forward; never force-push `staging`.
 
 Mechanics and rationale: `nession-cicd` skill.
@@ -479,7 +491,7 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 8. `./scripts/deploy-watch.sh prod`
 9. Sync `main` → `staging` (fast-forward, see **Development Cycle** step 9) — mandatory, and goes last
 
-**No manual k8s step.** `release.yml` opens the PR that sets production image tags; ArgoCD syncs. Never hand-edit overlay tags, never `kubectl apply` as part of a release.
+**No manual k8s step.** `release.yml`'s `promote-production` writes the gitops deploy commit after Environment approval; ArgoCD syncs. Never hand-edit gitops tags, never `kubectl apply` as part of a release (the only manual apply ever was the one-time `argocd/app-of-apps.yaml` bootstrap at cutover).
 
 For version bumps and PR mechanics, use the `nession-cicd` skill (`.claude/skills/nession-cicd/SKILL.md`).
 
