@@ -77,4 +77,20 @@ describe('CapsuleCommandsPopover', () => {
     await userEvent.click(screen.getByTestId('capsule-add-command'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('renders bottom sheet when presentation is sheet', () => {
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={vi.fn()}
+        sendText={sendText}
+        showPhysKeys
+        presentation="sheet"
+        trigger={<button type="button" data-testid="capsule-commands-more">More</button>}
+      />,
+    );
+    const sheet = document.querySelector('[data-slot="sheet-content"][data-side="bottom"]');
+    expect(sheet).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Commands' })).toBeInTheDocument();
+  });
 });

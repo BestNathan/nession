@@ -66,6 +66,7 @@ export function CapsuleCommandsRow({
             sendText={sendText}
             disabled={disabled}
             showPhysKeys
+            presentation="sheet"
             trigger={<CapsuleCommandsMoreTrigger disabled={disabled} />}
           />
         </div>
