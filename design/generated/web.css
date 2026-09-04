@@ -106,6 +106,7 @@
   --composer-terminal-clearance-gap: 0.375rem;
   --composer-caption-font-size: 0.625rem;
   --composer-popover-width: 20rem;
+  --composer-popover-viewport-inset: 1.5rem;
   --composer-popover-max-height: 45vh;
   --composer-popover-list-max-height: 38vh;
   --composer-popover-body-max-height: 42vh;
@@ -311,6 +312,7 @@
   --spacing-composer-terminal-clearance-gap: var(--composer-terminal-clearance-gap);
   --spacing-composer-caption-font-size: var(--composer-caption-font-size);
   --spacing-composer-popover-width: var(--composer-popover-width);
+  --spacing-composer-popover-viewport-inset: var(--composer-popover-viewport-inset);
   --spacing-composer-popover-max-height: var(--composer-popover-max-height);
   --spacing-composer-popover-list-max-height: var(--composer-popover-list-max-height);
   --spacing-composer-popover-body-max-height: var(--composer-popover-body-max-height);
@@ -372,6 +374,7 @@
   --composer-terminal-clearance-gap: 0.375rem;
   --composer-caption-font-size: 0.625rem;
   --composer-popover-width: 20rem;
+  --composer-popover-viewport-inset: 1.5rem;
   --composer-popover-max-height: 45vh;
   --composer-popover-list-max-height: 38vh;
   --composer-popover-body-max-height: 42vh;
