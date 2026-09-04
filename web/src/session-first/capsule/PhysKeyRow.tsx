@@ -115,38 +115,39 @@ export function PhysKeyRow({
         {visibleKeys.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
-        {dropdownKeys.length > 0 ? (
-          <div className={capsulePhysKeyOverflowClass}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={capsulePhysKeyButtonClass}
-                    disabled={disabled}
-                    data-testid="phys-key-overflow"
-                    aria-label="More keys"
-                  >
-                    <MoreHorizontal className={capsulePhysKeyIconClass} />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className={capsuleDropdownMinWidthClass}>
-                {dropdownKeys.map((keyDef) => (
-                  <DropdownMenuItem
-                    key={keyDef.label}
-                    onClick={() => onKey(keyDef.seq)}
-                    className={capsuleDropdownItemClass}
-                  >
-                    {keyDef.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ) : null}
       </div>
+
+      {dropdownKeys.length > 0 ? (
+        <div className={capsulePhysKeyOverflowClass}>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={capsulePhysKeyButtonClass}
+                  disabled={disabled}
+                  data-testid="phys-key-overflow"
+                  aria-label="More keys"
+                >
+                  <MoreHorizontal className={capsulePhysKeyIconClass} />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className={capsuleDropdownMinWidthClass}>
+              {dropdownKeys.map((keyDef) => (
+                <DropdownMenuItem
+                  key={keyDef.label}
+                  onClick={() => onKey(keyDef.seq)}
+                  className={capsuleDropdownItemClass}
+                >
+                  {keyDef.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
     </div>
   );
 }

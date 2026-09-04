@@ -58,7 +58,10 @@ describe('CapsuleCommandsPopover', () => {
     const scroll = screen.getByTestId('phys-key-scroll');
     expect(scroll).toHaveClass('overflow-x-auto');
     expect(scroll).toHaveClass('flex-1');
-    expect(screen.getByTestId('phys-key-overflow')).toBeInTheDocument();
+    const overflow = screen.getByTestId('phys-key-overflow');
+    expect(overflow).toBeInTheDocument();
+    expect(overflow.parentElement).toHaveClass('shrink-0');
+    expect(scroll.contains(overflow)).toBe(false);
     expect(screen.getByTestId('phys-key-Ctrl+C')).toBeInTheDocument();
 
     for (const label of ['↑', '←', '↓', '→']) {
