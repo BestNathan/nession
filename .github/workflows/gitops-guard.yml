@@ -9,23 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: reject non-gitops paths and non-semver production tags
+      # Stateless validation of the whole branch tree at HEAD — no dependence
+      # on event.before, so history rewrites (pre-cutover) cannot break it.
+      - name: reject app-source paths and non-semver production tags
         run: |
-          # First push of the orphan branch has no HEAD^: event.before is all
-          # zeros then — fall back to diff-tree against the single commit.
-          if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            CHANGED=$(git diff --name-only "${{ github.event.before }}" HEAD)
-          else
-            CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD)
-          fi
-          # 1) Only gitops/**, README and this workflow may exist on this branch;
-          #    application source paths (crates/, web/, ...) are rejected.
-          BAD=$(echo "$CHANGED" | grep -vE '^(gitops/|README\.md$|\.github/workflows/gitops-guard\.yml$)') || true
-          [ -z "$BAD" ] || { echo "non-gitops path in gitops branch push: $BAD"; exit 1; }
+          # 1) This branch may only carry desired state: argocd/, base/,
+          #    environments/, README and this workflow. Application source
+          #    paths (crates/, web/, Cargo.toml, ...) are rejected.
+          BAD=$(git ls-tree -r --name-only HEAD \
+            | grep -vE '^(argocd/|base/|environments/|README\.md$|\.github/workflows/gitops-guard\.yml$)') || true
+          [ -z "$BAD" ] || { echo "non-desired-state path in gitops branch: $BAD"; exit 1; }
           # 2) environments/production image tags must be SemVer (no v prefix,
           #    e.g. 0.36.0) — production only ever ships released versions.
-          for f in $(echo "$CHANGED" | grep '^gitops/environments/production/' || true); do
-            grep -E '^\s+newTag:' "$f" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+' \
+          for f in $(git ls-tree -r --name-only HEAD | grep '^environments/production/' | grep 'kustomization\.yaml$'); do
+            git show "HEAD:$f" | grep -E '^\s+newTag:' | grep -qE '[0-9]+\.[0-9]+\.[0-9]+' \
               || { echo "non-semver tag in production: $f"; exit 1; }
           done

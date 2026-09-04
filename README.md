@@ -16,10 +16,11 @@ deploy(production): 0.36.0     ← release promotion (Environment approval)
 - `.github/workflows/release.yml` (on `main`) — release promotions to preprod/production at SemVer tags.
 - Humans — only for rollback (`git revert` a deploy commit + ArgoCD re-sync).
 
-`gitops-guard` CI rejects non-`gitops/**` paths and non-SemVer tags in
-`environments/production/**`. Push commits on top of the remote tip; two
-writers never race thanks to the `gitops-writer` concurrency group plus a
-rebase-retry loop in `scripts/gitops-commit.sh`.
+`gitops-guard` CI rejects any non-desired-state path (`argocd/`, `base/`,
+`environments/`, README and the guard itself are the only allowed ones) and
+non-SemVer tags in `environments/production/**`. Push commits on top of the
+remote tip; two writers never race thanks to the `gitops-writer` concurrency
+group plus a rebase-retry loop in `scripts/gitops-commit.sh`.
 
 ## Layout
 
