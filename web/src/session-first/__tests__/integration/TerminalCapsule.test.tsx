@@ -132,6 +132,19 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('capsule-shell').className).toMatch(/radius-capsule/);
   });
 
+  it('uses pill shape on app commands mode', () => {
+    render(
+      <TerminalCapsule
+        experience="app"
+        mode="commands"
+        onModeChange={vi.fn()}
+        sendText={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
+    expect(screen.getByTestId('capsule-shell').className).toMatch(/composer-shell-pill-radius/);
+  });
+
   it('still accepts legacy variant prop', () => {
     render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-experience', 'web');

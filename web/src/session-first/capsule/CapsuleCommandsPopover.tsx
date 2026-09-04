@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Terminal } from 'lucide-react';
+import { useState, type ButtonHTMLAttributes } from 'react';
+import { MoreHorizontal, Terminal } from 'lucide-react';
 import { PRESETS } from '@/components/quickCommands';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -148,20 +148,24 @@ export function CapsuleCommandsPopover({
 export function CapsuleCommandsMoreTrigger({
   disabled,
   className,
-}: {
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
   disabled?: boolean;
-  className?: string;
 }) {
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
       disabled={disabled}
       data-testid="capsule-commands-more"
-      className={cn('min-h-[length:var(--control-md)]', capsuleIconButtonClass, className)}
+      className={cn(
+        capsuleIconButtonClass,
+        'inline-flex items-center justify-center rounded-full',
+        className,
+      )}
       aria-label="More commands"
+      {...rest}
     >
-      ⋯
-    </Button>
+      <MoreHorizontal className="size-[length:var(--icon-md)]" />
+    </button>
   );
 }
