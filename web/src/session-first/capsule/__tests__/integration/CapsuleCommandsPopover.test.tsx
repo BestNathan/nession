@@ -93,7 +93,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('renders the anchored popover when presentation is sheet', () => {
+  it('renders the mobile anchored popover', () => {
     render(
       <CapsuleCommandsPopover
         open

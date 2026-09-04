@@ -46,7 +46,7 @@ describe('CapsuleCommandsRow', () => {
     expect(screen.getByTestId('capsule-commands-more')).toBeInTheDocument();
   });
 
-  it('opens commands sheet when more trigger is clicked', async () => {
+  it('opens anchored popover when more trigger is clicked', async () => {
     const onCommandsOpenChange = vi.fn();
     render(
       <CapsuleCommandsRow
