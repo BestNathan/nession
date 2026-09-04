@@ -55,6 +55,11 @@ describe('CapsuleCommandsPopover', () => {
       />,
     );
     expect(screen.getByTestId('phys-key-row')).toBeInTheDocument();
+    const scroll = screen.getByTestId('phys-key-scroll');
+    expect(scroll).toHaveClass('overflow-x-auto');
+    expect(scroll).toHaveClass('flex-1');
+    expect(screen.getByTestId('phys-key-overflow')).toBeInTheDocument();
+    expect(screen.getByTestId('phys-key-Ctrl+C')).toBeInTheDocument();
   });
 
   it('runs preset command on click', async () => {
@@ -113,6 +118,26 @@ describe('CapsuleCommandsPopover', () => {
 
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith('\x1b');
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('sends an overflow physical key once and closes after execution', async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={onOpenChange}
+        sendText={sendText}
+        showPhysKeys
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('phys-key-overflow'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'PgDn' }));
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith('\x1b[6~');
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
