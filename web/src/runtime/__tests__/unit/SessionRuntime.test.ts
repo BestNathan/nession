@@ -235,6 +235,24 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('publishes a cached session snapshot for React external stores', () => {
+    const rt = new SessionRuntime(makeConfig());
+    const changes = vi.fn();
+    const unsubscribe = rt.subscribe(changes);
+
+    expect(rt.getSnapshot().activeUrl).toBe('ws://a/ws');
+    rt.setTransportReady(true);
+    rt.updateViewportSize({ cols: 120, rows: 40 });
+
+    expect(changes).toHaveBeenCalledTimes(2);
+    expect(rt.getSnapshot()).toMatchObject({
+      transportReady: true,
+      lastResize: { cols: 120, rows: 40 },
+    });
+    unsubscribe();
+    rt.dispose();
+  });
+
   it('opens one socket when route changes with same URL (configure + forceReconnect)', async () => {
     let openCount = 0;
     vi.stubGlobal('WebSocket', class {

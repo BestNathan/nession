@@ -8,7 +8,6 @@ export interface SessionRuntimeLease {
 
 interface RegistryEntry {
   runtime: SessionRuntime;
-  transportFirst: boolean;
   /** Live lease ids issued against THIS entry generation. */
   leases: Set<number>;
 }
@@ -31,17 +30,8 @@ export class SessionRuntimeRegistry {
     }
 
     let entry = this.entries.get(sessionId);
-    if (entry) {
-      if (entry.transportFirst !== config.transportFirst) {
-        // Attach-driver mode changed: a fresh runtime is required. Old leases
-        // keep their ids but can no longer match this entry's lease set.
-        entry.runtime.dispose();
-        this.entries.delete(sessionId);
-        entry = undefined;
-      }
-    }
     if (!entry) {
-      entry = { runtime: new SessionRuntime(config), transportFirst: config.transportFirst, leases: new Set() };
+      entry = { runtime: new SessionRuntime(config), leases: new Set() };
       this.entries.set(sessionId, entry);
     }
 

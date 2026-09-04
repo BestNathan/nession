@@ -149,11 +149,18 @@ function useEndRelayOnDisconnect(opts: {
 export interface UseTerminalOrchestrationOptions {
   onDisconnect: () => void;
   onError: (error: Error) => void;
+  /** UI-specific Ctrl-D behavior; transport disconnect stays shared. */
+  onCtrlD?: () => void;
+  rendererType?: 'webgl' | 'canvas';
+  scrollbackMode?: 'legacy' | 'local-buffer';
 }
 
 export function useTerminalOrchestration({
   onDisconnect,
   onError,
+  onCtrlD,
+  rendererType = 'canvas',
+  scrollbackMode = 'local-buffer',
 }: UseTerminalOrchestrationOptions) {
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
@@ -167,7 +174,7 @@ export function useTerminalOrchestration({
   const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, transportKey: runtimeTransportKey } = useP2PAttachTransport({
+  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -176,10 +183,14 @@ export function useTerminalOrchestration({
     wsService,
   });
 
-  const { terminalState, reconnectCount } = useSessionFirstTerminalAttach({
+  const mirroredAttach = useSessionFirstTerminalAttach({
     sessionId,
     runtime,
   });
+  // Runtime snapshot is the protocol source of truth. The attach hook keeps
+  // the legacy atom mirror alive for older chrome/components during migration.
+  const terminalState = snapshot?.phase ?? mirroredAttach.terminalState;
+  const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
 
   const handleDisconnect = useEndRelayOnDisconnect({
     effectiveMode, wsService, sessionId, onDisconnect,
@@ -197,11 +208,12 @@ export function useTerminalOrchestration({
     transportFactory,
     // Canvas avoids WebGL context exhaustion when the viewport remounts during
     // address-plan resolution / StrictMode — lost GL contexts render blank.
-    rendererType: 'canvas',
+    rendererType,
     fontSize: PROFILES[deviceProfile].fontSize,
     scrollback: PROFILES[deviceProfile].scrollback,
     deviceProfile,
-    scrollbackMode: 'local-buffer',
+    scrollbackMode,
+    runtime,
   });
 
   const banner = useReconnectBanner({
@@ -214,10 +226,10 @@ export function useTerminalOrchestration({
 
   useEffect(() => {
     if (!controller) { return; }
-    controller.onCtrlD = handleDisconnect;
+    controller.onCtrlD = onCtrlD ?? handleDisconnect;
     controller.onError = onError;
     controller.onDisconnect = handleDisconnect;
-  }, [controller, handleDisconnect, onError]);
+  }, [controller, handleDisconnect, onCtrlD, onError]);
 
   useEffect(() => {
     if (terminalState === 'attached') {
@@ -229,10 +241,12 @@ export function useTerminalOrchestration({
     sessionId,
     controller,
     isSwitching,
-    inputDisabled,
+    waitingForAddressPlan,
     viewportReady,
+    inputDisabled,
     terminalState,
     reconnectCount,
     transportKey,
+    fileOps,
   };
 }

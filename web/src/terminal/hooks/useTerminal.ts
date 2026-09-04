@@ -5,6 +5,7 @@ import { createTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { DeviceProfile, TerminalScrollbackMode } from '../types';
+import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
 export interface UseTerminalOptions {
   sessionId: string;
@@ -18,6 +19,8 @@ export interface UseTerminalOptions {
   deviceProfile?: DeviceProfile;
   /** Whether history is owned by xterm's browser buffer or the legacy path. */
   scrollbackMode?: TerminalScrollbackMode;
+  /** Shared session lifecycle owner receiving viewport readiness and size. */
+  runtime?: SessionRuntime | null;
 }
 
 function isCurrentControllerGeneration(
@@ -55,6 +58,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     scrollback,
     deviceProfile,
     scrollbackMode = 'legacy',
+    runtime,
   } = options;
 
   const controller = useMemo(() => {
@@ -74,7 +78,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     // late (passive-effect) binding used to miss that first event, leaving
     // terminalTransportReadyAtom false and blocking the SessionRuntime's
     // transportReady-gated attach forever (issue #598).
-    const events = createTerminalRuntimeAdapter();
+    const events = createTerminalRuntimeAdapter(runtime);
     return new TerminalController(
       session,
       transportFactory,
@@ -87,7 +91,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
         events,
       },
     );
-  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, scrollbackMode]);
+  }, [sessionId, sessionName, mode, transportFactory, rendererType, fontSize, scrollback, deviceProfile, scrollbackMode, runtime]);
 
   // Dispose replaced controllers (session switch). Never dispose synchronously
   // in cleanup: StrictMode replays effects as unmount→remount and would

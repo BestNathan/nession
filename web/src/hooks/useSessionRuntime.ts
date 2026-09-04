@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
 import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
-import type { SessionRuntime, SessionRuntimeConfig } from '@/runtime/SessionRuntime';
+import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
 import type { ConnectionState } from '@/services/socket/types';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { FileOps } from '@/services/fileOps';
 import type { RelayServerConnection } from '@/runtime/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
-  transportFirst: boolean;
+  /** @deprecated Attach ownership is always SessionRuntime-owned. */
+  transportFirst?: boolean;
   /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
   /** Relay-mode server lifecycle (beginRelay on reconnect). Required for hidden-viewport recovery. */
@@ -21,6 +22,7 @@ export interface UseSessionRuntimeOptions {
 
 export interface UseSessionRuntimeResult {
   runtime: SessionRuntime | null;
+  snapshot: SessionRuntimeSnapshot | null;
   p2pConnection: P2PConnection | null;
   p2pState: ConnectionState;
   fileOps: FileOps | null;
@@ -28,6 +30,29 @@ export interface UseSessionRuntimeResult {
   transportKey: string | null;
   waitingForAddressPlan: boolean;
   addressPlan: ReturnType<typeof useAddressPlan>;
+}
+
+const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
+  sessionId: '',
+  phase: 'idle',
+  transportGeneration: 0,
+  connectionState: 'disconnected',
+  p2pConnection: null,
+  activeUrl: null,
+  waitingForAddressPlan: false,
+  transportReady: false,
+  lastResize: null,
+  reconnectCount: 0,
+};
+const EMPTY_RUNTIME_SUBSCRIBE = () => () => {};
+const EMPTY_RUNTIME_GET_SNAPSHOT = () => EMPTY_RUNTIME_SNAPSHOT;
+
+/** React bridge for runtime-owned state. Jotai remains for UI preferences. */
+export function useSessionRuntimeSnapshot(runtime: SessionRuntime | null): SessionRuntimeSnapshot | null {
+  const subscribe = runtime?.subscribe ?? EMPTY_RUNTIME_SUBSCRIBE;
+  const getSnapshot = runtime?.getSnapshot ?? EMPTY_RUNTIME_GET_SNAPSHOT;
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return runtime ? snapshot : null;
 }
 
 function useForcedRelayReset(planUrlsKey: string, setForcedRelay: (v: boolean) => void): void {
@@ -319,7 +344,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       addressPlan: inP2PTransport
         ? { urls: addressPlan.urls, ready: addressPlanReady }
         : { urls: [], ready: true },
-      transportFirst: options.transportFirst,
+      transportFirst: true,
       routeIntentEpoch,
       lastResize,
       transportReady,
@@ -338,7 +363,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     inP2PTransport,
     addressPlanReady,
     addressPlan.urls,
-    options.transportFirst,
     options.wsService,
     routeIntentEpoch,
     lastResize,
@@ -346,6 +370,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   ]);
 
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);
+  const snapshot = useSessionRuntimeSnapshot(runtime);
 
   const { p2pConnection, p2pState } = useRuntimeConnectionSync({
     sessionId,
@@ -353,7 +378,9 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     runtimeConfig,
     inP2PTransport,
     configOwner: options.configOwner ?? false,
-    mirrorAttachPhase: options.transportFirst,
+    // Deprecated callers may still opt out of the atom mirror, but this does
+    // not change runtime ownership or the transport protocol.
+    mirrorAttachPhase: options.transportFirst ?? true,
     setP2pConnection,
     setP2pState,
     setForcedRelay,
@@ -370,6 +397,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
 
   return {
     runtime,
+    snapshot,
     p2pConnection,
     p2pState,
     fileOps,

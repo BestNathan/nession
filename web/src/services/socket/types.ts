@@ -14,6 +14,7 @@ export interface RequestOptions {
 export interface MessageRouter {
   send(message: SocketMessage): void;
   subscribe(type: string, handler: (payload: unknown, raw: SocketMessage) => void): () => void;
+  onBinary(handler: (data: ArrayBuffer) => void): () => void;
   request<T>(type: string, payload: Record<string, unknown>, options?: RequestOptions): Promise<T>;
   /** Reject all in-flight correlated requests (transport generation loss). */
   failPending(error: Error): void;

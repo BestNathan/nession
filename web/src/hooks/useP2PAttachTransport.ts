@@ -23,16 +23,17 @@ interface UseP2PAttachTransportResult {
   fileOps: import('@/services/fileOps').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
   transportKey: string | null;
+  snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;
 }
 
 /**
  * P2P attach transport: address rotation + relay fallback via shared SessionRuntime.
  */
 export function useP2PAttachTransport({
-  transportFirst = false,
+  transportFirst = true,
   wsService,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
-  const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, transportKey } = useSessionRuntime({
+  const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, snapshot, transportKey } = useSessionRuntime({
     transportFirst,
     configOwner: true,
     wsService,
@@ -47,5 +48,6 @@ export function useP2PAttachTransport({
     fileOps,
     runtime,
     transportKey,
+    snapshot,
   };
 }

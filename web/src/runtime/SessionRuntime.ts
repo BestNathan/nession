@@ -2,7 +2,6 @@ import type { AttachInfo, ConnectionStatus } from '@/types';
 import type { AddressPlan } from '@/hooks/useAddressPlan';
 import type { RelayServerConnection } from '@/runtime/relayServerConnection';
 import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
-import { createP2PConnectionAdapter } from '@/services/socket/P2PConnectionAdapter';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
@@ -18,7 +17,8 @@ export interface SessionRuntimeConfig {
   manualOverride: string | null;
   forcedRelay: boolean;
   addressPlan: AddressPlan;
-  transportFirst: boolean;
+  /** @deprecated Runtime owns attach timing for every UI. */
+  transportFirst?: boolean;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
@@ -32,6 +32,15 @@ export interface RuntimeMirrorSnapshot {
   transportGeneration: number;
   connectionState: ConnectionState;
   p2pConnection: P2PConnection | null;
+}
+
+export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
+  sessionId: string;
+  activeUrl: string | null;
+  waitingForAddressPlan: boolean;
+  transportReady: boolean;
+  lastResize: { cols: number; rows: number } | null;
+  reconnectCount: number;
 }
 
 export type SessionRuntimeEvent =
@@ -64,11 +73,15 @@ export class SessionRuntime {
   private disconnectHandling = false;
   private relayServerUnsub: (() => void) | null = null;
   private disposed = false;
+  private snapshot: SessionRuntimeSnapshot;
+  private readonly snapshotListeners = new Set<() => void>();
 
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
     this.routeIntentEpoch = config.routeIntentEpoch;
-    this.attachState = new AttachStateMachine({ transportFirst: config.transportFirst });
+    // Both UI implementations use the same transport-first attach protocol.
+    // The deprecated config flag remains accepted for old callers only.
+    this.attachState = new AttachStateMachine({ transportFirst: true });
     this.attachController = new SessionAttachController(this.attachState);
     this.addressPolicy = new AddressAttachPolicy({
       attachInfo: config.attachInfo,
@@ -80,6 +93,7 @@ export class SessionRuntime {
     });
     this.lastResize = config.lastResize ?? null;
     this.transportReady = config.transportReady ?? false;
+    this.snapshot = this.buildSnapshot();
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
         this.attachedTransportGeneration = this.transportGeneration;
@@ -100,14 +114,16 @@ export class SessionRuntime {
       for (const listener of this.attachOutcomeListeners) {
         listener(result);
       }
+      this.emitSnapshot();
     });
     this.syncAgentClient();
     this.wireRelayServerHandler();
     this.driveRelayAttach();
+    this.snapshot = this.buildSnapshot();
   }
 
   get transportFirstMode(): boolean {
-    return this.config.transportFirst;
+    return true;
   }
 
   getMirrorSnapshot(): RuntimeMirrorSnapshot {
@@ -117,6 +133,34 @@ export class SessionRuntime {
       connectionState: this.agentClient?.connectionState ?? 'disconnected',
       p2pConnection: this.config.forcedRelay ? null : this.p2pAdapter,
     };
+  }
+
+  /** Cached external-store snapshot consumed by either terminal UI. */
+  getSnapshot = (): SessionRuntimeSnapshot => this.snapshot;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.snapshotListeners.add(listener);
+    return () => this.snapshotListeners.delete(listener);
+  };
+
+  setTransportReady(ready: boolean): void {
+    if (this.transportReady === ready) {
+      return;
+    }
+    this.transportReady = ready;
+    if (ready) {
+      this.maybeStartP2PAttach();
+      this.driveRelayAttach();
+    }
+    this.emitSnapshot();
+  }
+
+  updateViewportSize(size: { cols: number; rows: number }): void {
+    if (this.lastResize?.cols === size.cols && this.lastResize?.rows === size.rows) {
+      return;
+    }
+    this.lastResize = size;
+    this.emitSnapshot();
   }
 
   subscribeAttachOutcomes(handler: (result: AttachTransitionResult) => void): () => void {
@@ -210,6 +254,7 @@ export class SessionRuntime {
     if (routeChanged) {
       this.addressPolicy.resetIndex();
       this.handleRouteIntentChange();
+      this.emitSnapshot();
       return this.getMirrorSnapshot();
     }
 
@@ -221,6 +266,7 @@ export class SessionRuntime {
     // A relay attach may be due now: forced-relay context just applied, or the
     // xterm viewport became ready while relay attach was pending.
     this.driveRelayAttach();
+    this.emitSnapshot();
     return this.getMirrorSnapshot();
   }
 
@@ -239,6 +285,7 @@ export class SessionRuntime {
     // The P2P → relay transport flip is complete; relay attach follows in the
     // same tick unless the server WS is not authenticated yet.
     this.requestRelayAttach();
+    this.emitSnapshot();
   }
 
   private handleRouteIntentChange(): void {
@@ -252,11 +299,6 @@ export class SessionRuntime {
   }
 
   private maybeStartP2PAttach(): void {
-    // Legacy TerminalWorkspace (transportFirst: false) owns client.attach via
-    // useTerminalStateMachine — runtime only manages the socket here.
-    if (!this.config.transportFirst) {
-      return;
-    }
     if (this.config.forcedRelay || !this.p2pAdapter) {
       return;
     }
@@ -270,8 +312,7 @@ export class SessionRuntime {
     if (phase === 'idle' || phase === 'failed') {
       return;
     }
-    const ready = this.config.transportFirst ? this.transportReady : true;
-    if (!this.attachController.canStartAttach(ready, true, false, 'p2p')) {
+    if (!this.attachController.canStartAttach(this.transportReady, true, false, 'p2p')) {
       return;
     }
     this.attachController.startP2PAttach({
@@ -316,17 +357,41 @@ export class SessionRuntime {
     }
     this.connectionStateListeners.clear();
     this.runtimeEventListeners.clear();
+    this.snapshotListeners.clear();
   }
 
   private emitConnectionState(state: ConnectionState): void {
     for (const listener of this.connectionStateListeners) {
       listener(state);
     }
+    this.emitSnapshot();
   }
 
   private emitRuntimeEvent(event: SessionRuntimeEvent): void {
     for (const listener of this.runtimeEventListeners) {
       listener(event);
+    }
+  }
+
+  private buildSnapshot(): SessionRuntimeSnapshot {
+    return {
+      ...this.getMirrorSnapshot(),
+      sessionId: this.sessionId,
+      activeUrl: this.activeUrl,
+      waitingForAddressPlan: this.waitingForAddressPlan,
+      transportReady: this.transportReady,
+      lastResize: this.lastResize,
+      reconnectCount: this.attachState.reconnectCount,
+    };
+  }
+
+  private emitSnapshot(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.snapshot = this.buildSnapshot();
+    for (const listener of this.snapshotListeners) {
+      listener();
     }
   }
 
@@ -337,6 +402,7 @@ export class SessionRuntime {
       this.transportGeneration += 1;
       this.syncAgentClient();
       this.emitRuntimeEvent({ type: 'next-candidate', activeUrl: this.activeUrl });
+      this.emitSnapshot();
       return 'next-candidate';
     }
     if (action.type === 'force-relay') {
@@ -354,6 +420,7 @@ export class SessionRuntime {
         type: 'transport-exhausted',
         manualRoute: action.manualRoute,
       });
+      this.emitSnapshot();
       return 'transport-exhausted';
     }
     return 'none';
@@ -412,9 +479,6 @@ export class SessionRuntime {
    * transitions; phase guards make it idempotent per loss cycle.
    */
   private driveRelayAttach(): void {
-    if (!this.config.transportFirst) {
-      return; // legacy React driver owns relay attach
-    }
     const conn = this.config.serverConnection;
     if (!conn || !this.config.attachInfo) {
       return;
@@ -526,7 +590,7 @@ export class SessionRuntime {
     if (!client) {
       return;
     }
-    this.p2pAdapter = createP2PConnectionAdapter(client);
+    this.p2pAdapter = client;
     this.fileCapability = new FileCapability(client);
     this.registerSessionCapability('files', this.fileCapability);
     if (client.connectionState === 'connected') {

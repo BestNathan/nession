@@ -3,6 +3,7 @@ import type { TerminalControllerEvents } from '../controller/TerminalController'
 import { inputModeAtomFamily } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
 import { terminalTransportReadyAtom } from '../state/transport';
+import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
 /**
  * Mirrors imperative TerminalController events into Jotai atoms for React UI.
@@ -13,17 +14,27 @@ import { terminalTransportReadyAtom } from '../state/transport';
  * to a late binding (issue #598). Detach/dispose publish ready=false through
  * the same adapter, so no explicit unbind is required.
  */
-export function createTerminalRuntimeAdapter(): TerminalControllerEvents {
+export function createTerminalRuntimeAdapter(runtime?: SessionRuntime | null): TerminalControllerEvents {
   const store = getDefaultStore();
   return {
     onTransportReady: (ready) => {
-      store.set(terminalTransportReadyAtom, ready);
+      if (runtime) {
+        runtime.setTransportReady(ready);
+      } else {
+        // Compatibility for isolated controller consumers. Production terminal
+        // paths always inject their SessionRuntime.
+        store.set(terminalTransportReadyAtom, ready);
+      }
     },
     onInputModeChange: (sid, mode) => {
       store.set(inputModeAtomFamily(sid), mode);
     },
     onResize: (_sid, cols, rows) => {
-      store.set(lastResizeAtom, { cols, rows });
+      if (runtime) {
+        runtime.updateViewportSize({ cols, rows });
+      } else {
+        store.set(lastResizeAtom, { cols, rows });
+      }
     },
   };
 }

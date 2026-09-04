@@ -99,7 +99,7 @@ describe('SessionRuntimeRegistry', () => {
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
 
-  it('recreates runtime when transportFirst mode changes', () => {
+  it('shares runtime when deprecated transportFirst mode changes', () => {
     const registry = new SessionRuntimeRegistry();
     const legacy = registry.acquire('s1', makeConfig('s1'));
     legacy.release();
@@ -108,7 +108,7 @@ describe('SessionRuntimeRegistry', () => {
     sessionFirstConfig.transportFirst = true;
     const sessionFirst = registry.acquire('s1', sessionFirstConfig);
 
-    expect(sessionFirst.runtime).not.toBe(legacy.runtime);
+    expect(sessionFirst.runtime).toBe(legacy.runtime);
     expect(sessionFirst.runtime.transportFirstMode).toBe(true);
     sessionFirst.release();
     vi.runAllTimers();

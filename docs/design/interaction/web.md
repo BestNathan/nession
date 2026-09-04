@@ -68,8 +68,8 @@ SessionRuntime — AgentSocketClient, attach policy, FileCapability
 ConnectionManager (terminal I/O only; no Jotai reads)
 ```
 
-- **Session-first** and **legacy `TerminalWorkspace`** both acquire the same registry entry (`transportFirst: true|false`).
-- React hooks (`useSessionRuntime`, `useP2PAttachTransport`) mirror transport state into Jotai; terminal code must not import hook types or call `getDefaultStore()` directly.
+- **Session-first** and **legacy `TerminalWorkspace`** both use the same registry entry and the same runtime-owned attach protocol. The deprecated `transportFirst` option no longer selects a lifecycle implementation.
+- React hooks (`useSessionRuntime`, `useP2PAttachTransport`) subscribe to the runtime external-store snapshot; Jotai is retained only for UI/session preferences and compatibility mirrors. Terminal code must not import hook types or call `getDefaultStore()` directly.
 - Session-first attach protocol is owned by `SessionAttachController` on the shared runtime; hooks only subscribe and mirror outcomes.
 - `routeIntentEpoch` (user route switch) and `transportGeneration` (runtime candidate rotation) replace `p2pEpoch` for transport identity.
 - Server relay and P2P agent sockets both correlate requests through the shared `MessageRouter` implementation.
@@ -77,5 +77,5 @@ ConnectionManager (terminal I/O only; no Jotai reads)
 
 ### Follow-ups (post-#593)
 
-- **Legacy Dashboard attach:** `useTerminalStateMachine` remains a compatibility adapter until migrated to `SessionAttachController`.
+- **Legacy Dashboard attach:** `TerminalWorkspace` now uses the same `useTerminalOrchestration` and `SessionAttachController` as session-first; only its chrome and scrollback policy remain different.
 - **Playwright smoke:** connection / attach / failover browser verification still pending.
