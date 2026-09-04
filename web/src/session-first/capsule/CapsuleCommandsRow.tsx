@@ -7,8 +7,11 @@ import {
 } from '@/session-first/capsule/CapsuleCommandsPopover';
 import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
 import {
-  capsuleComposerGridGapClass,
+  capsuleCommandsMoreClass,
+  capsuleCommandsRowClass,
+  capsuleCommandsScrollClass,
   capsuleQuickKeyButtonClass,
+  capsuleQuickKeyRowClass,
 } from '@/session-first/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
 
@@ -38,30 +41,35 @@ export function CapsuleCommandsRow({
       {isChaining ? (
         <CapsuleChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />
       ) : null}
-      <div className={cn('flex min-w-0 flex-1 items-center overflow-x-auto', capsuleComposerGridGapClass)}>
-        {QUICK_MOBILE_KEYS.map((keyDef) => (
-          <Button
-            key={keyDef.label}
-            type="button"
-            variant="ghost"
-            size="sm"
+      <div className={capsuleCommandsRowClass}>
+        <div className={cn(capsuleCommandsScrollClass, capsuleQuickKeyRowClass)}>
+          {QUICK_MOBILE_KEYS.map((keyDef) => (
+            <Button
+              key={keyDef.label}
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              data-testid={`capsule-quick-key-${keyDef.label}`}
+              className={capsuleQuickKeyButtonClass}
+              aria-label={keyDef.label}
+              onClick={() => handlePhysKey(keyDef.seq)}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              {keyDef.shortLabel}
+            </Button>
+          ))}
+        </div>
+        <div className={capsuleCommandsMoreClass}>
+          <CapsuleCommandsPopover
+            open={commandsOpen}
+            onOpenChange={onCommandsOpenChange}
+            sendText={sendText}
             disabled={disabled}
-            data-testid={`capsule-quick-key-${keyDef.label}`}
-            className={capsuleQuickKeyButtonClass}
-            onClick={() => handlePhysKey(keyDef.seq)}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            {keyDef.label}
-          </Button>
-        ))}
-        <CapsuleCommandsPopover
-          open={commandsOpen}
-          onOpenChange={onCommandsOpenChange}
-          sendText={sendText}
-          disabled={disabled}
-          showPhysKeys
-          trigger={<CapsuleCommandsMoreTrigger disabled={disabled} />}
-        />
+            showPhysKeys
+            trigger={<CapsuleCommandsMoreTrigger disabled={disabled} />}
+          />
+        </div>
       </div>
     </div>
   );

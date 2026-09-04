@@ -45,4 +45,33 @@ describe('CapsuleCommandsRow', () => {
     );
     expect(screen.getByTestId('capsule-commands-more')).toBeInTheDocument();
   });
+
+  it('opens commands popover when more trigger is clicked', async () => {
+    const onCommandsOpenChange = vi.fn();
+    render(
+      <CapsuleCommandsRow
+        sendText={vi.fn()}
+        commandsOpen={false}
+        onCommandsOpenChange={onCommandsOpenChange}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('capsule-commands-more'));
+    expect(onCommandsOpenChange).toHaveBeenCalled();
+    expect(onCommandsOpenChange.mock.calls[0]?.[0]).toBe(true);
+  });
+
+  it('keeps more trigger outside the scrollable quick-key row', () => {
+    render(
+      <CapsuleCommandsRow
+        sendText={vi.fn()}
+        commandsOpen={false}
+        onCommandsOpenChange={vi.fn()}
+      />,
+    );
+    const more = screen.getByTestId('capsule-commands-more');
+    const tab = screen.getByTestId('capsule-quick-key-Tab');
+    expect(more.parentElement?.className).toMatch(/shrink-0/);
+    expect(tab.parentElement?.className).toMatch(/overflow-x-auto/);
+    expect(more.parentElement).not.toBe(tab.parentElement);
+  });
 });

@@ -104,10 +104,25 @@ export const capsuleMiniButtonClass =
   'h-[length:var(--composer-mini-control-height)] text-[length:var(--composer-caption-font-size)]';
 
 export const capsuleQuickKeyButtonClass =
-  'shrink-0 rounded-[calc(var(--radius-capsule)/2)] px-[length:var(--composer-popover-item-pad-x)] font-mono text-[length:var(--composer-font-size)] text-muted-foreground min-h-[length:var(--control-md)] hover:bg-accent/50 hover:text-foreground active:bg-accent/70 data-pressed:bg-accent/60';
+  'shrink-0 rounded-[calc(var(--radius-capsule)/2)] px-[length:var(--composer-quick-key-pad-x)] font-mono text-[length:var(--composer-quick-key-font-size)] leading-none text-muted-foreground min-h-[length:var(--control-md)] min-w-[length:var(--control-sm)] hover:bg-accent/50 hover:text-foreground active:bg-accent/70 data-pressed:bg-accent/60';
+
+export const capsuleQuickKeyRowClass =
+  'gap-[length:var(--composer-quick-key-gap)]';
 
 export const capsuleModeToggleGroupClass =
-  'rounded-[calc(var(--radius-capsule)/2)] bg-muted/40 p-[length:var(--composer-control-gap)]';
+  'gap-[length:var(--composer-control-gap)]';
+
+export const capsuleModeToggleItemActiveClass =
+  'bg-accent/60 text-foreground';
+
+export const capsuleCommandsRowClass =
+  'flex min-w-0 flex-1 items-center';
+
+export const capsuleCommandsScrollClass =
+  'flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none';
+
+export const capsuleCommandsMoreClass =
+  'shrink-0';
 
 export const capsuleScrollOverlaySurfaceClass =
   `${capsuleFloatingSurfaceClass} rounded-[var(--radius-capsule)] p-[length:var(--composer-popover-inner-pad)]`;

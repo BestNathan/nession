@@ -361,6 +361,9 @@
   --composer-field-inset-y: 0.375rem;
   --composer-control-gap: 0.0625rem;
   --composer-row-gap: 0.25rem;
+  --composer-quick-key-font-size: 0.75rem;
+  --composer-quick-key-pad-x: 0.25rem;
+  --composer-quick-key-gap: 0.0625rem;
   --composer-toolbar-row-gap: 0.25rem;
   --composer-shell-pad-x: 0.625rem;
   --composer-shell-pad-y: 0.375rem;

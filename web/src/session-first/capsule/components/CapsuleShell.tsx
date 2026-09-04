@@ -44,7 +44,9 @@ export function CapsuleShell({
   const isCommandsMode = mode === 'commands';
   const showLayout = !isCommandsMode;
   const isApp = experience === 'app';
-  const usePillShape = !isCommandsMode && layout === 'flat' && !isApp;
+  const usePillShape =
+    (isApp && isCommandsMode) ||
+    (!isCommandsMode && layout === 'flat' && !isApp);
 
   return (
     <div
@@ -75,7 +77,14 @@ export function CapsuleShell({
             : 'items-center',
         )}
       >
-        <div ref={contentRef} data-testid="capsule-shell-content" className="flex min-w-0 flex-1">
+        <div
+          ref={contentRef}
+          data-testid="capsule-shell-content"
+          className={cn(
+            'flex min-w-0 flex-1 items-center overflow-hidden',
+            isCommandsMode && capsuleShellContentGapClass,
+          )}
+        >
           {children}
         </div>
       </div>

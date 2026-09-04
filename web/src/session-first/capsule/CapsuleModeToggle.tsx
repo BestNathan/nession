@@ -1,4 +1,8 @@
-import { capsuleModeToggleItemClass, capsuleModeToggleGroupClass } from '@/session-first/capsule/capsuleStyles';
+import {
+  capsuleModeToggleGroupClass,
+  capsuleModeToggleItemActiveClass,
+  capsuleModeToggleItemClass,
+} from '@/session-first/capsule/capsuleStyles';
 import { Keyboard, PenLine } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { CapsuleMode } from '@/session-first/capsule/types';
@@ -31,7 +35,11 @@ export function CapsuleModeToggle({ mode, onModeChange, disabled = false }: Caps
         value="input"
         aria-label="Input mode"
         data-testid="capsule-mode-input"
-        className={capsuleModeToggleItemClass}
+        className={cn(
+          capsuleModeToggleItemClass,
+          'rounded-full',
+          mode === 'input' && capsuleModeToggleItemActiveClass,
+        )}
       >
         <PenLine />
       </ToggleGroupItem>
@@ -39,7 +47,11 @@ export function CapsuleModeToggle({ mode, onModeChange, disabled = false }: Caps
         value="commands"
         aria-label="Commands mode"
         data-testid="capsule-mode-commands"
-        className={capsuleModeToggleItemClass}
+        className={cn(
+          capsuleModeToggleItemClass,
+          'rounded-full',
+          mode === 'commands' && capsuleModeToggleItemActiveClass,
+        )}
       >
         <Keyboard />
       </ToggleGroupItem>
