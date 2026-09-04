@@ -1,0 +1,42 @@
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'environment directory under gitops/environments/ (e.g. staging-01)'
+        required: true
+      sha:
+        description: 'commit SHA on main to deploy (its sha images must exist on ghcr)'
+        required: true
+
+# All gitops writers share one concurrency group across workflows — a deploy
+# never races a staging auto-deploy or a release promotion.
+concurrency:
+  group: gitops-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: validate environment and sha
+        run: |
+          git ls-tree origin/gitops "environments/${{ github.event.inputs.environment }}/nession/kustomization.yaml" >/dev/null \
+            || { echo "no such environment on gitops: ${{ github.event.inputs.environment }}"; exit 1; }
+          git merge-base --is-ancestor "${{ github.event.inputs.sha }}" origin/main \
+            || { echo "sha not on main: ${{ github.event.inputs.sha }}"; exit 1; }
+
+      - name: write gitops deploy commit
+        shell: bash
+        run: |
+          sha="${{ github.event.inputs.sha }}"
+          ./scripts/gitops-commit.sh "${{ github.event.inputs.environment }}" "${sha:0:7}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
