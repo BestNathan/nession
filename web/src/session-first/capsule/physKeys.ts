@@ -26,18 +26,13 @@ export const ARROW_KEYS: PhysKey[] = [
   { label: '→', seq: '\x1b[C' },
 ];
 
-/** Compact display label for mobile capsule quick keys (test ids / aria use `label`). */
-export interface QuickMobileKey extends PhysKey {
-  shortLabel: string;
-}
-
 /** Mobile capsule single-row quick keys. */
-export const QUICK_MOBILE_KEYS: QuickMobileKey[] = [
-  { label: 'Esc', shortLabel: '⎋', seq: '\x1b' },
-  { label: 'Tab', shortLabel: '⇥', seq: '\t' },
-  { label: 'Space', shortLabel: '⎵', seq: ' ' },
-  { label: 'Enter', shortLabel: '↵', seq: '\r' },
-  { label: 'Ctrl+C', shortLabel: '^C', seq: '\x03' },
+export const QUICK_MOBILE_KEYS: PhysKey[] = [
+  { label: 'Esc', seq: '\x1b' },
+  { label: 'Tab', seq: '\t' },
+  { label: 'Space', seq: ' ' },
+  { label: 'Enter', seq: '\r' },
+  { label: 'Ctrl+C', seq: '\x03' },
 ];
 
 export const SEQ_LABELS: Record<string, string> = {

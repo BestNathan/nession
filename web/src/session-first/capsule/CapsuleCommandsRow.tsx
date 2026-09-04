@@ -52,11 +52,10 @@ export function CapsuleCommandsRow({
               disabled={disabled}
               data-testid={`capsule-quick-key-${keyDef.label}`}
               className={capsuleQuickKeyButtonClass}
-              aria-label={keyDef.label}
               onClick={() => handlePhysKey(keyDef.seq)}
               onContextMenu={(event) => event.preventDefault()}
             >
-              {keyDef.shortLabel}
+              {keyDef.label}
             </Button>
           ))}
         </div>
