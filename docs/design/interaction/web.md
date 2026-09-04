@@ -53,3 +53,23 @@ Workspace owns its own secondary navigation. Do **not** create another permanent
 ## Patterns involved
 
 Web composition is expected to use SessionList, SessionHeader / AgentContext, SurfaceSwitcher, and WorkspaceNavigation. Specs: [design-system/patterns.md](../design-system/patterns.md).
+
+**Terminal surface** (xterm focus, keyboard input, capsule clearance) is specified in [terminal-surface.md](../design-system/patterns/terminal-surface.md). Shell-level rules here cover *where* Terminal lives; that spec covers *how* it behaves once active.
+
+## Transport runtime boundary ([#593](https://github.com/BestNathan/nession/issues/593))
+
+Web terminal attach uses a shared **SessionRuntime** per `sessionId`:
+
+```text
+React (session-first + legacy Dashboard)
+      ↓ subscribe / mirror
+SessionRuntimeRegistry
+      ↓
+SessionRuntime — AgentSocketClient, attach policy, FileCapability
+      ↓
+ConnectionManager (terminal I/O only; no Jotai reads)
+```
+
+- **Session-first** and **legacy `TerminalWorkspace`** both acquire the same registry entry (`transportFirst: true|false`).
+- React hooks (`useSessionRuntime`, `useP2PAttachTransport`) mirror transport state into Jotai; terminal code must not import hook types or call `getDefaultStore()` directly.
+- `ConnectionManager` gates outbound input/resize via an explicit `isAttached()` callback wired from the attach state machine.
