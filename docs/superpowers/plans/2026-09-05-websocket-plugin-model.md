@@ -104,7 +104,7 @@
 | `client.session.env.apply/unset/active/query` | env | `applySessionEnv/unsetSessionEnv/getSessionEnvActive/queryAgentEnvState` | |
 | `client.commands.list/add/remove/update` | commands | `listCommands/addCommand(label, cmd, raw?)/removeCommand(id)/updateCommand(id, fields)` | |
 | `server.commands.changed` | commands | `onCommandsChanged` | |
-| `extension.claude_code.list/read` | claude-code | `list(req)/read(req)` | types re-export 给 extensions |
+| `extension.claude_code.list/read` | claude-code | `claudeCodeList(req)`/`claudeCodeRead(req)` | 与旧 plugin/facade 同名;types re-export 给 extensions |
 | `file.list/read/write/delete/create_dir/rename/cwd` | files | typed `FileApi`(方法名同 FileOps 减去 base64 杂项) | `uploadFile`/`readFileChunked`/base64 helpers 随迁 |
 | `client.session.relay.begin/end` | terminal/server | `beginRelay(sessionId, relayUrl?, cols?, rows?)` / `endRelay(sessionId)` | |
 | `terminal.input` / `terminal.resize`(relay, `session_name`+base64) | terminal/server | `sendRelayInput(sessionName, data)` / `sendRelayResize(sessionName, cols, rows)` | |
@@ -532,7 +532,7 @@ const service = new WebSocketService(
 | `ws.serverInfo()` | `serverApi.serverInfo()` |
 | `ws.listEnvFiles/getEnvFile/writeEnvFile/deleteEnvFile/applySessionEnv/unsetSessionEnv/getSessionEnvActive` | `envApi.*` |
 | `ws.listCommands/addCommand/removeCommand/updateCommand/onCommandsChanged` | `commandsApi.*` |
-| `ws.claudeCodeList/claudeCodeRead` | `claudeCodeApi.list/read`(claudeCodeService.ts 删除,扩展组件直连) |
+| `ws.claudeCodeList/claudeCodeRead` | `claudeCodeApi.claudeCodeList/claudeCodeRead`(claudeCodeService.ts 删除,扩展组件直连) |
 | `ws.getConnectionStatus()/isAuthenticated()/onConnectionChange()` | `service.connectionState` / `service.onConnectionStateChange()`(`authenticated`→`connected`,`isConnected()||isAuthenticated()`→`state==='connected'`) |
 | `ws.connect()/disconnect()` | `service.connect()/disconnect()` |
 | `ws.getP2PConnectionInfo(attachInfo)` | 由 attachInfo 直接构造(Task 6 用),此处先 inline |
