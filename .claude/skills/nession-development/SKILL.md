@@ -111,6 +111,8 @@ git worktree add -b feat/<slug> .claude/worktrees/feat-<slug> origin/main
 cd .claude/worktrees/feat-<slug>
 ```
 
+⚠ Claude Code 的 **subagent**（Agent 工具派生的后台代理）无法调用 `EnterWorktree`——直接用上面的手动 `git worktree add` 命令，产物与规范命令完全一致（位置、分支名、base 都相同）。
+
 **依赖 staging 上尚未发布代码时** — base 用 `origin/staging`，仍在 `.claude/worktrees/` 下创建，不要在根目录 reset：
 
 ```bash
@@ -444,7 +446,7 @@ gh pr create --base staging --title "feat: description" --body "..."
 
 ```bash
 # Enable auto-merge for feat/fix PRs targeting staging
-gh pr merge <PR-NUMBER> --auto --rebase
+gh pr merge <PR-NUMBER> --auto --merge
 ```
 
 **⚠ No `Closes #N` in a feat→staging PR body.** Closing keywords are ignored unless the PR targets the default branch, so it would silently do nothing. Every `Closes #N` goes in the `staging` → `main` release PR body instead. See the `nession-cicd` skill.
@@ -465,7 +467,7 @@ EnterWorktree name: "chore/bump-version-X.Y.Z"
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
+gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge is rejected
 
 # 3. Wait for release.yml's promote-production (pauses at Environment
 #    approval) to write the gitops deploy commit, then ArgoCD rollout
@@ -476,11 +478,11 @@ git fetch origin
 git push origin origin/main:refs/heads/staging
 ```
 
-**Everything is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed. The merge commit records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main` and step 4 is a fast-forward forever — no orphaned commits, no force push. `--rebase` cannot do that: GitHub's rebase-merge always rewrites commits and leaves the head branch behind, which is free for a dead feature branch but not acceptable for long-lived `staging`. Step 4 goes last because steps 2 and 3 both add commits to `main`. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
+**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs. For the release that keeps `staging` an ancestor of `main`, which is what makes step 4 a fast-forward forever — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. Step 4 goes last because steps 2 and 3 both add commits to `main`. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
 
 ### PR Body Template
 
-**The PR body is review material, not git history.** No merge method in this flow writes it to a commit: rebase-merge keeps each commit's own message (measured: PR #301 → `673664f` kept the message, discarded the body), and `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`. So write real commit messages — they are the permanent record — and use the body to tell a reviewer what changed and how it was verified. Screenshots go in a PR comment so the body stays scannable. `Closes #N` does **not** belong here — it goes in the release PR.
+**The PR body is review material, not git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, never the PR body, and each commit keeps its own message — the body never enters history by any path. (Measured before the all-merge rule: rebase-merged PR #301 → `673664f` kept the commit's own message and discarded the body.) So write real commit messages — they are the permanent record — and use the body to tell a reviewer what changed and how it was verified. Screenshots go in a PR comment so the body stays scannable. `Closes #N` does **not** belong here — it goes in the release PR.
 
 ```markdown
 ## 变更内容
@@ -706,7 +708,7 @@ Parallelism only holds for disjoint files. Same-directory parallel work conflict
 EnterWorktree name: "fix/<slug>"
 # develop → gates → Playwright (mandatory for UI/interaction changes)
 gh pr create --base staging --title "fix: ..." --body "..."
-gh pr merge <N> --auto --rebase
+gh pr merge <N> --auto --merge
 ```
 
 Note the issue number in 变更内容. `Closes #N` goes only in the release PR — one line per issue in the batch.
