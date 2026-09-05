@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
+  capsulePhysKeyIconClass,
+  capsulePhysKeyRowClass,
   capsulePopoverPanelClass,
 } from '@/session-first/capsule/capsuleStyles';
 
@@ -20,5 +22,16 @@ describe('capsuleStyles', () => {
   it('keeps physical-key labels on a five-character touch target', () => {
     expect(capsulePhysKeyButtonClass).toContain('min-w-[5ch]');
     expect(capsulePhysKeyButtonClass).toContain('whitespace-nowrap');
+  });
+
+  it('uses compact horizontal physical-key layout tokens', () => {
+    expect(capsulePhysKeyRowClass).toContain('flex-row');
+    expect(capsulePhysKeyRowClass).toContain('items-center');
+    expect(capsulePhysKeyButtonClass).toContain(
+      'text-[length:var(--composer-phys-key-font-size)]',
+    );
+    expect(capsulePhysKeyIconClass).toContain(
+      'var(--composer-phys-key-icon-size)',
+    );
   });
 });
