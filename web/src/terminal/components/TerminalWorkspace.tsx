@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom } from 'jotai';
 import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '../../types';
@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { AddressSelector } from '../../components/AddressSelector';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { relayServerHandle } from '../../runtime/relayServerConnection';
 import { useTerminalSessions } from '../../hooks/useTerminalSessions';
 import { SessionDropdown } from '../../components/SessionDropdown';
 import { TerminalLayout } from '../../components/TerminalLayout';
@@ -124,6 +125,9 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   const [renderer] = useAtom(rendererAtom);
 
   const wsService = useWebSocket();
+  // Relay cleanup goes through the narrow handle — this component never
+  // touches the transport implementation directly.
+  const relayServer = useMemo(() => relayServerHandle(wsService), [wsService]);
   const {
     sessions,
     loading: sessionsLoading,
@@ -158,11 +162,11 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
   // server's relay loop exits and subsequent messages (e.g. sessions.list)
   // are processed by the server handler rather than forwarded to the agent.
   const handleBack = useCallback(() => {
-    if (effectiveMode === 'relay' && wsService?.isConnected()) {
-      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
+    if (effectiveMode === 'relay' && relayServer?.isReady()) {
+      try { relayServer.endRelay(sessionId); } catch { /* best-effort */ }
     }
     onBack();
-  }, [effectiveMode, wsService, sessionId, onBack]);
+  }, [effectiveMode, relayServer, sessionId, onBack]);
 
   const handleGetTerminalPwd = useCallback(async () => {
     if (!fileOps) {throw new Error('File ops not available');}

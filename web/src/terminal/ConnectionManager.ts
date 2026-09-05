@@ -103,7 +103,7 @@ export class ConnectionManager implements TerminalTransport {
         timestamp: Math.floor(Date.now() / 1000),
         payload: { session_name: this.sessionName, data: encodeB64(data) },
       });
-    } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+    } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayInput(this.sessionName, data);
     }
   }
@@ -163,7 +163,7 @@ export class ConnectionManager implements TerminalTransport {
         timestamp: Math.floor(Date.now() / 1000),
         payload: { session_name: this.sessionName, cols, rows },
       });
-    } else if (this.mode === 'relay' && this.serverConnection?.isConnected()) {
+    } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
     }
   }
@@ -250,13 +250,13 @@ export class ConnectionManager implements TerminalTransport {
 
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
-    this.relayUnsubOutput = svc.onTerminalOutput(this.sessionName, (data: Uint8Array) => {
+    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array) => {
       if (!this.disposed) {
         this.onOutput?.(data);
       }
     });
 
-    this.relayUnsubResize = svc.onTerminalResize(
+    this.relayUnsubResize = svc.onRelayResize(
       this.sessionName,
       (cols: number, rows: number) => {
         if (!this.disposed) {
@@ -265,11 +265,16 @@ export class ConnectionManager implements TerminalTransport {
       },
     );
 
-    this.relayUnsubState = svc.onConnectionChange((status) => {
+    // Only the durable edges are reported: the new transport's
+    // post-handshake 'connected' (old 'authenticated') and the
+    // budget-exhausted 'disconnected'. 'connecting'/'reconnecting' are the
+    // intra-budget loss window, surfaced by the lifecycle hooks — mirroring
+    // the old facade, which collapsed them onto 'connecting' and no-op'd.
+    this.relayUnsubState = svc.onConnectionStateChange((state) => {
       if (this.disposed) { return; }
-      if (status === 'authenticated') {
+      if (state === 'connected') {
         this.onStateChange?.('connected');
-      } else if (status === 'disconnected') {
+      } else if (state === 'disconnected') {
         this.onStateChange?.('disconnected');
       }
     });

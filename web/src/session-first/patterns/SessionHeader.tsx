@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/session-first/shellStyles';
 import type { CapsuleExperience } from '@/session-first/capsule/types';
 import type { DomainState } from '@/session-first/domainState';
-import type { ConnectionStatus } from '@/types';
+import type { ConnectionState } from '@/services/socket';
 
 export type { Surface };
 
@@ -24,7 +24,7 @@ export interface SessionHeaderProps {
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
   onOpenWorkspace?: () => void;
-  serverStatus?: ConnectionStatus;
+  serverStatus?: ConnectionState;
   /** App experience: no Terminal|Workspace switcher — the spatial model owns navigation. */
   experience?: CapsuleExperience;
 }

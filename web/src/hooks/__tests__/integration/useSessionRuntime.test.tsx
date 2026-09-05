@@ -14,6 +14,8 @@ import {
 } from '@/atoms/session';
 import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
+import type { ConnectionState } from '@/services/socket/types';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
@@ -443,22 +445,29 @@ describe('useSessionRuntime integration', () => {
   });
 
 
-  it('relay fallback with an already-authenticated server ws attaches through the runtime without a React subscriber', async () => {
-    const relayListeners = new Set<(status: import('@/types').ConnectionStatus) => void>();
+  it('relay fallback with an already-connected server ws attaches through the runtime without a React subscriber', async () => {
+    const relayListeners = new Set<(state: ConnectionState) => void>();
+    let currentState: ConnectionState = 'connected';
     const beginRelay = vi.fn();
-    const wsService = {
+    const serverConnection = {
       beginRelay,
-      isAuthenticated: () => true,
-      getConnectionStatus: () => 'authenticated' as const,
-      onConnectionChange: (cb: (status: import('@/types').ConnectionStatus) => void) => {
+      endRelay: vi.fn(),
+      isReady: () => currentState === 'connected',
+      emit(next: ConnectionState) {
+        currentState = next;
+        for (const cb of relayListeners) {
+          cb(currentState);
+        }
+      },
+      onConnectionStateChange: (cb: (state: ConnectionState) => void) => {
         relayListeners.add(cb);
         return () => relayListeners.delete(cb);
       },
-    } satisfies import('@/runtime/relayServerConnection').RelayServerConnection;
+    } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
 
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true, wsService }),
+      () => useSessionRuntime({ transportFirst: true, configOwner: true, serverConnection }),
       { wrapper: wrapper(store) },
     );
 
@@ -479,7 +488,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     // Agent rejects the attach → auto-route fallback must flip to relay inside
-    // the runtime and begin relay against the already-authenticated server ws.
+    // the runtime and begin relay against the already-connected server ws.
     const attachCall = lastWs().send.mock.calls.find((call: unknown[]) => {
       const raw = String(call[0]);
       try {

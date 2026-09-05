@@ -1,5 +1,5 @@
 import type { P2PConnection } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '../services/websocket';
+import type { RelayServerTransport } from '@/runtime/relayServerConnection';
 
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';
@@ -10,7 +10,8 @@ export interface ConnectionOptions {
   sessionName: string;
   sessionId: string;
   p2pConnection?: P2PConnection;
-  serverConnection?: WebSocketService;
+  /** Relay-mode server connection handle (see relayServerHandle). */
+  serverConnection?: RelayServerTransport;
   /** Manual relay endpoint URL from the attach dialog. */
   relayUrl?: string | null;
   /** When false, input/resize is buffered until attach completes. */

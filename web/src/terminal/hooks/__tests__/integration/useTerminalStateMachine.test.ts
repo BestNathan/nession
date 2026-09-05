@@ -12,18 +12,18 @@ import { sessionIdAtom, sessionNameAtom, attachInfoAtom, forcedRelayAtom, manual
 import { p2pConnectionAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import type { P2PConnection, P2PMessage, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '@/services/websocket';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 // ── Test doubles ─────────────────────────────────────────────────────────────
 
-/** Minimal mock of the server WebSocketService — only the members the state
- *  machine touches in relay mode. */
-function makeServerConnection(isConnected: boolean, isAuthenticated = isConnected) {
+/** Minimal mock of the relay server-connection handle — only the members the
+ *  state machine touches in relay mode (isReady gates the connecting →
+ *  connected promotion; beginRelay fires on the connected case). */
+function makeServerConnection(isReady: boolean) {
   return {
-    isConnected: () => isConnected,
-    isAuthenticated: () => isAuthenticated,
+    isReady: () => isReady,
     beginRelay: vi.fn(),
-  } as unknown as WebSocketService;
+  } as unknown as RelayServerHandle;
 }
 
 /**
@@ -114,14 +114,15 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
-    // server ws authenticated → connecting promotes to connected immediately, and
-    // the connected case fire-and-forgets beginRelay then attaches.
+    // Post-handshake 'connected' (old 'authenticated') → the connecting case
+    // promotes to connected immediately, and the connected case
+    // fire-and-forgets beginRelay then attaches.
     expect(result.current.terminalState).toBe('attached');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
     expect(serverConnection.beginRelay).toHaveBeenCalledWith('agent:sess', undefined, 120, 40);
   });
 
-  it('relay: stays in connecting while the server ws is not yet connected', () => {
+  it('relay: stays in connecting while the server connection is not yet ready (pre-handshake)', () => {
     const serverConnection = makeServerConnection(false);
     const store = makeStore({ mode: 'relay', sessionId: 'agent:sess' });
 
@@ -129,22 +130,29 @@ describe('useTerminalStateMachine', () => {
       useTerminalStateMachine({ serverConnection }),
     );
 
+    // isReady() is the post-handshake gate — beginRelay would be dropped by the
+    // server pre-handshake, so the machine must not promote to connected.
     expect(result.current.terminalState).toBe('connecting');
     expect(serverConnection.beginRelay).not.toHaveBeenCalled();
   });
 
-  it('relay: stays connecting while the ws is open but not yet authenticated', () => {
-    const serverConnection = makeServerConnection(true, false);
+  it('relay: transport readiness gates the promotion even when the server is ready', () => {
+    const serverConnection = makeServerConnection(true);
     const store = makeStore({ mode: 'relay', sessionId: 'agent:sess' });
+    store.set(terminalTransportReadyAtom, false);
 
     const { result } = renderWithStore(store, () =>
       useTerminalStateMachine({ serverConnection }),
     );
 
-    // isConnected() true, isAuthenticated() false — beginRelay would be dropped
-    // by the server pre-auth, so the machine must not promote to connected.
     expect(result.current.terminalState).toBe('connecting');
     expect(serverConnection.beginRelay).not.toHaveBeenCalled();
+
+    // Viewport/transport comes up → connecting promotes to connected and the
+    // connected case begins relay then attaches.
+    act(() => { store.set(terminalTransportReadyAtom, true); });
+    expect(result.current.terminalState).toBe('attached');
+    expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
   });
 
   it('p2p: connecting → connected (bridge) → client.attach → attached; resize read via ref', () => {

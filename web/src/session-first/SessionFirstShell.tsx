@@ -6,10 +6,10 @@ import { useProbePolling } from '@/hooks/useProbePolling';
 import { SessionFirstDialogs } from '@/session-first/SessionFirstDialogs';
 import { SessionFirstWorkspace } from '@/session-first/SessionFirstWorkspace';
 import { useSessionFirstShellState } from '@/session-first/useSessionFirstShellState';
-import type { ConnectionStatus } from '@/types';
+import type { ConnectionState } from '@/services/socket';
 
 export interface SessionFirstShellProps {
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   onLegacy: () => void;
 }
 

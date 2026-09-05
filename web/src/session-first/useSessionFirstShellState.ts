@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
@@ -6,6 +6,7 @@ import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
 import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
 import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { relayServerHandle } from '@/runtime/relayServerConnection';
 import { sessionIdAtom } from '@/atoms/session';
 import { mapDomainState } from '@/session-first/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
@@ -23,7 +24,9 @@ export function useSessionFirstShellState() {
   } = data;
   const clientSessionId = useAtomValue(sessionIdAtom);
   const wsService = useWebSocket();
-  const { fileOps } = useSessionRuntime({ transportFirst: true, wsService });
+  // The runtime takes a narrow relay handle, never the transport itself.
+  const serverConnection = useMemo(() => relayServerHandle(wsService), [wsService]);
+  const { fileOps } = useSessionRuntime({ transportFirst: true, serverConnection });
   const { attachDialogSession, requestAttach, confirmAttach, cancelAttach } = useSessionFirstAttach();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);

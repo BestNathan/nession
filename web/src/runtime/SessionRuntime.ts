@@ -1,6 +1,6 @@
-import type { AttachInfo, ConnectionStatus } from '@/types';
+import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/hooks/useAddressPlan';
-import type { RelayServerConnection } from '@/runtime/relayServerConnection';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { ConnectionState } from '@/services/socket/types';
@@ -23,8 +23,8 @@ export interface SessionRuntimeConfig {
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
   transportReady?: boolean;
-  /** Relay-mode server WebSocket — runtime re-begins relay after server reconnect. */
-  serverConnection?: RelayServerConnection | null;
+  /** Relay-mode server connection — runtime re-begins relay after server reconnect. */
+  serverConnection?: RelayServerHandle | null;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -455,17 +455,18 @@ export class SessionRuntime {
       return;
     }
 
-    this.relayServerUnsub = conn.onConnectionChange((status: ConnectionStatus) => {
-      // Recoverable loss is authenticated -> connecting (server core stays in
-      // 'connecting' through its intra-budget reconnect; 'disconnected' only
-      // fires once the budget is exhausted or on explicit disconnect). Either
-      // ends the server-side relay forwarding loop.
-      if (status === 'connecting' || status === 'disconnected') {
+    this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {
+      // Any loss of the server transport ends the server-side relay forwarding
+      // loop: 'connecting' (first connect / handshake pending), 'reconnecting'
+      // (recoverable intra-budget drop — the new transport surfaces this
+      // distinctly), and 'disconnected' (budget exhausted or explicit
+      // disconnect). The phase guard keeps this inert before the relay is live.
+      if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
-      } else if (status === 'authenticated') {
+      } else {
         // Server WS (re)established — begin (or re-begin) relay if attach is due.
         this.driveRelayAttach();
       }
@@ -497,7 +498,7 @@ export class SessionRuntime {
       // Relay-context recovery: a failed session re-attaches through relay.
       this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     }
-    if (conn.isAuthenticated()) {
+    if (conn.isReady()) {
       this.beginRelayOnce();
     }
   }

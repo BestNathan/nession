@@ -2,7 +2,7 @@ import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import type { AttachInfo } from '../types';
 import type { AddressPlan } from './useAddressPlan';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '@/services/websocket';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
@@ -11,7 +11,8 @@ interface UseP2PAttachTransportOptions {
   manualOverride: string | null;
   /** Session-first waits for xterm transport before attach. Legacy attaches on socket connect. */
   transportFirst?: boolean;
-  wsService?: WebSocketService;
+  /** Relay-mode server connection handle (see relayServerHandle). */
+  serverConnection?: RelayServerHandle;
 }
 
 interface UseP2PAttachTransportResult {
@@ -31,12 +32,12 @@ interface UseP2PAttachTransportResult {
  */
 export function useP2PAttachTransport({
   transportFirst = true,
-  wsService,
+  serverConnection,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, snapshot, transportKey } = useSessionRuntime({
     transportFirst,
     configOwner: true,
-    wsService,
+    serverConnection,
   });
 
   return {

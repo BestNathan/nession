@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '../../services/websocket';
+import type { RelayServerHandle } from '../../runtime/relayServerConnection';
 import { sessionIdAtom, sessionNameAtom, manualOverrideAtom, forcedRelayAtom } from '../../atoms/session';
 import { effectiveModeAtom, p2pConnectionAtom } from '../../atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom, type TerminalStatus } from '../state';
@@ -17,8 +17,8 @@ export const P2P_MAX_RECONNECT = 10;
 export const ATTACH_TIMEOUT_MS = 10_000;
 
 export interface UseTerminalStateMachineOptions {
-  /** Server WebSocket transport, required for relay-mode beginRelay. */
-  serverConnection?: WebSocketService;
+  /** Relay-mode server connection handle (build via relayServerHandle), required for relay-mode beginRelay. */
+  serverConnection?: RelayServerHandle;
   /** Live socket from useP2PAttachTransport — avoids p2pConnectionAtom publish lag. */
   p2pConnection?: P2PConnection | null;
   /** Reactive connection state from useP2PAttachTransport — do not read from p2pConnection getter. */
@@ -104,7 +104,7 @@ function useTerminalAttachProtocolEffect(opts: {
   terminalState: TerminalStatus;
   sessionName: string;
   sessionId: string;
-  serverConnection: WebSocketService | undefined;
+  serverConnection: RelayServerHandle | undefined;
   p2pConnection: P2PConnection | null;
   manualOverride: string | null;
   transportReady: boolean;
@@ -129,10 +129,11 @@ function useTerminalAttachProtocolEffect(opts: {
       case 'connecting':
         reconnectCountRef.current = 0;
         setReconnectCount(0);
-        // isAuthenticated, not isConnected: a ws that is open but not yet
-        // authenticated must not fire beginRelay — the server would drop it and
-        // nothing would re-begin until the next loss cycle.
-        if (mode === 'relay' && transportReady && serverConnection?.isAuthenticated()) {
+        // isReady, not merely socket-open: beginRelay must only fire once the
+        // server handshake completed (connectionState 'connected' on the new
+        // transport) — otherwise the server would drop it and nothing would
+        // re-begin until the next loss cycle.
+        if (mode === 'relay' && transportReady && serverConnection?.isReady()) {
           setTerminalState('connected');
         }
         break;

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
 import type { P2PConnection, P2PMessage } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '@/services/websocket';
+import type { ConnectionState } from '@/services/socket/types';
+import type { RelayServerTransport } from '@/runtime/relayServerConnection';
 
 const attached = { isAttached: () => true };
 
@@ -16,18 +17,17 @@ function makeMockP2P(): P2PConnection {
   };
 }
 
-function makeMockWs(): WebSocketService {
+function makeMockWs(): RelayServerTransport {
   return {
-    sendTerminalInput: vi.fn(),
-    sendTerminalResize: vi.fn(),
     sendRelayInput: vi.fn(),
     sendRelayResize: vi.fn(),
-    onTerminalOutput: vi.fn().mockReturnValue(() => {}),
-    onTerminalResize: vi.fn().mockReturnValue(() => {}),
-    onConnectionChange: vi.fn().mockReturnValue(() => {}),
-    requestAttach: vi.fn().mockResolvedValue({ mode: 'relay' }),
-    isConnected: () => true,
-  } as unknown as WebSocketService;
+    onRelayOutput: vi.fn().mockReturnValue(() => {}),
+    onRelayResize: vi.fn().mockReturnValue(() => {}),
+    onConnectionStateChange: vi.fn().mockReturnValue(() => {}),
+    beginRelay: vi.fn(),
+    endRelay: vi.fn(),
+    isReady: () => true,
+  };
 }
 
 describe('ConnectionManager', () => {
@@ -271,15 +271,15 @@ describe('ConnectionManager', () => {
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
       });
-      expect(ws.onTerminalOutput).toHaveBeenCalledWith('test', expect.any(Function));
+      expect(ws.onRelayOutput).toHaveBeenCalledWith('test', expect.any(Function));
       cm.dispose();
     });
 
-    it('maps relay connection status to onStateChange (authenticated → connected, disconnected → disconnected)', () => {
+    it('reports only the durable connection edges — intra-budget loss is a no-op', () => {
       const ws = makeMockWs();
-      let stateCb: (status: string) => void = () => {};
-      (ws.onConnectionChange as ReturnType<typeof vi.fn>).mockImplementation(
-        (cb: (status: string) => void) => { stateCb = cb; return () => {}; },
+      let stateCb: (state: ConnectionState) => void = () => {};
+      (ws.onConnectionStateChange as ReturnType<typeof vi.fn>).mockImplementation(
+        (cb: (state: ConnectionState) => void) => { stateCb = cb; return () => {}; },
       );
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws, ...attached,
@@ -287,10 +287,15 @@ describe('ConnectionManager', () => {
       const calls: string[] = [];
       cm.onStateChange = (s) => calls.push(s);
 
-      stateCb('authenticated');
+      // Post-handshake 'connected' (old 'authenticated') and budget-exhausted
+      // 'disconnected' are the only edges this transport reports — the
+      // intra-budget window surfaces as 'connecting'/'reconnecting', which the
+      // manager mirrors by staying silent (old facade collapsed them onto
+      // 'connecting', which ConnectionManager also ignored).
+      stateCb('connected');
       stateCb('disconnected');
       stateCb('connecting');
-      stateCb('connected');
+      stateCb('reconnecting');
 
       expect(calls).toEqual([
         'connected',
@@ -315,7 +320,7 @@ describe('ConnectionManager', () => {
       const onResize = vi.fn();
       let resizeHandler: (cols: number, rows: number) => void = () => {};
       const ws = makeMockWs();
-      (ws.onTerminalResize as ReturnType<typeof vi.fn>).mockImplementation(
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation(
         (_sid: string, cb: (cols: number, rows: number) => void) => {
           resizeHandler = cb;
           return () => {};
@@ -327,7 +332,7 @@ describe('ConnectionManager', () => {
       });
       cm.onResize = onResize;
 
-      expect(ws.onTerminalResize).toHaveBeenCalledWith('test', expect.any(Function));
+      expect(ws.onRelayResize).toHaveBeenCalledWith('test', expect.any(Function));
 
       // Simulate server broadcasting terminal.resize for this session
       resizeHandler(120, 40);

@@ -9,15 +9,15 @@ import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } fro
 import type { ConnectionState } from '@/services/socket/types';
 import type { P2PConnection } from '@/services/socket/p2pTypes';
 import type { FileOps } from '@/services/fileOps';
-import type { RelayServerConnection } from '@/runtime/relayServerConnection';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
   /** @deprecated Attach ownership is always SessionRuntime-owned. */
   transportFirst?: boolean;
   /** When true, this hook instance drives registry.update (single config owner). */
   configOwner?: boolean;
-  /** Relay-mode server lifecycle (beginRelay on reconnect). Required for hidden-viewport recovery. */
-  wsService?: RelayServerConnection;
+  /** Relay-mode server connection handle (build via relayServerHandle(service)). Required for hidden-viewport recovery. */
+  serverConnection?: RelayServerHandle;
 }
 
 export interface UseSessionRuntimeResult {
@@ -351,7 +351,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // Retained even while P2P is active: the runtime needs the relay-capable
       // server WS handle in hand when a fallback happens with the Terminal
       // config-owner subtree unmounted.
-      serverConnection: attachInfo ? options.wsService ?? null : null,
+      serverConnection: attachInfo ? options.serverConnection ?? null : null,
     };
   }, [
     sessionId,
@@ -363,7 +363,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     inP2PTransport,
     addressPlanReady,
     addressPlan.urls,
-    options.wsService,
+    options.serverConnection,
     routeIntentEpoch,
     lastResize,
     transportReady,
