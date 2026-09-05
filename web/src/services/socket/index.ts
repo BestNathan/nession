@@ -3,7 +3,6 @@ export { SocketCore } from './SocketCore';
 export type { SocketCoreConfig } from './SocketCore';
 export { WebSocketService } from './WebSocketService';
 export { AgentSocketClient } from './AgentSocketClient';
-export { ServerSocketClient } from './ServerSocketClient';
 export {
   buildAgentWsUrl,
   reconnectDelayMs,
