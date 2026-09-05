@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePopoverPanelClass,
 } from '@/session-first/capsule/capsuleStyles';
@@ -14,5 +15,10 @@ describe('capsuleStyles', () => {
 
   it('provides the shared physical-key grid gap token', () => {
     expect(capsulePhysKeyGridGapClass).toContain('var(--composer-phys-key-grid-gap)');
+  });
+
+  it('keeps physical-key labels on a five-character touch target', () => {
+    expect(capsulePhysKeyButtonClass).toContain('min-w-[5ch]');
+    expect(capsulePhysKeyButtonClass).toContain('whitespace-nowrap');
   });
 });

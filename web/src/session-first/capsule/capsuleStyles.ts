@@ -88,12 +88,12 @@ export const capsuleHistoryItemClass =
   'flex w-full items-center justify-between gap-[length:var(--composer-popover-gap)] rounded px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-x)] text-left text-[length:var(--composer-font-size)] hover:bg-accent/40';
 
 export const capsulePhysKeyButtonClass =
-  'h-[length:var(--composer-phys-key-height)] w-full font-mono text-[length:var(--composer-font-size)]';
+  'h-[length:var(--composer-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-1 font-mono text-[length:var(--composer-font-size)]';
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-icon-size)]';
 
 export const capsulePhysKeyRowClass =
-  'flex justify-between gap-[length:var(--composer-popover-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
+  'flex flex-col items-stretch gap-[length:var(--composer-popover-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
 
 export const capsulePhysKeyGridGapClass = 'gap-[length:var(--composer-phys-key-grid-gap)]';
 

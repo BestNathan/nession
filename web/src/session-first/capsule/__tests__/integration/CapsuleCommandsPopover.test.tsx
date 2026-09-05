@@ -114,7 +114,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('sends a visible physical key once and closes after execution', async () => {
+  it('sends a visible physical key once and keeps the popover open', async () => {
     const onOpenChange = vi.fn();
     render(
       <CapsuleCommandsPopover
@@ -129,11 +129,10 @@ describe('CapsuleCommandsPopover', () => {
 
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith('\x1b');
-    expect(onOpenChange).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
-  it('sends an arrow physical key once and closes after execution', async () => {
+  it('sends an arrow physical key once and keeps the popover open', async () => {
     const onOpenChange = vi.fn();
     render(
       <CapsuleCommandsPopover
@@ -148,11 +147,10 @@ describe('CapsuleCommandsPopover', () => {
 
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith('\x1b[A');
-    expect(onOpenChange).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
-  it('closes after sending an Esc + right-arrow chain built through long-press', () => {
+  it('keeps the popover open after sending an Esc + right-arrow chain', () => {
     vi.useFakeTimers();
     const onOpenChange = vi.fn();
     render(
@@ -181,8 +179,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(sendText).toHaveBeenCalledTimes(1);
     // The chain payload is Esc (\x1b) followed by right arrow (\x1b[C).
     expect(sendText).toHaveBeenCalledWith('\x1b\x1b[C');
-    expect(onOpenChange).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it('renders the commands panel as an anchored popover', () => {
