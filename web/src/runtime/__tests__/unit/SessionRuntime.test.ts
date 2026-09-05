@@ -74,7 +74,6 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     manualOverride: null,
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
-    transportFirst: true,
     routeIntentEpoch: 0,
     ...overrides,
   };

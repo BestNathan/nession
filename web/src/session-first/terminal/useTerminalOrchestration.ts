@@ -203,7 +203,6 @@ export function useTerminalOrchestration({
     sessionName,
     orderedUrls,
     manualOverride,
-    transportFirst: true,
     serverConnection: relayServer,
   });
 

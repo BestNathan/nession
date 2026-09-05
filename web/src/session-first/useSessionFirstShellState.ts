@@ -26,7 +26,7 @@ export function useSessionFirstShellState() {
   const wsService = useWebSocket();
   // The runtime takes a narrow relay handle, never the transport itself.
   const serverConnection = useMemo(() => relayServerHandle(wsService), [wsService]);
-  const { fileOps } = useSessionRuntime({ transportFirst: true, serverConnection });
+  const { fileOps } = useSessionRuntime({ serverConnection });
   const { attachDialogSession, requestAttach, confirmAttach, cancelAttach } = useSessionFirstAttach();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);

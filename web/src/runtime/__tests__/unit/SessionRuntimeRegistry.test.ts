@@ -18,7 +18,6 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     manualOverride: null,
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://agent/ws'] },
-    transportFirst: false,
     routeIntentEpoch: 0,
   };
 }
@@ -99,21 +98,6 @@ describe('SessionRuntimeRegistry', () => {
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
 
-  it('shares runtime when deprecated transportFirst mode changes', () => {
-    const registry = new SessionRuntimeRegistry();
-    const legacy = registry.acquire('s1', makeConfig('s1'));
-    legacy.release();
-
-    const sessionFirstConfig = makeConfig('s1');
-    sessionFirstConfig.transportFirst = true;
-    const sessionFirst = registry.acquire('s1', sessionFirstConfig);
-
-    expect(sessionFirst.runtime).toBe(legacy.runtime);
-    expect(sessionFirst.runtime.transportFirstMode).toBe(true);
-    sessionFirst.release();
-    vi.runAllTimers();
-  });
-
   it('double release of the same lease is a no-op', () => {
     const registry = new SessionRuntimeRegistry();
     const lease = registry.acquire('s1', makeConfig('s1'));
@@ -131,10 +115,7 @@ describe('SessionRuntimeRegistry', () => {
     stale.release();
     // Deferred dispose still pending — entry exists with zero leases.
 
-    const sessionFirstConfig = makeConfig('s1');
-    sessionFirstConfig.transportFirst = true;
-    const replacement = registry.acquire('s1', sessionFirstConfig);
-    expect(replacement.runtime.transportFirstMode).toBe(true);
+    const replacement = registry.acquire('s1', makeConfig('s1'));
 
     // Old holder's cleanup fires late against the replacement entry.
     stale.release();

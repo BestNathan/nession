@@ -9,8 +9,6 @@ interface UseP2PAttachTransportOptions {
   sessionName: string;
   orderedUrls: string[] | null;
   manualOverride: string | null;
-  /** Session-first waits for xterm transport before attach. Legacy attaches on socket connect. */
-  transportFirst?: boolean;
   /** Relay-mode server connection handle (see relayServerHandle). */
   serverConnection?: RelayServerHandle;
 }
@@ -22,8 +20,6 @@ interface UseP2PAttachTransportResult {
   agentTerminalApi: TerminalAgentApi | null;
   /** Agent-transport connection state, gated 'disconnected' outside the P2P transport. */
   connectionState: import('@/services/socket/types').ConnectionState;
-  /** @deprecated Alias of connectionState — legacy consumers migrating. */
-  p2pState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
   fileOps: import('@/features/files').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
@@ -35,14 +31,12 @@ interface UseP2PAttachTransportResult {
  * P2P attach transport: address rotation + relay fallback via shared SessionRuntime.
  */
 export function useP2PAttachTransport({
-  transportFirst = true,
   serverConnection,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const {
-    addressPlan, activeUrl, agentTerminalApi, connectionState, p2pState,
+    addressPlan, activeUrl, agentTerminalApi, connectionState,
     waitingForAddressPlan, fileOps, runtime, snapshot, transportKey,
   } = useSessionRuntime({
-    transportFirst,
     configOwner: true,
     serverConnection,
   });
@@ -52,7 +46,6 @@ export function useP2PAttachTransport({
     activeUrl,
     agentTerminalApi,
     connectionState,
-    p2pState,
     waitingForAddressPlan,
     fileOps,
     runtime,

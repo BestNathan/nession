@@ -17,8 +17,6 @@ export interface SessionRuntimeConfig {
   manualOverride: string | null;
   forcedRelay: boolean;
   addressPlan: AddressPlan;
-  /** @deprecated Runtime owns attach timing for every UI. */
-  transportFirst?: boolean;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
@@ -80,8 +78,8 @@ export class SessionRuntime {
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
     this.routeIntentEpoch = config.routeIntentEpoch;
-    // Both UI implementations use the same transport-first attach protocol.
-    // The deprecated config flag remains accepted for old callers only.
+    // Every UI uses the same transport-first attach protocol: the state
+    // machine gates attach on the terminal viewport being transport-ready.
     this.attachState = new AttachStateMachine({ transportFirst: true });
     this.attachController = new SessionAttachController(this.attachState);
     this.addressPolicy = new AddressAttachPolicy({
@@ -121,10 +119,6 @@ export class SessionRuntime {
     this.wireRelayServerHandler();
     this.driveRelayAttach();
     this.snapshot = this.buildSnapshot();
-  }
-
-  get transportFirstMode(): boolean {
-    return true;
   }
 
   getMirrorSnapshot(): RuntimeMirrorSnapshot {
@@ -304,7 +298,12 @@ export class SessionRuntime {
     });
   }
 
-  /** @deprecated Prefer internal handler; kept for unit tests. */
+  /**
+   * Synchronously apply the address policy when the current P2P candidate
+   * transport drops: advance to the next candidate, force relay, or exhaust.
+   * The connection-loss handler routes through this under the re-entrancy
+   * guard; kept public so tests can drive the policy step synchronously.
+   */
   onCandidateDisconnected(): 'next-candidate' | 'force-relay' | 'transport-exhausted' | 'none' {
     return this.applyCandidateDisconnect();
   }

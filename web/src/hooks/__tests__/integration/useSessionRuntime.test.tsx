@@ -133,10 +133,10 @@ describe('useSessionRuntime integration', () => {
     globalThis.WebSocket = OriginalWebSocket;
   });
 
-  it('exposes reactive p2pState when websocket connects (auto route)', async () => {
+  it('exposes reactive connectionState when websocket connects (auto route)', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -144,7 +144,7 @@ describe('useSessionRuntime integration', () => {
       expect(result.current.agentTerminalApi).not.toBeNull();
       expect(instances.length).toBeGreaterThan(0);
     });
-    expect(result.current.p2pState).toBe('connecting');
+    expect(result.current.connectionState).toBe('connecting');
 
     act(() => {
       const ws = lastWs();
@@ -153,7 +153,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.p2pState).toBe('connected');
+      expect(result.current.connectionState).toBe('connected');
     });
   });
 
@@ -161,7 +161,7 @@ describe('useSessionRuntime integration', () => {
     const store = makeStore('agent:a', 'token-a');
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -198,7 +198,7 @@ describe('useSessionRuntime integration', () => {
 
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -227,7 +227,7 @@ describe('useSessionRuntime integration', () => {
 
     renderHook(
       () => {
-        const rt = useSessionRuntime({ transportFirst: true, configOwner: true });
+        const rt = useSessionRuntime({ configOwner: true });
         if (rt.runtime) {
           seen.push(rt.runtime);
         }
@@ -243,7 +243,7 @@ describe('useSessionRuntime integration', () => {
   it('clears P2P state when forced to relay', async () => {
     const store = makeStore('agent:a', 'token-a');
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -257,7 +257,7 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     expect(result.current.agentTerminalApi).toBeNull();
-    expect(result.current.p2pState).toBe('disconnected');
+    expect(result.current.connectionState).toBe('disconnected');
     expect(result.current.runtime).not.toBeNull();
   });
 
@@ -288,8 +288,8 @@ describe('useSessionRuntime integration', () => {
       ],
     });
 
-    const shell = renderHook(() => useSessionRuntime({ transportFirst: true }), { wrapper: wrapper(store) });
-    const terminal = renderHook(() => useSessionRuntime({ transportFirst: true, configOwner: true }), { wrapper: wrapper(store) });
+    const shell = renderHook(() => useSessionRuntime({}), { wrapper: wrapper(store) });
+    const terminal = renderHook(() => useSessionRuntime({ configOwner: true }), { wrapper: wrapper(store) });
 
     await waitForRuntimeWs(() => shell.result.current.runtime);
     const shared = shell.result.current.runtime!;
@@ -332,7 +332,7 @@ describe('useSessionRuntime integration', () => {
 
     const epochBefore = store.get(routeIntentEpochAtom);
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -365,7 +365,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -397,7 +397,7 @@ describe('useSessionRuntime integration', () => {
     });
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -417,7 +417,7 @@ describe('useSessionRuntime integration', () => {
     store.set(attachInfoAtom, { mode: 'relay', session_id: 'agent:relay' });
 
     const { result } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
@@ -430,17 +430,19 @@ describe('useSessionRuntime integration', () => {
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
 
-  it('legacy config owner does not overwrite connecting terminal state from runtime snapshot', async () => {
+  it('config owner mirrors the fresh runtime snapshot over a pre-set terminal state', async () => {
     const store = makeStore('agent:a', 'token-a');
     store.set(terminalSessionStateAtom, 'connecting');
 
     renderHook(
-      () => useSessionRuntime({ transportFirst: false, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
+    // The attach-phase mirror is unconditional: a fresh runtime reports 'idle',
+    // and the atom converges to runtime truth instead of holding a stale value.
     await waitFor(() => {
-      expect(store.get(terminalSessionStateAtom)).toBe('connecting');
+      expect(store.get(terminalSessionStateAtom)).toBe('idle');
     });
   });
 
@@ -467,7 +469,7 @@ describe('useSessionRuntime integration', () => {
 
     const store = makeStore('agent:a', 'token-a');
     const { result } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true, serverConnection }),
+      () => useSessionRuntime({ configOwner: true, serverConnection }),
       { wrapper: wrapper(store) },
     );
 
@@ -484,7 +486,7 @@ describe('useSessionRuntime integration', () => {
       ws.onopen?.(new Event('open'));
     });
     await waitFor(() => {
-      expect(result.current.p2pState).toBe('connected');
+      expect(result.current.connectionState).toBe('connected');
     });
 
     // Agent rejects the attach → auto-route fallback must flip to relay inside
@@ -525,7 +527,7 @@ describe('useSessionRuntime integration', () => {
     store.set(terminalSessionStateAtom, 'attached');
 
     const { result, rerender } = renderHook(
-      () => useSessionRuntime({ transportFirst: true, configOwner: true }),
+      () => useSessionRuntime({ configOwner: true }),
       { wrapper: wrapper(store) },
     );
 
