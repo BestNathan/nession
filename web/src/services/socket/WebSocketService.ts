@@ -50,6 +50,7 @@ export class WebSocketService implements PluginSurface {
   private state: ConnectionState = 'disconnected';
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectPromise: Promise<void> | null = null;
+  private rejectConnect: ((error: Error) => void) | null = null;
   private userClosed = false;
   private disposed = false;
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
@@ -97,10 +98,12 @@ export class WebSocketService implements PluginSurface {
 
     this.setState('connecting');
     this.connectPromise = new Promise<void>((resolve, reject) => {
+      this.rejectConnect = reject;
       try {
         this.openSocket(resolve, reject);
       } catch (error) {
         this.connectPromise = null;
+        this.rejectConnect = null;
         this.setState('disconnected');
         reject(error instanceof Error ? error : new Error(String(error)));
       }
@@ -108,19 +111,27 @@ export class WebSocketService implements PluginSurface {
     return this.connectPromise;
   }
 
-  /** Stop the transport; plugins stay registered for a future connect(). */
+  /**
+   * Stop the transport. This is terminal: `userClosed` is never cleared, so a
+   * later `connect()` rejects with 'WebSocketService is closed' — rebuild the
+   * service to connect again. Plugins stay registered (torn down only by
+   * `dispose()`); an in-flight `connect()` is rejected so it cannot dangle.
+   */
   disconnect(): void {
     this.userClosed = true;
     this.clearReconnectTimer();
     this.teardownSocket();
-    this.connectPromise = null;
+    this.settleConnect(new Error('WebSocketService is closed'));
     const error = new Error('Connection lost');
     this.router.failPending(error);
     this.rejectWaiters(error);
     this.setState('disconnected');
   }
 
-  /** Permanently stop the transport: plugins are torn down (each once). */
+  /**
+   * Permanently stop the transport: plugins are torn down (each once) and an
+   * in-flight `connect()` is rejected with 'WebSocketService disposed'.
+   */
   dispose(): void {
     if (this.disposed) {
       return;
@@ -129,7 +140,7 @@ export class WebSocketService implements PluginSurface {
     this.userClosed = true;
     this.clearReconnectTimer();
     this.teardownSocket();
-    this.connectPromise = null;
+    this.settleConnect(new Error('WebSocketService disposed'));
     this.router.dispose();
     this.rejectWaiters(new Error('WebSocketService disposed'));
     for (const entry of this.plugins.values()) {
@@ -267,6 +278,7 @@ export class WebSocketService implements PluginSurface {
       if (!handshake) {
         this.setState('connected');
         this.connectPromise = null;
+        this.rejectConnect = null;
         resolve();
         return;
       }
@@ -298,6 +310,7 @@ export class WebSocketService implements PluginSurface {
           return;
         }
         this.connectPromise = null;
+        this.rejectConnect = null;
         this.setState('connected');
         resolve();
       }).catch((error) => {
@@ -305,6 +318,7 @@ export class WebSocketService implements PluginSurface {
           return;
         }
         this.connectPromise = null;
+        this.rejectConnect = null;
         reject(error instanceof Error ? error : new Error(String(error)));
         this.teardownSocket();
         this.handleSocketLoss();
@@ -334,6 +348,7 @@ export class WebSocketService implements PluginSurface {
       const error = new Error('WebSocket connection failed');
       if (this.connectPromise) {
         this.connectPromise = null;
+        this.rejectConnect = null;
         reject(error);
         this.teardownSocket();
         this.router.failPending(error);
@@ -350,6 +365,7 @@ export class WebSocketService implements PluginSurface {
       }
       if (this.connectPromise) {
         this.connectPromise = null;
+        this.rejectConnect = null;
         reject(new Error('Connection lost'));
       }
       this.handleSocketLoss();
@@ -357,6 +373,11 @@ export class WebSocketService implements PluginSurface {
   }
 
   private handleSocketLoss(): void {
+    // A stale async callback (e.g. a handshake failing after a teardown) must
+    // not schedule a reconnect or flip the state once the transport stopped.
+    if (this.disposed || this.userClosed) {
+      return;
+    }
     const error = new Error('Connection lost');
     this.router.failPending(error);
     const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
@@ -410,6 +431,23 @@ export class WebSocketService implements PluginSurface {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+  }
+
+  /**
+   * Reject the in-flight connect() promise, if any. disconnect()/dispose()
+   * call this so a connect() still awaiting the socket open or its handshake
+   * does not dangle once the transport stops — teardownSocket() nulls the
+   * ws handlers that would otherwise settle it, and a handshake completing
+   * after teardown trips the socket-identity guard and returns silently.
+   */
+  private settleConnect(error: Error): void {
+    if (!this.connectPromise) {
+      return;
+    }
+    this.connectPromise = null;
+    const reject = this.rejectConnect;
+    this.rejectConnect = null;
+    reject?.(error);
   }
 
   private teardownSocket(): void {

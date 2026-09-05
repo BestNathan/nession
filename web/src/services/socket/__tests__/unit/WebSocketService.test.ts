@@ -423,12 +423,18 @@ describe('WebSocketService', () => {
     service.use(makePlugin('gamma', events));
     expect(events).toEqual(['install:alpha', 'install:beta', 'install:gamma']);
 
-    service.connect();
+    // Handler attached at creation: dispose() settles this in-flight connect.
+    const connected = service.connect();
+    const connectOutcome = connected.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
     const waiting = service.waitForConnection(5_000);
 
     service.dispose();
     service.dispose();
     await expect(waiting).rejects.toThrow('WebSocketService disposed');
+    await expect(connectOutcome).resolves.toBe('WebSocketService disposed');
 
     expect(events).toEqual([
       'install:alpha',
@@ -441,6 +447,57 @@ describe('WebSocketService', () => {
     expect(() => service.send('x.y', {})).toThrow('WebSocketService disposed');
     await expect(service.request('x.y', {})).rejects.toThrow('WebSocketService disposed');
     await expect(service.waitForConnection()).rejects.toThrow('WebSocketService disposed');
+  });
+
+  it('dispose() rejects an in-flight connect() whose handshake is still pending', async () => {
+    const gate = controlledHandshake();
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake: gate.handshake,
+    });
+
+    // Handler attached at creation: the rejection must not go unhandled.
+    const connected = service.connect();
+    const outcome = connected.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+    MockWebSocket.instances[0].open();
+    expect(service.connectionState).toBe('connecting');
+
+    service.dispose();
+    await expect(outcome).resolves.toBe('WebSocketService disposed');
+
+    // The handshake completing after dispose trips the socket-identity guard
+    // and must not disturb anything (no late settle, no state flip).
+    gate.resolve();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connecting');
+  });
+
+  it('disconnect() rejects an in-flight connect() and is terminal for later connect() calls', async () => {
+    const gate = controlledHandshake();
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake: gate.handshake,
+    });
+
+    const connected = service.connect();
+    const outcome = connected.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+    MockWebSocket.instances[0].open();
+    expect(service.connectionState).toBe('connecting');
+
+    service.disconnect();
+    await expect(outcome).resolves.toBe('WebSocketService is closed');
+    expect(service.connectionState).toBe('disconnected');
+    await expect(service.connect()).rejects.toThrow('WebSocketService is closed');
+
+    // A handshake failing after disconnect must not schedule a reconnect or
+    // flip the state back to 'reconnecting'.
+    gate.reject(new Error('late failure'));
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('disconnected');
   });
 
   it('envelopes send() frames with a unique id, timestamp and msg_type', async () => {
