@@ -374,7 +374,8 @@ export const agentsApi = new AgentsPlugin();
 4. **响应类型**沿用 `web/src/types.ts`(Agent/Session/Env*/Commands*/ServerInfo…)或 `features/<name>/types.ts` 自持并 re-export;不要在 feature 里复制 UI 域类型。
 5. `sessions` 的 `capturePreview` 用 `lib/encoding.decodeBase64Utf8`;`fetchSessions` 保留 `stale_agents` 与 `force` 语义。
 6. `server` 只有 `serverInfo()`。
-7. 测试用 mock `PluginSurface`(#631 Constraint 5):逐方法断言发出的 `(type, payload)` 与响应剥壳、订阅类型与回调触发、teardown 后无通知、**5 步 stale-teardown 用例**(install A → install B → teardown A → B 仍活 → teardown B → detached)、未连接时方法抛「not connected」。capability 双挂守卫测试:同一实例 install 到两个不同 mock surface 的行为由实现决定——若 feature 自己守(有 active binding 且非本 surface → throw),测试之;**若选择不守(transport 允许),则测试声明"创建方责任"并在文档注明**。推荐前者(简单、明确)。
+7. 测试用 mock `PluginSurface`(#631 Constraint 5):逐方法断言发出的 `(type, payload)` 与响应剥壳、订阅类型与回调触发、teardown 后无通知、**6 步 stale-teardown 用例**(install(A) → install(B) → teardown(A) → B 仍为 active binding → teardown(B) → capability detached;#631 Scope 6 原文)、未连接时方法抛「not connected」。
+   **双挂语义(重要,照 #631 原文执行,勿自作主张加 throw)**:Scope 6 的 6 步测试要求 install(B) 在 teardown(A) 之前合法(B = 新连接/新 generation,StrictMode 下旧 teardown 迟到是常态)——generation 计数就是防 stale cleanup 的机制,**install 不做跨 surface throw**。「同一实例不并发双挂」的守卫含义 = 重挂走 replace 语义(旧 binding 被新 binding 取代;若旧 service 还活着,其订阅随旧 service dispose/teardown 释放)+ 6 步测试证明最终 detached;不做安装期抛错。服务端 `use()` 同名替换先 unregister(teardown)再 install,同样不抛。
 
 - [ ] **Step 1:** 建 `mockPluginSurface.ts`(含 `pushMessage(type, payload, raw?)`、`resolveNext(type, payload)`、`connectionState` 可控、记录 `sent: {type, payload}[]` 与 `requests: {type, payload}[]`)
 - [ ] **Step 2:** 三个 feature 的失败测试(红)

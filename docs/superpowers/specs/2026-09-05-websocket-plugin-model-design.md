@@ -176,7 +176,7 @@ web/src/features/
 └── index.ts(可选 re-export)
 ```
 
-- 同一实例双挂禁止:`CapabilityPlugin` 记录 activeSurface,第二次 install(不同 service)且已有 active 时 throw;同名同 service `use()` replace 合法。测试覆盖。
+- 重挂语义(与 #631 Scope 6 的 6 步测试一致):install(B) 允许发生在 teardown(A) 之前(B = 新 connection/generation;StrictMode 迟到 teardown 是常态);generation 计数是防 stale cleanup 的机制,install **不做**跨 surface throw。同 service 同名 `use()` 替换 = 先 unregister(teardown)再 install。真正的"不并发双挂"由创建方纪律保证(owner dispose 旧连接后才建新连接)+ 6 步测试证明最终 detached;测试覆盖。
 - 单例 stale-teardown 模式(#631 Scope 6)逐字落实 + 5 步测试(install A→install B→teardown A→B 仍活→teardown B→detached)。
 
 ## 7. Connection ownership 与迁移后形态
