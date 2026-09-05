@@ -228,6 +228,20 @@ Deploys are bot commits (`deploy(<env>): <ref>`) written by
 never a kustomize commit on `main`. Rollback is `git revert` of a deploy
 commit on `gitops`; ArgoCD syncs back.
 
+**Two deploy lanes** (owner model 2026-09-05, issue #592):
+
+- **Staging lane — any sha.** `staging` auto-deploys on every staging-branch
+  push (`staging.yml` → `deploy-staging-gitops`). `deploy.yml` deploys any
+  env dir at **any commit whose ghcr images exist** — merging to staging
+  builds `{server,agent,ui}-<sha7>` (quality gate already ran), so a small
+  fix merged to staging can be pulled onto `staging-01` and validated
+  standalone before the next release.
+- **Release lane — needs a version.** `production` deploys only via
+  `release.yml` `promote-production` at SemVer tags, behind GitHub
+  Environment `production` approval. `gitops-commit.sh` refuses non-SemVer
+  refs for production, and a manual `deploy.yml` against `production` fails
+  with that refusal — production never carries arbitrary SHAs.
+
 **If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway worktree off `origin/main`:
 
 ```bash

@@ -287,16 +287,28 @@ Triggered by push to `main` or PR. See `.github/workflows/docker-publish.yml`.
 staging→main releases; only deployment desired state moved). The branch holds
 `base/nession` (env-agnostic manifests), `environments/<env>/nession` (one
 kustomize overlay per env) and `argocd/` (self-managed app-of-apps). Deploys
-are bot commits on `gitops`:
+are bot commits on `gitops`, in **two lanes** (owner model 2026-09-05):
+
+| Lane | Environments | Deploys | Ref |
+|------|-------------|---------|-----|
+| **staging lane — any sha** | `staging` (auto), `staging-01` + any env dir (manual) | arbitrary commit whose ghcr images exist | `staging.yml` `deploy-staging-gitops`; `deploy.yml` |
+| **release lane — needs a version** | `production` only | SemVer via release, behind Environment approval | `release.yml` `promote-production` |
 
 - **staging branch push** → `staging.yml` builds sha images → `deploy-staging-gitops`
   writes `deploy(staging): <sha>` to `gitops/environments/staging` → ArgoCD syncs.
 - **staging→main release** (version bump) → `release.yml` builds version images →
   `promote-production` writes `deploy(production): <ver>` **after GitHub
   Environment `production` approval** → ArgoCD syncs.
-- **Manual SHA deploy** to any env dir (e.g. `staging-01`): dispatch `deploy.yml`.
+- **Manual SHA deploy** (`deploy.yml`) to any env dir (e.g. `staging-01`):
+  accepts **any commit with built images** — merge to staging builds them
+  (quality already ran), so small fixes can be validated standalone before the
+  next release. `production` is release-lane only: the deploy is refused with
+  a clear message (gitops-commit.sh rejects non-SemVer refs for production).
 
-All three go through `scripts/gitops-commit.sh` (gitops-writer concurrency +
+`preprod` is dormant (dispatch-ready, not in any lane). `staging-01` currently
+sits on an older validated commit from the machinery drills.
+
+All writers go through `scripts/gitops-commit.sh` (gitops-writer concurrency +
 rebase-retry). Never edit the `gitops` branch by hand except rollback
 (`git revert` a deploy commit — ArgoCD syncs back). Inspect overlays with:
 
