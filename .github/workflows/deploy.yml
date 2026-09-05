@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'environment directory under gitops/environments/ (e.g. staging-01)'
+        description: 'environment directory under gitops/environments/ (e.g. staging-01; production is release-lane only and will be rejected)'
         required: true
       sha:
-        description: 'commit SHA on main to deploy (its sha images must exist on ghcr)'
+        description: 'full commit SHA to deploy (must have built images on ghcr — merge to staging builds them)'
         required: true
 
 # All gitops writers share one concurrency group across workflows — a deploy
@@ -26,12 +26,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: validate environment and sha
+      # Two lanes (owner model 2026-09-05): the staging lane deploys ANY
+      # commit whose images exist (a commit merged to staging has them — the
+      # quality gate already ran there). Production is release-lane only:
+      # gitops-commit.sh refuses non-SemVer refs for it, so a manual deploy
+      # to production fails with a clear message — use the release flow.
+      - name: validate environment, sha, and images
         run: |
           git ls-tree origin/gitops "environments/${{ github.event.inputs.environment }}/nession/kustomization.yaml" >/dev/null \
             || { echo "no such environment on gitops: ${{ github.event.inputs.environment }}"; exit 1; }
-          git merge-base --is-ancestor "${{ github.event.inputs.sha }}" origin/main \
-            || { echo "sha not on main: ${{ github.event.inputs.sha }}"; exit 1; }
+          sha="${{ github.event.inputs.sha }}"
+          git cat-file -e "$sha^{commit}" || { echo "not a commit: $sha"; exit 1; }
+          short="${sha:0:7}"
+          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY_OWNER,,}/nession:pull" \
+            | python3 -c 'import sys, json; print(json.load(sys.stdin)["token"])')
+          for p in server agent ui; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${GITHUB_REPOSITORY_OWNER,,}/nession/manifests/${p}-${short}")
+            [ "$code" = "200" ] || { echo "image ${p}-${short} missing on ghcr (HTTP $code) — merge the commit to staging first (staging.yml builds sha images)"; exit 1; }
+          done
 
       - name: write gitops deploy commit
         shell: bash
