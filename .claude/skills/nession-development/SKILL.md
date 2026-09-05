@@ -467,7 +467,8 @@ git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
 gh pr merge <PR-NUMBER> --rebase  # No --auto: chore/** has no checks, auto-merge is rejected
 
-# 3. Wait for release.yml to finish writing the production overlay tag
+# 3. Wait for release.yml's promote-production (pauses at Environment
+#    approval) to write the gitops deploy commit, then ArgoCD rollout
 ./scripts/deploy-watch.sh prod
 
 # 4. Sync main → staging — a fast-forward, no force push. Last, once main has settled.
@@ -499,7 +500,17 @@ git push origin origin/main:refs/heads/staging
 
 Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
 
-Quality gate triggers on PR to staging. After merge to staging, CI builds Docker images, pushes hash tags, updates staging kustomize on `main`. After staging validation, the `staging → main` release PR merges with `--merge` and `main` is then synced back into `staging`; `release.yml` only builds if a version file changed, so a release carrying runtime changes needs the follow-up bump PR to reach production. See `nession-cicd`.
+Quality gate triggers on PR to staging. After merge to staging, CI builds
+Docker images and `deploy-staging-gitops` writes `deploy(staging): <sha>` to
+the `gitops` branch (ArgoCD consumes gitops, not main — issue #592). Two
+deploy lanes: **staging lane accepts any sha with built images** (merge to
+staging builds them — use `deploy.yml` to pull a specific commit onto
+`staging-01` for standalone validation); **production is release-lane only**
+(SemVer, behind Environment approval). After staging validation, the
+`staging → main` release PR merges with `--merge` and `main` is then synced
+back into `staging`; `release.yml` only builds if a version file changed, so
+a release carrying runtime changes needs the follow-up bump PR to reach
+production. See `nession-cicd`.
 
 **Monitor deployment:** Use `./scripts/deploy-watch.sh staging` after merging PR to staging, or `./scripts/deploy-watch.sh prod` after merging to main. See `nession-cicd` skill for details.
 
