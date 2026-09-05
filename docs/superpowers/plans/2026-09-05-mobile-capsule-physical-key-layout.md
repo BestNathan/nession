@@ -73,16 +73,16 @@ In the `[data-experience="app"]` block of `design/generated/web.css`, use these 
 --composer-popover-width: 22rem;
 --composer-popover-viewport-inset: 1rem;
 --composer-popover-gap: 0.25rem;
---composer-phys-key-height: 40px;
+--composer-phys-key-height: 44px;
 --composer-phys-key-icon-size: 14px;
 --composer-phys-key-pad-x: 0.25rem;
 --composer-phys-key-pad-y: 0.25rem;
 --composer-phys-key-grid-gap: 0.125rem;
---composer-phys-key-font-size: 0.75rem;
+--composer-phys-key-font-size: 0.625rem;
 --composer-phys-key-arrow-width: 2.25rem;
 ```
 
-These values reduce the panel’s visual density while retaining a 40px control band; desktop/root token values remain unchanged.
+These values reduce the panel’s visual density while retaining a 44px control band; desktop/root token values remain unchanged.
 
 - [ ] **Step 2: Update capsule style contracts.**
 
@@ -90,15 +90,15 @@ Set the physical row to a single horizontal flex line:
 
 ```ts
 export const capsulePhysKeyButtonClass =
-  'h-[length:var(--composer-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-1 font-mono text-[length:var(--composer-phys-key-font-size)]';
+  'h-[length:var(--composer-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-icon-size)]';
 
 export const capsuleArrowKeyButtonClass =
-  'h-[length:var(--composer-phys-key-height)] w-[length:var(--composer-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
+  'h-[length:var(--composer-phys-key-height)] w-[var(--composer-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
 export const capsulePhysKeyRowClass =
-  'flex items-center gap-[length:var(--composer-phys-key-grid-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
+  'flex flex-row items-center gap-[length:var(--composer-phys-key-grid-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
 ```
 
 Use the existing tokenized gap class for the grids; do not add literal layout dimensions in component code.
