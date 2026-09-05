@@ -31,8 +31,12 @@ rebase-retry push):
 - `.github/workflows/release.yml` → job `promote-production`: release promotions to `production` at SemVer tags (Environment approval).
 - Humans — only for rollback (`git revert` a deploy commit + ArgoCD re-sync).
 
-Do **not** put `[skip ci]` in deploy commits — `gitops-guard` must run on every
-push to this branch.
+Do **not** put `[skip ci]` in deploy commits. Note that GitHub does not fire
+workflows for pushes made with `GITHUB_TOKEN` — the workflow-bot deploy
+commits therefore never run `gitops-guard`; their defense is
+`gitops-commit.sh`, which refuses to write non-SemVer tags to `production`
+pre-push. Guard runs on human pushes (rollback reverted, hand edits) as the
+second line.
 
 ## Guard and app management
 
