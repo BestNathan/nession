@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsPopover } from '@/session-first/capsule/CapsuleCommandsPopover';
-import { CHAIN_LONG_PRESS_MS } from '@/session-first/capsule/physKeys';
+import {
+  ARROW_KEYS,
+  CHAIN_LONG_PRESS_MS,
+  LEFT_KEYS,
+} from '@/session-first/capsule/physKeys';
 
 vi.mock('@/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
@@ -45,7 +49,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
-  it('shows compact primary phys keys and keeps arrows in overflow', async () => {
+  it('renders the complete physical-key layout in the expanded panel', () => {
     render(
       <CapsuleCommandsPopover
         open
@@ -55,22 +59,10 @@ describe('CapsuleCommandsPopover', () => {
       />,
     );
     expect(screen.getByTestId('phys-key-row')).toBeInTheDocument();
-    const scroll = screen.getByTestId('phys-key-scroll');
-    expect(scroll).toHaveClass('overflow-x-auto');
-    expect(scroll).toHaveClass('flex-1');
-    const overflow = screen.getByTestId('phys-key-overflow');
-    expect(overflow).toBeInTheDocument();
-    expect(overflow.parentElement).toHaveClass('shrink-0');
-    expect(scroll.contains(overflow)).toBe(false);
-    expect(screen.getByTestId('phys-key-Ctrl+C')).toBeInTheDocument();
+    expect(screen.queryByTestId('phys-key-overflow')).not.toBeInTheDocument();
 
-    for (const label of ['↑', '←', '↓', '→']) {
-      expect(screen.queryByTestId(`phys-key-${label}`)).not.toBeInTheDocument();
-    }
-
-    await userEvent.click(screen.getByTestId('phys-key-overflow'));
-    for (const label of ['↑', '←', '↓', '→']) {
-      expect(await screen.findByRole('menuitem', { name: label })).toBeInTheDocument();
+    for (const keyDef of [...LEFT_KEYS, ...ARROW_KEYS]) {
+      expect(screen.getByTestId(`phys-key-${keyDef.label}`)).toBeInTheDocument();
     }
   });
 
@@ -134,7 +126,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('sends an overflow physical key once and closes after execution', async () => {
+  it('sends an arrow physical key once and closes after execution', async () => {
     const onOpenChange = vi.fn();
     render(
       <CapsuleCommandsPopover
@@ -145,16 +137,15 @@ describe('CapsuleCommandsPopover', () => {
       />,
     );
 
-    await userEvent.click(screen.getByTestId('phys-key-overflow'));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'PgDn' }));
+    await userEvent.click(screen.getByTestId('phys-key-↑'));
 
     expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText).toHaveBeenCalledWith('\x1b[6~');
+    expect(sendText).toHaveBeenCalledWith('\x1b[A');
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('closes after sending a chain built through long-press start and add', () => {
+  it('closes after sending an Esc + right-arrow chain built through long-press', () => {
     vi.useFakeTimers();
     const onOpenChange = vi.fn();
     render(
@@ -174,19 +165,20 @@ describe('CapsuleCommandsPopover', () => {
     fireEvent.pointerUp(firstKey);
     expect(screen.getByTestId('capsule-chain-bar')).toBeInTheDocument();
 
-    const secondKey = screen.getByTestId('phys-key-Tab');
+    const secondKey = screen.getByTestId('phys-key-→');
     fireEvent.pointerDown(secondKey);
     fireEvent.pointerUp(secondKey);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText).toHaveBeenCalledWith('\x1b\t');
+    // The chain payload is Esc (\x1b) followed by right arrow (\x1b[C).
+    expect(sendText).toHaveBeenCalledWith('\x1b\x1b[C');
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('renders the mobile anchored popover', () => {
+  it('renders the commands panel as an anchored popover', () => {
     render(
       <CapsuleCommandsPopover
         open
