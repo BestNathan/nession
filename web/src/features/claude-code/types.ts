@@ -1,7 +1,7 @@
 /**
  * Claude Code config-extension wire types (#593 proof case). Moved verbatim
- * from `services/websocket/plugins/ClaudeCodePlugin.ts`; the legacy
- * `extensions/claude-code/types.ts` keeps re-exporting them until Task 5.
+ * from the legacy `services/websocket/plugins/ClaudeCodePlugin.ts`, which the
+ * plugin-model refactor deleted.
  */
 export interface ClaudeCodeListRequest {
   agent_id: string;

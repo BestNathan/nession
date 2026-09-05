@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { generateId } from '@/lib/idGenerator';
-import type { FileEntry } from '../services/fileOps';
+import type { FileEntry } from '@/features/files';
 
 export interface OpenFile {
   id: string;

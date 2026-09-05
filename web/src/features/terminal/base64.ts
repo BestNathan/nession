@@ -1,8 +1,8 @@
 /**
  * Shared base64 helpers for the terminal capability's wire encoding.
  *
- * Two decode policies exist on purpose — one per legacy connection, and both
- * must survive until Task 8 deletes the legacy consumers:
+ * Two decode policies exist on purpose — one per connection type (agent vs
+ * server):
  *
  * - The agent (P2P) connection (`agent.ts`) decodes strictly: a frame that is
  *   not valid base64 is a protocol violation. Mirrors ConnectionManager.

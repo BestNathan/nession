@@ -8,7 +8,7 @@ import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
 import type { ConnectionState } from '@/services/socket/types';
 import type { TerminalAgentApi } from '@/features/terminal';
-import type { FileOps } from '@/services/fileOps';
+import type { FileOps } from '@/features/files';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {

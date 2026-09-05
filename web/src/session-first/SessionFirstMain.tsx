@@ -3,7 +3,7 @@ import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { FileOps } from '@/services/fileOps';
+import type { FileOps } from '@/features/files';
 import type { DomainState } from '@/session-first/domainState';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';

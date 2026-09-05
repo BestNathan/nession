@@ -1,4 +1,4 @@
-import type { FileData, FileEntry, FileOps } from '@/services/fileOps';
+import type { FileData, FileEntry, FileOps } from '@/features/files';
 import {
   FIXTURE_FILE_CONTENTS,
   FIXTURE_FILES,

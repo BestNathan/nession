@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { CapsuleExperience } from '@/session-first/capsule/types';
 import type { DomainState } from '@/session-first/domainState';
-import type { FileOps } from '@/services/fileOps';
+import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 
 export type WorkspaceToolId = 'files' | 'session' | 'agent';

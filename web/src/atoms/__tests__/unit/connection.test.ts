@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import {
-  p2pStateAtom, p2pConnectionAtom,
+  p2pStateAtom,
   activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
 } from '@/atoms/connection';
 import { terminalSessionStateAtom } from '@/terminal/state/session';
@@ -12,7 +12,6 @@ describe('base atoms', () => {
   it('start with defaults', () => {
     const store = createStore();
     expect(store.get(p2pStateAtom)).toBe('disconnected');
-    expect(store.get(p2pConnectionAtom)).toBeNull();
     expect(store.get(terminalSessionStateAtom)).toBe('idle');
     expect(store.get(lastResizeAtom)).toBeNull();
   });

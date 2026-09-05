@@ -1,6 +1,6 @@
 // web/src/atoms/connection.ts
 import { atom } from 'jotai';
-import type { P2PConnection, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
@@ -11,7 +11,6 @@ import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 // ── Base ────────────────────────────────────────────────────────
 
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
-export const p2pConnectionAtom = atom<P2PConnection | null>(null);
 
 /** User-initiated route switch epoch — resets P2P candidate index when changed. */
 export const routeIntentEpochAtom = atom(0);

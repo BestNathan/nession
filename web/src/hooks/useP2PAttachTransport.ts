@@ -25,7 +25,7 @@ interface UseP2PAttachTransportResult {
   /** @deprecated Alias of connectionState — legacy consumers migrating. */
   p2pState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
-  fileOps: import('@/services/fileOps').FileOps | null;
+  fileOps: import('@/features/files').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
   transportKey: string | null;
   snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;

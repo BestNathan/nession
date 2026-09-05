@@ -63,6 +63,5 @@ export { TerminalTabs } from './components/TerminalTabs';
 export { TerminalWorkspace } from './components/TerminalWorkspace';
 
 // New architecture: hooks
-export { useTerminalStateMachine } from './hooks/useTerminalStateMachine';
 export { useTerminal } from './hooks/useTerminal';
 export type { UseTerminalOptions } from './hooks/useTerminal';

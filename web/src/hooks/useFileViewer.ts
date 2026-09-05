@@ -8,7 +8,7 @@ import {
   detectLanguageForFile,
   isMarkdownExt,
 } from '@/markdown';
-import { readFileChunked, type FileOps } from '../services/fileOps';
+import { readFileChunked, type FileOps } from '@/features/files';
 export type ViewMode = 'preview' | 'raw';
 
 /**

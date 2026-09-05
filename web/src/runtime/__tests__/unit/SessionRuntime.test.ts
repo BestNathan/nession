@@ -140,6 +140,7 @@ describe('SessionRuntime', () => {
     rt.updateContext({ forcedRelay: true });
     expect(rt.activeUrl).toBeNull();
     expect(rt.getAgentTerminalApi()).toBeNull();
+    expect(rt.getFilesApi()).toBeNull();
     rt.dispose();
   });
 

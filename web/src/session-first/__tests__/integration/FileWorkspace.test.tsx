@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileWorkspace } from '@/session-first/patterns/FileWorkspace';
-import type { FileOps, FileEntry } from '@/services/fileOps';
+import type { FileOps, FileEntry } from '@/features/files';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
 vi.mock('sonner', () => ({

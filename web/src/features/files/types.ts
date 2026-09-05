@@ -1,6 +1,6 @@
 /**
  * File-domain data types — ported from `services/fileOps.ts`, which the
- * websocket-plugin-model refactor deletes once consumers re-point at this
+ * websocket-plugin-model refactor deleted once consumers re-pointed at this
  * feature (Task 8). The shapes are the wire responses of `file.*` requests,
  * unchanged.
  */
