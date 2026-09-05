@@ -1,7 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# staging-01 — fresh environment: own namespace, own NFS dirs, starts empty.
+# staging-01 — on-demand SHA-deploy target (deploy.yml): own namespace, own
+# NFS dirs, starts empty. Not driven by the staging-branch flow.
 namespace: nession-staging-01
 
 commonLabels:
