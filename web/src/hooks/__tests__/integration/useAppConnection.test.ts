@@ -2,6 +2,7 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
+import { toast } from 'sonner';
 import { useAppConnection } from '@/hooks/useAppConnection';
 import * as auth from '@/lib/auth';
 import { MockWebSocket } from '@/test/mockWebSocket';
@@ -10,6 +11,9 @@ import type { SocketMessage } from '@/services/socket/types';
 vi.mock('@/lib/auth');
 vi.mock('@/hooks/useVisibilityReconnect', () => ({
   useVisibilityReconnect: vi.fn(),
+}));
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn() },
 }));
 
 const OriginalWebSocket = globalThis.WebSocket;
@@ -152,6 +156,34 @@ describe('useAppConnection', () => {
       expect(result.current.isRestoringSession).toBe(false);
     });
     expect(vi.mocked(auth.clearToken)).toHaveBeenCalled();
+  });
+
+  it('manual connect with a failing handshake toasts and drops to disconnected', async () => {
+    const { result } = renderHook(() => useAppConnection());
+
+    act(() => {
+      result.current.setAuthToken('manual-token');
+    });
+    act(() => {
+      result.current.handleConnect(false);
+    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+
+    await act(async () => {
+      socket.open();
+    });
+    replyToAuth(socket, 'failed');
+
+    // The manual path surfaces the failure: a toast naming the server's
+    // rejection plus a return to the disconnected (login) state.
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('disconnected');
+      expect(result.current.isAuthenticated).toBe(false);
+    });
+    expect(toast.error).toHaveBeenCalledWith('Connection failed: invalid token');
+    // Clearing stored credentials is auto-connect semantics only.
+    expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
   });
 
   it('handleDisconnect disposes the live transport and exits restore state', async () => {

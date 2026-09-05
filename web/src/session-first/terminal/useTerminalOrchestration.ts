@@ -73,11 +73,11 @@ function useTransportFactory(opts: {
   isAttached: () => boolean;
 }) {
   const { effectiveMode, sessionName, sessionId, p2pConnection, serverConnection, isAttached } = opts;
-  const transportFactoryRef = useRef<() => TerminalTransport>(
-    () => new ConnectionManager({
-      mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }),
-  );
+  // Holds the render-fresh factory; the callback identity stays stable while
+  // the closure sees current values. The ref itself starts null — the
+  // previous dummy ConnectionManager initializer was constructed and discarded
+  // every render.
+  const transportFactoryRef = useRef<(() => TerminalTransport) | null>(null);
   const isAttachedRef = useRef(isAttached);
   isAttachedRef.current = isAttached;
   transportFactoryRef.current = () =>
@@ -89,7 +89,13 @@ function useTransportFactory(opts: {
       serverConnection: effectiveMode === 'relay' ? serverConnection : undefined,
       isAttached: () => isAttachedRef.current(),
     });
-  return useCallback(() => transportFactoryRef.current(), []);
+  return useCallback(() => {
+    const createTransport = transportFactoryRef.current;
+    if (createTransport === null) {
+      throw new Error('Transport factory is not initialized');
+    }
+    return createTransport();
+  }, []);
 }
 
 function useReconnectBanner(opts: {

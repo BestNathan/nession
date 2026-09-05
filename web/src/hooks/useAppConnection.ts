@@ -72,16 +72,17 @@ export function useAppConnection() {
     };
   }, []);
 
-  const connectInternal = useCallback((remember: boolean, auto: boolean) => {
+  const connectInternal = useCallback(async (remember: boolean, auto: boolean) => {
     setToken(authToken, remember);
     localStorage.setItem('nession_server_url', serverUrl);
 
+    let service: WebSocketService | null = null;
     try {
       // A previous service (StrictMode twin, reconnect after disconnect) must
       // stop before the new one opens — two transports would race the state.
       serviceRef.current?.dispose();
       const clientId = getOrCreateClientId();
-      const service = new WebSocketService(serverUrl, SERVER_CAPABILITIES, {
+      service = new WebSocketService(serverUrl, SERVER_CAPABILITIES, {
         maxReconnectAttempts: 5,
         handshake: (surface) => surface
           .request<AuthResponse>('client.auth', { auth_token: authToken, client_id: clientId })
@@ -102,20 +103,33 @@ export function useAppConnection() {
         setConnectionStatus(status);
       });
 
-      return service.connect();
+      // Await the handshake so an auth failure lands in the catch below. The
+      // try used to be sync-only, letting the rejection escape to callers —
+      // handleConnect swallowed it and the manual path lost its toast.
+      await service.connect();
     } catch (error) {
-      if (auto) {
-        clearToken();
-      } else {
-        toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        setConnectionStatus('disconnected');
+      // A rejection from a superseded service (disposed by a newer connect or
+      // by unmount) is not this attempt's failure — the successor owns the
+      // outcome and surfaces its own result. Only the current owner handles
+      // the error: auto-connect clears the token silently, manual connect
+      // toasts and drops back to the disconnected (login) state.
+      if (service === null || serviceRef.current === service) {
+        if (auto) {
+          clearToken();
+        } else {
+          toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          setConnectionStatus('disconnected');
+        }
       }
-      return Promise.reject(error);
+      throw error;
     }
   }, [authToken, serverUrl]);
 
   const handleConnect = useCallback((remember: boolean) => {
-    connectInternal(remember, false).catch(() => { /* error already toasted */ });
+    connectInternal(remember, false).catch(() => {
+      // Failure already surfaced inside connectInternal (toast + state) when
+      // this attempt owned the service; superseded rejections stay silent.
+    });
   }, [connectInternal]);
 
   useEffect(() => {
