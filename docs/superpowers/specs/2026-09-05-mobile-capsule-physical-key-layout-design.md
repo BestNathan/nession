@@ -15,8 +15,8 @@ Improve the expanded mobile terminal command panel so the physical shortcut keys
 ## Sizing and visual density
 
 - Retain a minimum visual width of `5ch` for physical-key buttons and `whitespace-nowrap`.
-- Reduce physical-key row padding, inter-key gaps, button visual height, font size, and arrow icon size through the existing composer tokens.
-- Preserve a usable touch target by shrinking visual content and spacing before shrinking the interactive control band below the existing control minimum.
+- Preserve the 44px touch/control band while reducing internal visual content and spacing through the existing composer tokens.
+- Reduce physical-key row padding, inter-key gaps, font size, and arrow icon size before changing the interactive control band.
 - Apply the compact sizing only to the mobile capsule panel; do not change desktop terminal controls.
 
 ## Interaction contract

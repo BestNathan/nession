@@ -12,7 +12,8 @@
 
 ## File map
 
-- Modify `design/generated/web.css`: tune only the `[data-experience="app"]` composer/popover tokens used by the mobile capsule.
+- Modify `design/tokens/experience/app.json`: define the app-scoped composer/popover tokens used by the mobile capsule; this is the token source of truth.
+- Regenerate `design/generated/app.ts` and `design/generated/web.css` from the token source.
 - Modify `web/src/session-first/capsule/capsuleStyles.ts`: define the horizontal row, compact physical-key typography, and arrow-button sizing classes.
 - Modify `web/src/session-first/capsule/PhysKeyRow.tsx`: render the five shortcut buttons in a flexible left grid and the arrow cluster in a fixed right grid; use a narrower arrow-button class without changing event behavior.
 - Modify `web/src/session-first/capsule/__tests__/unit/capsuleStyles.test.ts`: lock the horizontal layout and compact/no-wrap style contract.
@@ -59,13 +60,15 @@ Expected: failures because the row is still `flex-col`, the compact font token/n
 ## Task 2: Implement horizontal layout and compact controls
 
 **Files:**
-- Modify: `design/generated/web.css`
+- Modify: `design/tokens/experience/app.json`
+- Regenerate: `design/generated/app.ts`
+- Regenerate: `design/generated/web.css`
 - Modify: `web/src/session-first/capsule/capsuleStyles.ts`
 - Modify: `web/src/session-first/capsule/PhysKeyRow.tsx`
 
 - [ ] **Step 1: Tune app-scoped composer tokens for the mobile capsule.**
 
-In the `[data-experience="app"]` block of `design/generated/web.css`, use these values:
+In `design/tokens/experience/app.json`, use these values under `experience.app.composer`:
 
 ```css
 --composer-font-size: 0.875rem;
@@ -83,6 +86,8 @@ In the `[data-experience="app"]` block of `design/generated/web.css`, use these 
 ```
 
 These values reduce the panel’s visual density while retaining a 44px control band; desktop/root token values remain unchanged.
+
+Run `node design/scripts/generate-tokens.mjs` to regenerate `design/generated/app.ts` and `design/generated/web.css`. Do not edit generated outputs directly.
 
 - [ ] **Step 2: Update capsule style contracts.**
 
