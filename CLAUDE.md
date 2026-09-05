@@ -1,5 +1,15 @@
 # Nession — Distributed tmux Agent
 
+> **多 agent 兼容**:本文件通过 `AGENTS.md` 软链暴露给 Codex/Cursor/Copilot
+> (AGENTS.md 是跨工具指令标准)。如果你不是 Claude Code:
+> - 遇到 `EnterWorktree` / Skill 调用等 Claude Code 专属指令时,改用对应的
+>   手动 git 命令(`git worktree add …`,见 Iron Law 2 段落)或直接读取文件。
+> - 按领域取用 `.claude/skills/<name>/SKILL.md`(如开发前读
+>   `nession-development`,CI/CD 问题读 `nession-cicd`)——它们是与工具无关的
+>   流程文档,读文件即可生效。
+> - `.githooks/` 的 pre-commit/pre-push 对所有 agent 的 git 提交生效(工作区
+>   策略 + lint 门禁),不可绕过。
+
 ## 1. Project Structure
 
 ```
