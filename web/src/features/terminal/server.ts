@@ -1,34 +1,18 @@
+import { decodeTerminalData, encodeBase64 } from './base64';
 import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
 
 type RelayOutputCallback = (data: Uint8Array) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;
 
-/**
- * Decode base64-encoded terminal data to raw bytes.
- *
- * Returns Uint8Array so that non-UTF-8 octets are preserved. xterm.js
- * accepts Uint8Array in `write()` and interprets the bytes directly as a
- * terminal byte stream (ANSI escapes + text + arbitrary binary). Mirrors the
- * pre-refactor `services/websocket/plugins/EventPlugin.ts` semantics exactly.
- */
-export function decodeTerminalData(rawData: string): Uint8Array {
-  if (!rawData) {
-    return new Uint8Array(0);
-  }
-  try {
-    const binary = atob(rawData);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  } catch {
-    // Invalid base64 — fall back to encoding the raw string as UTF-8 bytes.
-    return new TextEncoder().encode(rawData);
-  }
+/** One registration, tagged with the install generation that created it. */
+interface GenerationEntry<T> {
+  cb: T;
+  generation: number;
 }
 
-/** Session key used by relay frames — session_name (short name), not session_id. */
+/**
+ * Session key used by relay frames — session_name (short name), not session_id.
+ */
 function getSessionId(payload: Record<string, unknown>): string {
   return (payload.session_name ?? payload.session_id) as string;
 }
@@ -39,6 +23,12 @@ function getSessionId(payload: Record<string, unknown>): string {
  * travels this connection, so the plugin owns both the outbound relay
  * lifecycle and the inbound per-session terminal.output / terminal.resize
  * fan-out. Wire strings live only in this file.
+ *
+ * Decode semantics: this relay path decodes terminal.output data *tolerantly*
+ * (see ./base64) because relay frames arrive via the server's per-connection
+ * EventPlugin twin; the P2P path in agent.ts decodes the same wire shape
+ * *strictly* (ConnectionManager twin). The relay side identifies base64
+ * frames per frame via the isRelay discriminator below.
  */
 export interface TerminalServerApi {
   beginRelay(sessionId: string, relayUrl?: string, cols?: number, rows?: number): void;
@@ -52,29 +42,26 @@ export interface TerminalServerApi {
   onRelayResize(sessionName: string, cb: RelayResizeCallback): () => void;
 }
 
-/** TextEncoder→binary-string→btoa, matching the server's base64 wire encoding. */
-function encodeBase64(data: string): string {
-  const bytes = new TextEncoder().encode(data);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi {
   readonly name = 'terminal-server';
 
   private connection: PluginSurface | null = null;
   private generation = 0;
-  private outputCallbacks = new Map<string, RelayOutputCallback[]>();
-  private resizeCallbacks = new Map<string, RelayResizeCallback[]>();
+  private outputCallbacks = new Map<string, Array<GenerationEntry<RelayOutputCallback>>>();
+  private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
 
   /**
    * Bind the plugin to the server connection. A later install replaces an
-   * earlier binding (same instance, new surface — StrictMode remount); the
-   * returned teardown is generation-guarded so a stale release can never
-   * detach the newer binding.
+   * earlier binding (same instance, new surface — StrictMode remount).
+   *
+   * Registration lifecycle contract: every onRelayOutput/onRelayResize
+   * subscription is tagged with the generation of the install that registered
+   * it. The returned teardown releases generation G:
+   * - unsubscribes G's surface subscriptions;
+   * - if G is still the current release, nulls `this.connection` and clears
+   *   ALL registrations (nothing newer exists);
+   * - otherwise a newer binding owns the connection — only registrations
+   *   tagged G are dropped, so the newer binding's consumers keep firing.
    */
   install(connection: PluginSurface): () => void {
     const generation = ++this.generation;
@@ -95,10 +82,15 @@ export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi
       }
       if (this.generation === generation && this.connection === connection) {
         this.connection = null;
+        // Current release — no newer binding exists, so every remaining
+        // registration belongs to this release. Drop them all.
+        this.outputCallbacks.clear();
+        this.resizeCallbacks.clear();
+      } else {
+        // Stale release — a newer binding is active. Drop only the
+        // registrations this release created; never touch newer ones.
+        this.dropGeneration(generation);
       }
-      // A released plugin must never notify stale consumers.
-      this.outputCallbacks.clear();
-      this.resizeCallbacks.clear();
     };
   }
 
@@ -152,8 +144,8 @@ export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi
 
     const callbacks = this.outputCallbacks.get(sessionId);
     if (callbacks) {
-      for (const cb of callbacks) {
-        cb(data);
+      for (const entry of callbacks) {
+        entry.cb(data);
       }
     }
   }
@@ -165,18 +157,23 @@ export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi
 
     const callbacks = this.resizeCallbacks.get(sessionId);
     if (callbacks) {
-      for (const cb of callbacks) {
-        cb(cols, rows);
+      for (const entry of callbacks) {
+        entry.cb(cols, rows);
       }
     }
   }
 
-  private addMapCallback<T>(map: Map<string, T[]>, key: string, callback: T): () => void {
+  private addMapCallback<T>(
+    map: Map<string, Array<GenerationEntry<T>>>,
+    key: string,
+    cb: T,
+  ): () => void {
+    const entry: GenerationEntry<T> = { cb, generation: this.generation };
     const list = map.get(key);
     if (list) {
-      list.push(callback);
+      list.push(entry);
     } else {
-      map.set(key, [callback]);
+      map.set(key, [entry]);
     }
 
     return () => {
@@ -184,7 +181,7 @@ export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi
       if (!current) {
         return;
       }
-      const index = current.indexOf(callback);
+      const index = current.indexOf(entry);
       if (index > -1) {
         current.splice(index, 1);
       }
@@ -192,6 +189,26 @@ export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi
         map.delete(key);
       }
     };
+  }
+
+  /** Drop every registration tagged with `generation` across both maps. */
+  private dropGeneration(generation: number): void {
+    this.dropGenerationFrom(this.outputCallbacks, generation);
+    this.dropGenerationFrom(this.resizeCallbacks, generation);
+  }
+
+  private dropGenerationFrom<T>(
+    map: Map<string, Array<GenerationEntry<T>>>,
+    generation: number,
+  ): void {
+    for (const [key, list] of map) {
+      const kept = list.filter((entry) => entry.generation !== generation);
+      if (kept.length === 0) {
+        map.delete(key);
+      } else if (kept.length !== list.length) {
+        map.set(key, kept);
+      }
+    }
   }
 
   private requireConnection(): PluginSurface {

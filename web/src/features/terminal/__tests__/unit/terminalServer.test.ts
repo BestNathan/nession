@@ -230,6 +230,27 @@ describe('TerminalServerPlugin', () => {
       expect(() => plugin.beginRelay('sess-1')).toThrow('terminal-server feature is not connected');
     });
 
+    it('a consumer registered under the newer binding survives a stale teardown', () => {
+      const surfaceA = createMockPluginSurface();
+      const surfaceB = createMockPluginSurface();
+
+      const teardownA = plugin.install(surfaceA);
+      const teardownB = plugin.install(surfaceB);
+
+      const cb = vi.fn();
+      plugin.onRelayOutput('work', cb); // registered under B's generation
+
+      teardownA(); // stale release — must not drop B's consumers
+
+      surfaceB.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105]));
+
+      teardownB(); // current release — the consumer dies with its binding
+      surfaceB.pushMessage('terminal.output', { session_name: 'work', data: 'aGk=' });
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
     it('teardown is idempotent', () => {
       const teardown = plugin.install(surface);
       expect(() => {

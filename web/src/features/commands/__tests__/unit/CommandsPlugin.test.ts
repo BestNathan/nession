@@ -47,6 +47,26 @@ describe('CommandsPlugin', () => {
       expect(lateCb).not.toHaveBeenCalled(); // no subscription survives on B
     });
 
+    it('a consumer registered under the newer binding survives a stale teardown', () => {
+      const surfaceA = createMockPluginSurface();
+      const surfaceB = createMockPluginSurface();
+
+      const teardownA = plugin.install(surfaceA);
+      const teardownB = plugin.install(surfaceB);
+
+      const cb = vi.fn();
+      plugin.onCommandsChanged(cb); // registered under B's generation
+
+      teardownA(); // stale release — must not drop B's consumers
+
+      surfaceB.pushMessage('server.commands.changed', {});
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      teardownB(); // current release — the consumer dies with its binding
+      surfaceB.pushMessage('server.commands.changed', {});
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
     it('teardown is idempotent', () => {
       const teardown = plugin.install(surface);
       expect(() => {

@@ -8,6 +8,14 @@ import type {
   SessionsListResponse,
 } from './types';
 
+type SessionsCallback = (sessions: Session[]) => void;
+
+/** One registration, tagged with the install generation that created it. */
+interface GenerationEntry<T> {
+  cb: T;
+  generation: number;
+}
+
 /**
  * sessions capability — `client.sessions.list` / `client.session.create|kill|
  * attach|capture_preview` plus the two change notifications that keep the UI's
@@ -19,13 +27,20 @@ export class SessionsPlugin implements CapabilityPlugin {
 
   private connection: PluginSurface | null = null;
   private generation = 0;
-  private callbacks = new Set<(sessions: Session[]) => void>();
+  private callbacks = new Set<GenerationEntry<SessionsCallback>>();
 
   /**
    * Bind the plugin to a connection. A later install replaces an earlier
-   * binding (same instance, new surface — StrictMode remount); the returned
-   * teardown is generation-guarded so a stale release can never detach the
-   * newer binding.
+   * binding (same instance, new surface — StrictMode remount).
+   *
+   * Registration lifecycle contract: every onSessionsChanged subscription is
+   * tagged with the generation of the install that registered it. The
+   * returned teardown releases generation G:
+   * - unsubscribes G's surface subscriptions;
+   * - if G is still the current release, nulls `this.connection` and clears
+   *   ALL registrations (nothing newer exists);
+   * - otherwise a newer binding owns the connection — only registrations
+   *   tagged G are dropped, so the newer binding's consumers keep firing.
    */
   install(connection: PluginSurface): () => void {
     const generation = ++this.generation;
@@ -52,9 +67,14 @@ export class SessionsPlugin implements CapabilityPlugin {
       }
       if (this.generation === generation && this.connection === connection) {
         this.connection = null;
+        // Current release — no newer binding exists, so every remaining
+        // registration belongs to this release. Drop them all.
+        this.callbacks.clear();
+      } else {
+        // Stale release — a newer binding is active. Drop only the
+        // registrations this release created; never touch newer ones.
+        this.dropGeneration(generation);
       }
-      // A released plugin must never notify stale consumers.
-      this.callbacks.clear();
     };
   }
 
@@ -165,16 +185,26 @@ export class SessionsPlugin implements CapabilityPlugin {
   }
 
   /** Subscribe to session list changes (server push or list response). */
-  onSessionsChanged(cb: (sessions: Session[]) => void): () => void {
-    this.callbacks.add(cb);
+  onSessionsChanged(cb: SessionsCallback): () => void {
+    const entry: GenerationEntry<SessionsCallback> = { cb, generation: this.generation };
+    this.callbacks.add(entry);
     return () => {
-      this.callbacks.delete(cb);
+      this.callbacks.delete(entry);
     };
   }
 
   private notify(sessions: Session[]): void {
-    for (const cb of this.callbacks) {
-      cb(sessions);
+    for (const entry of this.callbacks) {
+      entry.cb(sessions);
+    }
+  }
+
+  /** Drop the registrations made under one (now-released) install generation. */
+  private dropGeneration(generation: number): void {
+    for (const entry of this.callbacks) {
+      if (entry.generation === generation) {
+        this.callbacks.delete(entry);
+      }
     }
   }
 

@@ -1,7 +1,12 @@
+import { decodeBase64Bytes, encodeBase64 } from './base64';
 import type { PluginSurface } from '@/services/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 
-/** Default attach timeout — the controller-level budget in AttachStateMachine. */
+/**
+ * Default attach timeout — must mirror `runtime/AttachStateMachine.ts`
+ * (controller-level budget kept there for the old consumer; this one serves
+ * the feature API). Do not import from the feature into runtime.
+ */
 export const ATTACH_TIMEOUT_MS = 10_000;
 
 /**
@@ -12,7 +17,7 @@ export const ATTACH_TIMEOUT_MS = 10_000;
  * The wire shapes mirror `terminal/ConnectionManager.ts`, which Task 6
  * rewires onto this API: attach carries the viewport as width/height,
  * terminal I/O carries the short session_name, and terminal.output data is
- * base64 (agent protocol现状).
+ * base64 (current agent protocol).
  */
 export interface TerminalAgentApi {
   /**
@@ -24,7 +29,7 @@ export interface TerminalAgentApi {
   attach(
     sessionName: string,
     size: TerminalSize,
-    opts?: { timeoutMs?: number; manualRoute?: boolean },
+    opts?: { timeoutMs?: number },
   ): Promise<AttachResult>;
   /** Send terminal input (keystrokes) to the session — base64-encoded. */
   sendInput(sessionName: string, data: string): void;
@@ -38,37 +43,12 @@ export interface TerminalAgentApi {
   ping(): void;
 }
 
-/** TextEncoder→binary-string→btoa, matching the agent's base64 wire encoding. */
-function encodeBase64(data: string): string {
-  const bytes = new TextEncoder().encode(data);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Decode a base64 frame to raw bytes (strict — no fallback, matching
- * ConnectionManager). Returns Uint8Array, NOT a decoded string: terminal
- * output is a raw byte stream (ANSI + UTF-8 + arbitrary octets) and
- * TextDecoder would corrupt invalid UTF-8 before xterm.js can interpret it.
- */
-function decodeBase64Bytes(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   return {
     attach: async (
       sessionName: string,
       size: TerminalSize,
-      opts?: { timeoutMs?: number; manualRoute?: boolean },
+      opts?: { timeoutMs?: number },
     ): Promise<AttachResult> => {
       try {
         await surface.request('client.attach', {
@@ -79,8 +59,10 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         return { ok: true };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        // Router timeouts reject with "Request timeout: <type>".
-        const error = /timeout/i.test(message) ? 'timeout' : message;
+        // Router timeouts reject with "Request timeout: <type>" — that exact
+        // prefix is the only timeout signal; an agent error ack that merely
+        // mentions "timeout" in prose is passed through verbatim.
+        const error = message.startsWith('Request timeout: ') ? 'timeout' : message;
         return { ok: false, error };
       }
     },
@@ -97,6 +79,8 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       return surface.subscribe('terminal.output', (payload) => {
         const data = (payload as { data?: unknown })?.data as string | undefined;
         if (data) {
+          // Strict decode (throws on invalid base64) — see './base64' for why
+          // this side is strict while server.ts (relay) is tolerant.
           cb(decodeBase64Bytes(data));
         }
       });

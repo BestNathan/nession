@@ -24,8 +24,8 @@ describe('createTerminalAgentApi', () => {
       await expect(pending).resolves.toEqual({ ok: true });
     });
 
-    it('honors a custom timeout and never leaks manualRoute onto the wire', async () => {
-      const pending = api.attach('work', { cols: 80, rows: 24 }, { timeoutMs: 500, manualRoute: true });
+    it('honors a custom timeout', async () => {
+      const pending = api.attach('work', { cols: 80, rows: 24 }, { timeoutMs: 500 });
       expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', width: 80, height: 24 });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: 500 });
 
@@ -45,6 +45,16 @@ describe('createTerminalAgentApi', () => {
       surface.rejectNext('client.attach', new Error('Request timeout: client.attach'));
 
       await expect(pending).resolves.toEqual({ ok: false, error: 'timeout' });
+    });
+
+    it('passes through agent error prose that merely mentions "timeout"', async () => {
+      const pending = api.attach('work', { cols: 80, rows: 24 });
+      surface.rejectNext('client.attach', new Error('agent: attach timed out while starting'));
+
+      await expect(pending).resolves.toEqual({
+        ok: false,
+        error: 'agent: attach timed out while starting',
+      });
     });
 
     it('never rejects — any transport failure converges into an AttachResult', async () => {

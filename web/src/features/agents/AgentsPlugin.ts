@@ -2,6 +2,14 @@ import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
 import type { Agent } from '@/types';
 import type { AgentDeleteResponse, AgentRenameResponse, AgentsListResponse } from './types';
 
+type AgentsCallback = (agents: Agent[]) => void;
+
+/** One registration, tagged with the install generation that created it. */
+interface GenerationEntry<T> {
+  cb: T;
+  generation: number;
+}
+
 /**
  * agents capability — `client.agents.list` / `client.agent.rename` /
  * `client.agent.delete` plus the two change notifications that keep the UI's
@@ -13,13 +21,20 @@ export class AgentsPlugin implements CapabilityPlugin {
 
   private connection: PluginSurface | null = null;
   private generation = 0;
-  private callbacks = new Set<(agents: Agent[]) => void>();
+  private callbacks = new Set<GenerationEntry<AgentsCallback>>();
 
   /**
    * Bind the plugin to a connection. A later install replaces an earlier
-   * binding (same instance, new surface — StrictMode remount); the returned
-   * teardown is generation-guarded so a stale release can never detach the
-   * newer binding.
+   * binding (same instance, new surface — StrictMode remount).
+   *
+   * Registration lifecycle contract: every onAgentsChanged subscription is
+   * tagged with the generation of the install that registered it. The
+   * returned teardown releases generation G:
+   * - unsubscribes G's surface subscriptions;
+   * - if G is still the current release, nulls `this.connection` and clears
+   *   ALL registrations (nothing newer exists);
+   * - otherwise a newer binding owns the connection — only registrations
+   *   tagged G are dropped, so the newer binding's consumers keep firing.
    */
   install(connection: PluginSurface): () => void {
     const generation = ++this.generation;
@@ -46,9 +61,14 @@ export class AgentsPlugin implements CapabilityPlugin {
       }
       if (this.generation === generation && this.connection === connection) {
         this.connection = null;
+        // Current release — no newer binding exists, so every remaining
+        // registration belongs to this release. Drop them all.
+        this.callbacks.clear();
+      } else {
+        // Stale release — a newer binding is active. Drop only the
+        // registrations this release created; never touch newer ones.
+        this.dropGeneration(generation);
       }
-      // A released plugin must never notify stale consumers.
-      this.callbacks.clear();
     };
   }
 
@@ -85,16 +105,26 @@ export class AgentsPlugin implements CapabilityPlugin {
   }
 
   /** Subscribe to agent list changes (server push or list response). */
-  onAgentsChanged(cb: (agents: Agent[]) => void): () => void {
-    this.callbacks.add(cb);
+  onAgentsChanged(cb: AgentsCallback): () => void {
+    const entry: GenerationEntry<AgentsCallback> = { cb, generation: this.generation };
+    this.callbacks.add(entry);
     return () => {
-      this.callbacks.delete(cb);
+      this.callbacks.delete(entry);
     };
   }
 
   private notify(agents: Agent[]): void {
-    for (const cb of this.callbacks) {
-      cb(agents);
+    for (const entry of this.callbacks) {
+      entry.cb(agents);
+    }
+  }
+
+  /** Drop the registrations made under one (now-released) install generation. */
+  private dropGeneration(generation: number): void {
+    for (const entry of this.callbacks) {
+      if (entry.generation === generation) {
+        this.callbacks.delete(entry);
+      }
     }
   }
 
