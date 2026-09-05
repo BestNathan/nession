@@ -1,5 +1,5 @@
 import type { ConnectionOptions } from './types';
-import type { P2PConnectionState } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
 
 export class ConnectionManager implements TerminalTransport {
@@ -26,7 +26,7 @@ export class ConnectionManager implements TerminalTransport {
   private pendingResize: { cols: number; rows: number } | null = null;
   private isAttached: () => boolean;
 
-  onStateChange: ((state: P2PConnectionState) => void) | null = null;
+  onStateChange: ((state: ConnectionState) => void) | null = null;
   onOutput: ((data: Uint8Array) => void) | null = null;
   onError: ((error: Error) => void) | null = null;
   onDisconnect: (() => void) | null = null;

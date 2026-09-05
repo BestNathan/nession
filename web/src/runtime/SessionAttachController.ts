@@ -69,7 +69,10 @@ export class SessionAttachController {
    * Send a client.attach request through the agent API. Never throws and never
    * rejects: the feature API converges transport failures into
    * `{ ok: false, error }`, and the request timeout is the feature's own
-   * `timeoutMs` budget, surfaced as the `'timeout'` error.
+   * `timeoutMs` budget, surfaced as the `'timeout'` error. A contract-violating
+   * rejection (a future TerminalAgentApi impl that does not converge) is
+   * treated as a transport failure too, so the reconnect budget owns recovery
+   * either way.
    *
    * Resolution outcomes (epoch-guarded — a late resolution after a cancel or
    * supersede is a no-op):
@@ -81,6 +84,7 @@ export class SessionAttachController {
    * - any other prose (a genuine agent error ack) → ATTACH_ERROR; the runtime
    *   force-relays (auto route) or fails (manual route), and the in-flight
    *   attach is canceled.
+   * - rejection (contract violation) → ATTACH_TIMEOUT, same as 'timeout'.
    */
   startP2PAttach(params: StartP2PAttachParams): () => void {
     if (this.inFlightTransportGen === params.transportGeneration) {
@@ -96,31 +100,49 @@ export class SessionAttachController {
       .attach(params.sessionName, params.lastResize ?? undefined, {
         timeoutMs: ATTACH_TIMEOUT_MS,
       })
-      .then((result) => {
-        if (gen !== this.attachGeneration) {
-          // Canceled or superseded while in flight — the late resolution is a
-          // no-op (the dispose-time router rejection on teardown lands here).
-          return;
-        }
-        this.inFlightTransportGen = null;
-        if (result.ok) {
-          this.dispatch({ type: 'ATTACH_OK' });
+      .then(
+        (result) => {
+          if (gen !== this.attachGeneration) {
+            // Canceled or superseded while in flight — the late resolution is a
+            // no-op (the dispose-time router rejection on teardown lands here).
+            return;
+          }
+          this.inFlightTransportGen = null;
+          if (result.ok) {
+            this.dispatch({ type: 'ATTACH_OK' });
+            this.cancelActiveAttach();
+            return;
+          }
+          if (result.error === 'timeout' || TRANSPORT_FAILURE_ERRORS.has(result.error)) {
+            this.dispatch({
+              type: 'ATTACH_TIMEOUT',
+              manualRoute: params.manualRoute,
+              attempt: this.attachState.reconnectCount + 1,
+            });
+            return;
+          }
+          // Genuine agent error ack: the agent owns the session and refused the
+          // attach. The runtime routes it (force-relay auto / fail manual).
+          this.dispatch({ type: 'ATTACH_ERROR', manualRoute: params.manualRoute });
           this.cancelActiveAttach();
-          return;
-        }
-        if (result.error === 'timeout' || TRANSPORT_FAILURE_ERRORS.has(result.error)) {
+        },
+        () => {
+          if (gen !== this.attachGeneration) {
+            // Superseded/canceled while in flight — same no-op as a late
+            // resolution.
+            return;
+          }
+          this.inFlightTransportGen = null;
+          // Contract violation: the feature API converges every failure into
+          // `{ ok: false, error }`, so a rejection is treated as a transport
+          // failure and the reconnect budget owns recovery from here.
           this.dispatch({
             type: 'ATTACH_TIMEOUT',
             manualRoute: params.manualRoute,
             attempt: this.attachState.reconnectCount + 1,
           });
-          return;
-        }
-        // Genuine agent error ack: the agent owns the session and refused the
-        // attach. The runtime routes it (force-relay auto / fail manual).
-        this.dispatch({ type: 'ATTACH_ERROR', manualRoute: params.manualRoute });
-        this.cancelActiveAttach();
-      });
+        },
+      );
 
     return () => {
       if (gen === this.attachGeneration) {

@@ -20,7 +20,7 @@ function lastWs(): MockWs {
   return wsInstances[wsInstances.length - 1];
 }
 
-/** Drive a mock ws to the open state (AgentSocketClient.setState('connected')). */
+/** Drive the latest mock ws to the open state (surfaces 'connected' via onopen). */
 function openWs(): void {
   const ws = lastWs();
   ws.readyState = 1;
@@ -280,17 +280,6 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('does not start P2P attach when transportFirst is false (legacy state machine owns attach)', () => {
-    const rt = new SessionRuntime(makeConfig({ transportFirst: false }));
-    const startSpy = vi.spyOn(rt.attachController, 'startP2PAttach');
-    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-    rt.updateContext({ transportReady: true });
-
-    expect(startSpy).not.toHaveBeenCalled();
-    startSpy.mockRestore();
-    rt.dispose();
-  });
-
   it('applies forceRelay internally without React subscriber', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -417,42 +406,6 @@ describe('SessionRuntime', () => {
     });
   });
 
-
-  describe('session capability registry', () => {
-    it('registers the file capability when the client is created and unregisters on teardown', () => {
-      const rt = new SessionRuntime(makeConfig());
-      expect(rt.getSessionCapability('files')).toBe(rt.getFilesApi());
-      expect(rt.getSessionCapability('files')).not.toBeNull();
-
-      rt.updateContext({ forcedRelay: true });
-      expect(rt.getSessionCapability('files')).toBeNull();
-      expect(rt.getFilesApi()).toBeNull();
-      rt.dispose();
-    });
-
-    it('disposes a replaced capability instance and on unregister', () => {
-      const rt = new SessionRuntime(makeConfig());
-      const disposeA = vi.fn();
-      const disposeB = vi.fn();
-      rt.registerSessionCapability('probe', { kind: 'a' }, disposeA);
-      rt.registerSessionCapability('probe', { kind: 'b' }, disposeB);
-      expect(disposeA).toHaveBeenCalledOnce();
-      expect(rt.getSessionCapability<{ kind: string }>('probe')?.kind).toBe('b');
-
-      rt.unregisterSessionCapability('probe');
-      expect(disposeB).toHaveBeenCalledOnce();
-      expect(rt.getSessionCapability('probe')).toBeNull();
-      rt.dispose();
-    });
-
-    it('survives unrelated config updates', () => {
-      const rt = new SessionRuntime(makeConfig());
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      rt.updateContext({ lastResize: { cols: 100, rows: 40 } });
-      expect(rt.getSessionCapability('files')).toBe(rt.getFilesApi());
-      rt.dispose();
-    });
-  });
 
   describe('self-driving attach retry', () => {
     afterEach(() => {

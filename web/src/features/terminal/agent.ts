@@ -25,10 +25,10 @@ export interface AgentError {
  * factory takes the surface rather than a plugin install (the session
  * runtime owns install timing). Wire strings live only in this file.
  *
- * The wire shapes mirror `terminal/ConnectionManager.ts`, which Task 6
- * rewires onto this API: attach optionally carries the viewport as
- * width/height, terminal I/O carries the short session_name, and
- * terminal.output data is base64 (current agent protocol).
+ * The wire shapes mirror `terminal/ConnectionManager.ts`, which now drives
+ * this API: attach optionally carries the viewport as width/height,
+ * terminal I/O carries the short session_name, and terminal.output data is
+ * base64 (current agent protocol).
  */
 export interface TerminalAgentApi {
   /**

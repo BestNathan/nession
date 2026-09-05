@@ -57,6 +57,24 @@ function makeTimedAgentApi(): AgentApiHarness {
   return { api: api as unknown as TerminalAgentApi, attach, attachResolvers: [] };
 }
 
+/**
+ * Attach rejects outright — a contract-violating TerminalAgentApi impl (the
+ * real feature API converges every failure into `{ ok: false, error }`).
+ */
+function makeRejectingAgentApi(): AgentApiHarness {
+  const attach = vi.fn((): Promise<AttachResult> => Promise.reject(new Error('boom')));
+  const api = {
+    attach,
+    sendInput: vi.fn(),
+    sendResize: vi.fn(),
+    onOutput: vi.fn(() => () => {}),
+    onResize: vi.fn(() => () => {}),
+    onError: vi.fn(() => () => {}),
+    ping: vi.fn(),
+  };
+  return { api: api as unknown as TerminalAgentApi, attach, attachResolvers: [] };
+}
+
 function makeController(): { sm: AttachStateMachine; controller: SessionAttachController; outcomes: AttachTransitionResult[] } {
   const sm = new AttachStateMachine({ transportFirst: true });
   sm.dispatch({ type: 'SESSION_SELECTED' });
@@ -172,6 +190,29 @@ describe('SessionAttachController', () => {
     attachResolvers[0]?.({ ok: false, error });
     await flushMicrotasks();
 
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ retryAttach: true, forceRelay: false });
+    expect(sm.reconnectCount).toBe(1);
+    expect(sm.phase).toBe('reconnecting');
+  });
+
+  it('converges a rejecting attach (contract violation) to ATTACH_TIMEOUT', async () => {
+    const { sm, controller, outcomes } = makeController();
+    const { api, attach } = makeRejectingAgentApi();
+    controller.startP2PAttach({
+      sessionName: 's1',
+      agentApi: api,
+      manualRoute: false,
+      lastResize: null,
+      transportGeneration: 0,
+    });
+
+    expect(attach).toHaveBeenCalledWith('s1', undefined, { timeoutMs: ATTACH_TIMEOUT_MS });
+    expect(sm.phase).toBe('connecting');
+    await flushMicrotasks();
+
+    // Same outcome class as a transport failure: the reconnect budget owns
+    // recovery, so the machine lands back at reconnecting with attempt 1.
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]).toMatchObject({ retryAttach: true, forceRelay: false });
     expect(sm.reconnectCount).toBe(1);

@@ -58,9 +58,8 @@ export class SessionRuntime {
   /** Live P2P WebSocket service to the current agent candidate (or null in relay). */
   private agentWs: WebSocketService | null = null;
   private agentTerminalApi: TerminalAgentApi | null = null;
+  /** Files capability of the live P2P transport — null outside it. */
   private filesApi: FilesPlugin | null = null;
-  /** Typed per-session capabilities (files today; future: process, port-forward). */
-  private readonly capabilities = new Map<string, { instance: unknown; dispose?: () => void }>();
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -207,32 +206,6 @@ export class SessionRuntime {
     return this.filesApi;
   }
 
-  /** Register a session capability. A prior instance under the same name is disposed. */
-  registerSessionCapability<T>(name: string, instance: T, dispose?: () => void): void {
-    const existing = this.capabilities.get(name);
-    if (existing) {
-      existing.dispose?.();
-    }
-    this.capabilities.set(name, { instance, dispose });
-  }
-
-  unregisterSessionCapability(name: string): void {
-    const entry = this.capabilities.get(name);
-    if (!entry) {
-      return;
-    }
-    this.capabilities.delete(name);
-    entry.dispose?.();
-  }
-
-  getSessionCapability<T>(name: string): T | null {
-    const entry = this.capabilities.get(name);
-    if (!entry) {
-      return null;
-    }
-    return entry.instance as T;
-  }
-
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const routeChanged =
       next.routeIntentEpoch !== undefined
@@ -359,9 +332,6 @@ export class SessionRuntime {
     this.agentWs = null;
     this.agentTerminalApi = null;
     this.filesApi = null;
-    for (const name of [...this.capabilities.keys()]) {
-      this.unregisterSessionCapability(name);
-    }
     this.connectionStateListeners.clear();
     this.runtimeEventListeners.clear();
     this.snapshotListeners.clear();
@@ -581,7 +551,6 @@ export class SessionRuntime {
       this.agentWs = null;
       this.agentTerminalApi = null;
       this.filesApi = null;
-      this.unregisterSessionCapability('files');
       return;
     }
 
@@ -610,7 +579,6 @@ export class SessionRuntime {
     this.agentWs = ws;
     this.filesApi = files;
     this.agentTerminalApi = createTerminalAgentApi(ws);
-    this.registerSessionCapability('files', files);
     // Fire-and-forget like the legacy client: transport failures surface via
     // onConnectionStateChange (the router rejects in-flight requests). A
     // teardown/dispose while the socket is still opening rejects this pending
