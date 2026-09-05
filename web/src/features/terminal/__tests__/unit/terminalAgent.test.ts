@@ -33,6 +33,15 @@ describe('createTerminalAgentApi', () => {
       await expect(pending).resolves.toEqual({ ok: true });
     });
 
+    it('omits width/height when no viewport size is given', async () => {
+      const pending = api.attach('work');
+      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
+      expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
+
+      surface.resolveNext('client.attach', {});
+      await expect(pending).resolves.toEqual({ ok: true });
+    });
+
     it('maps a remote error ack to { ok: false, error } instead of throwing', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 });
       surface.rejectNext('client.attach', new Error('no such session'));
@@ -133,6 +142,53 @@ describe('createTerminalAgentApi', () => {
       unsub();
 
       surface.pushMessage('terminal.resize', { session_name: 'work', cols: 150, rows: 50 });
+
+      expect(cb).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onError', () => {
+    it('delivers agent error frames with the message and the notAttached flag', () => {
+      const cb = vi.fn();
+      api.onError(cb);
+
+      surface.pushMessage('error', { message: 'no such session: work' });
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb.mock.calls[0]?.[0]).toEqual({ message: 'no such session: work', notAttached: false });
+
+      surface.pushMessage('error', { message: 'not attached to session: work' });
+      expect(cb).toHaveBeenCalledTimes(2);
+      expect(cb.mock.calls[1]?.[0]).toEqual({
+        message: 'not attached to session: work',
+        notAttached: true,
+      });
+    });
+
+    it('drops keepalive-ping errors (legacy ka- ids)', () => {
+      const cb = vi.fn();
+      api.onError(cb);
+
+      surface.pushMessage('error', { message: 'session not found' }, { id: 'ka-1730000000000' });
+      surface.pushMessage('error', { message: 'session not found' });
+
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it('defaults an empty message to Remote error', () => {
+      const cb = vi.fn();
+      api.onError(cb);
+
+      surface.pushMessage('error', {});
+
+      expect(cb).toHaveBeenCalledWith({ message: 'Remote error', notAttached: false });
+    });
+
+    it('stops delivering after unsubscribe', () => {
+      const cb = vi.fn();
+      const unsub = api.onError(cb);
+      unsub();
+
+      surface.pushMessage('error', { message: 'boom' });
 
       expect(cb).not.toHaveBeenCalled();
     });

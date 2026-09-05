@@ -10,25 +10,38 @@ import type { AttachResult, TerminalSize } from './types';
 export const ATTACH_TIMEOUT_MS = 10_000;
 
 /**
+ * An `error` frame the agent sent outside any request correlation — e.g. a
+ * terminal I/O frame rejected because the session is gone. `notAttached`
+ * flags the transient `not attached to session` race (an outbound frame that
+ * crossed the attach ack), which transports may suppress while reconnecting.
+ */
+export interface AgentError {
+  message: string;
+  notAttached: boolean;
+}
+
+/**
  * Agent (P2P) terminal capability — bound to one concrete connection, so a
  * factory takes the surface rather than a plugin install (the session
  * runtime owns install timing). Wire strings live only in this file.
  *
  * The wire shapes mirror `terminal/ConnectionManager.ts`, which Task 6
- * rewires onto this API: attach carries the viewport as width/height,
- * terminal I/O carries the short session_name, and terminal.output data is
- * base64 (current agent protocol).
+ * rewires onto this API: attach optionally carries the viewport as
+ * width/height, terminal I/O carries the short session_name, and
+ * terminal.output data is base64 (current agent protocol).
  */
 export interface TerminalAgentApi {
   /**
    * Typed `client.attach`. Converges every outcome into {@link AttachResult}
    * — never throws. An agent `error` ack maps to `{ ok: false, error }`;
    * a timeout (default {@link ATTACH_TIMEOUT_MS}, overridable) maps to
-   * `{ ok: false, error: 'timeout' }`.
+   * `{ ok: false, error: 'timeout' }`. The viewport is optional — an attach
+   * without a known size (e.g. after a reconnect) omits width/height; the
+   * agent keeps the previous PTY size.
    */
   attach(
     sessionName: string,
-    size: TerminalSize,
+    size?: TerminalSize,
     opts?: { timeoutMs?: number },
   ): Promise<AttachResult>;
   /** Send terminal input (keystrokes) to the session — base64-encoded. */
@@ -39,6 +52,13 @@ export interface TerminalAgentApi {
   onOutput(cb: (data: Uint8Array) => void): () => void;
   /** Subscribe to terminal resize frames from the agent. */
   onResize(cb: (cols: number, rows: number) => void): () => void;
+  /**
+   * Subscribe to uncorrelated agent `error` frames (see {@link AgentError}).
+   * Errors that ack a request (e.g. `client.attach`) are consumed by the
+   * request layer and reach the requester, not this surface; keepalive-ping
+   * errors are dropped by the transport filter.
+   */
+  onError(cb: (error: AgentError) => void): () => void;
   /** Keepalive probe — the agent's connection watchdog. */
   ping(): void;
 }
@@ -47,14 +67,13 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
   return {
     attach: async (
       sessionName: string,
-      size: TerminalSize,
+      size?: TerminalSize,
       opts?: { timeoutMs?: number },
     ): Promise<AttachResult> => {
       try {
         await surface.request('client.attach', {
           session_name: sessionName,
-          width: size.cols,
-          height: size.rows,
+          ...(size ? { width: size.cols, height: size.rows } : {}),
         }, { timeoutMs: opts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
         return { ok: true };
       } catch (err) {
@@ -90,6 +109,19 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       return surface.subscribe('terminal.resize', (payload) => {
         const { cols, rows } = payload as { cols: number; rows: number };
         cb(cols, rows);
+      });
+    },
+
+    onError: (cb: (error: AgentError) => void): (() => void) => {
+      return surface.subscribe('error', (payload, raw) => {
+        // Keepalive-ping errors (agent replies echoing the legacy `ka-` ids)
+        // are connection watchdogs, not session errors — drop them silently
+        // like the old ConnectionManager filter did.
+        if (typeof raw.id === 'string' && raw.id.startsWith('ka-')) {
+          return;
+        }
+        const message = ((payload as { message?: unknown })?.message as string) || 'Remote error';
+        cb({ message, notAttached: /not attached/i.test(message) });
       });
     },
 

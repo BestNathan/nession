@@ -449,6 +449,26 @@ describe('WebSocketService', () => {
     await expect(service.waitForConnection()).rejects.toThrow('WebSocketService disposed');
   });
 
+  it('isDisposed is false until dispose() runs, then stays true', async () => {
+    const service = new WebSocketService('ws://server/ws');
+    expect(service.isDisposed).toBe(false);
+
+    const connected = service.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+    expect(service.connectionState).toBe('connected');
+    expect(service.isDisposed).toBe(false);
+
+    service.disconnect();
+    // disconnect() is not terminal — only dispose() flags the service.
+    expect(service.isDisposed).toBe(false);
+
+    service.dispose();
+    expect(service.isDisposed).toBe(true);
+    service.dispose();
+    expect(service.isDisposed).toBe(true);
+  });
+
   it('dispose() rejects an in-flight connect() whose handshake is still pending', async () => {
     const gate = controlledHandshake();
     const service = new WebSocketService('ws://server/ws', [], {

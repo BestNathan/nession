@@ -81,6 +81,11 @@ export class WebSocketService implements PluginSurface {
     return this.reconnectAttempt;
   }
 
+  /** True once {@link dispose} ran — the service can never connect again. */
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
   getUrl(): string {
     return this.url;
   }

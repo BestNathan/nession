@@ -47,18 +47,43 @@ export type RelayServerTransport = RelayServerHandle &
  * (subscription + readiness) delegates to the service; the relay lifecycle
  * and terminal I/O delegate to the terminal-server capability singleton,
  * which binds to whichever service instance is currently installed.
+ *
+ * A stale handle (one whose service was disposed, e.g. after the app
+ * reconnected and rebuilt the singleton) is inert: every outbound member
+ * no-ops and subscriptions return no-op unsubscribes instead of registering
+ * against the singleton on the handle's behalf. Without the guard, the
+ * terminal-server singleton would route a stale handle's begin/end/I/O to
+ * whichever *newer* service owns the binding — relaying a session the stale
+ * consumer no longer owns on a connection it never authenticated for.
  */
 export function relayServerHandle(service: WebSocketService): RelayServerTransport {
+  const stale = (): boolean => service.isDisposed;
   return {
     onConnectionStateChange: (cb) => service.onConnectionStateChange(cb),
-    isReady: () => service.connectionState === 'connected',
-    beginRelay: (sessionId, relayUrl, cols, rows) =>
-      terminalServerApi.beginRelay(sessionId, relayUrl, cols, rows),
-    endRelay: (sessionId) => terminalServerApi.endRelay(sessionId),
-    sendRelayInput: (sessionName, data) => terminalServerApi.sendRelayInput(sessionName, data),
-    sendRelayResize: (sessionName, cols, rows) =>
-      terminalServerApi.sendRelayResize(sessionName, cols, rows),
-    onRelayOutput: (sessionName, cb) => terminalServerApi.onRelayOutput(sessionName, cb),
-    onRelayResize: (sessionName, cb) => terminalServerApi.onRelayResize(sessionName, cb),
+    isReady: () => !stale() && service.connectionState === 'connected',
+    beginRelay: (sessionId, relayUrl, cols, rows) => {
+      if (stale()) { return; }
+      terminalServerApi.beginRelay(sessionId, relayUrl, cols, rows);
+    },
+    endRelay: (sessionId) => {
+      if (stale()) { return; }
+      terminalServerApi.endRelay(sessionId);
+    },
+    sendRelayInput: (sessionName, data) => {
+      if (stale()) { return; }
+      terminalServerApi.sendRelayInput(sessionName, data);
+    },
+    sendRelayResize: (sessionName, cols, rows) => {
+      if (stale()) { return; }
+      terminalServerApi.sendRelayResize(sessionName, cols, rows);
+    },
+    onRelayOutput: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelayOutput(sessionName, cb);
+    },
+    onRelayResize: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelayResize(sessionName, cb);
+    },
   };
 }
