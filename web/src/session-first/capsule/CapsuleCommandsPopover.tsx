@@ -166,14 +166,12 @@ export function CapsuleCommandsPopover({
   const handlePhysKey = useCallback(
     (seq: string) => {
       sendPhysKey(seq);
-      onOpenChange(false);
     },
-    [sendPhysKey, onOpenChange],
+    [sendPhysKey],
   );
   const sendChain = useCallback(() => {
     sendCommandChain();
-    onOpenChange(false);
-  }, [sendCommandChain, onOpenChange]);
+  }, [sendCommandChain]);
   const panelBody = (
     <CapsuleCommandsPanelBody
       disabled={disabled}

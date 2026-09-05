@@ -94,12 +94,12 @@ export function PhysKeyRow({
 
   return (
     <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
-      <div className={cn('grid min-w-0 flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}>
+      <div className={cn('grid w-full grid-cols-5', capsulePhysKeyGridGapClass)}>
         {LEFT_KEYS.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
       </div>
-      <div className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}>
+      <div className={cn('grid w-fit grid-cols-3 grid-rows-2 self-center', capsulePhysKeyGridGapClass)}>
         <div />
         <KeyButton keyDef={ARROW_KEYS[0]} />
         <div />
