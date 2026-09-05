@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  capsulePhysKeyOverflowClass,
-  capsulePhysKeyScrollClass,
+  capsulePhysKeyGridGapClass,
   capsulePopoverPanelClass,
 } from '@/session-first/capsule/capsuleStyles';
 
@@ -13,10 +12,7 @@ describe('capsuleStyles', () => {
     );
   });
 
-  it('provides compact horizontally scrolling physical-key row classes', () => {
-    expect(capsulePhysKeyScrollClass).toBe(
-      'flex min-w-0 flex-1 items-center gap-[length:var(--composer-phys-key-grid-gap)] overflow-x-auto scrollbar-none',
-    );
-    expect(capsulePhysKeyOverflowClass).toBe('shrink-0');
+  it('provides the shared physical-key grid gap token', () => {
+    expect(capsulePhysKeyGridGapClass).toContain('var(--composer-phys-key-grid-gap)');
   });
 });

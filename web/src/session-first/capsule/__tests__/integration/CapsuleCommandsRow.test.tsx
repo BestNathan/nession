@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsRow } from '@/session-first/capsule/CapsuleCommandsRow';
+import { QUICK_MOBILE_KEYS } from '@/session-first/capsule/physKeys';
 
 vi.mock('@/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
@@ -35,7 +36,7 @@ describe('CapsuleCommandsRow', () => {
     expect(sendText).toHaveBeenCalledWith('\t');
   });
 
-  it('renders more commands trigger', () => {
+  it('renders quick mobile keys and More trigger while collapsed', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -43,7 +44,12 @@ describe('CapsuleCommandsRow', () => {
         onCommandsOpenChange={vi.fn()}
       />,
     );
+
+    for (const keyDef of QUICK_MOBILE_KEYS) {
+      expect(screen.getByTestId(`capsule-quick-key-${keyDef.label}`)).toBeInTheDocument();
+    }
     expect(screen.getByTestId('capsule-commands-more')).toBeInTheDocument();
+    expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
   it('opens anchored popover when more trigger is clicked', async () => {
@@ -60,7 +66,7 @@ describe('CapsuleCommandsRow', () => {
     expect(onCommandsOpenChange.mock.calls[0]?.[0]).toBe(true);
   });
 
-  it('uses anchored popover for mobile more menu', () => {
+  it('renders the opened commands panel as an anchored popover', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
