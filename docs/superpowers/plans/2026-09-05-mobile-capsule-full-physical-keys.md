@@ -41,10 +41,10 @@ it('shows the complete physical key layout in the expanded panel', () => {
 
 - [ ] **Step 2: Add direct arrow execution coverage**
 
-Add a test that clicks the visible `↑` button and verifies exactly one terminal sequence and one presentation close request:
+Add a test that clicks the visible `↑` button and verifies exactly one terminal sequence while keeping the presentation open:
 
 ```tsx
-it('sends a visible arrow key once and closes after execution', async () => {
+it('sends a visible arrow key once and keeps the popover open', async () => {
   const onOpenChange = vi.fn();
   render(
     <CapsuleCommandsPopover
@@ -59,8 +59,7 @@ it('sends a visible arrow key once and closes after execution', async () => {
 
   expect(sendText).toHaveBeenCalledTimes(1);
   expect(sendText).toHaveBeenCalledWith('\x1b[A');
-  expect(onOpenChange).toHaveBeenCalledTimes(1);
-  expect(onOpenChange).toHaveBeenCalledWith(false);
+  expect(onOpenChange).not.toHaveBeenCalled();
 });
 ```
 
@@ -77,8 +76,7 @@ fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
 expect(sendText).toHaveBeenCalledTimes(1);
 expect(sendText).toHaveBeenCalledWith('\x1b\x1b[C');
-expect(onOpenChange).toHaveBeenCalledTimes(1);
-expect(onOpenChange).toHaveBeenCalledWith(false);
+expect(onOpenChange).not.toHaveBeenCalled();
 ```
 
 This verifies arrows use `KeyButton` and remain chainable.

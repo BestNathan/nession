@@ -383,12 +383,12 @@
   --composer-popover-gap: 0.25rem;
   --composer-popover-item-pad-x: 0.75rem;
   --composer-popover-side-offset: 8px;
-  --composer-phys-key-height: 40px;
+  --composer-phys-key-height: 44px;
   --composer-phys-key-icon-size: 14px;
   --composer-phys-key-pad-x: 0.25rem;
   --composer-phys-key-pad-y: 0.25rem;
   --composer-phys-key-grid-gap: 0.125rem;
-  --composer-phys-key-font-size: 0.75rem;
+  --composer-phys-key-font-size: 0.625rem;
   --composer-phys-key-arrow-width: 2.25rem;
   --composer-mini-control-height: 1.5rem;
   --composer-dropdown-min-width: 6.25rem;
