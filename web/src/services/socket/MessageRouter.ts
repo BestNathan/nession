@@ -1,4 +1,4 @@
-import type { MessageRouter, RequestOptions, SocketMessage } from './types';
+import type { RequestOptions, SocketMessage } from './types';
 
 interface Pending {
   resolve: (v: unknown) => void;
@@ -11,7 +11,7 @@ interface MessageRouterDeps {
   generateId: () => string;
 }
 
-export class MessageRouterImpl implements MessageRouter {
+export class MessageRouterImpl {
   private readonly handlers = new Map<string, Set<(payload: unknown, raw: SocketMessage) => void>>();
   private readonly pending = new Map<string, Pending>();
   private readonly binaryHandlers = new Set<(data: ArrayBuffer) => void>();

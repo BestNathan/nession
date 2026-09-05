@@ -108,8 +108,16 @@ vi.mock('@/components/env/AttachDialog', () => ({
       </div>
     ) : null,
 }));
+// New-model core surface: the shell builds its relay handle via
+// relayServerHandle(wsService), whose transport members delegate to
+// onConnectionStateChange + connectionState (runtime/relayServerConnection.ts).
+// 'connected' mirrors the shell's post-handshake render state.
 vi.mock('@/hooks/useWebSocket', () => ({
   useWebSocket: () => ({
+    connectionState: 'connected',
+    onConnectionStateChange: vi.fn(() => () => {}),
+    // Legacy facade members some in-flight consumers still consult; inert
+    // shims that disappear once those land on the new core.
     requestAttach: vi.fn(),
     beginRelay: vi.fn(),
     onConnectionChange: vi.fn(() => () => {}),
@@ -165,7 +173,7 @@ function renderShell(initialEntry = '/') {
   const view = render(
     <Provider store={store}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SessionFirstShell connectionStatus="authenticated" onLegacy={vi.fn()} />
+        <SessionFirstShell connectionStatus="connected" onLegacy={vi.fn()} />
       </MemoryRouter>
     </Provider>,
   );

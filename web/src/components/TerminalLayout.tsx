@@ -8,7 +8,7 @@ import { BottomBar, type BottomTab } from './BottomBar';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { TerminalCapsule } from '@/session-first/TerminalCapsule';
 import { cn } from '@/lib/utils';
-import type { FileOps } from '../services/fileOps';
+import type { FileOps } from '@/features/files';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
 

@@ -1,4 +1,4 @@
-import type { P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
 
 /** Abstraction over ConnectionManager so Controller never touches WebSocket/P2P details. */
 export interface TerminalTransport {

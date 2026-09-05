@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import type { P2PConnection } from '@/services/socket/p2pTypes';
 import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { envApi } from '@/features/env';
+import type { TerminalAgentApi } from '@/features/terminal';
+import type { ConnectionState } from '@/services/socket/types';
+import {
+  relayServerHandle,
+  type RelayServerHandle,
+  type RelayServerTransport,
+} from '@/runtime/relayServerConnection';
 import type { EnvFileRef } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
 import {
   sessionIdAtom,
   sessionNameAtom,
@@ -32,10 +38,10 @@ function useSessionEnvSourcing(opts: {
   envRefs: EnvFileRef[];
   sessionId: string;
   effectiveMode: 'p2p' | 'relay';
-  p2pConnection: P2PConnection | null;
-  wsService: WebSocketService;
+  agentTerminalApi: TerminalAgentApi | null;
+  connectionState: ConnectionState;
 }) {
-  const { envRefs, sessionId, effectiveMode, p2pConnection, wsService } = opts;
+  const { envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState } = opts;
   const envSourcedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!envRefs || envRefs.length === 0 || envSourcedRef.current === sessionId) {
@@ -47,45 +53,56 @@ function useSessionEnvSourcing(opts: {
       }
       envSourcedRef.current = sessionId;
       for (const ref of envRefs) {
-        void wsService.applySessionEnv(sessionId, [ref]).catch(() => {});
+        void envApi.applySessionEnv(sessionId, [ref]).catch(() => {});
       }
     };
     if (effectiveMode === 'relay') {
       apply();
       return;
     }
-    if (p2pConnection) {
-      void p2pConnection.waitForConnection().then(apply).catch(() => {});
+    // P2P: env refs are applied once the agent transport is up (the socket
+    // being open is the legacy waitForConnection().then(apply) edge).
+    if (agentTerminalApi && connectionState === 'connected') {
+      apply();
     }
-  }, [envRefs, sessionId, effectiveMode, p2pConnection, wsService]);
+  }, [envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState]);
 }
 
 function useTransportFactory(opts: {
   effectiveMode: 'p2p' | 'relay';
   sessionName: string;
   sessionId: string;
-  p2pConnection: P2PConnection | null;
-  wsService: WebSocketService;
+  agentTerminalApi: TerminalAgentApi | null;
+  serverConnection: RelayServerTransport;
   isAttached: () => boolean;
 }) {
-  const { effectiveMode, sessionName, sessionId, p2pConnection, wsService, isAttached } = opts;
-  const transportFactoryRef = useRef<() => TerminalTransport>(
-    () => new ConnectionManager({
-      mode: 'relay', sessionName: '', sessionId: '', serverConnection: undefined,
-    }),
-  );
+  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached } = opts;
+  // Holds the render-fresh factory; the callback identity stays stable while
+  // the closure sees current values. The ref itself starts null — the
+  // previous dummy ConnectionManager initializer was constructed and discarded
+  // every render.
+  const transportFactoryRef = useRef<(() => TerminalTransport) | null>(null);
   const isAttachedRef = useRef(isAttached);
   isAttachedRef.current = isAttached;
+  // The P2P transport is a pure I/O channel: ConnectionManager binds to
+  // whatever agent terminal API the runtime currently owns (null while no
+  // candidate is built — e.g. relay mode — making the transport inert).
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
       sessionName,
       sessionId,
-      p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
-      serverConnection: effectiveMode === 'relay' ? wsService : undefined,
+      agentApi: effectiveMode === 'p2p' ? agentTerminalApi ?? undefined : undefined,
+      serverConnection: effectiveMode === 'relay' ? serverConnection : undefined,
       isAttached: () => isAttachedRef.current(),
     });
-  return useCallback(() => transportFactoryRef.current(), []);
+  return useCallback(() => {
+    const createTransport = transportFactoryRef.current;
+    if (createTransport === null) {
+      throw new Error('Transport factory is not initialized');
+    }
+    return createTransport();
+  }, []);
 }
 
 function useReconnectBanner(opts: {
@@ -93,9 +110,9 @@ function useReconnectBanner(opts: {
   terminalState: TerminalStatus;
   reconnectCount: number;
   effectiveMode: 'p2p' | 'relay';
-  wsService: WebSocketService;
+  serverConnection: RelayServerHandle;
 }): ReconnectBanner {
-  const { sessionId, terminalState, reconnectCount, effectiveMode, wsService } = opts;
+  const { sessionId, terminalState, reconnectCount, effectiveMode, serverConnection } = opts;
   const setBanner = useSetAtom(bannerAtomFamily(sessionId));
   const setBannerAttempt = useSetAtom(bannerAttemptAtomFamily(sessionId));
   const [relayLost, setRelayLost] = useState(false);
@@ -105,17 +122,20 @@ function useReconnectBanner(opts: {
   }, [sessionId, effectiveMode]);
 
   useEffect(() => {
-    if (effectiveMode !== 'relay' || !wsService) { return; }
+    if (effectiveMode !== 'relay' || !serverConnection) { return; }
     // UI-only bookkeeping: attach phase transitions are driven by the
     // SessionRuntime relay handler and mirrored through runtime events.
-    return wsService.onConnectionChange((status) => {
-      if (status === 'authenticated') {
+    // Only the durable edges touch relayLost — intra-budget loss shows as
+    // 'reconnecting' via the runtime phase mirror (old facade collapsed it
+    // onto 'connecting', which this hook ignored too).
+    return serverConnection.onConnectionStateChange((state) => {
+      if (state === 'connected') {
         setRelayLost(false);
-      } else if (status === 'disconnected') {
+      } else if (state === 'disconnected') {
         setRelayLost(true);
       }
     });
-  }, [effectiveMode, wsService]);
+  }, [effectiveMode, serverConnection]);
 
   const banner: ReconnectBanner =
     terminalState === 'reconnecting'
@@ -133,17 +153,17 @@ function useReconnectBanner(opts: {
 
 function useEndRelayOnDisconnect(opts: {
   effectiveMode: 'p2p' | 'relay';
-  wsService: WebSocketService;
+  serverConnection: RelayServerHandle;
   sessionId: string;
   onDisconnect: () => void;
 }) {
-  const { effectiveMode, wsService, sessionId, onDisconnect } = opts;
+  const { effectiveMode, serverConnection, sessionId, onDisconnect } = opts;
   return useCallback(() => {
-    if (effectiveMode === 'relay' && wsService?.isConnected()) {
-      try { wsService.endRelay(sessionId); } catch { /* best-effort */ }
+    if (effectiveMode === 'relay' && serverConnection?.isReady()) {
+      try { serverConnection.endRelay(sessionId); } catch { /* best-effort */ }
     }
     onDisconnect();
-  }, [effectiveMode, wsService, sessionId, onDisconnect]);
+  }, [effectiveMode, serverConnection, sessionId, onDisconnect]);
 }
 
 export interface UseTerminalOrchestrationOptions {
@@ -174,13 +194,16 @@ export function useTerminalOrchestration({
   const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
+  // One relay handle per service instance, shared by every relay consumer —
+  // the runtime (begin/endRelay + state), the transport factory (relay I/O),
+  // the banner, and disconnect cleanup. Rebuilt only when the service does.
+  const relayServer = useMemo(() => relayServerHandle(wsService), [wsService]);
+  const { waitingForAddressPlan, agentTerminalApi, connectionState, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
     manualOverride,
-    transportFirst: true,
-    wsService,
+    serverConnection: relayServer,
   });
 
   const mirroredAttach = useSessionFirstTerminalAttach({
@@ -193,11 +216,11 @@ export function useTerminalOrchestration({
   const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
 
   const handleDisconnect = useEndRelayOnDisconnect({
-    effectiveMode, wsService, sessionId, onDisconnect,
+    effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
   });
-  useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, p2pConnection, wsService });
+  useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const transportFactory = useTransportFactory({
-    effectiveMode, sessionName, sessionId, p2pConnection, wsService,
+    effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
     isAttached: createAttachGate(() => terminalState),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
@@ -217,10 +240,10 @@ export function useTerminalOrchestration({
   });
 
   const banner = useReconnectBanner({
-    sessionId, terminalState, reconnectCount, effectiveMode, wsService,
+    sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,
   });
   const inputDisabled = banner !== 'none' || isSwitching;
-  const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
+  const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
   const transportKey = runtimeTransportKey ?? `${routeIntentEpoch}:${transportGeneration}:${activeUrl ?? ''}`;
 

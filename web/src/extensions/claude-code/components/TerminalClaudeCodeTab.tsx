@@ -1,15 +1,12 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Settings } from 'lucide-react';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { createClaudeCodeService } from '../services/claudeCodeService';
+import { claudeCodeApi } from '@/features/claude-code';
 import { ConfigViewer } from './ConfigViewer';
 import type { TerminalHeaderSlotProps } from '../../types';
 import type { ConfigCategory, ClaudeCodeListResponse } from '../types';
 
 export function TerminalClaudeCodeTab({ sessionId }: TerminalHeaderSlotProps) {
-  const ws = useWebSocket();
-  const service = useMemo(() => createClaudeCodeService(ws), [ws]);
   const [categories, setCategories] = useState<ConfigCategory[]>([]);
   const [available, setAvailable] = useState<boolean>(false);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -17,13 +14,13 @@ export function TerminalClaudeCodeTab({ sessionId }: TerminalHeaderSlotProps) {
 
   const fetchConfig = useCallback(async () => {
     try {
-      const resp: ClaudeCodeListResponse = await service.list({ agent_id: agentId, scope: 'project', session_id: sessionId });
+      const resp: ClaudeCodeListResponse = await claudeCodeApi.claudeCodeList({ agent_id: agentId, scope: 'project', session_id: sessionId });
       setAvailable(resp.available);
       setCategories(resp.categories);
     } catch {
       setAvailable(false);
     }
-  }, [agentId, sessionId, service]);
+  }, [agentId, sessionId]);
 
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
@@ -43,7 +40,6 @@ export function TerminalClaudeCodeTab({ sessionId }: TerminalHeaderSlotProps) {
         open={viewerOpen}
         onClose={() => setViewerOpen(false)}
         categories={categories}
-        service={service}
         agentId={agentId}
         scope="project"
         sessionId={sessionId}

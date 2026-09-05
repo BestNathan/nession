@@ -1,13 +1,13 @@
-import type { AttachInfo, ConnectionStatus } from '@/types';
+import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/hooks/useAddressPlan';
-import type { RelayServerConnection } from '@/runtime/relayServerConnection';
-import { AgentSocketClient } from '@/services/socket/AgentSocketClient';
-import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import { buildAgentWsUrl, WebSocketService } from '@/services/socket';
 import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/runtime/AttachStateMachine';
-import { FileCapability } from '@/runtime/FileCapability';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
+import { createFilesApi, type FilesPlugin } from '@/features/files';
+import { createTerminalAgentApi, type TerminalAgentApi } from '@/features/terminal';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -17,21 +17,20 @@ export interface SessionRuntimeConfig {
   manualOverride: string | null;
   forcedRelay: boolean;
   addressPlan: AddressPlan;
-  /** @deprecated Runtime owns attach timing for every UI. */
-  transportFirst?: boolean;
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
   lastResize?: { cols: number; rows: number } | null;
   transportReady?: boolean;
-  /** Relay-mode server WebSocket — runtime re-begins relay after server reconnect. */
-  serverConnection?: RelayServerConnection | null;
+  /** Relay-mode server connection — runtime re-begins relay after server reconnect. */
+  serverConnection?: RelayServerHandle | null;
 }
 
 export interface RuntimeMirrorSnapshot {
   phase: AttachPhase;
   transportGeneration: number;
   connectionState: ConnectionState;
-  p2pConnection: P2PConnection | null;
+  /** Agent terminal capability — null outside the P2P transport. */
+  agentTerminalApi: TerminalAgentApi | null;
 }
 
 export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
@@ -54,11 +53,11 @@ export class SessionRuntime {
   readonly attachState: AttachStateMachine;
   readonly attachController: SessionAttachController;
   private addressPolicy: AddressAttachPolicy;
-  private agentClient: AgentSocketClient | null = null;
-  private p2pAdapter: P2PConnection | null = null;
-  private fileCapability: FileCapability | null = null;
-  /** Typed per-session capabilities (files today; future: process, port-forward). */
-  private readonly capabilities = new Map<string, { instance: unknown; dispose?: () => void }>();
+  /** Live P2P WebSocket service to the current agent candidate (or null in relay). */
+  private agentWs: WebSocketService | null = null;
+  private agentTerminalApi: TerminalAgentApi | null = null;
+  /** Files capability of the live P2P transport — null outside it. */
+  private filesApi: FilesPlugin | null = null;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -79,8 +78,8 @@ export class SessionRuntime {
   constructor(private config: SessionRuntimeConfig) {
     this.sessionId = config.sessionId;
     this.routeIntentEpoch = config.routeIntentEpoch;
-    // Both UI implementations use the same transport-first attach protocol.
-    // The deprecated config flag remains accepted for old callers only.
+    // Every UI uses the same transport-first attach protocol: the state
+    // machine gates attach on the terminal viewport being transport-ready.
     this.attachState = new AttachStateMachine({ transportFirst: true });
     this.attachController = new SessionAttachController(this.attachState);
     this.addressPolicy = new AddressAttachPolicy({
@@ -116,22 +115,18 @@ export class SessionRuntime {
       }
       this.emitSnapshot();
     });
-    this.syncAgentClient();
+    this.syncAgentConnection();
     this.wireRelayServerHandler();
     this.driveRelayAttach();
     this.snapshot = this.buildSnapshot();
-  }
-
-  get transportFirstMode(): boolean {
-    return true;
   }
 
   getMirrorSnapshot(): RuntimeMirrorSnapshot {
     return {
       phase: this.attachState.phase,
       transportGeneration: this.transportGeneration,
-      connectionState: this.agentClient?.connectionState ?? 'disconnected',
-      p2pConnection: this.config.forcedRelay ? null : this.p2pAdapter,
+      connectionState: this.agentWs?.connectionState ?? 'disconnected',
+      agentTerminalApi: this.config.forcedRelay ? null : this.agentTerminalApi,
     };
   }
 
@@ -192,38 +187,17 @@ export class SessionRuntime {
     return `${this.routeIntentEpoch}:${this.transportGeneration}:${this.activeUrl ?? ''}`;
   }
 
-  getP2PConnection(): P2PConnection | null {
-    return this.p2pAdapter;
+  getAgentTerminalApi(): TerminalAgentApi | null {
+    return this.agentTerminalApi;
   }
 
-  getFileCapability(): FileCapability | null {
-    return this.fileCapability;
+  /** Live agent-transport connection state ('disconnected' outside the P2P transport). */
+  get connectionState(): ConnectionState {
+    return this.agentWs?.connectionState ?? 'disconnected';
   }
 
-  /** Register a session capability. A prior instance under the same name is disposed. */
-  registerSessionCapability<T>(name: string, instance: T, dispose?: () => void): void {
-    const existing = this.capabilities.get(name);
-    if (existing) {
-      existing.dispose?.();
-    }
-    this.capabilities.set(name, { instance, dispose });
-  }
-
-  unregisterSessionCapability(name: string): void {
-    const entry = this.capabilities.get(name);
-    if (!entry) {
-      return;
-    }
-    this.capabilities.delete(name);
-    entry.dispose?.();
-  }
-
-  getSessionCapability<T>(name: string): T | null {
-    const entry = this.capabilities.get(name);
-    if (!entry) {
-      return null;
-    }
-    return entry.instance as T;
+  getFilesApi(): FilesPlugin | null {
+    return this.filesApi;
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -258,7 +232,7 @@ export class SessionRuntime {
       return this.getMirrorSnapshot();
     }
 
-    this.syncAgentClient();
+    this.syncAgentConnection();
     this.wireRelayServerHandler();
     if (!prevTransportReady && this.transportReady) {
       this.maybeStartP2PAttach();
@@ -279,7 +253,7 @@ export class SessionRuntime {
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
     this.transportGeneration += 1;
-    this.syncAgentClient();
+    this.syncAgentConnection();
     this.wireRelayServerHandler();
     this.emitRuntimeEvent({ type: 'force-relay' });
     // The P2P → relay transport flip is complete; relay attach follows in the
@@ -294,15 +268,15 @@ export class SessionRuntime {
     this.attachController.dispatch({ type: 'DISCONNECT' });
     const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     this.transportGeneration += 1;
-    this.syncAgentClient({ forceReconnect: true });
+    this.syncAgentConnection({ forceReconnect: true });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }
 
   private maybeStartP2PAttach(): void {
-    if (this.config.forcedRelay || !this.p2pAdapter) {
+    if (this.config.forcedRelay || !this.agentWs || !this.agentTerminalApi) {
       return;
     }
-    if (this.p2pAdapter.connectionState !== 'connected') {
+    if (this.agentWs.connectionState !== 'connected') {
       return;
     }
     const phase = this.attachState.phase;
@@ -317,14 +291,19 @@ export class SessionRuntime {
     }
     this.attachController.startP2PAttach({
       sessionName: this.config.sessionName,
-      p2pConnection: this.p2pAdapter,
+      agentApi: this.agentTerminalApi,
       manualRoute: this.config.manualOverride !== null,
       lastResize: this.lastResize,
       transportGeneration: this.transportGeneration,
     });
   }
 
-  /** @deprecated Prefer internal handler; kept for unit tests. */
+  /**
+   * Synchronously apply the address policy when the current P2P candidate
+   * transport drops: advance to the next candidate, force relay, or exhaust.
+   * The connection-loss handler routes through this under the re-entrancy
+   * guard; kept public so tests can drive the policy step synchronously.
+   */
   onCandidateDisconnected(): 'next-candidate' | 'force-relay' | 'transport-exhausted' | 'none' {
     return this.applyCandidateDisconnect();
   }
@@ -348,13 +327,10 @@ export class SessionRuntime {
     this.teardownConnectionHandler();
     this.teardownRelayServerHandler();
     this.attachController.cancelActiveAttach();
-    this.agentClient?.dispose();
-    this.agentClient = null;
-    this.p2pAdapter = null;
-    this.fileCapability = null;
-    for (const name of [...this.capabilities.keys()]) {
-      this.unregisterSessionCapability(name);
-    }
+    this.agentWs?.dispose();
+    this.agentWs = null;
+    this.agentTerminalApi = null;
+    this.filesApi = null;
     this.connectionStateListeners.clear();
     this.runtimeEventListeners.clear();
     this.snapshotListeners.clear();
@@ -400,7 +376,7 @@ export class SessionRuntime {
     if (action.type === 'next-candidate') {
       this.attachedTransportGeneration = null;
       this.transportGeneration += 1;
-      this.syncAgentClient();
+      this.syncAgentConnection();
       this.emitRuntimeEvent({ type: 'next-candidate', activeUrl: this.activeUrl });
       this.emitSnapshot();
       return 'next-candidate';
@@ -455,17 +431,18 @@ export class SessionRuntime {
       return;
     }
 
-    this.relayServerUnsub = conn.onConnectionChange((status: ConnectionStatus) => {
-      // Recoverable loss is authenticated -> connecting (server core stays in
-      // 'connecting' through its intra-budget reconnect; 'disconnected' only
-      // fires once the budget is exhausted or on explicit disconnect). Either
-      // ends the server-side relay forwarding loop.
-      if (status === 'connecting' || status === 'disconnected') {
+    this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {
+      // Any loss of the server transport ends the server-side relay forwarding
+      // loop: 'connecting' (first connect / handshake pending), 'reconnecting'
+      // (recoverable intra-budget drop — the new transport surfaces this
+      // distinctly), and 'disconnected' (budget exhausted or explicit
+      // disconnect). The phase guard keeps this inert before the relay is live.
+      if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
-      } else if (status === 'authenticated') {
+      } else {
         // Server WS (re)established — begin (or re-begin) relay if attach is due.
         this.driveRelayAttach();
       }
@@ -497,7 +474,7 @@ export class SessionRuntime {
       // Relay-context recovery: a failed session re-attaches through relay.
       this.attachController.dispatch({ type: 'SESSION_SELECTED' });
     }
-    if (conn.isAuthenticated()) {
+    if (conn.isReady()) {
       this.beginRelayOnce();
     }
   }
@@ -529,10 +506,10 @@ export class SessionRuntime {
 
   private wireConnectionHandler(): void {
     this.teardownConnectionHandler();
-    if (!this.agentClient) {
+    if (!this.agentWs) {
       return;
     }
-    this.connectionUnsub = this.agentClient.onConnectionStateChange((next) => {
+    this.connectionUnsub = this.agentWs.onConnectionStateChange((next) => {
       this.emitConnectionState(next);
       if (next === 'connected') {
         this.maybeStartP2PAttach();
@@ -549,51 +526,65 @@ export class SessionRuntime {
     });
   }
 
-  private syncAgentClient(opts?: { forceReconnect?: boolean }): void {
+  /**
+   * Keep or rebuild the P2P agent WebSocket.
+   *
+   * Rebuilds (and only rebuilds) when the agent endpoint changed — candidate
+   * rotation, a manual route switch, or the first sync — or when
+   * `forceReconnect` is requested. A rebuild disposes the old service and
+   * constructs a fresh one bound to a fresh files plugin and terminal agent
+   * API. Same-endpoint updates keep the live socket and its reconnect budget.
+   *
+   * Teardown order matters: the in-flight attach is canceled (epoch bump)
+   * BEFORE the old service is disposed, so the disposal's router rejection of
+   * the pending client.attach is a no-op instead of a spurious ATTACH_ERROR.
+   */
+  private syncAgentConnection(opts?: { forceReconnect?: boolean }): void {
     const url = this.addressPolicy.activeUrl;
     const token = this.config.attachInfo?.connection_token;
 
     if (!url || !this.config.attachInfo || this.config.forcedRelay) {
       this.teardownConnectionHandler();
-      this.agentClient?.dispose();
-      this.agentClient = null;
-      this.p2pAdapter = null;
-      this.fileCapability = null;
-      this.unregisterSessionCapability('files');
+      this.attachController.cancelActiveAttach();
+      this.agentWs?.dispose();
+      this.agentWs = null;
+      this.agentTerminalApi = null;
+      this.filesApi = null;
       return;
     }
 
-    const maxAttempts = this.addressPolicy.maxReconnectAttempts();
-    const isNewClient = !this.agentClient;
-
-    if (isNewClient) {
-      const client = new AgentSocketClient({
-        agentUrl: url,
-        connectionToken: token,
-        maxReconnectAttempts: maxAttempts,
-      });
-      this.agentClient = client;
-      client.connect();
-      this.wireConnectionHandler();
-    } else {
-      const rebuilt = this.agentClient!.configure({
-        agentUrl: url,
-        connectionToken: token,
-        maxReconnectAttempts: maxAttempts,
-      });
-      if (opts?.forceReconnect && !rebuilt) {
-        this.agentClient!.forceReconnect();
+    const builtUrl = buildAgentWsUrl(url, token);
+    const live = this.agentWs;
+    if (live && !opts?.forceReconnect && live.getUrl() === builtUrl) {
+      // Same agent endpoint: keep the live socket. The reconnect budget was
+      // fixed at construction; endpoint or token changes rebuild below.
+      if (live.connectionState === 'connected') {
+        this.maybeStartP2PAttach();
       }
-    }
-
-    const client = this.agentClient;
-    if (!client) {
       return;
     }
-    this.p2pAdapter = client;
-    this.fileCapability = new FileCapability(client);
-    this.registerSessionCapability('files', this.fileCapability);
-    if (client.connectionState === 'connected') {
+
+    this.teardownConnectionHandler();
+    this.attachController.cancelActiveAttach();
+    live?.dispose();
+    this.agentWs = null;
+    this.agentTerminalApi = null;
+    this.filesApi = null;
+
+    const files = createFilesApi();
+    const ws = new WebSocketService(builtUrl, [files], {
+      maxReconnectAttempts: this.addressPolicy.maxReconnectAttempts(),
+    });
+    this.agentWs = ws;
+    this.filesApi = files;
+    this.agentTerminalApi = createTerminalAgentApi(ws);
+    // Fire-and-forget like the legacy client: transport failures surface via
+    // onConnectionStateChange (the router rejects in-flight requests). A
+    // teardown/dispose while the socket is still opening rejects this pending
+    // connect — swallow so it cannot dangle as an unhandled rejection.
+    void ws.connect().catch(() => {});
+    this.wireConnectionHandler();
+    if (ws.connectionState === 'connected') {
       this.maybeStartP2PAttach();
     }
   }

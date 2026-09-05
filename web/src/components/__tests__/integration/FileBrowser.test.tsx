@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FileBrowser } from '@/components/FileBrowser';
-import type { FileOps, FileEntry } from '@/services/fileOps';
+import type { FileOps, FileEntry } from '@/features/files';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },

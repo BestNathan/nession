@@ -1,0 +1,11 @@
+export { FilesPlugin } from './FilesPlugin';
+export { createFilesApi } from './FilesPlugin';
+export { DEFAULT_CHUNK_SIZE } from './FilesPlugin';
+export { base64Decode } from './FilesPlugin';
+export { base64Encode } from './FilesPlugin';
+export { readFileChunked } from './FilesPlugin';
+export type { FileApi } from './FilesPlugin';
+export type { ChunkedReadResult } from './types';
+export type { FileData } from './types';
+export type { FileEntry } from './types';
+export type { FileOps } from './types';

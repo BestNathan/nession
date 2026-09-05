@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveDeepLinkAttachChoice } from '@/services/deepLinkAttach';
 import type { Session } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
 
 vi.mock('@/services/attachPrefs', () => ({
   loadAttachPrefs: () => ({ mode: 'auto', renderer: 'webgl' }),
@@ -18,6 +17,13 @@ vi.mock('@/services/addressSelection', () => ({
   ]),
   orderByLatency: vi.fn((results: { url: string }[]) => results.map((r) => r.url)),
 }));
+
+// requestAttach now comes from the sessions feature singleton.
+const sessionsApiMock = vi.hoisted(() => ({
+  requestAttach: vi.fn(),
+}));
+
+vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
 
 describe('resolveDeepLinkAttachChoice', () => {
   const session: Session = {
@@ -41,16 +47,14 @@ describe('resolveDeepLinkAttachChoice', () => {
       connection_token: 'secret',
       agent_address: 'ws://agent/ws',
     };
-    const wsService = {
-      requestAttach: vi.fn().mockResolvedValue(attachInfo),
-    } as unknown as WebSocketService;
+    sessionsApiMock.requestAttach.mockResolvedValue(attachInfo);
     const probeResults = new Map([
       ['agent-1', { latencies: [], orderedUrls: ['ws://fast/ws'], probedAt: 1 }],
     ]);
 
-    const choice = await resolveDeepLinkAttachChoice(wsService, session, probeResults);
+    const choice = await resolveDeepLinkAttachChoice(session, probeResults);
 
-    expect(wsService.requestAttach).toHaveBeenCalledWith(session.session_id, 'p2p');
+    expect(sessionsApiMock.requestAttach).toHaveBeenCalledWith(session.session_id, 'p2p');
     expect(choice.attachInfo).toEqual(attachInfo);
     expect(choice.orderedUrls).toEqual(['ws://fast/ws']);
     expect(choice.mode).toBe('auto');
@@ -66,11 +70,9 @@ describe('resolveDeepLinkAttachChoice', () => {
         { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
       ],
     };
-    const wsService = {
-      requestAttach: vi.fn().mockResolvedValue(attachInfo),
-    } as unknown as WebSocketService;
+    sessionsApiMock.requestAttach.mockResolvedValue(attachInfo);
 
-    const choice = await resolveDeepLinkAttachChoice(wsService, session, new Map());
+    const choice = await resolveDeepLinkAttachChoice(session, new Map());
 
     expect(choice.orderedUrls).toEqual(['ws://fast/ws', 'ws://slow/ws']);
     expect(choice.latencies).toHaveLength(2);

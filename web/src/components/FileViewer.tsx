@@ -22,7 +22,7 @@ import {
 import { type ViewerType } from '@/lib/viewerRegistry';
 import { formatSize } from '@/lib/format';
 import { useFileViewer, type ViewMode } from '@/hooks/useFileViewer';
-import type { FileOps } from '../services/fileOps';
+import type { FileOps } from '@/features/files';
 
 export interface FileViewerProps {
   fileOps: FileOps;

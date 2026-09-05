@@ -4,18 +4,18 @@ import { createElement, type ReactNode } from 'react';
 import { createStore, Provider } from 'jotai';
 import { useRelayServerLifecycle } from '@/terminal/hooks/useRelayServerLifecycle';
 import { terminalSessionStateAtom, type TerminalStatus } from '@/terminal/state/session';
-import type { ConnectionStatus } from '@/types';
+import type { ConnectionState } from '@/services/socket/types';
 
-/** Fake of the narrow server-ws surface the lifecycle hook consumes. */
+/** Fake of the narrow server-connection surface the lifecycle hook consumes. */
 function makeServerConnection() {
-  const listeners = new Set<(status: ConnectionStatus) => void>();
+  const listeners = new Set<(state: ConnectionState) => void>();
   return {
-    emit(next: ConnectionStatus) {
+    emit(next: ConnectionState) {
       for (const cb of listeners) {
         cb(next);
       }
     },
-    onConnectionChange(cb: (status: ConnectionStatus) => void) {
+    onConnectionStateChange(cb: (state: ConnectionState) => void) {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
@@ -32,7 +32,7 @@ function renderLifecycle(opts: { status: TerminalStatus; mode?: 'p2p' | 'relay' 
   const { result } = renderHook(
     () => useRelayServerLifecycle({
       effectiveMode: opts.mode ?? 'relay',
-      wsService: server as never,
+      serverConnection: server as never,
       setTerminalState: (u: TerminalStatus | ((prev: TerminalStatus) => TerminalStatus)) => {
         store.set(terminalSessionStateAtom, u as TerminalStatus);
       },
@@ -47,10 +47,11 @@ describe('useRelayServerLifecycle', () => {
     vi.restoreAllMocks();
   });
 
-  it('legacy relay survives an intra-budget server-ws reconnect with exactly one beginRelay handoff', () => {
+  it('relay survives an intra-budget server-ws reconnect with exactly one handoff', () => {
     // TerminalWorkspace composition: attach machine holds 'attached'; on
-    // 'connecting' the machine goes reconnecting → connecting, and the
-    // authenticated handoff promotes to 'connected' so the machine re-begins.
+    // 'connecting'/'reconnecting' (intra-budget loss, old collapsed 'connecting')
+    // the machine goes reconnecting, and the post-handshake 'connected' handoff
+    // promotes to 'connected' so the machine re-begins relay.
     const { store, server, result } = renderLifecycle({ status: 'attached' });
     expect(result.current.relayLost).toBe(false);
 
@@ -62,12 +63,6 @@ describe('useRelayServerLifecycle', () => {
 
     act(() => {
       server.emit('connected');
-    });
-    // Open-but-unauthenticated must not promote.
-    expect(store.get(terminalSessionStateAtom)).toBe('reconnecting');
-
-    act(() => {
-      server.emit('authenticated');
     });
     expect(store.get(terminalSessionStateAtom)).toBe('connected');
     expect(result.current.relayLost).toBe(false);
@@ -83,7 +78,7 @@ describe('useRelayServerLifecycle', () => {
     expect(result.current.relayLost).toBe(true);
 
     act(() => {
-      server.emit('authenticated');
+      server.emit('connected');
     });
     expect(result.current.relayLost).toBe(false);
     expect(store.get(terminalSessionStateAtom)).toBe('connected');
@@ -94,8 +89,9 @@ describe('useRelayServerLifecycle', () => {
 
     act(() => {
       server.emit('connecting');
+      server.emit('reconnecting');
       server.emit('disconnected');
-      server.emit('authenticated');
+      server.emit('connected');
     });
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
     expect(result.current.relayLost).toBe(false);

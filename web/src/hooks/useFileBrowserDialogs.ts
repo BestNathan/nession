@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FileEntry } from '../services/fileOps';
+import type { FileEntry } from '@/features/files';
 
 export function useFileBrowserDialogs() {
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);

@@ -106,7 +106,7 @@ function App() {
     [connectionStatus, wsService, sessionFirst],
   );
 
-  if (isRestoringSession || (isAuthenticated && !wsService)) {
+  if (isRestoringSession) {
     return <ReconnectingShell />;
   }
 

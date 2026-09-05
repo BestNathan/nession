@@ -10,7 +10,7 @@ import { BottomBar, type BottomTab } from './BottomBar';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { renderSlot } from '@/extensions/registry';
-import type { FileOps, FileEntry } from '../services/fileOps';
+import type { FileOps, FileEntry } from '@/features/files';
 
 interface FileTabsProps {
   fileOps: FileOps;

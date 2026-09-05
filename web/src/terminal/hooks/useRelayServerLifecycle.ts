@@ -1,40 +1,40 @@
 import { useEffect, useState } from 'react';
-import type { ConnectionStatus } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
+import type { ConnectionState } from '@/services/socket/types';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 import type { TerminalStatus } from '@/terminal/state/session';
 
 interface UseRelayServerLifecycleOptions {
   effectiveMode: 'p2p' | 'relay';
-  wsService?: WebSocketService;
+  serverConnection?: RelayServerHandle;
   setTerminalState: (update: TerminalStatus | ((prev: TerminalStatus) => TerminalStatus)) => void;
 }
 
 /**
  * Legacy TerminalWorkspace relay server-ws lifecycle.
  *
- * The server WebSocket core stays in `connecting` through its intra-budget
- * reconnect — `disconnected` only fires once the budget is exhausted. Either
- * ends the server-side relay forwarding loop, so both are a recoverable loss
- * for the attach machine. `relayLost` (the "Connection lost" banner) is only
- * for the terminal, budget-exhausted `disconnected`.
+ * On the new transport the server WebSocket reports 'reconnecting' through
+ * its intra-budget reconnect — 'disconnected' only fires once the budget is
+ * exhausted. Either ends the server-side relay forwarding loop, so both are
+ * a recoverable loss for the attach machine. `relayLost` (the "Connection
+ * lost" banner) is only for the budget-exhausted 'disconnected'.
  *
- * The `authenticated` handoff promotes connecting/reconnecting/failed to
- * `connected`; the attach machine's `connected` case then re-begins relay
- * exactly once per reconnect cycle.
+ * The post-handshake 'connected' handoff (old 'authenticated') promotes
+ * connecting/reconnecting/failed to 'connected'; the attach machine's
+ * 'connected' case then re-begins relay exactly once per reconnect cycle.
  */
 export function useRelayServerLifecycle({
   effectiveMode,
-  wsService,
+  serverConnection,
   setTerminalState,
 }: UseRelayServerLifecycleOptions): { relayLost: boolean } {
   const [relayLost, setRelayLost] = useState(false);
 
   useEffect(() => {
-    if (effectiveMode !== 'relay' || !wsService) {
+    if (effectiveMode !== 'relay' || !serverConnection) {
       return;
     }
-    return wsService.onConnectionChange((status: ConnectionStatus) => {
-      if (status === 'authenticated') {
+    return serverConnection.onConnectionStateChange((state: ConnectionState) => {
+      if (state === 'connected') {
         setRelayLost(false);
         setTerminalState((prev) => {
           if (prev === 'connecting' || prev === 'reconnecting' || prev === 'failed') {
@@ -42,16 +42,18 @@ export function useRelayServerLifecycle({
           }
           return prev;
         });
-      } else if (status === 'connecting') {
+      } else if (state === 'connecting' || state === 'reconnecting') {
         // Recoverable (intra-budget) loss — relay loop is gone, but the server
-        // may re-authenticate without the browser ever seeing 'disconnected'.
+        // may re-handshake without the browser ever seeing 'disconnected'.
+        // ('connecting' fires for the initial attempt too, where the terminal
+        // is idle/connecting and this is a no-op.)
         setTerminalState((prev) => {
           if (prev === 'attached' || prev === 'connected') {
             return 'reconnecting';
           }
           return prev;
         });
-      } else if (status === 'disconnected') {
+      } else if (state === 'disconnected') {
         setRelayLost(true);
         setTerminalState((prev) => {
           if (prev === 'attached' || prev === 'connected') {
@@ -61,7 +63,7 @@ export function useRelayServerLifecycle({
         });
       }
     });
-  }, [effectiveMode, wsService, setTerminalState]);
+  }, [effectiveMode, serverConnection, setTerminalState]);
 
   return { relayLost };
 }

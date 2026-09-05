@@ -43,7 +43,7 @@ import { toastError } from '@/lib/errorHelpers';
 import { useNewEntryForm } from '../hooks/useNewEntryForm';
 import { useRenameState } from '../hooks/useRenameState';
 import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
-import type { FileOps, FileEntry } from '../services/fileOps';
+import type { FileOps, FileEntry } from '@/features/files';
 import { registerSeenLangKeys, scanLangKeysFromPaths } from '@/lib/codeMirrorLangs';
 
 export interface FileBrowserProps {

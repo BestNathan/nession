@@ -1,26 +1,27 @@
 import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import type { AttachInfo } from '../types';
 import type { AddressPlan } from './useAddressPlan';
-import type { P2PConnection } from '@/services/socket/p2pTypes';
-import type { WebSocketService } from '@/services/websocket';
+import type { TerminalAgentApi } from '@/features/terminal';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
   sessionName: string;
   orderedUrls: string[] | null;
   manualOverride: string | null;
-  /** Session-first waits for xterm transport before attach. Legacy attaches on socket connect. */
-  transportFirst?: boolean;
-  wsService?: WebSocketService;
+  /** Relay-mode server connection handle (see relayServerHandle). */
+  serverConnection?: RelayServerHandle;
 }
 
 interface UseP2PAttachTransportResult {
   addressPlan: AddressPlan;
   activeUrl: string | null;
-  p2pConnection: P2PConnection | null;
-  p2pState: import('@/services/socket/types').ConnectionState;
+  /** Live agent terminal capability of the current P2P transport (null in relay). */
+  agentTerminalApi: TerminalAgentApi | null;
+  /** Agent-transport connection state, gated 'disconnected' outside the P2P transport. */
+  connectionState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
-  fileOps: import('@/services/fileOps').FileOps | null;
+  fileOps: import('@/features/files').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
   transportKey: string | null;
   snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;
@@ -30,20 +31,21 @@ interface UseP2PAttachTransportResult {
  * P2P attach transport: address rotation + relay fallback via shared SessionRuntime.
  */
 export function useP2PAttachTransport({
-  transportFirst = true,
-  wsService,
+  serverConnection,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
-  const { addressPlan, activeUrl, p2pConnection, p2pState, waitingForAddressPlan, fileOps, runtime, snapshot, transportKey } = useSessionRuntime({
-    transportFirst,
+  const {
+    addressPlan, activeUrl, agentTerminalApi, connectionState,
+    waitingForAddressPlan, fileOps, runtime, snapshot, transportKey,
+  } = useSessionRuntime({
     configOwner: true,
-    wsService,
+    serverConnection,
   });
 
   return {
     addressPlan,
     activeUrl,
-    p2pConnection,
-    p2pState,
+    agentTerminalApi,
+    connectionState,
     waitingForAddressPlan,
     fileOps,
     runtime,

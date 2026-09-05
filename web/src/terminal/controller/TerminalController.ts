@@ -1,6 +1,6 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import type { P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
 import type { InputMode } from '../state/input';
 import type { TerminalSession, TerminalStatus } from '../state/session';
 import type { TerminalTransport } from '../transport/TerminalTransport';

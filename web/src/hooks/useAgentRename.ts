@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import type { Agent } from '../types';
-import { getWebSocketService } from '../services/websocket';
+import { agentsApi } from '../features/agents';
 import { agentDisplayName } from '../lib/format';
 
 /** Hook encapsulating the rename-in-place state machine for an agent card. */
@@ -32,9 +32,7 @@ export function useAgentRename(
 
     setSaving(true);
     try {
-      const ws = getWebSocketService();
-      if (!ws) {throw new Error('Not connected');}
-      const updated = await ws.renameAgent(agent.agent_id, trimmed);
+      const updated = await agentsApi.renameAgent(agent.agent_id, trimmed);
       onRename?.(updated);
     } catch (err) {
       console.error('Failed to rename agent:', err);
@@ -66,9 +64,7 @@ export function useAgentRename(
       e.stopPropagation();
       setSaving(true);
       try {
-        const ws = getWebSocketService();
-        if (!ws) {throw new Error('Not connected');}
-        const updated = await ws.renameAgent(agent.agent_id, null);
+        const updated = await agentsApi.renameAgent(agent.agent_id, null);
         onRename?.(updated);
       } catch (err) {
         console.error('Failed to clear agent name:', err);

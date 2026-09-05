@@ -81,15 +81,6 @@ export interface AttachInfo {
  */
 export type AttachMode = 'auto' | 'p2p' | 'relay';
 
-export interface WebSocketMessage {
-  msg_type: string;
-  id: string;
-  timestamp: number;
-  payload: Record<string, unknown>;
-}
-
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
-
 export interface AuthResponse {
   status: 'success' | 'failed';
   message: string;

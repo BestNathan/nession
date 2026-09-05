@@ -6,10 +6,10 @@ import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { getRememberPreference, setRememberPreference } from '../lib/auth';
-import type { ConnectionStatus } from '../types';
+import type { ConnectionState } from '@/services/socket';
 
 interface LoginPageProps {
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   serverUrl: string;
   setServerUrl: (url: string) => void;
   authToken: string;
@@ -18,11 +18,11 @@ interface LoginPageProps {
   onDisconnect: () => void;
 }
 
-const HELPER_TEXT: Record<ConnectionStatus, string> = {
+const HELPER_TEXT: Record<ConnectionState, string> = {
   disconnected: 'Enter your auth token and click Connect to establish a WebSocket connection to the server.',
   connecting: 'Establishing connection to the server...',
-  connected: 'Connected! Authenticating...',
-  authenticated: '',
+  reconnecting: 'Connection lost — reconnecting to the server...',
+  connected: '',
 };
 
 const FEATURES = [

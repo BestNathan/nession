@@ -4,15 +4,17 @@ import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
 import { bannerAtomFamily } from '@/terminal/state/ui';
+import type { ConnectionState } from '@/services/socket/types';
 
 const { wsListeners } = vi.hoisted(() => ({
-  wsListeners: [] as Array<(status: string) => void>,
+  wsListeners: [] as Array<(state: ConnectionState) => void>,
 }));
 
 vi.mock('@/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
-    p2pConnection: null,
+    agentTerminalApi: null,
+    connectionState: 'connected' as const,
     activeUrl: null,
   }),
 }));
@@ -21,8 +23,13 @@ vi.mock('@/session-first/terminal/useSessionFirstTerminalAttach', () => ({
 }));
 vi.mock('@/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/hooks/useWebSocket', () => ({
+  // The new-core WebSocketService surface: useTerminalOrchestration wraps the
+  // service in a relayServerHandle and subscribes to connection-state changes
+  // for the banner (durable 'connected'/'disconnected' edges). The remaining
+  // members are inert — these tests never drive attach or relay I/O.
   useWebSocket: () => ({
-    onConnectionChange: (cb: (status: string) => void) => {
+    connectionState: 'connected',
+    onConnectionStateChange: (cb: (state: ConnectionState) => void) => {
       wsListeners.push(cb);
       return () => {
         const i = wsListeners.indexOf(cb);
@@ -31,9 +38,12 @@ vi.mock('@/hooks/useWebSocket', () => ({
         }
       };
     },
-    isConnected: () => false,
+    beginRelay: vi.fn(),
     endRelay: vi.fn(),
-    applySessionEnv: vi.fn(),
+    sendRelayInput: vi.fn(),
+    sendRelayResize: vi.fn(),
+    onRelayOutput: vi.fn(() => () => {}),
+    onRelayResize: vi.fn(() => () => {}),
   }),
 }));
 vi.mock('@/session-first/terminal/SessionFirstTerminalPane', () => ({

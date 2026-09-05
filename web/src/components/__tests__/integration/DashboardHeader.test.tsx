@@ -1,10 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { WebSocketContext } from '@/hooks/useWebSocket';
 import { DashboardHeader } from '@/components/DashboardHeader';
-import type { WebSocketService } from '@/services/websocket';
 import type { ServerInfo } from '@/types';
+
+// The header embeds ServerInfoMenu, which fetches through the serverApi
+// singleton — no WebSocketService involved.
+const { serverInfoMock } = vi.hoisted(() => ({
+  serverInfoMock: vi.fn(),
+}));
+vi.mock('@/features/server', () => ({
+  serverApi: { serverInfo: serverInfoMock },
+}));
 
 function makeServerInfo(overrides: Partial<ServerInfo> = {}): ServerInfo {
   return {
@@ -19,39 +26,32 @@ function makeServerInfo(overrides: Partial<ServerInfo> = {}): ServerInfo {
   };
 }
 
-function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketService {
-  return {
-    serverInfo: vi.fn().mockResolvedValue(makeServerInfo()),
-    ...overrides,
-  } as unknown as WebSocketService;
-}
+beforeEach(() => {
+  serverInfoMock.mockReset();
+  serverInfoMock.mockResolvedValue(makeServerInfo());
+});
 
-function renderHeader(
-  ws?: WebSocketService,
-  extra?: { onSessionFirst?: () => void },
-) {
+function renderHeader(extra?: { onSessionFirst?: () => void }) {
   return render(
-    <WebSocketContext.Provider value={ws ?? makeWsService()}>
-      <DashboardHeader
-        connectionStatus="connected"
-        searchProps={{
-          query: '',
-          setQuery: vi.fn(),
-          statusFilter: 'all',
-          setStatusFilter: vi.fn(),
-          onlineCount: 1,
-          offlineCount: 1,
-        }}
-        actionsProps={{
-          fetchSessions: vi.fn(),
-          onOpenEnv: vi.fn(),
-          loadingAgents: false,
-          clearError: vi.fn(),
-        }}
-        error={null}
-        onSessionFirst={extra?.onSessionFirst}
-      />
-    </WebSocketContext.Provider>,
+    <DashboardHeader
+      connectionStatus="connected"
+      searchProps={{
+        query: '',
+        setQuery: vi.fn(),
+        statusFilter: 'all',
+        setStatusFilter: vi.fn(),
+        onlineCount: 1,
+        offlineCount: 1,
+      }}
+      actionsProps={{
+        fetchSessions: vi.fn(),
+        onOpenEnv: vi.fn(),
+        loadingAgents: false,
+        clearError: vi.fn(),
+      }}
+      error={null}
+      onSessionFirst={extra?.onSessionFirst}
+    />,
   );
 }
 
@@ -106,12 +106,10 @@ describe('DashboardHeader', () => {
 
     it('omits the built row when the server has no build time', async () => {
       const user = userEvent.setup();
-      const ws = makeWsService({
-        serverInfo: vi.fn().mockResolvedValue(
-          makeServerInfo({ build_time: '', image_tag: 'dev' }),
-        ),
-      });
-      renderHeader(ws);
+      serverInfoMock.mockResolvedValueOnce(
+        makeServerInfo({ build_time: '', image_tag: 'dev' }),
+      );
+      renderHeader();
 
       await user.click(await screen.findByRole('button', { name: 'Server info' }));
 
@@ -124,7 +122,7 @@ describe('DashboardHeader', () => {
     it('renders the preview button and clicking calls onSessionFirst', async () => {
       const onSessionFirst = vi.fn();
       const user = userEvent.setup();
-      renderHeader(undefined, { onSessionFirst });
+      renderHeader({ onSessionFirst });
 
       const button = screen.getByTestId('use-session-first');
       expect(button).toBeInTheDocument();

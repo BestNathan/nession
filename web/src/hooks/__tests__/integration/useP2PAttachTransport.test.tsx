@@ -11,11 +11,13 @@ vi.mock('@/hooks/useSessionRuntime', () => ({
   useSessionRuntime: vi.fn(() => ({
     addressPlan: { ready: true, urls: ['ws://a/ws'] },
     activeUrl: 'ws://a/ws',
-    p2pConnection: null,
-    p2pState: 'disconnected' as const,
+    agentTerminalApi: null,
+    connectionState: 'disconnected' as const,
     waitingForAddressPlan: false,
     fileOps: null,
     runtime: null,
+    transportKey: null,
+    snapshot: null,
   })),
 }));
 
@@ -39,7 +41,7 @@ describe('useP2PAttachTransport', () => {
     vi.clearAllMocks();
   });
 
-  it('delegates to useSessionRuntime with transportFirst flag', () => {
+  it('delegates to useSessionRuntime as the session config owner', () => {
     const store = createStore();
     renderHook(
       () => useP2PAttachTransport({
@@ -47,12 +49,11 @@ describe('useP2PAttachTransport', () => {
         sessionName: 'test',
         orderedUrls: ['ws://a/ws'],
         manualOverride: null,
-        transportFirst: true,
       }),
       { wrapper: wrapper(store) },
     );
 
-    expect(useSessionRuntime).toHaveBeenCalledWith({ transportFirst: true, configOwner: true });
+    expect(useSessionRuntime).toHaveBeenCalledWith({ configOwner: true });
   });
 
   it('returns runtime transport fields', () => {
@@ -68,7 +69,6 @@ describe('useP2PAttachTransport', () => {
     );
 
     expect(result.current.activeUrl).toBe('ws://a/ws');
-    expect(result.current.p2pState).toBe('disconnected');
     expect(result.current.waitingForAddressPlan).toBe(false);
   });
 });

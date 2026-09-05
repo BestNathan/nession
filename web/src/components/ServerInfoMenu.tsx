@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { ServerInfo } from '@/types';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { serverApi } from '@/features/server';
 import pkg from '../../package.json';
 
 function formatUptimeCompact(seconds: number): string {
@@ -36,17 +36,16 @@ export interface ServerInfoMenuProps {
 }
 
 export function ServerInfoMenu({ refreshKey = 0 }: ServerInfoMenuProps) {
-  const ws = useWebSocket();
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const fetchedAtRef = useRef<number>(0);
   const [, setTick] = useState(0);
 
   const fetch = useCallback(() => {
-    ws.serverInfo().then((s) => {
+    serverApi.serverInfo().then((s) => {
       fetchedAtRef.current = Date.now();
       setInfo(s);
     }).catch(() => {});
-  }, [ws]);
+  }, []);
 
   useEffect(() => {
     fetch();

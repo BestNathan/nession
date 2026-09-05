@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
-import { useWebSocket } from './useWebSocket';
 import { toast } from 'sonner';
+import { sessionsApi } from '../features/sessions';
 
 export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -31,7 +31,6 @@ function localizeError(error: string): string {
 }
 
 export function useSessionPreview() {
-  const ws = useWebSocket();
   const [status, setStatus] = useState<PreviewStatus>('idle');
   const [result, setResult] = useState<PreviewResult>({ ansi: '' });
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +44,7 @@ export function useSessionPreview() {
       setStatus('loading');
       setError(null);
       try {
-        const previewResult = await ws.capturePreview(sessionId, lines);
+        const previewResult = await sessionsApi.capturePreview(sessionId, lines);
         if (ctrl.signal.aborted) {
           return;
         }
@@ -63,7 +62,7 @@ export function useSessionPreview() {
         });
       }
     },
-    [ws],
+    [],
   );
 
   const reset = useCallback(() => {

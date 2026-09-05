@@ -12,10 +12,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
+import { envApi } from '@/features/env';
 import { EnvDiff } from './EnvDiff';
 import { parseEnv } from '@/lib/envParser';
 import { sourceLabel } from './envRef';
-import { useWebSocket } from '../../hooks/useWebSocket';
 
 const PLACEHOLDER =
   '# KEY=VALUE pairs, one per line\n# Lines starting with # are comments\nAPI_URL=https://api.example.com\nDEBUG=false\n';
@@ -204,11 +204,10 @@ function EditorFormBody({
 // ── Footer actions ──────────────────────────────────────────────────────
 
 function EditorFooter({
-  state, file, wsService, loading, onSaved, onDeleted, onClone, doSave,
+  state, file, loading, onSaved, onDeleted, onClone, doSave,
 }: {
   state: EditorState;
   file: EnvFileInfo | null;
-  wsService: ReturnType<typeof useWebSocket>;
   loading: boolean;
   onSaved: () => void;
   onDeleted: () => void;
@@ -226,7 +225,7 @@ function EditorFooter({
             onClick={() => {
               if (!file) { return; }
               if (!window.confirm(`Delete ${file.name}? This cannot be undone.`)) { return; }
-              wsService.deleteEnvFile({ name: file.name, source: file.source, agent_id: file.agent_id ?? undefined })
+              envApi.deleteEnvFile({ name: file.name, source: file.source, agent_id: file.agent_id ?? undefined })
                 .then((r) => {
                   if (r.success) { onDeleted(); }
                   else { toast.error(r.error ?? 'Failed to delete'); }
@@ -258,7 +257,6 @@ function EditorFooter({
 export function EnvInlineEditor({
   file, cloneFrom, isNew, agents, onSaved, onDeleted, onClone, onNew,
 }: EnvInlineEditorProps) {
-  const wsService = useWebSocket();
   const [state, setState] = useState<EditorState>({
     name: '', source: 'server', agentId: '', content: '', originalContent: '',
     loading: false, error: null, hideSecrets: false, inUseBy: [], isEdit: false,
@@ -277,7 +275,7 @@ export function EnvInlineEditor({
         content: '', originalContent: '', loading: true, error: null,
         hideSecrets: false, inUseBy: [], isEdit: false,
       }));
-      wsService.getEnvFile({ name: cloneFrom.name, source: cloneFrom.source, agent_id: cloneFrom.agent_id })
+      envApi.getEnvFile({ name: cloneFrom.name, source: cloneFrom.source, agent_id: cloneFrom.agent_id })
         .then((r) => { if (r.success) { set('content', r.content ?? ''); set('loading', false); } })
         .catch(() => set('error', 'Failed to load'));
       return;
@@ -288,7 +286,7 @@ export function EnvInlineEditor({
         content: '', originalContent: '', loading: true, error: null,
         hideSecrets: true, inUseBy: [], isEdit: true,
       }));
-      wsService.getEnvFile({ name: file.name, source: file.source, agent_id: file.agent_id })
+      envApi.getEnvFile({ name: file.name, source: file.source, agent_id: file.agent_id })
         .then((r) => {
           if (r.success) {
             setState((prev) => ({
@@ -306,7 +304,7 @@ export function EnvInlineEditor({
       content: '', originalContent: '', loading: false, error: null,
       hideSecrets: false, inUseBy: [], isEdit: false,
     }));
-  }, [file?.name, file?.source, file?.agent_id, cloneFrom?.name, cloneFrom?.source, cloneFrom?.agent_id, isNew, wsService, agents, set]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [file?.name, file?.source, file?.agent_id, cloneFrom?.name, cloneFrom?.source, cloneFrom?.agent_id, isNew, agents, set]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const buildRef = () => {
     const fileName = state.name.trim().endsWith('.env') ? state.name.trim() : `${state.name.trim()}.env`;
@@ -319,7 +317,7 @@ export function EnvInlineEditor({
     set('loading', true);
     set('error', null);
     try {
-      const resp = await wsService.writeEnvFile(buildRef(), state.content, overwrite, force);
+      const resp = await envApi.writeEnvFile(buildRef(), state.content, overwrite, force);
       if (resp.success) {
         if (resp.re_sourced?.length) { toast.success(`Re-sourced in ${resp.re_sourced.length} session(s)`); }
         resp.re_source_errors?.forEach((e: string) => toast.error(`Re-source failed: ${e}`));
@@ -379,7 +377,7 @@ export function EnvInlineEditor({
           parsed={parsed} hasWarnings={hasWarnings} hasDiff={hasDiff} />
       </ScrollArea>
 
-      <EditorFooter state={state} file={file} wsService={wsService} loading={loading}
+      <EditorFooter state={state} file={file} loading={loading}
         onSaved={onSaved} onDeleted={onDeleted} onClone={onClone} doSave={doSave} />
     </div>
   );

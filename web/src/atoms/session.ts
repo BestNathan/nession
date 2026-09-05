@@ -2,7 +2,7 @@
 import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom, routeIntentEpochAtom } from './connection';
+import { p2pStateAtom, routeIntentEpochAtom } from './connection';
 import { terminalSessionStateAtom } from '../terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
@@ -51,13 +51,6 @@ export const attachToSessionAtom = atom(
     set(envRefsAtom, choice.envRefs ?? []);
     set(manualOverrideAtom, choice.selectedUrl ?? null);
     set(forcedRelayAtom, false);
-    // Clear the previous P2P connection so the terminal's view-creation gate
-    // (Terminal.tsx: `mode === 'p2p' && !p2pConnection`) doesn't build a view
-    // against the old socket on a session switch. Without this, the old
-    // connection stays in the atom until the old hook's unmount cleanup runs —
-    // which is too late — and the throwaway view's xterm Viewport crashes with
-    // "Cannot read properties of undefined (reading 'dimensions')" (issue #51).
-    set(p2pConnectionAtom, null);
     set(attachDialogSessionAtom, null);
     set(terminalSessionStateAtom, 'connecting');
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
@@ -75,7 +68,6 @@ export const disconnectAtom = atom(
     set(forcedRelayAtom, false);
     set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
-    set(p2pConnectionAtom, null);
     set(p2pStateAtom, 'disconnected');
     set(terminalSessionStateAtom, 'idle');
     navigate('/');
@@ -123,25 +115,23 @@ export const switchAddressAtom = atom(
         }
         set(manualOverrideAtom, null);
         set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
-        set(p2pConnectionAtom, null);
         return;
       }
     }
 
     set(manualOverrideAtom, url);
     set(forcedRelayAtom, false);
-    // Bump the route epoch so SessionRuntime detects the route change and
-    // and Terminal.tsx rebuilds its xterm view against the new socket — even
-    // when the resolved activeUrl does not change (e.g. Auto → an explicit
-    // route that Auto already resolved to).
+    // Bump the route epoch so SessionRuntime detects the route change and the
+    // terminal rebuilds its view against the new socket — even when the
+    // resolved activeUrl does not change (e.g. Auto → an explicit route that
+    // Auto already resolved to).
     set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
-    set(p2pConnectionAtom, null);
   },
 );
 
 // The imports below create a circular dependency between session.ts,
 // connection.ts, and terminal/state/session.ts. This is fine because:
-// 1. session.ts imports connection.ts for p2pConnectionAtom/p2pStateAtom (write-only)
+// 1. session.ts imports connection.ts for p2pStateAtom/routeIntentEpochAtom (write-only)
 // 2. connection.ts imports session.ts for derived atoms (read-only)
 // 3. session.ts imports terminal/state/session.ts for terminalSessionStateAtom (write-only)
 // 4. terminal/state/session.ts imports atoms/session.ts (sessionId/sessionName, read-only)

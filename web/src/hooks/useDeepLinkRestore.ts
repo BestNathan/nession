@@ -3,7 +3,6 @@ import type { NavigateFunction } from 'react-router-dom';
 import type { Session } from '../types';
 import type { AttachedSession } from '../components/TerminalView';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import type { WebSocketService } from '../services/websocket';
 import type { AgentProbe } from '../atoms/probe';
 import { resolveDeepLinkAttachChoice } from '../services/deepLinkAttach';
 
@@ -18,14 +17,13 @@ export function useDeepLinkRestore(opts: {
   sessionsLoaded: boolean;
   loadingSessions: boolean;
   sessions: Session[];
-  wsService: WebSocketService;
   probeResults: Map<string, AgentProbe>;
   confirmAttach: (session: Session, choice: AttachChoice) => void;
   navigate: NavigateFunction;
 }) {
   const {
     pendingSessionId, attachedSession, sessionsLoaded, loadingSessions,
-    sessions, wsService, probeResults, confirmAttach, navigate,
+    sessions, probeResults, confirmAttach, navigate,
   } = opts;
 
   const confirmedRef = useRef<string | null>(null);
@@ -51,7 +49,7 @@ export function useDeepLinkRestore(opts: {
     }
 
     let cancelled = false;
-    void resolveDeepLinkAttachChoice(wsService, session, probeResultsRef.current)
+    void resolveDeepLinkAttachChoice(session, probeResultsRef.current)
       .then((choice) => {
         if (cancelled) { return; }
         confirmAttach(session, choice);
@@ -68,6 +66,6 @@ export function useDeepLinkRestore(opts: {
     };
   }, [
     pendingSessionId, attachedSession, sessionsLoaded, loadingSessions,
-    sessions, wsService, confirmAttach, navigate,
+    sessions, confirmAttach, navigate,
   ]);
 }

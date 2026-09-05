@@ -16,7 +16,7 @@ vi.mock('@/components/Dashboard', () => ({
 }));
 vi.mock('@/hooks/useAppConnection', () => ({
   useAppConnection: () => ({
-    connectionStatus: 'authenticated',
+    connectionStatus: 'connected',
     wsService: {},
     authToken: 't',
     setAuthToken: vi.fn(),

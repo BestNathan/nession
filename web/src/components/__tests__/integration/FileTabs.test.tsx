@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FileTabs } from '@/components/FileTabs';
-import type { FileOps, FileEntry } from '@/services/fileOps';
+import type { FileOps, FileEntry } from '@/features/files';
 
 // Minimal fileOps mock: FileBrowser calls listDir on mount, and opening a file
 // tab needs readFile for FileViewer.

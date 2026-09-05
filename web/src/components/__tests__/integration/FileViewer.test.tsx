@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FileViewer } from '@/components/FileViewer';
-import type { FileOps } from '@/services/fileOps';
+import type { FileOps } from '@/features/files';
 
 function mockFileOps(overrides: Partial<FileOps> = {}): FileOps {
   return {

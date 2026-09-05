@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
 import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/runtime/AttachStateMachine';
-import type { RelayServerConnection } from '@/runtime/relayServerConnection';
-import type { AttachInfo, ConnectionStatus } from '@/types';
+import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import type { ConnectionState } from '@/services/socket/types';
+import type { AttachInfo } from '@/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 
@@ -19,7 +20,7 @@ function lastWs(): MockWs {
   return wsInstances[wsInstances.length - 1];
 }
 
-/** Drive a mock ws to the open state (AgentSocketClient.setState('connected')). */
+/** Drive the latest mock ws to the open state (surfaces 'connected' via onopen). */
 function openWs(): void {
   const ws = lastWs();
   ws.readyState = 1;
@@ -73,31 +74,30 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     manualOverride: null,
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
-    transportFirst: true,
     routeIntentEpoch: 0,
     ...overrides,
   };
 }
 
-function makeRelayServerConnection(initialStatus: ConnectionStatus = 'disconnected') {
-  const listeners = new Set<(status: ConnectionStatus) => void>();
-  let current: ConnectionStatus = initialStatus;
+function makeRelayServerConnection(initialState: ConnectionState = 'disconnected') {
+  const listeners = new Set<(state: ConnectionState) => void>();
+  let current: ConnectionState = initialState;
   const beginRelay = vi.fn();
   return {
     beginRelay,
-    isAuthenticated: () => current === 'authenticated',
-    getConnectionStatus: () => current,
-    emit(next: ConnectionStatus) {
+    endRelay: vi.fn(),
+    isReady: () => current === 'connected',
+    emit(next: ConnectionState) {
       current = next;
       for (const cb of listeners) {
         cb(current);
       }
     },
-    onConnectionChange(cb: (status: ConnectionStatus) => void) {
+    onConnectionStateChange(cb: (state: ConnectionState) => void) {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-  } satisfies RelayServerConnection & { emit(status: ConnectionStatus): void };
+  } satisfies RelayServerHandle & { emit(state: ConnectionState): void };
 }
 
 describe('SessionRuntime', () => {
@@ -129,8 +129,8 @@ describe('SessionRuntime', () => {
   it('creates P2P connection and file capability when address plan is ready', () => {
     const rt = new SessionRuntime(makeConfig());
     expect(rt.activeUrl).toBe('ws://a/ws');
-    expect(rt.getP2PConnection()).not.toBeNull();
-    expect(rt.getFileCapability()).not.toBeNull();
+    expect(rt.getAgentTerminalApi()).not.toBeNull();
+    expect(rt.getFilesApi()).not.toBeNull();
     rt.dispose();
   });
 
@@ -138,7 +138,8 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.updateContext({ forcedRelay: true });
     expect(rt.activeUrl).toBeNull();
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
+    expect(rt.getFilesApi()).toBeNull();
     rt.dispose();
   });
 
@@ -154,7 +155,7 @@ describe('SessionRuntime', () => {
       addressPlan: { ready: false, urls: [] },
     }));
     expect(rt.waitingForAddressPlan).toBe(true);
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -203,8 +204,7 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     const states: string[] = [];
     const unsub = rt.subscribeConnectionState((s) => states.push(s));
-    const ws = (rt.getP2PConnection() as { waitForConnection: () => Promise<void> });
-    expect(ws).toBeTruthy();
+    expect(rt.getAgentTerminalApi()).not.toBeNull();
     unsub();
     rt.dispose();
   });
@@ -222,7 +222,7 @@ describe('SessionRuntime', () => {
   it('clears client when attachInfo becomes unavailable', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.updateContext({ attachInfo: null });
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -280,22 +280,11 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('does not start P2P attach when transportFirst is false (legacy state machine owns attach)', () => {
-    const rt = new SessionRuntime(makeConfig({ transportFirst: false }));
-    const startSpy = vi.spyOn(rt.attachController, 'startP2PAttach');
-    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-    rt.updateContext({ transportReady: true });
-
-    expect(startSpy).not.toHaveBeenCalled();
-    startSpy.mockRestore();
-    rt.dispose();
-  });
-
   it('applies forceRelay internally without React subscriber', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
     rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -303,8 +292,8 @@ describe('SessionRuntime', () => {
 
 
   describe('relay reconnect across intra-budget server-ws loss', () => {
-    it('re-begins exactly once across authenticated -> connecting -> connected -> authenticated', async () => {
-      const serverConnection = makeRelayServerConnection('authenticated');
+    it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
 
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -312,24 +301,21 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
 
-      // Recoverable loss: status leaves authenticated for connecting (intra-budget).
+      // Recoverable loss: state leaves 'connected' for 'connecting' (intra-budget
+      // drop — the new transport surfaces it distinctly from 'disconnected').
       serverConnection.emit('connecting');
       expect(rt.attachState.phase).toBe('reconnecting');
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
 
-      // The open-but-not-yet-authenticated window must not begin relay.
+      // Post-handshake 'connected' (old 'authenticated') handoff re-drives relay.
       serverConnection.emit('connected');
-      expect(rt.attachState.phase).toBe('reconnecting');
-      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
-
-      serverConnection.emit('authenticated');
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
       expect(rt.attachState.phase).toBe('attached');
 
       // A full second loss cycle re-begins once more.
       serverConnection.emit('connecting');
-      serverConnection.emit('authenticated');
+      serverConnection.emit('connected');
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(3);
       expect(rt.attachState.phase).toBe('attached');
@@ -337,7 +323,7 @@ describe('SessionRuntime', () => {
     });
 
     it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
-      const serverConnection = makeRelayServerConnection('authenticated');
+      const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
 
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -351,7 +337,7 @@ describe('SessionRuntime', () => {
       expect(rt.attachState.phase).toBe('reconnecting');
       expect(events.filter((t) => t === 'route-intent-changed')).toHaveLength(1);
 
-      serverConnection.emit('authenticated');
+      serverConnection.emit('connected');
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
       rt.dispose();
@@ -359,8 +345,8 @@ describe('SessionRuntime', () => {
   });
 
   describe('atomic P2P -> relay fallback (runtime-owned beginRelay)', () => {
-    it('attach-error fallback begins relay immediately when the server ws is already authenticated', async () => {
-      const serverConnection = makeRelayServerConnection('authenticated');
+    it('attach-error fallback begins relay immediately when the server ws is already connected', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
 
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -374,11 +360,11 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
       expect(rt.activeUrl).toBeNull();
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       rt.dispose();
     });
 
-    it('defers beginRelay while the server ws is reconnecting, then begins exactly once on authenticated', async () => {
+    it('defers beginRelay while the server ws is not ready, then begins exactly once on connected', async () => {
       const serverConnection = makeRelayServerConnection('connecting');
       const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
 
@@ -388,20 +374,20 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay).not.toHaveBeenCalled();
       expect(rt.attachState.phase).toBe('connecting');
 
-      serverConnection.emit('authenticated');
+      serverConnection.emit('connected');
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
 
-      // A second authenticated (no loss in between) must not re-begin.
-      serverConnection.emit('authenticated');
+      // A second connected (no loss in between) must not re-begin.
+      serverConnection.emit('connected');
       await flushMicrotasks();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       rt.dispose();
     });
 
     it('candidate/address exhaustion routes through applyForceRelay (single force-relay event, p2p torn down)', async () => {
-      const serverConnection = makeRelayServerConnection('authenticated');
+      const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ transportReady: true, serverConnection }));
       const events: string[] = [];
       rt.subscribeRuntimeEvents((e) => events.push(e.type));
@@ -413,7 +399,7 @@ describe('SessionRuntime', () => {
 
       expect(events.filter((t) => t === 'force-relay')).toHaveLength(1);
       expect(rt.activeUrl).toBeNull();
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
       rt.dispose();
@@ -421,48 +407,12 @@ describe('SessionRuntime', () => {
   });
 
 
-  describe('session capability registry', () => {
-    it('registers the file capability when the client is created and unregisters on teardown', () => {
-      const rt = new SessionRuntime(makeConfig());
-      expect(rt.getSessionCapability('files')).toBe(rt.getFileCapability());
-      expect(rt.getSessionCapability('files')).not.toBeNull();
-
-      rt.updateContext({ forcedRelay: true });
-      expect(rt.getSessionCapability('files')).toBeNull();
-      expect(rt.getFileCapability()).toBeNull();
-      rt.dispose();
-    });
-
-    it('disposes a replaced capability instance and on unregister', () => {
-      const rt = new SessionRuntime(makeConfig());
-      const disposeA = vi.fn();
-      const disposeB = vi.fn();
-      rt.registerSessionCapability('probe', { kind: 'a' }, disposeA);
-      rt.registerSessionCapability('probe', { kind: 'b' }, disposeB);
-      expect(disposeA).toHaveBeenCalledOnce();
-      expect(rt.getSessionCapability<{ kind: string }>('probe')?.kind).toBe('b');
-
-      rt.unregisterSessionCapability('probe');
-      expect(disposeB).toHaveBeenCalledOnce();
-      expect(rt.getSessionCapability('probe')).toBeNull();
-      rt.dispose();
-    });
-
-    it('survives unrelated config updates', () => {
-      const rt = new SessionRuntime(makeConfig());
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      rt.updateContext({ lastResize: { cols: 100, rows: 40 } });
-      expect(rt.getSessionCapability('files')).toBe(rt.getFileCapability());
-      rt.dispose();
-    });
-  });
-
   describe('self-driving attach retry', () => {
     afterEach(() => {
       vi.useRealTimers();
     });
 
-    it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', () => {
+    it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -470,22 +420,27 @@ describe('SessionRuntime', () => {
       expect(rt.attachState.phase).toBe('connecting');
       expect(countClientAttach()).toBe(1);
 
-      // No React/manual re-invocation — each timeout must schedule the next attach itself.
+      // No React/manual re-invocation — each timeout must schedule the next
+      // attach itself. The timeout now flows router timer → request rejection →
+      // feature mapping → controller resolution, so flush microtasks after each
+      // advance before the next attach can be counted.
       for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        await flushMicrotasks();
         expect(countClientAttach()).toBe(i + 2);
       }
       // Budget exhausted on the auto route: force-relay, P2P client torn down, no further attach.
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       expect(rt.attachState.phase).toBe('connecting');
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       rt.dispose();
     });
 
-    it('stops retrying with failed on a manual route after the budget is exhausted', () => {
+    it('stops retrying with failed on a manual route after the budget is exhausted', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true, manualOverride: 'ws://a/ws' }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -494,16 +449,18 @@ describe('SessionRuntime', () => {
 
       for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        await flushMicrotasks();
       }
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(rt.attachState.phase).toBe('failed');
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       rt.dispose();
     });
 
-    it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', () => {
+    it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -515,6 +472,7 @@ describe('SessionRuntime', () => {
       expect(countClientAttach()).toBe(1);
 
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(countClientAttach()).toBe(2);
       expect(rt.attachState.reconnectCount).toBe(1);
       rt.dispose();
@@ -522,7 +480,7 @@ describe('SessionRuntime', () => {
   });
 
   it('re-begins relay after server websocket reconnect', async () => {
-    const serverConnection = makeRelayServerConnection('authenticated');
+    const serverConnection = makeRelayServerConnection('connected');
     const rt = new SessionRuntime(makeConfig({
       forcedRelay: true,
       transportReady: true,
@@ -530,7 +488,7 @@ describe('SessionRuntime', () => {
     }));
 
     // Relay attach is runtime-driven: SESSION_SELECTED → connecting, and the
-    // already-authenticated server WS begins relay without any React driver.
+    // already-connected server WS begins relay without any React driver.
     rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
     await flushMicrotasks();
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
@@ -540,7 +498,7 @@ describe('SessionRuntime', () => {
     expect(rt.attachState.phase).toBe('reconnecting');
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
 
-    serverConnection.emit('authenticated');
+    serverConnection.emit('connected');
     await flushMicrotasks();
     expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
     expect(rt.attachState.phase).toBe('attached');

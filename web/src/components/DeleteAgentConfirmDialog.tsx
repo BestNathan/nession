@@ -13,7 +13,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import type { Agent } from '../types';
 import { agentDisplayName } from '../lib/format';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { agentsApi } from '@/features/agents';
 import { useDialogReset } from '../hooks/useDialogReset';
 
 interface DeleteAgentConfirmDialogProps {
@@ -29,7 +29,6 @@ export function DeleteAgentConfirmDialog({
   agent,
   onDeleted,
 }: DeleteAgentConfirmDialogProps) {
-  const wsService = useWebSocket();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmName, setConfirmName] = useState('');
@@ -55,7 +54,7 @@ export function DeleteAgentConfirmDialog({
     setLoading(true);
     setError(null);
     try {
-      await wsService.deleteAgent(agent.agent_id);
+      await agentsApi.deleteAgent(agent.agent_id);
       onDeleted();
       onClose();
     } catch (err) {

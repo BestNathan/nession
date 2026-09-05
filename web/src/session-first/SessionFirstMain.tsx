@@ -3,7 +3,7 @@ import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { FileOps } from '@/services/fileOps';
+import type { FileOps } from '@/features/files';
 import type { DomainState } from '@/session-first/domainState';
 import { SessionHeader, type Surface } from '@/session-first/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
@@ -16,7 +16,8 @@ import type {
 } from '@/session-first/workspace/toolTypes';
 import { WORKSPACE_TOOLS } from '@/session-first/workspace/tools';
 import { WorkspaceShell } from '@/session-first/workspace/WorkspaceShell';
-import type { Agent, ConnectionStatus, Session } from '@/types';
+import type { Agent, Session } from '@/types';
+import type { ConnectionState } from '@/services/socket';
 
 interface WorkspaceTabPanelProps {
   selectedSession: Session;
@@ -82,7 +83,7 @@ export interface SessionFirstMainProps {
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
   onOpenWorkspace?: () => void;
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
