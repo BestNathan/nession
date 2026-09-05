@@ -1,18 +1,18 @@
 import { Badge } from './badge';
 import { cn } from '@/lib/utils';
-import type { ConnectionStatus } from '../../types';
+import type { ConnectionState } from '@/services/socket';
 
 interface ConnectionStatusBadgeProps {
-  status: ConnectionStatus;
+  status: ConnectionState;
   showPulse?: boolean;
   className?: string;
 }
 
-const STATUS_CONFIG: Record<ConnectionStatus, { color: string; text: string }> = {
+const STATUS_CONFIG: Record<ConnectionState, { color: string; text: string }> = {
   disconnected: { color: 'bg-destructive', text: 'Disconnected' },
   connecting: { color: 'bg-warning', text: 'Connecting...' },
+  reconnecting: { color: 'bg-warning', text: 'Reconnecting...' },
   connected: { color: 'bg-success', text: 'Connected' },
-  authenticated: { color: 'bg-info', text: 'Authenticated' },
 };
 
 export function ConnectionStatusBadge({ status, showPulse = true, className }: ConnectionStatusBadgeProps) {

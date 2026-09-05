@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import type { Agent } from '../types';
-import type { WebSocketService } from '../services/websocket';
+import { agentsApi } from '../features/agents';
 
 function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
   for (const agent of newAgents) {
@@ -25,19 +25,17 @@ function agentsEqual(a: Agent[], b: Agent[]): boolean {
 }
 
 /** Agents data: state, fetch, heartbeat history tracking. */
-export function useAgentData(wsService: WebSocketService) {
+export function useAgentData() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heartbeatHistory = useRef<Map<string, string[]>>(new Map());
-  const wsServiceRef = useRef(wsService);
-  wsServiceRef.current = wsService;
 
   const fetchAgents = useCallback(async () => {
     setLoadingAgents(true);
     setError(null);
     try {
-      const newAgents = await wsServiceRef.current.listAgents();
+      const newAgents = await agentsApi.listAgents();
       setAgents(newAgents);
       trackHeartbeats(newAgents, heartbeatHistory.current);
     } catch (err) {

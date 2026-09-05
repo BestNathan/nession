@@ -2,12 +2,12 @@ import { useCallback, useEffect, type ReactNode } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import type { ConnectionStatus, Session } from '../types';
+import type { Session } from '../types';
+import type { ConnectionState } from '@/services/socket';
 import { useDashboardDialogs } from '../hooks/useDashboardDialogs';
 import { useDashboard } from '../hooks/useDashboard';
 import { useProbePolling } from '../hooks/useProbePolling';
 import { useDeepLinkRestore } from '../hooks/useDeepLinkRestore';
-import { useWebSocket } from '../hooks/useWebSocket';
 import { probeResultsAtom, type AgentProbe } from '../atoms/probe';
 import {
   hasActiveSessionAtom, sessionIdAtom, sessionIdFromUrlAtom, attachInfoAtom, sessionNameAtom,
@@ -22,14 +22,14 @@ import { DashboardMainView } from './DashboardMainView';
 export { AgentSection };
 
 interface DashboardProps {
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   onSessionFirst?: () => void;
 }
 
 /** Route guard: returns the correct view or null to continue to main dashboard. */
 function resolveRouteView(opts: {
   terminalMatch: ReturnType<typeof useMatch>; envMatch: ReturnType<typeof useMatch>;
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   hasActiveSession: boolean; sessionId: string;
   handleBackToDashboard: () => void;
   handleTerminalDisconnect: () => void; handleTerminalError: (err: Error) => void;
@@ -70,10 +70,9 @@ function useTerminalAttach(opts: {
   sessions: Session[];
   sessionsLoaded: boolean;
   loadingSessions: boolean;
-  wsService: ReturnType<typeof useWebSocket>;
   probeResults: Map<string, AgentProbe>;
 }) {
-  const { navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions, wsService, probeResults } = opts;
+  const { navigate, terminalMatch, sessions, sessionsLoaded, loadingSessions, probeResults } = opts;
   const [hasActiveSession] = useAtom(hasActiveSessionAtom);
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
@@ -106,7 +105,6 @@ function useTerminalAttach(opts: {
     sessionsLoaded,
     loadingSessions,
     sessions,
-    wsService,
     probeResults,
     confirmAttach,
     navigate,
@@ -122,7 +120,6 @@ export function Dashboard({ connectionStatus, onSessionFirst }: DashboardProps) 
   const navigate = useNavigate();
   const terminalMatch = useMatch('/terminal/:sessionId');
   const envMatch = useMatch('/env');
-  const wsService = useWebSocket();
   const probeResults = useAtomValue(probeResultsAtom);
   const dashboardData = useDashboard();
   useProbePolling(dashboardData.agents);
@@ -136,7 +133,6 @@ export function Dashboard({ connectionStatus, onSessionFirst }: DashboardProps) 
     sessions: dashboardData.sessions,
     sessionsLoaded: dashboardData.sessionsLoaded,
     loadingSessions: dashboardData.loadingSessions,
-    wsService,
     probeResults,
   });
 

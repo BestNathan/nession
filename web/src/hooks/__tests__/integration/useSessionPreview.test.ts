@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSessionPreview } from '@/hooks/useSessionPreview';
-import { useWebSocket } from '@/hooks/useWebSocket';
 
-vi.mock('@/hooks/useWebSocket');
+// The hook captures through the sessions feature singleton, so the whole
+// service dependency collapses into one mocked module.
+const sessionsApiMock = vi.hoisted(() => ({
+  capturePreview: vi.fn(),
+}));
+
+vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
 
 describe('useSessionPreview', () => {
   beforeEach(() => {
@@ -11,9 +16,7 @@ describe('useSessionPreview', () => {
   });
 
   it('captures and transitions to ready', async () => {
-    vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue({ ansi: 'hello', cols: 80, rows: 24 }),
-    } as unknown as ReturnType<typeof useWebSocket>);
+    sessionsApiMock.capturePreview.mockResolvedValue({ ansi: 'hello', cols: 80, rows: 24 });
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
       await result.current.capture('agent1:session1', 100);
@@ -25,9 +28,7 @@ describe('useSessionPreview', () => {
   });
 
   it('transitions to error on failure', async () => {
-    vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockRejectedValue(new Error('tmux failed')),
-    } as unknown as ReturnType<typeof useWebSocket>);
+    sessionsApiMock.capturePreview.mockRejectedValue(new Error('tmux failed'));
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
       await result.current.capture('agent1:session1', 100);
@@ -37,9 +38,7 @@ describe('useSessionPreview', () => {
   });
 
   it('reset clears state', async () => {
-    vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 }),
-    } as unknown as ReturnType<typeof useWebSocket>);
+    sessionsApiMock.capturePreview.mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 });
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
       await result.current.capture('agent1:session1', 100);
@@ -53,9 +52,7 @@ describe('useSessionPreview', () => {
   });
 
   it('empty capture result stays idle', async () => {
-    vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: vi.fn().mockResolvedValue({ ansi: '', cols: 80, rows: 24 }),
-    } as unknown as ReturnType<typeof useWebSocket>);
+    sessionsApiMock.capturePreview.mockResolvedValue({ ansi: '', cols: 80, rows: 24 });
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
       await result.current.capture('agent1:session1', 100);
@@ -65,14 +62,11 @@ describe('useSessionPreview', () => {
   });
 
   it('calls capturePreview with correct args', async () => {
-    const captureFn = vi.fn().mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 });
-    vi.mocked(useWebSocket).mockReturnValue({
-      capturePreview: captureFn,
-    } as unknown as ReturnType<typeof useWebSocket>);
+    sessionsApiMock.capturePreview.mockResolvedValue({ ansi: 'data', cols: 80, rows: 24 });
     const { result } = renderHook(() => useSessionPreview());
     await act(async () => {
       await result.current.capture('agentX:sessY', 500);
     });
-    expect(captureFn).toHaveBeenCalledWith('agentX:sessY', 500);
+    expect(sessionsApiMock.capturePreview).toHaveBeenCalledWith('agentX:sessY', 500);
   });
 });

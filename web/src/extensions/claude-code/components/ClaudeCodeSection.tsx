@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { FileText, BookOpen, Bot, Puzzle, History, Settings, FolderOpen } from 'lucide-react';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
-import { createClaudeCodeService } from '../services/claudeCodeService';
+import { claudeCodeApi } from '@/features/claude-code';
 import { ConfigViewer } from './ConfigViewer';
 import type { AgentDetailSlotProps } from '../../types';
 import type { ConfigCategory, ClaudeCodeListResponse } from '../types';
@@ -17,8 +16,6 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 };
 
 export function ClaudeCodeSection({ agent }: AgentDetailSlotProps) {
-  const ws = useWebSocket();
-  const service = useMemo(() => createClaudeCodeService(ws), [ws]);
   const [categories, setCategories] = useState<ConfigCategory[] | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +26,7 @@ export function ClaudeCodeSection({ agent }: AgentDetailSlotProps) {
     setLoading(true);
     setError(null);
     try {
-      const resp: ClaudeCodeListResponse = await service.list({ agent_id: agent.agent_id, scope: 'global' });
+      const resp: ClaudeCodeListResponse = await claudeCodeApi.claudeCodeList({ agent_id: agent.agent_id, scope: 'global' });
       setAvailable(resp.available);
       setCategories(resp.categories);
       if (resp.error) {
@@ -41,7 +38,7 @@ export function ClaudeCodeSection({ agent }: AgentDetailSlotProps) {
     } finally {
       setLoading(false);
     }
-  }, [agent.agent_id, service]);
+  }, [agent.agent_id]);
 
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
@@ -113,7 +110,6 @@ export function ClaudeCodeSection({ agent }: AgentDetailSlotProps) {
         open={viewerOpen}
         onClose={() => setViewerOpen(false)}
         categories={categories || []}
-        service={service}
         agentId={agent.agent_id}
         scope="global"
       />

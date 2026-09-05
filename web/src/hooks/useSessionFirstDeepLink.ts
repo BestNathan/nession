@@ -12,7 +12,6 @@ import {
 } from '@/atoms/session';
 import { probeResultsAtom } from '@/atoms/probe';
 import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import type { Session } from '@/types';
 
 /** Deep-link restore for session-first: `#/terminal/:sessionId` auto-attaches and syncs selection. */
@@ -33,7 +32,6 @@ export function useSessionFirstDeepLink(opts: {
 
   const navigate = useNavigate();
   const terminalMatch = useMatch('/terminal/:sessionId');
-  const wsService = useWebSocket();
   const probeResults = useAtomValue(probeResultsAtom);
   const hasActiveSession = useAtomValue(hasActiveSessionAtom);
   const sessionId = useAtomValue(sessionIdAtom);
@@ -62,7 +60,6 @@ export function useSessionFirstDeepLink(opts: {
     sessionsLoaded,
     loadingSessions,
     sessions,
-    wsService,
     probeResults,
     confirmAttach: deepLinkConfirmAttach,
     navigate,

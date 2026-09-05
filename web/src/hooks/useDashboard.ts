@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { Agent, Session } from '../types';
-import type { WebSocketService } from '../services/websocket';
+import type { WebSocketService } from '../services/socket';
 import { useWebSocket } from './useWebSocket';
 import { useAgentData } from './useAgentData';
 import { useSessionData, type FetchSessionsOptions } from './useSessionData';
@@ -100,15 +100,16 @@ function filterSessions(
  * Composes agent/session data, filter state, modal state, and realtime
  * subscriptions into the single shape that `<Dashboard>` consumes.
  */
-export function useDashboard(_wsService?: WebSocketService): DashboardState {
-  const wsService = useWebSocket(_wsService);
+export function useDashboard(wsService?: WebSocketService): DashboardState {
+  const service = useWebSocket(wsService);
 
   // Data
-  const agentData = useAgentData(wsService);
-  const sessionData = useSessionData(wsService);
+  const agentData = useAgentData();
+  const sessionData = useSessionData();
 
-  // Realtime subscriptions + initial fetch
-  const { clearError, fetchSessions } = useRealtimeUpdates(wsService, agentData, sessionData);
+  // Realtime subscriptions + initial fetch (service instance keys the
+  // re-registration when a reconnect replaces the transport)
+  const { clearError, fetchSessions } = useRealtimeUpdates(service, agentData, sessionData);
 
   // Filter state
   const {

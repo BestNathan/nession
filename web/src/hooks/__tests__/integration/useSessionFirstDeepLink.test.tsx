@@ -11,10 +11,6 @@ vi.mock('@/hooks/useDeepLinkRestore', () => ({
   useDeepLinkRestore: vi.fn(),
 }));
 
-vi.mock('@/hooks/useWebSocket', () => ({
-  useWebSocket: () => ({ requestAttach: vi.fn() }),
-}));
-
 import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
 
 function makeSession(id = 'a1:s1'): Session {

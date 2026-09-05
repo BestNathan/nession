@@ -1,16 +1,38 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { createWebSocketService, destroyWebSocketService, getWebSocketService, WebSocketService } from '../services/websocket';
-import { ConnectionStatus } from '../types';
+import { WebSocketService } from '../services/socket';
+import type { ConnectionState } from '../services/socket/types';
+import type { AuthResponse } from '../types';
+import { agentsApi } from '@/features/agents';
+import { sessionsApi } from '@/features/sessions';
+import { serverApi } from '@/features/server';
+import { envApi } from '@/features/env';
+import { commandsApi } from '@/features/commands';
+import { claudeCodeApi } from '@/features/claude-code';
+import { terminalServerApi } from '@/features/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from '../lib/auth';
+import { getOrCreateClientId } from '../services/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
+// Every capability this app knows how to speak. The feature singletons bind
+// to whichever service instance installs them (use() in the service
+// constructor); a later service simply re-installs them with its surface.
+const SERVER_CAPABILITIES = [
+  agentsApi,
+  sessionsApi,
+  serverApi,
+  envApi,
+  commandsApi,
+  claudeCodeApi,
+  terminalServerApi,
+];
+
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
   const autoConnect = params.get('token') !== null || getToken() !== null;
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionState>(
     () => autoConnect ? 'connecting' : 'disconnected',
   );
   const [wsService, setWsService] = useState<WebSocketService | null>(null);
@@ -25,16 +47,21 @@ export function useAppConnection() {
   const [serverUrl, setServerUrl] = useState(
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL,
   );
+  // The service instance this render currently owns. Cleanup disposes only
+  // when it is still the owner — a later connectInternal() replaces the ref
+  // before the effect cleanup of the superseded instance runs (StrictMode
+  // and token/status updates both re-run the effects).
+  const serviceRef = useRef<WebSocketService | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     return () => {
-      // Only tear down the singleton if it is still this instance. Otherwise a
-      // later setWsService() would have already replaced it, and destroying
-      // here would close the *new* socket (StrictMode and token/status
-      // updates both re-run this effect).
-      if (wsService && getWebSocketService() === wsService) {
-        destroyWebSocketService();
+      // Only tear down the service if it is still this instance. Otherwise a
+      // later connectInternal() would have already replaced it, and disposing
+      // here would close the *new* socket (StrictMode double-mount).
+      if (wsService && serviceRef.current === wsService) {
+        serviceRef.current?.dispose();
+        serviceRef.current = null;
       }
     };
   }, [wsService]);
@@ -50,12 +77,26 @@ export function useAppConnection() {
     localStorage.setItem('nession_server_url', serverUrl);
 
     try {
-      const service = createWebSocketService(serverUrl, authToken);
+      // A previous service (StrictMode twin, reconnect after disconnect) must
+      // stop before the new one opens — two transports would race the state.
+      serviceRef.current?.dispose();
+      const clientId = getOrCreateClientId();
+      const service = new WebSocketService(serverUrl, SERVER_CAPABILITIES, {
+        maxReconnectAttempts: 5,
+        handshake: (surface) => surface
+          .request<AuthResponse>('client.auth', { auth_token: authToken, client_id: clientId })
+          .then((res) => {
+            if (res.status !== 'success') {
+              throw new Error(res.message || 'Authentication failed');
+            }
+          }),
+      });
+      serviceRef.current = service;
       setWsService(service);
 
       unsubRef.current?.();
-      unsubRef.current = service.onConnectionChange((status) => {
-        if (status === 'authenticated') {
+      unsubRef.current = service.onConnectionStateChange((status) => {
+        if (status === 'connected') {
           setWasEverAuthed(true);
         }
         setConnectionStatus(status);
@@ -99,16 +140,19 @@ export function useAppConnection() {
   useVisibilityReconnect(wasEverAuthed, wsService);
 
   const handleDisconnect = useCallback(() => {
-    if (wsService) {
-      destroyWebSocketService();
+    if (serviceRef.current) {
+      serviceRef.current.dispose();
+      serviceRef.current = null;
       setWsService(null);
       setWasEverAuthed(false);
       setConnectionStatus('disconnected');
     }
-  }, [wsService]);
+  }, []);
 
-  // App shell is ready only after client.auth succeeds — never while connecting/connected.
-  const isAuthenticated = connectionStatus === 'authenticated' && wsService !== null;
+  // App shell is ready only after the handshake succeeded — never while
+  // connecting/reconnecting/disconnected. 'connected' on the transport IS the
+  // post-handshake state (there is no separate 'authenticated' anymore).
+  const isAuthenticated = connectionStatus === 'connected' && wsService !== null;
   // Stored credentials or a prior session: hold reconnecting UI instead of LoginPage (#424).
   const isRestoringSession =
     wasEverAuthed && connectionStatus !== 'disconnected' && !isAuthenticated;

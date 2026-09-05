@@ -126,10 +126,10 @@ describe('LoginPage', () => {
     expect(screen.getByText('Connecting...')).toBeInTheDocument();
   });
 
-  it('shows authenticated status text', () => {
+  it('shows connected status text', () => {
     render(
       <LoginPage
-        connectionStatus="authenticated"
+        connectionStatus="connected"
         serverUrl="ws://localhost:19090/ws"
         setServerUrl={vi.fn()}
         authToken=""
@@ -138,13 +138,13 @@ describe('LoginPage', () => {
         onDisconnect={vi.fn()}
       />,
     );
-    expect(screen.getByText('Authenticated')).toBeInTheDocument();
+    expect(screen.getByText('Connected')).toBeInTheDocument();
   });
 
-  it('enables Disconnect when authenticated', () => {
+  it('enables Disconnect when connected', () => {
     render(
       <LoginPage
-        connectionStatus="authenticated"
+        connectionStatus="connected"
         serverUrl="ws://localhost:19090/ws"
         setServerUrl={vi.fn()}
         authToken=""
@@ -178,7 +178,7 @@ describe('LoginPage', () => {
 
     render(
       <LoginPage
-        connectionStatus="authenticated"
+        connectionStatus="connected"
         serverUrl="ws://localhost:19090/ws"
         setServerUrl={vi.fn()}
         authToken=""
@@ -192,7 +192,7 @@ describe('LoginPage', () => {
     expect(onDisconnect).toHaveBeenCalled();
   });
 
-  it('shows connected helper text', () => {
+  it('shows no helper text when connected', () => {
     render(
       <LoginPage
         connectionStatus="connected"
@@ -204,8 +204,10 @@ describe('LoginPage', () => {
         onDisconnect={vi.fn()}
       />,
     );
+    // The badge carries the state ('Connected'); the helper line is blank in
+    // the connected state because the form is replaced by the dashboard.
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByText(/Connected! Authenticating/)).toBeInTheDocument();
+    expect(screen.queryByText(/Enter your auth token/)).not.toBeInTheDocument();
   });
 
   it('renders features list', () => {

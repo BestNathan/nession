@@ -12,7 +12,7 @@ import {
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import type { Session } from '../types';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { sessionsApi } from '@/features/sessions';
 import { useDialogReset } from '../hooks/useDialogReset';
 
 interface KillConfirmDialogProps {
@@ -28,7 +28,6 @@ export function KillConfirmDialog({
   session,
   onKilled,
 }: KillConfirmDialogProps) {
-  const wsService = useWebSocket();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmName, setConfirmName] = useState('');
@@ -53,7 +52,7 @@ export function KillConfirmDialog({
     setLoading(true);
     setError(null);
     try {
-      const result = await wsService.killSession(session.session_id);
+      const result = await sessionsApi.killSession(session.session_id);
       if (result.success) {
         onKilled();
         onClose();

@@ -6,8 +6,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { commandsApi } from '../features/commands';
 import { useWebSocket } from './useWebSocket';
-import type { WebSocketService } from '../services/websocket';
+import type { WebSocketService } from '../services/socket';
 import {
   loadLegacyCommands,
   clearLegacyCommands,
@@ -31,7 +32,7 @@ export function useQuickCommands(): UseQuickCommandsResult {
 
   const refreshCommands = useCallback(async () => {
     try {
-      const resp = await wsService.listCommands();
+      const resp = await commandsApi.listCommands();
       setUserCommands(
         resp.commands.map((c) => ({
           id: c.id,
@@ -43,17 +44,18 @@ export function useQuickCommands(): UseQuickCommandsResult {
     } catch {
       // Not connected/authenticated yet — leave the list empty.
     }
-  }, [wsService]);
+  }, []);
 
   // Load commands on mount and whenever the server broadcasts a change.
-  // The subscription is always (re)established so a reconnected wsService is
-  // wired up correctly; only the initial fetch is de-duplicated.
+  // The subscription is always (re)established so a replaced wsService (which
+  // re-installs the commands feature under a new generation) is wired up
+  // correctly; only the initial fetch is de-duplicated per instance.
   useEffect(() => {
     if (initialFetchFor.current !== wsService) {
       initialFetchFor.current = wsService;
       void refreshCommands();
     }
-    const unsubscribe = wsService.onCommandsChanged(() => {
+    const unsubscribe = commandsApi.onCommandsChanged(() => {
       void refreshCommands();
     });
     return unsubscribe;
@@ -76,7 +78,7 @@ export function useQuickCommands(): UseQuickCommandsResult {
     (async () => {
       try {
         for (const cmd of legacy) {
-          await wsService.addCommand(cmd.label, cmd.command, cmd.raw ?? false);
+          await commandsApi.addCommand(cmd.label, cmd.command, cmd.raw ?? false);
         }
         clearLegacyCommands();
         toast.success(`Imported ${legacy.length} saved command(s) to the server`);
@@ -91,26 +93,26 @@ export function useQuickCommands(): UseQuickCommandsResult {
   const addCommand = useCallback(
     async (label: string, command: string, raw = false) => {
       try {
-        await wsService.addCommand(label, command, raw);
+        await commandsApi.addCommand(label, command, raw);
         await refreshCommands();
       } catch {
         toast.error('Failed to add command');
       }
     },
-    [wsService, refreshCommands],
+    [refreshCommands],
   );
 
   const deleteCommand = useCallback(
     async (id: string) => {
       try {
-        await wsService.removeCommand(id);
+        await commandsApi.removeCommand(id);
         // Optimistic local update; the server broadcast will also refresh.
         setUserCommands((prev) => prev.filter((c) => c.id !== id));
       } catch {
         toast.error('Failed to delete command');
       }
     },
-    [wsService],
+    [],
   );
 
   return { userCommands, addCommand, deleteCommand };

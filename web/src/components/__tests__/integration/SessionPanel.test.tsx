@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { SessionPanel } from '@/components/SessionPanel';
 import { WebSocketContext } from '@/hooks/useWebSocket';
 import type { Session } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
+// WebSocketContext now carries the new transport type; the mock keeps the
+// legacy member set its consumers still touch, cast through unknown.
+import type { WebSocketService } from '@/services/socket';
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {

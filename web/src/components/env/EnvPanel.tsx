@@ -5,10 +5,9 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import type { EnvFileInfo } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
+import { envApi } from '@/features/env';
 import { refKey, toRef, sourceLabel } from './envRef';
 import { EnvEditorDialog } from './EnvEditorDialog';
-import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface EnvPanelProps {
   sessionId: string;
@@ -17,12 +16,10 @@ interface EnvPanelProps {
 // ── Helpers (extracted to keep EnvPanel under the 120-line limit) ────────
 
 function useEnvActions(
-  _wsService: WebSocketService | undefined,
   sessionId: string,
   setSourced: Dispatch<SetStateAction<Set<string>>>,
   setBusy: Dispatch<SetStateAction<Set<string>>>,
 ) {
-  const wsService = useWebSocket(_wsService);
   return useCallback(
     (file: EnvFileInfo, action: 'source' | 'unsource') => {
       const ref = toRef(file);
@@ -30,8 +27,8 @@ function useEnvActions(
       setBusy((prev) => new Set(prev).add(key));
       const promise =
         action === 'source'
-          ? wsService.applySessionEnv(sessionId, [ref])
-          : wsService.unsetSessionEnv(sessionId, [ref]);
+          ? envApi.applySessionEnv(sessionId, [ref])
+          : envApi.unsetSessionEnv(sessionId, [ref]);
       promise
         .then((resp) => {
           if (resp.success) {
@@ -61,20 +58,18 @@ function useEnvActions(
           setBusy((prev) => { const next = new Set(prev); next.delete(key); return next; });
         });
     },
-    [wsService, sessionId, setSourced, setBusy],
+    [sessionId, setSourced, setBusy],
   );
 }
 
 // ── Selection + batch actions (extracted to keep EnvPanel under the 120-line limit) ──
 
 function useEnvSelection({
-  wsService,
   sessionId,
   files,
   setBusy,
   refresh,
 }: {
-  wsService: WebSocketService;
   sessionId: string;
   files: EnvFileInfo[];
   setBusy: Dispatch<SetStateAction<Set<string>>>;
@@ -120,8 +115,8 @@ function useEnvSelection({
         selFiles.map((f) => {
           const ref = toRef(f);
           return action === 'source'
-            ? wsService.applySessionEnv(sessionId, [ref])
-            : wsService.unsetSessionEnv(sessionId, [ref]);
+            ? envApi.applySessionEnv(sessionId, [ref])
+            : envApi.unsetSessionEnv(sessionId, [ref]);
         }),
       );
 
@@ -151,7 +146,7 @@ function useEnvSelection({
       setSelected(new Set());
       refresh();
     },
-    [wsService, sessionId, files, selected, setBusy, refresh],
+    [sessionId, files, selected, setBusy, refresh],
   );
 
   return { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction };
@@ -301,7 +296,6 @@ function BatchActionBar({
  * (send-keys "source /tmp/unsource.sh"). Sourced files are tracked locally.
  */
 export function EnvPanel({ sessionId }: EnvPanelProps) {
-  const wsService = useWebSocket();
   const [files, setFiles] = useState<EnvFileInfo[]>([]);
   const [sourced, setSourced] = useState<Set<string>>(new Set());
   const [createTimeKeys, setCreateTimeKeys] = useState<Set<string>>(new Set());
@@ -310,18 +304,18 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    wsService
+    envApi
       .listEnvFiles()
       .then((resp) => setFiles(resp.files ?? []))
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to list env files'))
       .finally(() => setLoading(false));
-  }, [wsService]);
+  }, []);
 
   useEffect(() => {
     refresh();
     const agentId = sessionId.split(':')[0] ?? '';
     // Pre-mark env files applied at session create time as already sourced.
-    wsService
+    envApi
       .getSessionEnvActive(sessionId)
       .then((resp) => {
         const ck = resp.active
@@ -339,7 +333,7 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
       .catch(() => undefined);
     // Query the agent for currently sourced env files.
     if (agentId) {
-      wsService
+      envApi
         .queryAgentEnvState(sessionId)
         .then((resp) => {
           const refs = resp.sourced_files ?? [];
@@ -356,13 +350,12 @@ export function EnvPanel({ sessionId }: EnvPanelProps) {
         })
         .catch(() => undefined);
     }
-  }, [refresh, sessionId, wsService]);
+  }, [refresh, sessionId]);
 
-  const action = useEnvActions(undefined, sessionId, setSourced, setBusy);
+  const action = useEnvActions(sessionId, setSourced, setBusy);
   const edit = useEnvEditDialog(refresh, sourced, action);
 
   const { selectMode, selected, toggleSelectMode, toggleFileSelect, batchAction } = useEnvSelection({
-    wsService,
     sessionId,
     files,
     setBusy,

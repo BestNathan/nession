@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import type { Session } from '../types';
-import type { WebSocketService } from '../services/websocket';
+import { sessionsApi } from '../features/sessions';
 
 /** Options for {@link useSessionData}'s `fetchSessions`. */
 export interface FetchSessionsOptions {
@@ -12,7 +12,7 @@ export interface FetchSessionsOptions {
 }
 
 /** Sessions data: state, fetch, realtime apply. */
-export function useSessionData(wsService: WebSocketService) {
+export function useSessionData() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   /** False until the first fetch attempt finishes (success or failure). */
@@ -20,13 +20,11 @@ export function useSessionData(wsService: WebSocketService) {
   /** Agents that failed to answer the last force refresh. Their sessions are
    *  still shown, flagged as possibly out of date. */
   const [staleAgents, setStaleAgents] = useState<string[]>([]);
-  const wsServiceRef = useRef(wsService);
-  wsServiceRef.current = wsService;
 
   const fetchSessions = useCallback(async (opts: FetchSessionsOptions = {}) => {
     setLoadingSessions(true);
     try {
-      const response = await wsServiceRef.current.fetchSessions(opts);
+      const response = await sessionsApi.fetchSessions(opts);
       setSessions(response.sessions);
       const stale = response.stale_agents ?? [];
       setStaleAgents(stale);

@@ -12,9 +12,10 @@ import {
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '../../types';
+import { envApi } from '@/features/env';
+import { sessionsApi } from '@/features/sessions';
 import { loadAttachPrefs } from '../../services/attachPrefs';
 import { detectWebGLSupport } from '../../terminal/Renderer';
-import { useWebSocket } from '../../hooks/useWebSocket';
 import { probeResultsAtom, probeRefreshRequestAtom } from '../../atoms/probe';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 
@@ -60,7 +61,6 @@ const AUTO_URL = '__auto__';
  * control requests a fresh probe via probeRefreshRequestAtom.
  */
 export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDialogProps) {
-  const wsService = useWebSocket();
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
   // Local state (not attachInfoAtom): this is dialog scratch space for the
@@ -93,11 +93,11 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
     setSelectedUrl(AUTO_URL);
     setError(null);
     // Load available env files and clear the previous selection on each open.
-    wsService.listEnvFiles()
+    envApi.listEnvFiles()
       .then((resp) => setEnvFiles(resp.files))
       .catch(() => {});
     setSelectedEnv([]);
-  }, [isOpen, webglSupported, wsService, setAttachInfo]);
+  }, [isOpen, webglSupported, setAttachInfo]);
 
   // Manual relay URL override — only relevant in relay mode.
   const relayUrl = useMemo(
@@ -125,7 +125,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
     prevRequestedMode.current = requestedMode;
     void (async () => {
       try {
-        const info = await wsService.requestAttach(session.session_id, requestedMode, relayUrl);
+        const info = await sessionsApi.requestAttach(session.session_id, requestedMode, relayUrl);
         if (!cancelled) {
           setAttachInfo(info);
         }
@@ -138,7 +138,7 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
     return () => {
       cancelled = true;
     };
-  }, [isOpen, session, wsService, mode, relayUrl, setAttachInfo]);
+  }, [isOpen, session, mode, relayUrl, setAttachInfo]);
 
   const cached = agentId ? probeResults.get(agentId) : undefined;
   const results = useMemo<AddressLatency[]>(() => cached?.latencies ?? [], [cached]);

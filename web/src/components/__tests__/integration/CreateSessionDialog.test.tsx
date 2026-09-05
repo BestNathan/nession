@@ -1,12 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Agent, CreateSessionResponse } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
-import { WebSocketContext } from '@/hooks/useWebSocket';
+import type { Agent } from '@/types';
+
+// Feature singletons are mocked: the dialog now talks to sessionsApi/envApi
+// instead of a WebSocketService instance.
+const { createSessionMock, listEnvFilesMock } = vi.hoisted(() => ({
+  createSessionMock: vi.fn(),
+  listEnvFilesMock: vi.fn(),
+}));
+vi.mock('@/features/sessions', () => ({
+  sessionsApi: { createSession: createSessionMock },
+}));
+vi.mock('@/features/env', () => ({
+  envApi: { listEnvFiles: listEnvFilesMock },
+}));
 
 // Mock the ui/dialog module to render content directly (no portal)
-vi.mock( '@/components/ui/dialog', () => ({
+vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
     open ? <div data-testid="dialog">{children}</div> : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -15,11 +26,15 @@ vi.mock( '@/components/ui/dialog', () => ({
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-// Now import the component (after the mock is set up)
-// We need to dynamically import because the mock must be in place first
+// Now import the component (after the mocks are set up)
+// We need to dynamically import because the mocks must be in place first
 let CreateSessionDialogModule: typeof import('@/components/CreateSessionDialog');
 beforeEach(async () => {
   CreateSessionDialogModule = await import('@/components/CreateSessionDialog');
+  createSessionMock.mockReset();
+  createSessionMock.mockResolvedValue({ success: true });
+  listEnvFilesMock.mockReset();
+  listEnvFilesMock.mockResolvedValue({ files: [] });
 });
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -35,28 +50,18 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
-function makeWsService(overrides: Partial<WebSocketService> = {}): WebSocketService {
-  return {
-    createSession: vi.fn().mockResolvedValue({ success: true }),
-    listEnvFiles: vi.fn().mockResolvedValue({ files: [] }),
-    ...overrides,
-  } as unknown as WebSocketService;
-}
-
 describe('CreateSessionDialog', () => {
   // ── Rendering ─────────────────────────────────────────────────────────
 
   it('renders dialog when open', async () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -67,14 +72,12 @@ describe('CreateSessionDialog', () => {
   it('does not render when closed', async () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={false}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={false}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     expect(screen.queryByText('Create Session')).not.toBeInTheDocument();
@@ -83,14 +86,12 @@ describe('CreateSessionDialog', () => {
   it('has Cancel and Create buttons', async () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -102,18 +103,36 @@ describe('CreateSessionDialog', () => {
   it('has session name input', async () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
       expect(screen.getByPlaceholderText('my-session')).toBeInTheDocument();
+    });
+  });
+
+  it('loads env files when opened', async () => {
+    listEnvFilesMock.mockResolvedValueOnce({
+      files: [{ file_id: 'env-1', name: 'prod.env' }],
+    });
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listEnvFilesMock).toHaveBeenCalled();
+      expect(screen.getByText('prod.env')).toBeInTheDocument();
     });
   });
 
@@ -123,14 +142,12 @@ describe('CreateSessionDialog', () => {
     const onClose = vi.fn();
 
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={onClose}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={onClose}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -145,14 +162,12 @@ describe('CreateSessionDialog', () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
 
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent({ status: 'offline' })]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ status: 'offline' })]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -167,17 +182,14 @@ describe('CreateSessionDialog', () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     const onCreated = vi.fn();
     const onClose = vi.fn();
-    const createSession = vi.fn().mockResolvedValue({ success: true, session_id: 'agent-1:my-session' });
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={onClose}
-          agents={[makeAgent()]}
-          onCreated={onCreated}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={onClose}
+        agents={[makeAgent()]}
+        onCreated={onCreated}
+      />,
     );
 
     await waitFor(() => {
@@ -188,7 +200,7 @@ describe('CreateSessionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-session', []);
+      expect(createSessionMock).toHaveBeenCalledWith('agent-1', 'my-session', []);
       expect(onCreated).toHaveBeenCalled();
       expect(onClose).toHaveBeenCalled();
     });
@@ -199,20 +211,18 @@ describe('CreateSessionDialog', () => {
   it('shows error when createSession returns success=false', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn().mockResolvedValue({
+    createSessionMock.mockResolvedValueOnce({
       success: false,
       error: 'Agent is offline',
     });
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -230,17 +240,15 @@ describe('CreateSessionDialog', () => {
   it('shows error when createSession throws', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn().mockRejectedValue(new Error('Network error'));
+    createSessionMock.mockRejectedValueOnce(new Error('Network error'));
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -258,17 +266,15 @@ describe('CreateSessionDialog', () => {
   it('shows generic error when createSession throws non-Error', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn().mockRejectedValue('unknown');
+    createSessionMock.mockRejectedValueOnce('unknown');
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -288,17 +294,14 @@ describe('CreateSessionDialog', () => {
   it('shows error for empty session name', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn();
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -310,23 +313,20 @@ describe('CreateSessionDialog', () => {
     await waitFor(() => {
       expect(screen.getByText('Session name is required')).toBeInTheDocument();
     });
-    expect(createSession).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
   });
 
   it('shows error for invalid session name characters', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn();
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -339,23 +339,20 @@ describe('CreateSessionDialog', () => {
     await waitFor(() => {
       expect(screen.getByText(/Only letters, digits/)).toBeInTheDocument();
     });
-    expect(createSession).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
   });
 
   it('accepts session name with hyphens and dots', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const createSession = vi.fn().mockResolvedValue({ success: true });
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -366,7 +363,7 @@ describe('CreateSessionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(createSession).toHaveBeenCalledWith('agent-1', 'my-app.v2', []);
+      expect(createSessionMock).toHaveBeenCalledWith('agent-1', 'my-app.v2', []);
     });
   });
 
@@ -376,19 +373,15 @@ describe('CreateSessionDialog', () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
     // Never resolves so we can inspect the loading state
-    const createSession = vi.fn().mockImplementation(
-      () => new Promise<CreateSessionResponse>(() => {}),
-    );
+    createSessionMock.mockImplementationOnce(() => new Promise(() => {}));
 
     render(
-      <WebSocketContext.Provider value={makeWsService({ createSession })}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -410,15 +403,13 @@ describe('CreateSessionDialog', () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
 
     render(
-      <WebSocketContext.Provider value={makeWsService()}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent({ agent_id: 'agent-1' }), makeAgent({ agent_id: 'agent-2' })]}
-          preselectedAgentId="agent-2"
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'agent-1' }), makeAgent({ agent_id: 'agent-2' })]}
+        preselectedAgentId="agent-2"
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -432,17 +423,14 @@ describe('CreateSessionDialog', () => {
   it('resets error state when dialog is reopened', async () => {
     const user = userEvent.setup();
     const { CreateSessionDialog } = CreateSessionDialogModule;
-    const ws = makeWsService();
 
     const { rerender } = render(
-      <WebSocketContext.Provider value={ws}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {
@@ -457,24 +445,20 @@ describe('CreateSessionDialog', () => {
 
     // Close and reopen
     rerender(
-      <WebSocketContext.Provider value={ws}>
-        <CreateSessionDialog
-          isOpen={false}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={false}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
     rerender(
-      <WebSocketContext.Provider value={ws}>
-        <CreateSessionDialog
-          isOpen={true}
-          onClose={vi.fn()}
-          agents={[makeAgent()]}
-          onCreated={vi.fn()}
-        />
-      </WebSocketContext.Provider>,
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+      />,
     );
 
     await waitFor(() => {

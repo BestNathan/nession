@@ -4,21 +4,20 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { claudeCodeApi } from '@/features/claude-code';
 import type { ConfigCategory, ConfigFile, ClaudeCodeReadResponse } from '../types';
-import type { ClaudeCodeService } from '../services/claudeCodeService';
 
 interface ConfigViewerProps {
   open: boolean;
   onClose: () => void;
   categories: ConfigCategory[];
-  service: ClaudeCodeService;
   agentId: string;
   scope: 'global' | 'project';
   sessionId?: string;
 }
 
 export function ConfigViewer({
-  open, onClose, categories, service, agentId, scope, sessionId,
+  open, onClose, categories, agentId, scope, sessionId,
 }: ConfigViewerProps) {
   const [selectedFile, setSelectedFile] = useState<ConfigFile | null>(null);
   const [content, setContent] = useState('');
@@ -35,7 +34,7 @@ export function ConfigViewer({
     setError(null);
     setOffset(0);
     try {
-      const resp: ClaudeCodeReadResponse = await service.read({
+      const resp: ClaudeCodeReadResponse = await claudeCodeApi.claudeCodeRead({
         agent_id: agentId, scope, session_id: sessionId, path: file.path, offset: 0,
       });
       if (resp.error) {
@@ -52,7 +51,7 @@ export function ConfigViewer({
     } finally {
       setLoading(false);
     }
-  }, [service, agentId, scope, sessionId]);
+  }, [agentId, scope, sessionId]);
 
   const handleNextPage = useCallback(async () => {
     if (!selectedFile || !hasMore) {
@@ -61,7 +60,7 @@ export function ConfigViewer({
     setLoading(true);
     const newOffset = offset + content.length;
     try {
-      const resp = await service.read({
+      const resp = await claudeCodeApi.claudeCodeRead({
         agent_id: agentId, scope, session_id: sessionId, path: selectedFile.path, offset: newOffset,
       });
       if (!resp.error) {
@@ -74,7 +73,7 @@ export function ConfigViewer({
     } finally {
       setLoading(false);
     }
-  }, [selectedFile, hasMore, offset, content.length, service, agentId, scope, sessionId]);
+  }, [selectedFile, hasMore, offset, content.length, agentId, scope, sessionId]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) {

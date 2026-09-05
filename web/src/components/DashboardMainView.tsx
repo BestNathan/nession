@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
-import type { Agent, ConnectionStatus, Session } from '../types';
+import type { Agent, Session } from '../types';
+import type { ConnectionState } from '@/services/socket';
 import type { useDashboard } from '../hooks/useDashboard';
 import { type AttachChoice } from './env/AttachDialog';
 import { AgentSection } from './AgentSection';
@@ -12,7 +13,7 @@ import { DashboardDialogs } from './DashboardDialogs';
 type DashboardData = ReturnType<typeof useDashboard>;
 
 export interface DashboardMainViewProps {
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   navigate: NavigateFunction;
   data: DashboardData;
   attachDialogSession: Session | null;

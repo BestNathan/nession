@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { Agent, EnvFileInfo, EnvFileRef, EnvSource, EnvWriteResponse } from '../../types';
-import type { WebSocketService } from '../../services/websocket';
-import { useWebSocket } from '../../hooks/useWebSocket';
+import { envApi } from '@/features/env';
 
 /** Inputs for {@link useEnvEditor}. */
 export interface EnvEditorOptions {
-  wsService?: WebSocketService;
   isOpen: boolean;
   editing: EnvFileInfo | null;
   /** When set, opens a new editor pre-filled from this file's content. */
@@ -33,12 +31,11 @@ function notifySaveResult(resp: EnvWriteResponse, isEdit: boolean): void {
 
 /** Seed a clone editor with a file's content; on failure the editor opens empty. */
 async function loadCloneContent(
-  wsService: WebSocketService,
   file: EnvFileInfo,
   onContent: (content: string) => void,
 ): Promise<void> {
   try {
-    const resp = await wsService.getEnvFile({
+    const resp = await envApi.getEnvFile({
       name: file.name,
       source: file.source,
       agent_id: file.agent_id,
@@ -53,7 +50,6 @@ async function loadCloneContent(
 
 /** Form state + load/save behaviour for the env editor dialog. */
 export function useEnvEditor({
-  wsService: _wsService,
   isOpen,
   editing,
   cloneFrom,
@@ -61,7 +57,6 @@ export function useEnvEditor({
   onSaved,
   onClose,
 }: EnvEditorOptions) {
-  const wsService = useWebSocket(_wsService);
   const [name, setName] = useState('');
   const [source, setSource] = useState<EnvSource>('server');
   const [agentId, setAgentId] = useState('');
@@ -90,7 +85,7 @@ export function useEnvEditor({
       setAgentId(cloneFrom.agent_id ?? '');
       setOriginalContent('');
       setInUseBy([]);
-      void loadCloneContent(wsService, cloneFrom, setContent);
+      void loadCloneContent(cloneFrom, setContent);
       return;
     }
     if (editing) {
@@ -98,7 +93,7 @@ export function useEnvEditor({
       setSource(editing.source);
       setAgentId(editing.agent_id ?? '');
       setHideSecrets(true);
-      wsService
+      envApi
         .getEnvFile({ name: editing.name, source: editing.source, agent_id: editing.agent_id })
         .then((resp) => {
           if (resp.success) {
@@ -120,7 +115,7 @@ export function useEnvEditor({
       setHideSecrets(false);
       setInUseBy([]);
     }
-  }, [isOpen, editing, cloneFrom, wsService]);
+  }, [isOpen, editing, cloneFrom]);
 
   const buildRef = (): EnvFileRef => {
     const fileName = name.trim().endsWith('.env') ? name.trim() : `${name.trim()}.env`;
@@ -131,7 +126,7 @@ export function useEnvEditor({
     setLoading(true);
     setError(null);
     try {
-      const resp = await wsService.writeEnvFile(buildRef(), content, overwrite, force);
+      const resp = await envApi.writeEnvFile(buildRef(), content, overwrite, force);
       if (resp.success) {
         notifySaveResult(resp, isEdit);
         onSaved();

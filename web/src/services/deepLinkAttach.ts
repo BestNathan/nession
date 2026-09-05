@@ -1,6 +1,6 @@
 import type { Session } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
-import type { WebSocketService } from './websocket';
+import { sessionsApi } from '../features/sessions';
 import type { AgentProbe } from '../atoms/probe';
 import { loadAttachPrefs } from './attachPrefs';
 import { detectWebGLSupport } from '../terminal/Renderer';
@@ -11,14 +11,13 @@ import { orderByLatency, testAddresses } from './addressSelection';
  * without showing the dialog (deep-link / refresh restore).
  */
 export async function resolveDeepLinkAttachChoice(
-  wsService: WebSocketService,
   session: Session,
   probeResults: Map<string, AgentProbe>,
 ): Promise<AttachChoice> {
   const prefs = loadAttachPrefs();
   const mode = prefs.mode === 'relay' ? 'auto' : prefs.mode;
   const requestedMode = mode === 'auto' ? 'p2p' : mode;
-  const attachInfo = await wsService.requestAttach(session.session_id, requestedMode);
+  const attachInfo = await sessionsApi.requestAttach(session.session_id, requestedMode);
   const cached = probeResults.get(session.agent_id);
   let orderedUrls = cached?.orderedUrls ?? [];
   let latencies = cached?.latencies ?? [];

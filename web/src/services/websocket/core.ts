@@ -6,8 +6,8 @@
  * generic transport states to the historical server status contract consumed
  * by plugins and relay code.
  */
-import { v4 as uuidv4 } from 'uuid';
 import type { AttachInfo, AuthResponse, ConnectionStatus, WebSocketMessage } from '../../types';
+import { getOrCreateClientId } from '../socket/clientId';
 import { SocketCore } from '../socket/SocketCore';
 import type { SocketMessage } from '../socket/types';
 import type { WebSocketServiceCore } from './types';
@@ -22,7 +22,7 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   private readonly connectionChangeCallbacks = new Set<ConnectionChangeCallback>();
 
   constructor(private readonly url: string, private readonly authToken: string) {
-    this.clientId = this.getOrCreateClientId();
+    this.clientId = getOrCreateClientId();
     this.core = new SocketCore({
       url,
       maxReconnectAttempts: 5,
@@ -60,16 +60,6 @@ export class WebSocketServiceCoreImpl implements WebSocketServiceCore {
   }
 
   private readonly subscribedTypes = new Set<string>();
-
-  private getOrCreateClientId(): string {
-    const key = 'nessioclientid';
-    let id = localStorage.getItem(key);
-    if (!id) {
-      id = uuidv4();
-      localStorage.setItem(key, id);
-    }
-    return id;
-  }
 
   async connect(): Promise<void> {
     return this.core.connect();

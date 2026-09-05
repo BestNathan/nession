@@ -18,7 +18,8 @@ import {
 import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
 import { agentDisplayName } from '../lib/format';
 import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { envApi } from '@/features/env';
+import { sessionsApi } from '@/features/sessions';
 import { useDialogReset } from '../hooks/useDialogReset';
 
 interface CreateSessionDialogProps {
@@ -69,7 +70,6 @@ export function CreateSessionDialog({
   preselectedAgentId,
   onCreated,
 }: CreateSessionDialogProps) {
-  const wsService = useWebSocket();
   const [agentId, setAgentId] = useState('');
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -99,13 +99,13 @@ export function CreateSessionDialog({
   useEffect(() => {
     if (isOpen) {
       // Load available env files (optional selection — failure is non-fatal).
-      wsService
+      envApi
         .listEnvFiles()
         .then((resp) => setEnvFiles(resp.files))
         .catch(() => setEnvFiles([]));
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
-  }, [isOpen, wsService]);
+  }, [isOpen]);
 
   const validateName = (name: string): string | null => {
     if (!name.trim()) {return 'Session name is required';}
@@ -130,7 +130,7 @@ export function CreateSessionDialog({
     setLoading(true);
     setError(null);
     try {
-      const result = await wsService.createSession(agentId, sessionName.trim(), selectedEnv);
+      const result = await sessionsApi.createSession(agentId, sessionName.trim(), selectedEnv);
       if (result.success) {
         onCreated();
         onClose();

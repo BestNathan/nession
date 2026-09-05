@@ -1,41 +1,18 @@
-export interface ConfigFile {
-  path: string;
-  size: number;
-  content_type: 'json' | 'markdown' | 'jsonl' | 'text';
-}
+/**
+ * The claude-code extension UI consumes the canonical capability types from
+ * `@/features/claude-code` (single source of truth for the wire contract).
+ * The re-exports below keep the extension-local import path stable while the
+ * UI migrates onto the feature module singleton (`claudeCodeApi`).
+ */
+import type { ClaudeCodeListResponse } from '@/features/claude-code';
 
-export interface ConfigCategory {
-  name: string;
-  icon: string | null;
-  files: ConfigFile[];
-}
+export type {
+  ClaudeCodeListRequest,
+  ClaudeCodeListResponse,
+  ClaudeCodeReadRequest,
+  ClaudeCodeReadResponse,
+} from '@/features/claude-code';
 
-export interface ClaudeCodeListRequest {
-  agent_id: string;
-  scope: 'global' | 'project';
-  session_id?: string;
-}
-
-export interface ClaudeCodeListResponse {
-  available: boolean;
-  categories: ConfigCategory[];
-  error?: string;
-}
-
-export interface ClaudeCodeReadRequest {
-  agent_id: string;
-  scope: 'global' | 'project';
-  session_id?: string;
-  path: string;
-  offset?: number;
-  limit?: number;
-}
-
-export interface ClaudeCodeReadResponse {
-  content: string;
-  content_type: 'json' | 'markdown' | 'jsonl' | 'text';
-  total_size: number;
-  offset: number;
-  has_more: boolean;
-  error?: string;
-}
+/** Presentation aliases over the canonical claude-code list response. */
+export type ConfigCategory = ClaudeCodeListResponse['categories'][number];
+export type ConfigFile = ConfigCategory['files'][number];

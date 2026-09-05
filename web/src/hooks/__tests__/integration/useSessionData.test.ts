@@ -3,11 +3,18 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
 import { useSessionData } from '@/hooks/useSessionData';
 import type { Session } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), warning: vi.fn() },
 }));
+
+// useSessionData now talks to the sessions feature singleton rather than a
+// WebSocketService instance.
+const sessionsApiMock = vi.hoisted(() => ({
+  fetchSessions: vi.fn(),
+}));
+
+vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -22,18 +29,14 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
-function makeWs(fetchSessions: ReturnType<typeof vi.fn>) {
-  return { fetchSessions } as unknown as WebSocketService;
-}
-
 describe('useSessionData', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('stores fetched sessions', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({ sessions: [makeSession()] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [makeSession()] });
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions(); });
 
@@ -42,32 +45,32 @@ describe('useSessionData', () => {
     expect(result.current.sessionsLoaded).toBe(true);
   });
 
-  /** The refresh button relies on this: `force` must reach the service, or the
-   *  server would answer from its registry instead of re-querying agents. */
-  it('forwards force to the service', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+  /** The refresh button relies on this: `force` must reach the feature API, or
+   *  the server would answer from its registry instead of re-querying agents. */
+  it('forwards force to the feature API', async () => {
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [] });
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ force: true }); });
 
-    expect(fetchSessions).toHaveBeenCalledWith({ force: true });
+    expect(sessionsApiMock.fetchSessions).toHaveBeenCalledWith({ force: true });
   });
 
-  it('forwards agentId to the service', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+  it('forwards agentId to the feature API', async () => {
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [] });
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ agentId: 'a1' }); });
 
-    expect(fetchSessions).toHaveBeenCalledWith({ agentId: 'a1' });
+    expect(sessionsApiMock.fetchSessions).toHaveBeenCalledWith({ agentId: 'a1' });
   });
 
   it('records stale agents and warns the user', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({
+    sessionsApiMock.fetchSessions.mockResolvedValue({
       sessions: [makeSession()],
       stale_agents: ['a1'],
     });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ force: true }); });
 
@@ -78,8 +81,8 @@ describe('useSessionData', () => {
   });
 
   it('does not warn when nothing is stale', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({ sessions: [], stale_agents: [] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [], stale_agents: [] });
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ force: true }); });
 
@@ -89,11 +92,10 @@ describe('useSessionData', () => {
   /** A refresh that recovers must clear the previous stale marks, otherwise
    *  the badges would stick around forever. */
   it('clears stale agents on a subsequent healthy refresh', async () => {
-    const fetchSessions = vi
-      .fn()
+    sessionsApiMock.fetchSessions
       .mockResolvedValueOnce({ sessions: [makeSession()], stale_agents: ['a1'] })
       .mockResolvedValueOnce({ sessions: [makeSession()], stale_agents: [] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ force: true }); });
     expect(result.current.staleAgents).toEqual(['a1']);
@@ -103,8 +105,8 @@ describe('useSessionData', () => {
   });
 
   it('treats a missing stale_agents field as none stale', async () => {
-    const fetchSessions = vi.fn().mockResolvedValue({ sessions: [makeSession()] });
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [makeSession()] });
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions(); });
 
@@ -113,8 +115,8 @@ describe('useSessionData', () => {
   });
 
   it('surfaces fetch failures and stops loading', async () => {
-    const fetchSessions = vi.fn().mockRejectedValue(new Error('network down'));
-    const { result } = renderHook(() => useSessionData(makeWs(fetchSessions)));
+    sessionsApiMock.fetchSessions.mockRejectedValue(new Error('network down'));
+    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions(); });
 

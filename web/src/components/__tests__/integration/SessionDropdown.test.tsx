@@ -6,7 +6,7 @@ import { SessionDropdown } from '@/components/SessionDropdown';
 import { WebSocketContext } from '@/hooks/useWebSocket';
 import { sessionIdAtom } from '@/atoms/session';
 import type { Session } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
+import type { WebSocketService } from '@/services/socket';
 
 // SessionDropdown navigates via useNavigate on attach; stub it so the component
 // can render outside a Router and we can assert the target path.
@@ -19,6 +19,41 @@ vi.mock('react-router-dom', async (importOriginal) => {
     useNavigate: () => navigateMock,
   };
 });
+
+// KillConfirmDialog (rendered by the row Kill button) now calls the
+// sessionsApi singleton, and AttachDialog resolves its enablement through
+// sessionsApi.requestAttach — the real plugin needs an installed connection
+// this test never provides. Override only those two members; other consumers
+// of the module in this tree keep their real implementations.
+const { killSessionMock, requestAttachMock } = vi.hoisted(() => ({
+  killSessionMock: vi.fn(),
+  requestAttachMock: vi.fn(),
+}));
+vi.mock('@/features/sessions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/sessions')>();
+  return {
+    ...actual,
+    sessionsApi: {
+      ...actual.sessionsApi,
+      killSession: killSessionMock,
+      requestAttach: requestAttachMock,
+    },
+  };
+});
+
+/** AttachInfo the dialog needs to enable Attach; mirrors AttachDialog.test.tsx. */
+function makeAttachInfo(): import('@/types').AttachInfo {
+  return {
+    mode: 'p2p',
+    session_id: 'b:beta',
+    session_name: 'beta',
+    agent_address: 'ws://agent1/ws',
+    connection_token: 'tok',
+    addresses: [
+      { url: 'ws://agent1/ws', label: 'LAN', network_type: 'lan', priority: 10, status: 'reachable' },
+    ],
+  };
+}
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -46,6 +81,8 @@ function makeWsService() {
 describe('SessionDropdown', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    killSessionMock.mockResolvedValue({ success: true });
+    requestAttachMock.mockResolvedValue(makeAttachInfo());
   });
 
   function renderDropdown(props: Partial<{
@@ -261,7 +298,7 @@ describe('SessionDropdown', () => {
     await userEvent.type(screen.getByRole('textbox'), 'beta');
     await userEvent.click(confirmBtn);
 
-    expect(ws.killSession).toHaveBeenCalledWith('b:beta');
+    expect(killSessionMock).toHaveBeenCalledWith('b:beta');
     // Dialog closes after a successful kill.
     expect(screen.queryByText('Kill Session')).toBeNull();
   });

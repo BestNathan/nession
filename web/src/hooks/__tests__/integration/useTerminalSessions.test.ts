@@ -1,20 +1,17 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useTerminalSessions } from '@/hooks/useTerminalSessions';
-import type { WebSocketService } from '@/services/websocket';
+import type { WebSocketService } from '@/services/socket';
 import type { Session } from '@/types';
 
-function mockWsService(sessions: Session[] = []) {
-  const listeners = new Set<(s: Session[]) => void>();
-  return {
-    listSessions: vi.fn().mockResolvedValue(sessions),
-    onSessionsChanged: vi.fn((cb: (s: Session[]) => void) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    }),
-    _push: (s: Session[]) => listeners.forEach((cb) => cb(s)),
-  } as unknown as WebSocketService & { _push: (s: Session[]) => void };
-}
+// The hook fetches and subscribes through the sessions feature singleton;
+// the wsService argument is now only an identity/null gate for re-keying.
+const sessionsApiMock = vi.hoisted(() => ({
+  listSessions: vi.fn(),
+  onSessionsChanged: vi.fn<(cb: (sessions: Session[]) => void) => () => void>(() => () => {}),
+}));
+
+vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -30,13 +27,25 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 }
 
 describe('useTerminalSessions', () => {
+  let pushSessions: ((sessions: Session[]) => void) | null;
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    pushSessions = null;
+    sessionsApiMock.listSessions.mockReset();
+    sessionsApiMock.onSessionsChanged = vi.fn((cb: (sessions: Session[]) => void) => {
+      pushSessions = cb;
+      return () => {};
+    });
   });
+
+  function makeWsService(sessions: Session[] = []): WebSocketService {
+    sessionsApiMock.listSessions.mockResolvedValue(sessions);
+    return { connectionState: 'connected' } as unknown as WebSocketService;
+  }
 
   it('returns loading=true initially, then sessions after fetch', async () => {
     const sessions = [makeSession()];
-    const ws = mockWsService(sessions);
+    const ws = makeWsService(sessions);
 
     const { result } = renderHook(() => useTerminalSessions(ws));
 
@@ -52,8 +61,8 @@ describe('useTerminalSessions', () => {
   });
 
   it('handles fetch error', async () => {
-    const ws = mockWsService();
-    ws.listSessions = vi.fn().mockRejectedValue(new Error('network error'));
+    sessionsApiMock.listSessions.mockRejectedValue(new Error('network error'));
+    const ws = { connectionState: 'connected' } as unknown as WebSocketService;
 
     const { result } = renderHook(() => useTerminalSessions(ws));
 
@@ -67,7 +76,7 @@ describe('useTerminalSessions', () => {
 
   it('updates sessions on push event', async () => {
     const initial = [makeSession({ session_name: 'old' })];
-    const ws = mockWsService(initial);
+    const ws = makeWsService(initial);
 
     const { result } = renderHook(() => useTerminalSessions(ws));
 
@@ -77,7 +86,7 @@ describe('useTerminalSessions', () => {
 
     const updated = [makeSession({ session_name: 'new' })];
     act(() => {
-      ws._push(updated);
+      pushSessions!(updated);
     });
 
     expect(result.current.sessions).toEqual(updated);
@@ -89,10 +98,11 @@ describe('useTerminalSessions', () => {
     expect(result.current.loading).toBe(true);
     expect(result.current.sessions).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(sessionsApiMock.listSessions).not.toHaveBeenCalled();
   });
 
   it('refetch calls listSessions again', async () => {
-    const ws = mockWsService([]);
+    const ws = makeWsService([]);
     const { result } = renderHook(() => useTerminalSessions(ws));
 
     await waitFor(() => {
@@ -100,7 +110,7 @@ describe('useTerminalSessions', () => {
     });
 
     const updated = [makeSession({ session_name: 'refetched' })];
-    ws.listSessions = vi.fn().mockResolvedValue(updated);
+    sessionsApiMock.listSessions.mockResolvedValue(updated);
 
     await act(async () => {
       await result.current.refetch();

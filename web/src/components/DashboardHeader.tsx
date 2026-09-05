@@ -1,5 +1,5 @@
 import { X, FileCog } from 'lucide-react';
-import type { ConnectionStatus } from '../types';
+import type { ConnectionState } from '@/services/socket';
 import type { StatusFilter } from '../hooks/useDashboard';
 import { SearchBar } from './SearchBar';
 import { ServerInfoMenu } from './ServerInfoMenu';
@@ -27,7 +27,7 @@ export interface HeaderActionsProps {
 }
 
 export interface DashboardHeaderProps {
-  connectionStatus: ConnectionStatus;
+  connectionStatus: ConnectionState;
   searchProps: SearchProps;
   actionsProps: HeaderActionsProps;
   error: string | null;

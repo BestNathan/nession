@@ -2,7 +2,25 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDashboard } from '@/hooks/useDashboard';
 import type { Agent, Session } from '@/types';
-import type { WebSocketService } from '@/services/websocket';
+import type { WebSocketService } from '@/services/socket';
+
+// ---------------------------------------------------------------------------
+// Feature API mocks — useDashboard's data/subscription chain now talks to the
+// module singletons (agentsApi/sessionsApi), not to a WebSocketService.
+// ---------------------------------------------------------------------------
+
+const agentsApiMock = vi.hoisted(() => ({
+  listAgents: vi.fn(),
+  onAgentsChanged: vi.fn<(cb: (agents: Agent[]) => void) => () => void>(() => () => {}),
+}));
+
+const sessionsApiMock = vi.hoisted(() => ({
+  fetchSessions: vi.fn(),
+  onSessionsChanged: vi.fn<(cb: (sessions: Session[]) => void) => () => void>(() => () => {}),
+}));
+
+vi.mock('@/features/agents', () => ({ agentsApi: agentsApiMock }));
+vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -38,26 +56,13 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 // Mock WebSocketService
 // ---------------------------------------------------------------------------
 
-interface MockWsService {
-  listAgents: ReturnType<typeof vi.fn>;
-  listSessions: ReturnType<typeof vi.fn>;
-  fetchSessions: ReturnType<typeof vi.fn>;
-  onAgentsChanged: ReturnType<typeof vi.fn>;
-  onSessionsChanged: ReturnType<typeof vi.fn>;
-  isAuthenticated: ReturnType<typeof vi.fn>;
-  onConnectionChange: ReturnType<typeof vi.fn>;
-}
-
-function createMockWsService(): MockWsService {
+function createService(
+  connectionState: WebSocketService['connectionState'] = 'disconnected',
+): WebSocketService {
   return {
-    listAgents: vi.fn(() => new Promise<Agent[]>(() => {})),
-    listSessions: vi.fn(() => new Promise<Session[]>(() => {})),
-    fetchSessions: vi.fn(() => new Promise<{ sessions: Session[] }>(() => {})),
-    onAgentsChanged: vi.fn().mockReturnValue(() => {}),
-    onSessionsChanged: vi.fn().mockReturnValue(() => {}),
-    isAuthenticated: vi.fn(() => true),
-    onConnectionChange: vi.fn().mockReturnValue(() => {}),
-  };
+    connectionState,
+    onConnectionStateChange: vi.fn(() => () => {}),
+  } as unknown as WebSocketService;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,27 +72,35 @@ function createMockWsService(): MockWsService {
 describe('useDashboard', () => {
   let agentsCallback: ((agents: Agent[]) => void) | null;
   let sessionsCallback: ((sessions: Session[]) => void) | null;
-  let mockWsService: MockWsService;
 
   beforeEach(() => {
     agentsCallback = null;
     sessionsCallback = null;
-    mockWsService = createMockWsService();
-    mockWsService.onAgentsChanged = vi.fn((cb: (agents: Agent[]) => void) => {
+    agentsApiMock.listAgents.mockReset();
+    sessionsApiMock.fetchSessions.mockReset();
+    agentsApiMock.onAgentsChanged = vi.fn((cb: (agents: Agent[]) => void) => {
       agentsCallback = cb;
       return () => {};
     });
-    mockWsService.onSessionsChanged = vi.fn((cb: (sessions: Session[]) => void) => {
+    sessionsApiMock.onSessionsChanged = vi.fn((cb: (sessions: Session[]) => void) => {
       sessionsCallback = cb;
       return () => {};
     });
   });
 
+  // The service instance must be stable across re-renders: effects in
+  // useRealtimeUpdates are keyed on the wsService instance, so a service
+  // recreated inside the render callback would re-run fetch/subscribe on
+  // every state update, starting an endless fetch loop once connected.
+  function renderDashboard(service: WebSocketService = createService()) {
+    return renderHook(() => useDashboard(service));
+  }
+
   // ── searchQuery filtering ──────────────────────────────────────────────
 
   describe('searchQuery', () => {
     it('filters agents by hostname (case-insensitive)', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -113,7 +126,7 @@ describe('useDashboard', () => {
     });
 
     it('filters agents by agent_id', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -132,7 +145,7 @@ describe('useDashboard', () => {
 
   describe('statusFilter', () => {
     it('filters agents by online status', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -148,7 +161,7 @@ describe('useDashboard', () => {
     });
 
     it('filters agents by offline status', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -163,7 +176,7 @@ describe('useDashboard', () => {
     });
 
     it('returns all agents when statusFilter is "all"', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -184,7 +197,7 @@ describe('useDashboard', () => {
 
   describe('combined filtering', () => {
     it('applies both searchQuery and statusFilter', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -201,7 +214,7 @@ describe('useDashboard', () => {
     });
 
     it('returns empty when no agents match both filters', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -215,7 +228,7 @@ describe('useDashboard', () => {
     });
 
     it('applies statusFilter, searchQuery, and sort to filteredSessions', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -246,7 +259,7 @@ describe('useDashboard', () => {
 
   describe('sorting', () => {
     it('sorts sessions by name ascending (default)', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -261,7 +274,7 @@ describe('useDashboard', () => {
     });
 
     it('toggles sort direction on same field', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -285,7 +298,7 @@ describe('useDashboard', () => {
     });
 
     it('switches sort field and resets to asc', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -312,7 +325,7 @@ describe('useDashboard', () => {
 
   describe('heartbeat history', () => {
     it('accumulates heartbeats across agent updates', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([
@@ -333,7 +346,7 @@ describe('useDashboard', () => {
     });
 
     it('caps heartbeat history at 5 entries', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       for (let i = 1; i <= 7; i++) {
         act(() => {
@@ -351,7 +364,7 @@ describe('useDashboard', () => {
     });
 
     it('returns empty array for unknown agents', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       expect(result.current.getHeartbeatHistory('unknown')).toEqual([]);
     });
@@ -361,13 +374,13 @@ describe('useDashboard', () => {
 
   describe('selectedAgent', () => {
     it('starts as null', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       expect(result.current.selectedAgent).toBeNull();
     });
 
     it('can be set to an agent and cleared', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       const agent = makeAgent({ agent_id: 'a1' });
       act(() => { result.current.setSelectedAgent(agent); });
@@ -382,20 +395,20 @@ describe('useDashboard', () => {
 
   describe('isSearchActive', () => {
     it('is false when searchQuery is empty and statusFilter is "all"', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       expect(result.current.isSearchActive).toBe(false);
     });
 
     it('is true when searchQuery is non-empty', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => { result.current.setSearchQuery('web'); });
       expect(result.current.isSearchActive).toBe(true);
     });
 
     it('is true when statusFilter is not "all"', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => { result.current.setStatusFilter('online'); });
       expect(result.current.isSearchActive).toBe(true);
@@ -406,14 +419,10 @@ describe('useDashboard', () => {
 
   describe('fetch errors', () => {
     it('sets error when fetchAgents fails', async () => {
-      const mock = createMockWsService();
-      mock.listAgents = vi.fn().mockRejectedValue(new Error('Fetch agents failed'));
-      // Keep onAgentsChanged / onSessionsChanged registered
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
-      mock.fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
+      agentsApiMock.listAgents.mockRejectedValue(new Error('Fetch agents failed'));
+      sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [], stale_agents: [] });
 
-      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
+      const { result } = renderDashboard(createService('connected'));
 
       // Wait for the initial fetch to settle
       await vi.waitFor(() => {
@@ -426,14 +435,11 @@ describe('useDashboard', () => {
 
   describe('session lifecycle callbacks', () => {
     it('handleSessionCreated closes modal and refreshes sessions', async () => {
-      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
-      const mock = createMockWsService();
-      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.fetchSessions = fetchSessions;
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+      agentsApiMock.listAgents.mockResolvedValue([makeAgent()]);
+      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [], stale_agents: [] });
+      sessionsApiMock.fetchSessions = fetchSessions;
 
-      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
+      const { result } = renderDashboard(createService('connected'));
 
       await vi.waitFor(() => {
         expect(result.current.loadingAgents).toBe(false);
@@ -447,14 +453,11 @@ describe('useDashboard', () => {
     });
 
     it('handleSessionKilled clears kill target and refreshes', async () => {
-      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [] });
-      const mock = createMockWsService();
-      mock.listAgents = vi.fn().mockResolvedValue([makeAgent()]);
-      mock.fetchSessions = fetchSessions;
-      mock.onAgentsChanged = vi.fn().mockReturnValue(() => {});
-      mock.onSessionsChanged = vi.fn().mockReturnValue(() => {});
+      agentsApiMock.listAgents.mockResolvedValue([makeAgent()]);
+      const fetchSessions = vi.fn().mockResolvedValue({ sessions: [], stale_agents: [] });
+      sessionsApiMock.fetchSessions = fetchSessions;
 
-      const { result } = renderHook(() => useDashboard(mock as unknown as WebSocketService));
+      const { result } = renderDashboard(createService('connected'));
 
       await vi.waitFor(() => {
         expect(result.current.loadingAgents).toBe(false);
@@ -471,7 +474,7 @@ describe('useDashboard', () => {
 
   describe('session search filtering', () => {
     it('filters sessions by session_name', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([makeAgent({ agent_id: 'a1' })]);
@@ -487,7 +490,7 @@ describe('useDashboard', () => {
     });
 
     it('filters sessions by agent_id', () => {
-      const { result } = renderHook(() => useDashboard(mockWsService as unknown as WebSocketService));
+      const { result } = renderDashboard();
 
       act(() => {
         agentsCallback!([

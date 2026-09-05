@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { WebSocketService } from '../services/websocket';
+import type { WebSocketService } from '../services/socket';
 
 /** WebSocket context — use `<WebSocketContext.Provider>` in App.tsx. */
 export const WebSocketContext = createContext<WebSocketService | null>(null);
