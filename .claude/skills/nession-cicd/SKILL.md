@@ -14,14 +14,14 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 
 ```
 Local dev → verify locally
-  → branch off main → PR to staging → quality gate passes → rebase-merge to staging
+  → branch off main → PR to staging → quality gate passes → merge to staging
   → staging builds + deploys to staging environment → validate on staging
   → audit what is being released → PR staging → main with every `Closes #N` → --merge
   → version bump if warranted → release builds multi-arch images → ArgoCD syncs to production
   → sync main → staging (fast-forward)
 ```
 
-**Every merge is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed. The asymmetry is deliberate — see **Why the release uses a merge commit**.
+**Every merge is `--merge`.** Nothing is ever rebased or squashed — `--rebase` rewrites commits and orphans the branch tip, `--squash` collapses N commits into one unmatched patch; both leave a class of re-conflicting orphans behind. See **Why every merge is `--merge`**.
 
 ## Deployment Monitoring
 
@@ -123,12 +123,12 @@ EnterWorktree name: "chore/workflow-fix"
 git cherry-pick <workflow-commit-hash>
 git push -u origin chore/workflow-fix
 gh pr create --title "chore: ..." --body "..."
-gh pr merge <N> --rebase
+gh pr merge <N> --merge
 ```
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
+For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -136,7 +136,7 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-gh pr merge <PR-NUMBER> --auto --rebase
+gh pr merge <PR-NUMBER> --auto --merge
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
@@ -144,9 +144,9 @@ gh pr merge <PR-NUMBER> --auto --rebase
 # 4. After staging validation, open the release PR (see "Release: staging → main")
 ```
 
-**`--rebase`, not `--squash`.** Rebase-merge replays the branch's commits onto `staging` individually, each keeping its own message. It leaves the feature branch itself on orphaned SHAs, which costs nothing — the branch is dead after merge and nobody syncs back to it. (That is exactly why the *release* cannot use `--rebase`: `staging` is long-lived and does get synced back.) Two consequences:
+**`--merge`, never `--rebase` or `--squash`.** `--merge` records the head branch's tip as a second parent, so every landed commit stays in the target's ancestry with its **original SHA** — nothing is ever orphaned, no matter how long-lived the target is. `--rebase` always rewrites and orphans the branch tip; `--squash` collapses N commits into one whose patch-id matches nothing. Both failure classes are measured below under **Why every merge is `--merge`**. Two consequences:
 
-- **Commit messages are the permanent record.** No merge method in this flow writes the PR body to a commit. Measured: PR #301 rebase-merged as `673664f` and kept the commit's own message while the (different, Chinese) PR body was discarded; squash-merged PR #303 became `3a35e20` whose message *is* `PR_TITLE` + `PR_BODY`; and `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`. The repo still has `squash_merge_commit_message = PR_BODY` configured, but nothing squashes any more.
+- **Commit messages are the permanent record.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, never the PR body, and each commit keeps its own message. (Measured before the all-merge rule: PR #301 rebase-merged as `673664f` kept the commit's own message while the (different, Chinese) PR body was discarded; squash-merged PR #303 became `3a35e20` whose message *is* `PR_TITLE` + `PR_BODY`.) The repo still has `squash_merge_commit_message = PR_BODY` configured, but nothing squashes any more.
 - **Clean up the branch locally before merging.** `wip`/`fixup` commits land verbatim. Squash them with `git rebase -i` on the branch, not with a squash-merge.
 
 
@@ -191,13 +191,13 @@ git push origin origin/main:refs/heads/staging
 
 **Step 5 goes last** because the bump and `release.yml`'s `chore: update prod image tags` both land on `main` after step 3 — syncing earlier just leaves `staging` two commits behind again. It is still a fast-forward at that point: `staging`'s tip is an ancestor of the merge commit, which is an ancestor of everything added after it.
 
-### Why the release uses a merge commit
+### Why every merge is `--merge`
 
-**`--merge` records `staging`'s tip as a second parent**, so `staging` stays an ancestor of `main` and step 5 is a fast-forward forever. No orphaned commits are created and `staging` never needs a force push.
+**`--merge` records the head branch's tip as a second parent**, so every landed branch stays reachable from the target with its original SHAs. For the release that means `staging` stays an ancestor of `main` and step 5 is a fast-forward forever — no orphaned commits anywhere, no force push. That is the whole point of the rule: a feature branch merged into `staging` keeps its original SHAs in `staging`'s ancestry, so the orphan class below never starts.
 
-**`--rebase` cannot give that**, because GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
+**`--rebase` rewrites and orphans, so no merge in this flow may use it.** GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
 
-Those orphans are *usually* harmless — a later rebase skips them by patch-id:
+The class this rule eliminates was measured on the 0.29.0 release — at that point the release itself was rebase-merged, so the rebased commits landed on `main` while their originals stayed on `staging`. Such orphans are *usually* harmless — a later rebase skips them by patch-id:
 
 | Orphan on `staging` | patch-id | Twin on `main` | patch-id | Next release |
 |---|---|---|---|---|
@@ -206,7 +206,7 @@ Those orphans are *usually* harmless — a later rebase skips them by patch-id:
 
 Both rows are from the single 0.29.0 release. The second diverged because that commit's release rebase **resolved a conflict**, so what landed on `main` is not the same patch as what `staging` still holds. Such an orphan re-conflicts on *every* subsequent release until someone drops it by hand. Confirmed in a controlled repro: identical patch-id → rebase skips the orphan and replays only the new work; divergent patch-id → the orphan replays and collides.
 
-So the choice is not "rebase is broken" — it is that rebase makes correctness depend on patch-id de-duplication continuing to hold, while `--merge` removes the class outright. Feature branches keep using `--rebase` precisely because they are dead after merge and orphaning them is free.
+So the choice is not "rebase is broken" — it is that rebase makes correctness depend on patch-id de-duplication continuing to hold, while `--merge` removes the class outright. Feature branches used to keep using `--rebase` because they were dead after merge and orphaning them was free; the all-merge rule closes that too — an orphaned commit is only "free" until a conflict changes its patch-id, and nothing in the flow needs that risk. Every merge is `--merge`, feature-to-staging included.
 
 **`--squash` is wrong for a further reason:** N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured historically: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
@@ -251,7 +251,7 @@ cd .claude/worktrees/chore-release-<sha>
 git cherry-pick <staging-commit>...          # resolve conflicts here
 git push -u origin chore/release-<sha>
 gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
-gh pr merge <PR-NUMBER> --rebase
+gh pr merge <PR-NUMBER> --merge
 ```
 
 Then sync step 5 as usual. Measured 2026-08-17: `staging → main` reported `mergeable: false` (conflict on `k8s/overlays/staging/kustomization.yaml`); `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. The cherry-pick branch (PR #300) merged cleanly and `staging` was never touched. Under this flow the conflict should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes it.
@@ -277,7 +277,7 @@ EnterWorktree name: "chore/bump-version-X.Y.Z"
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
+gh pr merge <PR-NUMBER> --merge  # Direct merge, no --auto (no checks to wait on)
 ```
 
 Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
@@ -305,7 +305,7 @@ EnterWorktree name: "docs/<slug>"    # or chore/<slug>
 git add -A && git commit -m "docs: ..."
 git push -u origin docs/<slug>
 gh pr create --base main --title "docs: ..." --body "..."
-gh pr merge <PR-NUMBER> --rebase      # no --auto: no checks to wait on
+gh pr merge <PR-NUMBER> --merge      # no --auto: no checks to wait on
 ```
 
 Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, and `k8s/**` manifests.
@@ -325,9 +325,9 @@ Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch,
 
 | Step | Method | Effect |
 |------|--------|--------|
-| `feature → staging` | `--rebase` | Commits replayed individually, each keeping its own message. Orphans the (now dead) feature branch, which costs nothing. |
-| `staging → main` | `--merge` | Records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main`. No orphans. |
-| `main → staging` sync | fast-forward push | Possible only because the release used a merge commit. Never force-push. |
+| `feature → staging` | `--merge` | Records the head tip as a second parent — original SHAs stay in `staging`'s ancestry. No orphans anywhere. |
+| `staging → main` | `--merge` | Same, and it keeps `staging` an ancestor of `main`, which makes the sync a fast-forward. |
+| `main → staging` sync | fast-forward push | Possible only because every release merged with `--merge`. Never force-push. |
 
 After the sync the refs are identical, and the next staging build puts `main` exactly 1 commit ahead again. That is the expected steady state.
 
@@ -364,7 +364,7 @@ This is why the release PR needs an audit step: nothing upstream carries the iss
 gh pr view <RELEASE-PR> --json closingIssuesReferences   # verify before merging
 ```
 
-**The PR body is review material, not git history.** Under rebase-merge it is never written to a commit — each replayed commit keeps its own message (measured: PR #301 → `673664f`). Still keep the body a change record — 变更内容 + 测试报告, plus `Closes #N` on the release PR — because it is what a reviewer and the release audit read. Screenshots go in a PR comment (`gh pr comment`) rather than the body, now purely so the body stays scannable.
+**The PR body is review material, not git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE` to the merge commit, never the PR body, and each commit keeps its own message — so the body never enters history by any path. Still keep the body a change record — 变更内容 + 测试报告, plus `Closes #N` on the release PR — because it is what a reviewer and the release audit read. Screenshots go in a PR comment (`gh pr comment`) rather than the body, now purely so the body stays scannable.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
