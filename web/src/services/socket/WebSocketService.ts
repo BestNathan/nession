@@ -1,9 +1,4 @@
 import { MessageRouterImpl } from './MessageRouter';
-import {
-  DEFAULT_MAX_RECONNECT_ATTEMPTS,
-  DEFAULT_RECONNECT_BASE_DELAY,
-  reconnectDelayMs,
-} from './agentSocketUtils';
 import type {
   CapabilityPlugin,
   ConnectionState,
@@ -13,6 +8,22 @@ import type {
   SocketMessage,
   WebSocketServiceOptions,
 } from './types';
+
+const MAX_RECONNECT_DELAY = 30_000;
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
+const DEFAULT_RECONNECT_BASE_DELAY = 1_000;
+
+function reconnectDelayMs(attempt: number, baseDelay: number): number {
+  return Math.min(baseDelay * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
+}
+
+/** Append a connection token to an agent WebSocket URL as a query parameter. */
+export function buildAgentWsUrl(agentUrl: string, connectionToken?: string): string {
+  if (!connectionToken) {
+    return agentUrl;
+  }
+  return `${agentUrl}${agentUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(connectionToken)}`;
+}
 
 interface RegisteredPlugin {
   plugin: CapabilityPlugin;
@@ -27,9 +38,9 @@ type ConnectionWaiter = {
 /**
  * The single WebSocket transport for the web UI.
  *
- * Lifecycle is SocketCore's: reconnect with exponential backoff, generation
- * guard for stale socket events, request correlation via MessageRouterImpl.
- * Three differences make it the transport for capability plugins:
+ * Lifecycle: reconnect with exponential backoff, generation guard for stale
+ * socket events, request correlation via MessageRouterImpl. Three differences
+ * make it the transport for capability plugins:
  *
  * 1. Readiness gate — when `options.handshake` is provided, the state stays
  *    'connecting' until the handshake succeeds; `connect()`/`waitForConnection()`
