@@ -15,35 +15,60 @@ import {
   manualOverrideAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
-import type { P2PConnection, P2PMessage, P2PConnectionState as ConnectionState } from '@/services/socket/p2pTypes';
+import type { ConnectionState } from '@/services/socket/types';
+import type { AttachResult, TerminalAgentApi } from '@/features/terminal';
 import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
-function makeP2PConnection() {
-  let connState: ConnectionState = 'connected';
-  const handlers: Array<(msg: P2PMessage) => void> = [];
-  const sendMessage = vi.fn();
-  const conn = {
-    sendMessage,
-    onMessage: vi.fn((handler: (msg: P2PMessage) => void) => {
-      handlers.push(handler);
-      return vi.fn();
-    }),
-    close: vi.fn(),
-    waitForConnection: vi.fn(),
-    reconnectAttempt: 0,
-    get connectionState() {
-      return connState;
-    },
-  } as unknown as P2PConnection;
+/** Two microtask ticks — enough for a resolved attach's .then chain to run. */
+function flushMicrotasks(): Promise<void> {
+  return Promise.resolve().then(() => Promise.resolve());
+}
 
-  return {
-    conn,
-    sendMessage,
-    getHandlers: () => handlers,
-    setConnectionState: (s: ConnectionState) => { connState = s; },
+interface AgentApiHarness {
+  api: TerminalAgentApi;
+  attach: ReturnType<typeof vi.fn>;
+  /** Resolvers in call order — resolve attach call N via attachResolvers[N]. */
+  attachResolvers: Array<(result: AttachResult) => void>;
+}
+
+/** Deferred attach — the test controls when (and with what) attach resolves. */
+function makeAgentApi(): AgentApiHarness {
+  const attachResolvers: Array<(result: AttachResult) => void> = [];
+  const attach = vi.fn((): Promise<AttachResult> => new Promise((resolve) => {
+    attachResolvers.push(resolve);
+  }));
+  const api = {
+    attach,
+    sendInput: vi.fn(),
+    sendResize: vi.fn(),
+    onOutput: vi.fn(() => () => {}),
+    onResize: vi.fn(() => () => {}),
+    onError: vi.fn(() => () => {}),
+    ping: vi.fn(),
   };
+  return { api: api as unknown as TerminalAgentApi, attach, attachResolvers };
+}
+
+/** Attach resolves { ok: false, error: 'timeout' } on its own timeout budget. */
+function makeTimedAgentApi(): AgentApiHarness {
+  const attach = vi.fn(
+    (_sessionName: string, _size?: unknown, opts?: { timeoutMs?: number }): Promise<AttachResult> =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ ok: false, error: 'timeout' }), opts?.timeoutMs ?? ATTACH_TIMEOUT_MS);
+      }),
+  );
+  const api = {
+    attach,
+    sendInput: vi.fn(),
+    sendResize: vi.fn(),
+    onOutput: vi.fn(() => () => {}),
+    onResize: vi.fn(() => () => {}),
+    onError: vi.fn(() => () => {}),
+    ping: vi.fn(),
+  };
+  return { api: api as unknown as TerminalAgentApi, attach, attachResolvers: [] };
 }
 
 function makeStore(opts: {
@@ -74,7 +99,7 @@ interface MockP2pRuntime {
     phase: AttachPhase;
     transportGeneration: number;
     connectionState: ConnectionState;
-    p2pConnection: P2PConnection;
+    agentTerminalApi: TerminalAgentApi | null;
   };
   maybeStartP2PAttach(): void;
   notifyP2pState(next: ConnectionState): void;
@@ -82,7 +107,7 @@ interface MockP2pRuntime {
 }
 
 function makeRuntime(opts: {
-  p2p: P2PConnection;
+  api: TerminalAgentApi;
   sessionName?: string;
   manualRoute?: boolean;
   transportReady?: boolean;
@@ -100,9 +125,6 @@ function makeRuntime(opts: {
   });
 
   const maybeStartP2PAttach = () => {
-    if (opts.p2p.connectionState !== 'connected') {
-      return;
-    }
     const phase = attachState.phase;
     if (phase === 'attached' && attachedGen === transportGen) {
       return;
@@ -115,7 +137,7 @@ function makeRuntime(opts: {
     }
     attachController.startP2PAttach({
       sessionName: opts.sessionName ?? 'sess',
-      p2pConnection: opts.p2p,
+      agentApi: opts.api,
       manualRoute: opts.manualRoute ?? false,
       lastResize: null,
       transportGeneration: transportGen,
@@ -128,8 +150,8 @@ function makeRuntime(opts: {
     getMirrorSnapshot: () => ({
       phase: attachState.phase as AttachPhase,
       transportGeneration: transportGen,
-      connectionState: opts.p2p.connectionState,
-      p2pConnection: opts.p2p,
+      connectionState: 'connected',
+      agentTerminalApi: opts.api,
     }),
     setTransportReady(value: boolean) {
       transportReady = value;
@@ -144,35 +166,40 @@ function makeRuntime(opts: {
         attachController.dispatch({ type: 'TRANSPORT_LOST' });
       }
     },
-  } as MockP2pRuntime;
+  };
 }
 
 function asSessionRuntime(runtime: MockP2pRuntime | SessionRuntime): SessionRuntime {
+  // The tests drive a minimal runtime twin (attach state machine + controller +
+  // mirror snapshot); the hook only consumes those members.
   return runtime as SessionRuntime;
 }
 
-function makeRelayRuntime(): SessionRuntime {
+function makeRelayRuntime(): MockP2pRuntime {
   const attachState = new AttachStateMachine({ transportFirst: true });
   return {
     attachState,
     attachController: new SessionAttachController(attachState),
     getMirrorSnapshot: () => ({
-      phase: attachState.phase,
+      phase: attachState.phase as AttachPhase,
       transportGeneration: 0,
       connectionState: 'disconnected' as const,
-      p2pConnection: null,
+      agentTerminalApi: null,
     }),
-  } as SessionRuntime;
+    maybeStartP2PAttach: () => {},
+    notifyP2pState: () => {},
+    setTransportReady: () => {},
+  };
 }
 
 function renderAttachHook(opts: {
   store: ReturnType<typeof makeStore>;
-  p2p: ReturnType<typeof makeP2PConnection> | null;
+  api?: TerminalAgentApi | null;
   runtime?: MockP2pRuntime | SessionRuntime | null;
 }) {
-  const { store, p2p } = opts;
-  const runtime = opts.runtime ?? (p2p
-    ? makeRuntime({ p2p: p2p.conn, sessionName: store.get(sessionNameAtom) })
+  const { store, api } = opts;
+  const runtime = opts.runtime ?? (api
+    ? makeRuntime({ api, sessionName: store.get(sessionNameAtom) })
     : makeRelayRuntime());
   return renderHook(
     () =>
@@ -198,12 +225,12 @@ describe('useSessionFirstTerminalAttach', () => {
   });
 
   it('P2P: mirrors runtime attach when transport becomes ready', () => {
-    const p2p = makeP2PConnection();
+    const { api, attach } = makeAgentApi();
     const store = makeStore({ mode: 'p2p', transportReady: false });
-    const runtime = makeRuntime({ p2p: p2p.conn, transportReady: false });
+    const runtime = makeRuntime({ api, transportReady: false });
 
-    renderAttachHook({ store, p2p, runtime });
-    expect(p2p.sendMessage).not.toHaveBeenCalled();
+    renderAttachHook({ store, api, runtime });
+    expect(attach).not.toHaveBeenCalled();
 
     act(() => {
       store.set(terminalTransportReadyAtom, true);
@@ -211,45 +238,43 @@ describe('useSessionFirstTerminalAttach', () => {
       runtime.maybeStartP2PAttach();
     });
 
-    expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
-    expect(p2p.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ msg_type: 'client.attach' }),
-    );
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(attach).toHaveBeenCalledWith('sess', undefined, { timeoutMs: ATTACH_TIMEOUT_MS });
   });
 
-  it('P2P: mirrors attach ok outcome to attached', () => {
-    const p2p = makeP2PConnection();
+  it('P2P: mirrors attach ok outcome to attached', async () => {
+    const { api, attach, attachResolvers } = makeAgentApi();
     const store = makeStore({ mode: 'p2p', resize: { cols: 80, rows: 24 } });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    const { result } = renderAttachHook({ store, p2p, runtime });
+    const { result } = renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.maybeStartP2PAttach();
     });
+    expect(attach).toHaveBeenCalledTimes(1);
 
-    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
-    act(() => {
-      for (const h of p2p.getHandlers()) {
-        h({ msg_type: 'ok', id: attachCall.id, timestamp: 0, payload: {} });
-      }
+    await act(async () => {
+      attachResolvers[0]?.({ ok: true });
+      await flushMicrotasks();
     });
 
     expect(result.current.terminalState).toBe('attached');
   });
 
-  it('P2P: mirrors attach timeout outcome to reconnecting', () => {
+  it('P2P: mirrors attach timeout outcome to reconnecting', async () => {
     vi.useFakeTimers();
-    const p2p = makeP2PConnection();
+    const { api } = makeTimedAgentApi();
     const store = makeStore({ mode: 'p2p' });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    const { result } = renderAttachHook({ store, p2p, runtime });
+    const { result } = renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.maybeStartP2PAttach();
     });
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
     });
 
     expect(result.current.terminalState).toBe('reconnecting');
@@ -259,7 +284,7 @@ describe('useSessionFirstTerminalAttach', () => {
   it('relay: driver sends no beginRelay; mirror reflects runtime RELAY_BEGIN_OK', () => {
     const store = makeStore({ mode: 'relay', transportReady: true });
     const runtime = makeRelayRuntime();
-    const { result } = renderAttachHook({ store, p2p: null, runtime });
+    const { result } = renderAttachHook({ store, api: null, runtime });
 
     // The mirror promotes the idle session and reflects controller outcomes.
     act(() => {
@@ -275,22 +300,20 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(runtime.attachState.phase).toBe('attached');
   });
 
-  it('P2P: runtime re-attach after transport rebind while attached', () => {
-    const p2p = makeP2PConnection();
+  it('P2P: runtime re-attach after transport rebind while attached', async () => {
+    const { api, attach, attachResolvers } = makeAgentApi();
     const store = makeStore({ mode: 'p2p' });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    renderAttachHook({ store, p2p, runtime });
+    renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.maybeStartP2PAttach();
     });
-    expect(p2p.sendMessage).toHaveBeenCalledTimes(1);
+    expect(attach).toHaveBeenCalledTimes(1);
 
-    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
-    act(() => {
-      for (const h of p2p.getHandlers()) {
-        h({ msg_type: 'ok', id: attachCall.id, timestamp: 0, payload: {} });
-      }
+    await act(async () => {
+      attachResolvers[0]?.({ ok: true });
+      await flushMicrotasks();
     });
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
 
@@ -299,29 +322,29 @@ describe('useSessionFirstTerminalAttach', () => {
       runtime.maybeStartP2PAttach();
     });
 
-    const secondAttach = p2p.sendMessage.mock.calls[1][0] as { id: string };
-    act(() => {
-      for (const h of p2p.getHandlers()) {
-        h({ msg_type: 'ok', id: secondAttach.id, timestamp: 0, payload: {} });
-      }
+    expect(attach).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      attachResolvers[1]?.({ ok: true });
+      await flushMicrotasks();
     });
 
-    expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
   });
 
-  it('P2P: mirrors force-relay outcome after reconnect budget exhausted', () => {
+  it('P2P: mirrors force-relay outcome after reconnect budget exhausted', async () => {
     vi.useFakeTimers();
-    const p2p = makeP2PConnection();
+    const { api } = makeTimedAgentApi();
     const store = makeStore({ mode: 'p2p' });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    const { result } = renderAttachHook({ store, p2p, runtime });
+    const { result } = renderAttachHook({ store, api, runtime });
 
     for (let i = 0; i <= P2P_MAX_RECONNECT; i += 1) {
-      act(() => {
+      await act(async () => {
         runtime.maybeStartP2PAttach();
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        await flushMicrotasks();
       });
     }
 
@@ -329,42 +352,38 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(store.get(forcedRelayAtom)).toBe(true);
   });
 
-  it('P2P: mirrors attach error on manual route to failed', () => {
-    const p2p = makeP2PConnection();
+  it('P2P: mirrors attach error on manual route to failed', async () => {
+    const { api, attachResolvers } = makeAgentApi();
     const store = makeStore({ mode: 'p2p' });
     store.set(manualOverrideAtom, 'ws://manual/ws');
-    const runtime = makeRuntime({ p2p: p2p.conn, manualRoute: true });
+    const runtime = makeRuntime({ api, manualRoute: true });
 
-    const { result } = renderAttachHook({ store, p2p, runtime });
+    const { result } = renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.maybeStartP2PAttach();
     });
 
-    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
-    act(() => {
-      for (const h of p2p.getHandlers()) {
-        h({ msg_type: 'error', id: attachCall.id, timestamp: 0, payload: { message: 'bad route' } });
-      }
+    await act(async () => {
+      attachResolvers[0]?.({ ok: false, error: 'bad route' });
+      await flushMicrotasks();
     });
 
     expect(result.current.terminalState).toBe('failed');
   });
 
-  it('P2P: mirrors transport disconnect while attached via runtime TRANSPORT_LOST', () => {
-    const p2p = makeP2PConnection();
+  it('P2P: mirrors transport disconnect while attached via runtime TRANSPORT_LOST', async () => {
+    const { api, attachResolvers } = makeAgentApi();
     const store = makeStore({ mode: 'p2p' });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    renderAttachHook({ store, p2p, runtime });
+    renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.maybeStartP2PAttach();
     });
 
-    const attachCall = p2p.sendMessage.mock.calls[0][0] as { id: string };
-    act(() => {
-      for (const h of p2p.getHandlers()) {
-        h({ msg_type: 'ok', id: attachCall.id, timestamp: 0, payload: {} });
-      }
+    await act(async () => {
+      attachResolvers[0]?.({ ok: true });
+      await flushMicrotasks();
     });
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
 
@@ -377,23 +396,23 @@ describe('useSessionFirstTerminalAttach', () => {
   });
 
   it('idle session promotes to connecting through runtime SESSION_SELECTED', () => {
-    const p2p = makeP2PConnection();
+    const { api } = makeAgentApi();
     const store = makeStore({ mode: 'p2p', transportReady: true });
     store.set(terminalSessionStateAtom, 'idle');
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    renderAttachHook({ store, p2p, runtime });
+    renderAttachHook({ store, api, runtime });
 
     expect(store.get(terminalSessionStateAtom)).toBe('connecting');
     expect(runtime.attachState.phase).toBe('connecting');
   });
 
   it('remount mirrors runtime phase without resetting attach state', () => {
-    const p2p = makeP2PConnection();
+    const { api } = makeAgentApi();
     const store = makeStore({ mode: 'p2p' });
-    const runtime = makeRuntime({ p2p: p2p.conn });
+    const runtime = makeRuntime({ api });
 
-    const { unmount } = renderAttachHook({ store, p2p, runtime });
+    const { unmount } = renderAttachHook({ store, api, runtime });
     act(() => {
       runtime.attachController.dispatch({ type: 'SESSION_SELECTED' });
       runtime.attachController.dispatch({ type: 'ATTACH_OK' });
@@ -401,7 +420,7 @@ describe('useSessionFirstTerminalAttach', () => {
     expect(runtime.attachState.phase).toBe('attached');
 
     unmount();
-    const { result } = renderAttachHook({ store, p2p, runtime });
+    const { result } = renderAttachHook({ store, api, runtime });
     expect(result.current.terminalState).toBe('attached');
     expect(runtime.attachState.phase).toBe('attached');
   });

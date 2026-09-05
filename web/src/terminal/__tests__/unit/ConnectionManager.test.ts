@@ -1,19 +1,51 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
-import type { P2PConnection, P2PMessage } from '@/services/socket/p2pTypes';
+import type { AgentError, TerminalAgentApi } from '@/features/terminal';
 import type { ConnectionState } from '@/services/socket/types';
 import type { RelayServerTransport } from '@/runtime/relayServerConnection';
 
 const attached = { isAttached: () => true };
 
-function makeMockP2P(): P2PConnection {
+interface AgentApiHarness {
+  api: TerminalAgentApi;
+  outputHandlers: Array<(data: Uint8Array) => void>;
+  resizeHandlers: Array<(cols: number, rows: number) => void>;
+  errorHandlers: Array<(error: AgentError) => void>;
+}
+
+function makeAgentApi(): AgentApiHarness & { unsubs: { output: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } } {
+  const outputHandlers: Array<(data: Uint8Array) => void> = [];
+  const resizeHandlers: Array<(cols: number, rows: number) => void> = [];
+  const errorHandlers: Array<(error: AgentError) => void> = [];
+  const unsubs = {
+    output: vi.fn(() => {}),
+    resize: vi.fn(() => {}),
+    error: vi.fn(() => {}),
+  };
+  const api = {
+    attach: vi.fn(),
+    sendInput: vi.fn(),
+    sendResize: vi.fn(),
+    onOutput: vi.fn((cb: (data: Uint8Array) => void) => {
+      outputHandlers.push(cb);
+      return unsubs.output;
+    }),
+    onResize: vi.fn((cb: (cols: number, rows: number) => void) => {
+      resizeHandlers.push(cb);
+      return unsubs.resize;
+    }),
+    onError: vi.fn((cb: (error: AgentError) => void) => {
+      errorHandlers.push(cb);
+      return unsubs.error;
+    }),
+    ping: vi.fn(),
+  };
   return {
-    connectionState: 'connected',
-    reconnectAttempt: 0,
-    sendMessage: vi.fn(),
-    onMessage: () => () => {},
-    close: vi.fn(),
-    waitForConnection: () => Promise.resolve(),
+    api: api as unknown as TerminalAgentApi,
+    outputHandlers,
+    resizeHandlers,
+    errorHandlers,
+    unsubs,
   };
 }
 
@@ -40,217 +72,238 @@ describe('ConnectionManager', () => {
   });
 
   describe('P2P mode', () => {
-    it('send routes data as terminal.input message with base64 encoding', () => {
-      const p2p = makeMockP2P();
+    it('routes send input through agentApi.sendInput with the session name', () => {
+      const { api } = makeAgentApi();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
       });
       cm.send('hello');
-      expect(p2p.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          msg_type: 'terminal.input',
-          payload: expect.objectContaining({ session_name: 'test', data: expect.any(String) }),
-        }),
-      );
+      expect(api.sendInput).toHaveBeenCalledWith('test', 'hello');
       cm.dispose();
     });
 
     it('buffers input until attached and flushes on the next send', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       let isAttached = false;
       const cm = new ConnectionManager({
         mode: 'p2p',
         sessionName: 'test',
         sessionId: 'a:test',
-        p2pConnection: p2p,
+        agentApi: api,
         isAttached: () => isAttached,
       });
 
       cm.send('hello');
-      expect(p2p.sendMessage).not.toHaveBeenCalled();
+      expect(api.sendInput).not.toHaveBeenCalled();
 
       isAttached = true;
       cm.send('world');
-      expect(p2p.sendMessage).toHaveBeenCalledTimes(2);
-      expect((p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
-        msg_type: 'terminal.input',
-        payload: expect.objectContaining({ session_name: 'test' }),
-      });
+      expect(api.sendInput).toHaveBeenCalledTimes(2);
+      expect((api.sendInput as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['test', 'hello']);
       cm.dispose();
     });
 
     it('send is a no-op after dispose', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
       });
       cm.dispose();
       cm.send('hello');
-      expect(p2p.sendMessage).not.toHaveBeenCalled();
+      expect(api.sendInput).not.toHaveBeenCalled();
     });
 
     it('keepalive pings are sent every 30 seconds', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
       });
       vi.advanceTimersByTime(30_000);
-      expect(p2p.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ msg_type: 'keepalive.ping' }),
-      );
+      expect(api.ping).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(30_000);
+      expect(api.ping).toHaveBeenCalledTimes(2);
     });
 
     it('keepalive stops after dispose', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', p2pConnection: p2p, ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
       });
       cm.dispose();
-      const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length;
       vi.advanceTimersByTime(60_000);
-      expect((p2p.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(calls);
+      expect(api.ping).not.toHaveBeenCalled();
     });
 
-    it('should call onResize callback when terminal.resize message received', () => {
-      const onResize = vi.fn();
-      let messageHandler: (msg: P2PMessage) => void = () => {};
-      const p2p = makeMockP2P();
-      p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
-
+    it('routes agent output frames to onOutput', () => {
+      const { api, outputHandlers } = makeAgentApi();
       const cm = new ConnectionManager({
-        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', p2pConnection: p2p, ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
       });
+      const onOutput = vi.fn();
+      cm.onOutput = onOutput;
+
+      const bytes = new Uint8Array([104, 105]);
+      outputHandlers[0]?.(bytes);
+      expect(onOutput).toHaveBeenCalledWith(bytes);
+      cm.dispose();
+    });
+
+    it('routes agent resize frames to onResize', () => {
+      const { api, resizeHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
       cm.onResize = onResize;
 
-      // Simulate receiving terminal.resize message
-      messageHandler({
-        msg_type: 'terminal.resize',
-        id: 'test-1',
-        timestamp: Date.now(),
-        payload: { cols: 120, rows: 40 },
-      } as P2PMessage);
-
+      resizeHandlers[0]?.(120, 40);
       expect(onResize).toHaveBeenCalledWith(120, 40);
       cm.dispose();
     });
 
-    it('should send terminal.resize message in P2P mode', () => {
-      const mockSend = vi.fn();
-      const mockP2P: P2PConnection = {
-        connectionState: 'connected',
-        sendMessage: mockSend,
-        onMessage: vi.fn().mockReturnValue(() => {}),
-        waitForConnection: vi.fn().mockResolvedValue(undefined),
-        reconnectAttempt: 0,
-        close: vi.fn(),
-      };
+    it('routes resize outbound through agentApi.sendResize', () => {
+      const { api } = makeAgentApi();
       const manager = new ConnectionManager({
-        mode: 'p2p',
-        sessionName: 'test',
-        sessionId: 'sess-1',
-        p2pConnection: mockP2P,
-        ...attached,
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
       });
-
       manager.sendResize(120, 40);
-
-      expect(mockSend).toHaveBeenCalledWith(
-        expect.objectContaining({
-          msg_type: 'terminal.resize',
-          payload: { session_name: 'test', cols: 120, rows: 40 },
-        }),
-      );
+      expect(api.sendResize).toHaveBeenCalledWith('test', 120, 40);
       manager.dispose();
     });
 
     it('buffers sendResize until attached and coalesces to the latest size', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       let isAttached = false;
       const cm = new ConnectionManager({
         mode: 'p2p',
         sessionName: 'test',
         sessionId: 'a:test',
-        p2pConnection: p2p,
+        agentApi: api,
         isAttached: () => isAttached,
       });
 
       cm.sendResize(80, 24);
       cm.sendResize(100, 30);
       cm.sendResize(120, 40);
-      expect(p2p.sendMessage).not.toHaveBeenCalled();
+      expect(api.sendResize).not.toHaveBeenCalled();
 
       isAttached = true;
       cm.flushPendingResize();
-      const resizeCalls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (c) => c[0].msg_type === 'terminal.resize',
-      );
-      expect(resizeCalls).toHaveLength(1);
-      expect(resizeCalls[0][0]).toMatchObject({
-        msg_type: 'terminal.resize',
-        payload: { session_name: 'test', cols: 120, rows: 40 },
-      });
+      expect(api.sendResize).toHaveBeenCalledTimes(1);
+      expect(api.sendResize).toHaveBeenCalledWith('test', 120, 40);
       cm.dispose();
     });
 
     it('flushAllOutbound sends buffered input first, then coalesced resize', () => {
-      const p2p = makeMockP2P();
+      const { api } = makeAgentApi();
       let isAttached = false;
       const cm = new ConnectionManager({
         mode: 'p2p',
         sessionName: 'test',
         sessionId: 'a:test',
-        p2pConnection: p2p,
+        agentApi: api,
         isAttached: () => isAttached,
       });
 
       cm.send('hello');
       cm.sendResize(120, 40);
-      expect(p2p.sendMessage).not.toHaveBeenCalled();
+      expect(api.sendInput).not.toHaveBeenCalled();
+      expect(api.sendResize).not.toHaveBeenCalled();
 
       isAttached = true;
       cm.flushAllOutbound();
 
-      const calls = (p2p.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
       // Input first, then resize — agent expects a live session before
       // accepting terminal.* I/O.
-      expect(calls).toHaveLength(2);
-      expect(calls[0][0].msg_type).toBe('terminal.input');
-      expect(calls[1][0].msg_type).toBe('terminal.resize');
+      expect(api.sendInput).toHaveBeenCalledTimes(1);
+      expect(api.sendResize).toHaveBeenCalledTimes(1);
+      const inputOrder = (api.sendInput as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+      const resizeOrder = (api.sendResize as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+      expect(inputOrder).toBeLessThan(resizeOrder);
       cm.dispose();
     });
 
     it('suppresses not_attached errors while state !== attached', () => {
+      const { api, errorHandlers } = makeAgentApi();
       const onError = vi.fn();
-      let messageHandler: (msg: P2PMessage) => void = () => {};
-      const p2p = makeMockP2P();
-      p2p.onMessage = (cb: (msg: P2PMessage) => void) => { messageHandler = cb; return () => {}; };
-
       let isAttached = false;
       const cm = new ConnectionManager({
         mode: 'p2p',
         sessionName: 'test',
         sessionId: 'a:test',
-        p2pConnection: p2p,
+        agentApi: api,
         isAttached: () => isAttached,
       });
       cm.onError = onError;
 
-      messageHandler({
-        msg_type: 'error',
-        id: 'some-id',
-        timestamp: Date.now(),
-        payload: { message: 'not attached to session: test' },
-      } as P2PMessage);
+      errorHandlers[0]?.({ message: 'not attached to session: test', notAttached: true });
       expect(onError).not.toHaveBeenCalled();
 
       isAttached = true;
-      messageHandler({
-        msg_type: 'error',
-        id: 'some-id',
-        timestamp: Date.now(),
-        payload: { message: 'not attached to session: test' },
-      } as P2PMessage);
+      errorHandlers[0]?.({ message: 'not attached to session: test', notAttached: true });
       expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(new Error('not attached to session: test'));
+      cm.dispose();
+    });
+
+    it('forwards non-not_attached errors even while detached', () => {
+      const { api, errorHandlers } = makeAgentApi();
+      const onError = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        agentApi: api,
+        isAttached: () => false,
+      });
+      cm.onError = onError;
+
+      errorHandlers[0]?.({ message: 'session terminated', notAttached: false });
+      expect(onError).toHaveBeenCalledWith(new Error('session terminated'));
+      cm.dispose();
+    });
+
+    it('does not forward output, resize, or errors after dispose', () => {
+      const { api, outputHandlers, resizeHandlers, errorHandlers } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      const onOutput = vi.fn();
+      const onResize = vi.fn();
+      const onError = vi.fn();
+      cm.onOutput = onOutput;
+      cm.onResize = onResize;
+      cm.onError = onError;
+
+      cm.dispose();
+      outputHandlers[0]?.(new Uint8Array([1]));
+      resizeHandlers[0]?.(80, 24);
+      errorHandlers[0]?.({ message: 'boom', notAttached: false });
+      expect(onOutput).not.toHaveBeenCalled();
+      expect(onResize).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('unsubscribes from the agent api on dispose', () => {
+      const { api, unsubs } = makeAgentApi();
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      cm.dispose();
+      expect(unsubs.output).toHaveBeenCalledTimes(1);
+      expect(unsubs.resize).toHaveBeenCalledTimes(1);
+      expect(unsubs.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('a thrown agent send does not escape while the transport is reconnecting', () => {
+      const { api } = makeAgentApi();
+      (api.sendInput as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('WebSocket not connected');
+      });
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: api, ...attached,
+      });
+      expect(() => cm.send('hello')).not.toThrow();
       cm.dispose();
     });
   });

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import type { P2PConnection } from '@/services/socket/p2pTypes';
 import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { envApi } from '@/features/env';
+import type { TerminalAgentApi } from '@/features/terminal';
+import type { ConnectionState } from '@/services/socket/types';
 import {
   relayServerHandle,
   type RelayServerHandle,
@@ -37,9 +38,10 @@ function useSessionEnvSourcing(opts: {
   envRefs: EnvFileRef[];
   sessionId: string;
   effectiveMode: 'p2p' | 'relay';
-  p2pConnection: P2PConnection | null;
+  agentTerminalApi: TerminalAgentApi | null;
+  connectionState: ConnectionState;
 }) {
-  const { envRefs, sessionId, effectiveMode, p2pConnection } = opts;
+  const { envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState } = opts;
   const envSourcedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!envRefs || envRefs.length === 0 || envSourcedRef.current === sessionId) {
@@ -58,21 +60,23 @@ function useSessionEnvSourcing(opts: {
       apply();
       return;
     }
-    if (p2pConnection) {
-      void p2pConnection.waitForConnection().then(apply).catch(() => {});
+    // P2P: env refs are applied once the agent transport is up (the socket
+    // being open is the legacy waitForConnection().then(apply) edge).
+    if (agentTerminalApi && connectionState === 'connected') {
+      apply();
     }
-  }, [envRefs, sessionId, effectiveMode, p2pConnection]);
+  }, [envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState]);
 }
 
 function useTransportFactory(opts: {
   effectiveMode: 'p2p' | 'relay';
   sessionName: string;
   sessionId: string;
-  p2pConnection: P2PConnection | null;
+  agentTerminalApi: TerminalAgentApi | null;
   serverConnection: RelayServerTransport;
   isAttached: () => boolean;
 }) {
-  const { effectiveMode, sessionName, sessionId, p2pConnection, serverConnection, isAttached } = opts;
+  const { effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection, isAttached } = opts;
   // Holds the render-fresh factory; the callback identity stays stable while
   // the closure sees current values. The ref itself starts null — the
   // previous dummy ConnectionManager initializer was constructed and discarded
@@ -80,12 +84,15 @@ function useTransportFactory(opts: {
   const transportFactoryRef = useRef<(() => TerminalTransport) | null>(null);
   const isAttachedRef = useRef(isAttached);
   isAttachedRef.current = isAttached;
+  // The P2P transport is a pure I/O channel: ConnectionManager binds to
+  // whatever agent terminal API the runtime currently owns (null while no
+  // candidate is built — e.g. relay mode — making the transport inert).
   transportFactoryRef.current = () =>
     new ConnectionManager({
       mode: effectiveMode,
       sessionName,
       sessionId,
-      p2pConnection: effectiveMode === 'p2p' ? p2pConnection ?? undefined : undefined,
+      agentApi: effectiveMode === 'p2p' ? agentTerminalApi ?? undefined : undefined,
       serverConnection: effectiveMode === 'relay' ? serverConnection : undefined,
       isAttached: () => isAttachedRef.current(),
     });
@@ -191,7 +198,7 @@ export function useTerminalOrchestration({
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
   // the banner, and disconnect cleanup. Rebuilt only when the service does.
   const relayServer = useMemo(() => relayServerHandle(wsService), [wsService]);
-  const { waitingForAddressPlan, p2pConnection, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
+  const { waitingForAddressPlan, agentTerminalApi, connectionState, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -212,9 +219,9 @@ export function useTerminalOrchestration({
   const handleDisconnect = useEndRelayOnDisconnect({
     effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
   });
-  useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, p2pConnection });
+  useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const transportFactory = useTransportFactory({
-    effectiveMode, sessionName, sessionId, p2pConnection, serverConnection: relayServer,
+    effectiveMode, sessionName, sessionId, agentTerminalApi, serverConnection: relayServer,
     isAttached: createAttachGate(() => terminalState),
   });
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
@@ -237,7 +244,7 @@ export function useTerminalOrchestration({
     sessionId, terminalState, reconnectCount, effectiveMode, serverConnection: relayServer,
   });
   const inputDisabled = banner !== 'none' || isSwitching;
-  const modeGateOk = !(effectiveMode === 'p2p' && !p2pConnection);
+  const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
   const transportKey = runtimeTransportKey ?? `${routeIntentEpoch}:${transportGeneration}:${activeUrl ?? ''}`;
 

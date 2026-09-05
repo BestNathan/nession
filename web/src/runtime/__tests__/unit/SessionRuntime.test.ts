@@ -130,8 +130,8 @@ describe('SessionRuntime', () => {
   it('creates P2P connection and file capability when address plan is ready', () => {
     const rt = new SessionRuntime(makeConfig());
     expect(rt.activeUrl).toBe('ws://a/ws');
-    expect(rt.getP2PConnection()).not.toBeNull();
-    expect(rt.getFileCapability()).not.toBeNull();
+    expect(rt.getAgentTerminalApi()).not.toBeNull();
+    expect(rt.getFilesApi()).not.toBeNull();
     rt.dispose();
   });
 
@@ -139,7 +139,7 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.updateContext({ forcedRelay: true });
     expect(rt.activeUrl).toBeNull();
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -155,7 +155,7 @@ describe('SessionRuntime', () => {
       addressPlan: { ready: false, urls: [] },
     }));
     expect(rt.waitingForAddressPlan).toBe(true);
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -204,8 +204,7 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     const states: string[] = [];
     const unsub = rt.subscribeConnectionState((s) => states.push(s));
-    const ws = (rt.getP2PConnection() as { waitForConnection: () => Promise<void> });
-    expect(ws).toBeTruthy();
+    expect(rt.getAgentTerminalApi()).not.toBeNull();
     unsub();
     rt.dispose();
   });
@@ -223,7 +222,7 @@ describe('SessionRuntime', () => {
   it('clears client when attachInfo becomes unavailable', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.updateContext({ attachInfo: null });
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -296,7 +295,7 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime(makeConfig());
     rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
     rt.attachController.dispatch({ type: 'ATTACH_ERROR', manualRoute: false });
-    expect(rt.getP2PConnection()).toBeNull();
+    expect(rt.getAgentTerminalApi()).toBeNull();
     rt.dispose();
   });
 
@@ -372,7 +371,7 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
       expect(rt.activeUrl).toBeNull();
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       rt.dispose();
     });
 
@@ -411,7 +410,7 @@ describe('SessionRuntime', () => {
 
       expect(events.filter((t) => t === 'force-relay')).toHaveLength(1);
       expect(rt.activeUrl).toBeNull();
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
       rt.dispose();
@@ -422,12 +421,12 @@ describe('SessionRuntime', () => {
   describe('session capability registry', () => {
     it('registers the file capability when the client is created and unregisters on teardown', () => {
       const rt = new SessionRuntime(makeConfig());
-      expect(rt.getSessionCapability('files')).toBe(rt.getFileCapability());
+      expect(rt.getSessionCapability('files')).toBe(rt.getFilesApi());
       expect(rt.getSessionCapability('files')).not.toBeNull();
 
       rt.updateContext({ forcedRelay: true });
       expect(rt.getSessionCapability('files')).toBeNull();
-      expect(rt.getFileCapability()).toBeNull();
+      expect(rt.getFilesApi()).toBeNull();
       rt.dispose();
     });
 
@@ -450,7 +449,7 @@ describe('SessionRuntime', () => {
       const rt = new SessionRuntime(makeConfig());
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       rt.updateContext({ lastResize: { cols: 100, rows: 40 } });
-      expect(rt.getSessionCapability('files')).toBe(rt.getFileCapability());
+      expect(rt.getSessionCapability('files')).toBe(rt.getFilesApi());
       rt.dispose();
     });
   });
@@ -460,7 +459,7 @@ describe('SessionRuntime', () => {
       vi.useRealTimers();
     });
 
-    it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', () => {
+    it('re-sends client.attach automatically after each attach timeout until the budget is exhausted (auto route)', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -468,22 +467,27 @@ describe('SessionRuntime', () => {
       expect(rt.attachState.phase).toBe('connecting');
       expect(countClientAttach()).toBe(1);
 
-      // No React/manual re-invocation — each timeout must schedule the next attach itself.
+      // No React/manual re-invocation — each timeout must schedule the next
+      // attach itself. The timeout now flows router timer → request rejection →
+      // feature mapping → controller resolution, so flush microtasks after each
+      // advance before the next attach can be counted.
       for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        await flushMicrotasks();
         expect(countClientAttach()).toBe(i + 2);
       }
       // Budget exhausted on the auto route: force-relay, P2P client torn down, no further attach.
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       expect(rt.attachState.phase).toBe('connecting');
-      expect(rt.getP2PConnection()).toBeNull();
+      expect(rt.getAgentTerminalApi()).toBeNull();
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       rt.dispose();
     });
 
-    it('stops retrying with failed on a manual route after the budget is exhausted', () => {
+    it('stops retrying with failed on a manual route after the budget is exhausted', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true, manualOverride: 'ws://a/ws' }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -492,16 +496,18 @@ describe('SessionRuntime', () => {
 
       for (let i = 0; i < P2P_MAX_RECONNECT; i += 1) {
         vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+        await flushMicrotasks();
       }
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(rt.attachState.phase).toBe('failed');
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS * 2);
       expect(countClientAttach()).toBe(P2P_MAX_RECONNECT + 1);
       rt.dispose();
     });
 
-    it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', () => {
+    it('updateContext churn during an in-flight attach neither cancels nor duplicates the attempt', async () => {
       vi.useFakeTimers();
       const rt = new SessionRuntime(makeConfig({ transportReady: true }));
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -513,6 +519,7 @@ describe('SessionRuntime', () => {
       expect(countClientAttach()).toBe(1);
 
       vi.advanceTimersByTime(ATTACH_TIMEOUT_MS);
+      await flushMicrotasks();
       expect(countClientAttach()).toBe(2);
       expect(rt.attachState.reconnectCount).toBe(1);
       rt.dispose();

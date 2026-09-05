@@ -141,7 +141,7 @@ describe('useSessionRuntime integration', () => {
     );
 
     await waitFor(() => {
-      expect(result.current.p2pConnection).not.toBeNull();
+      expect(result.current.agentTerminalApi).not.toBeNull();
       expect(instances.length).toBeGreaterThan(0);
     });
     expect(result.current.p2pState).toBe('connecting');
@@ -214,7 +214,7 @@ describe('useSessionRuntime integration', () => {
     rerender();
 
     await waitFor(() => {
-      expect(result.current.p2pConnection).not.toBeNull();
+      expect(result.current.agentTerminalApi).not.toBeNull();
     });
     await waitFor(() => {
       expect(result.current.fileOps).not.toBeNull();
@@ -248,7 +248,7 @@ describe('useSessionRuntime integration', () => {
     );
 
     await waitFor(() => {
-      expect(result.current.p2pConnection).not.toBeNull();
+      expect(result.current.agentTerminalApi).not.toBeNull();
     });
 
     act(() => {
@@ -256,7 +256,7 @@ describe('useSessionRuntime integration', () => {
     });
     rerender();
 
-    expect(result.current.p2pConnection).toBeNull();
+    expect(result.current.agentTerminalApi).toBeNull();
     expect(result.current.p2pState).toBe('disconnected');
     expect(result.current.runtime).not.toBeNull();
   });
@@ -379,7 +379,7 @@ describe('useSessionRuntime integration', () => {
 
     expect(store.get(forcedRelayAtom)).toBe(true);
     rerender();
-    expect(result.current.p2pConnection).toBeNull();
+    expect(result.current.agentTerminalApi).toBeNull();
   });
 
   it('mirrors transport-exhausted to failed terminal state on manual route', async () => {
@@ -425,7 +425,7 @@ describe('useSessionRuntime integration', () => {
       expect(result.current.runtime).not.toBeNull();
     });
     await waitFor(() => {
-      expect(result.current.p2pConnection).toBeNull();
+      expect(result.current.agentTerminalApi).toBeNull();
     });
     expect(result.current.runtime!.sessionId).toBe('agent:relay');
   });
@@ -517,7 +517,7 @@ describe('useSessionRuntime integration', () => {
     await waitFor(() => {
       expect(store.get(terminalSessionStateAtom)).toBe('attached');
     });
-    expect(result.current.p2pConnection).toBeNull();
+    expect(result.current.agentTerminalApi).toBeNull();
   });
 
   it('applies route-intent snapshot when config owner updates after subscribing', async () => {

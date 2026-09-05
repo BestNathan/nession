@@ -13,7 +13,8 @@ const { wsListeners } = vi.hoisted(() => ({
 vi.mock('@/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
-    p2pConnection: null,
+    agentTerminalApi: null,
+    connectionState: 'connected' as const,
     activeUrl: null,
   }),
 }));

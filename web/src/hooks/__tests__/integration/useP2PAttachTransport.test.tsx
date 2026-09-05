@@ -11,11 +11,14 @@ vi.mock('@/hooks/useSessionRuntime', () => ({
   useSessionRuntime: vi.fn(() => ({
     addressPlan: { ready: true, urls: ['ws://a/ws'] },
     activeUrl: 'ws://a/ws',
-    p2pConnection: null,
+    agentTerminalApi: null,
+    connectionState: 'disconnected' as const,
     p2pState: 'disconnected' as const,
     waitingForAddressPlan: false,
     fileOps: null,
     runtime: null,
+    transportKey: null,
+    snapshot: null,
   })),
 }));
 

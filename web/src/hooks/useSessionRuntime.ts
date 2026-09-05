@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
-import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pConnectionAtom, p2pStateAtom } from '@/atoms/connection';
+import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pStateAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
 import type { ConnectionState } from '@/services/socket/types';
-import type { P2PConnection } from '@/services/socket/p2pTypes';
+import type { TerminalAgentApi } from '@/features/terminal';
 import type { FileOps } from '@/services/fileOps';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
@@ -23,7 +23,19 @@ export interface UseSessionRuntimeOptions {
 export interface UseSessionRuntimeResult {
   runtime: SessionRuntime | null;
   snapshot: SessionRuntimeSnapshot | null;
-  p2pConnection: P2PConnection | null;
+  /**
+   * Live agent-transport terminal capability — null outside the P2P transport
+   * (relay mode, or no candidate selected yet). Connection identity changes
+   * flow through this field; consumers bind I/O to it, never to an atom.
+   */
+  agentTerminalApi: TerminalAgentApi | null;
+  /**
+   * Live agent-transport connection state. Gated to the P2P transport —
+   * 'disconnected' while relay mode owns the session (the relay transport's
+   * state is the serverConnection handle, not this).
+   */
+  connectionState: ConnectionState;
+  /** @deprecated Alias of connectionState — legacy consumers migrating. */
   p2pState: ConnectionState;
   fileOps: FileOps | null;
   activeUrl: string | null;
@@ -37,7 +49,7 @@ const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
   phase: 'idle',
   transportGeneration: 0,
   connectionState: 'disconnected',
-  p2pConnection: null,
+  agentTerminalApi: null,
   activeUrl: null,
   waitingForAddressPlan: false,
   transportReady: false,
@@ -99,8 +111,8 @@ function useRuntimeOwnership(
 }
 
 interface RuntimeConnectionSyncResult {
-  p2pConnection: P2PConnection | null;
-  p2pState: ConnectionState;
+  agentTerminalApi: TerminalAgentApi | null;
+  connectionState: ConnectionState;
 }
 
 function applyRuntimeMirrorSnapshot(opts: {
@@ -109,25 +121,26 @@ function applyRuntimeMirrorSnapshot(opts: {
   mirrorAttachPhase: boolean;
   setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
   setTransportGeneration: (n: number) => void;
-  setLocalP2p: (c: P2PConnection | null) => void;
-  setP2pConnection: (c: P2PConnection | null) => void;
+  setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   setConnectionState: (s: ConnectionState) => void;
   setP2pState: (s: ConnectionState) => void;
 }): void {
   const {
     snapshot, inP2PTransport, mirrorAttachPhase,
     setTerminalState, setTransportGeneration,
-    setLocalP2p, setP2pConnection, setConnectionState, setP2pState,
+    setAgentTerminalApi, setConnectionState, setP2pState,
   } = opts;
   if (mirrorAttachPhase) {
     setTerminalState(snapshot.phase);
   }
   setTransportGeneration(snapshot.transportGeneration);
-  const conn = inP2PTransport ? snapshot.p2pConnection : null;
-  setLocalP2p(conn);
-  setP2pConnection(conn);
-  setConnectionState(snapshot.connectionState);
-  setP2pState(snapshot.connectionState);
+  // Both mirrors are gated to the P2P transport: outside it the mirror already
+  // carries null / 'disconnected', and the gate keeps a stale value from
+  // leaking during the same-render flip.
+  setAgentTerminalApi(inP2PTransport ? snapshot.agentTerminalApi : null);
+  const state = inP2PTransport ? snapshot.connectionState : 'disconnected';
+  setConnectionState(state);
+  setP2pState(state);
 }
 
 function handleRuntimeEvent(
@@ -139,19 +152,19 @@ function handleRuntimeEvent(
     setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
     setTransportGeneration: (n: number) => void;
     setForcedRelay: (v: boolean) => void;
-    setLocalP2p: (c: P2PConnection | null) => void;
-    setP2pConnection: (c: P2PConnection | null) => void;
+    setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   },
 ): void {
   const {
     runtime, inP2PTransport, mirrorAttachPhase,
-    setTerminalState, setTransportGeneration, setForcedRelay, setLocalP2p, setP2pConnection,
+    setTerminalState, setTransportGeneration, setForcedRelay, setAgentTerminalApi,
   } = ctx;
   setTransportGeneration(runtime.currentTransportGeneration);
   if (event.type === 'next-candidate') {
     setTerminalState('connecting');
-    setLocalP2p(runtime.getP2PConnection());
-    setP2pConnection(runtime.getP2PConnection());
+    if (inP2PTransport) {
+      setAgentTerminalApi(runtime.getAgentTerminalApi());
+    }
     return;
   }
   if (event.type === 'force-relay') {
@@ -172,8 +185,7 @@ function handleRuntimeEvent(
       setTerminalState(event.phase);
     }
     if (inP2PTransport) {
-      setLocalP2p(runtime.getP2PConnection());
-      setP2pConnection(runtime.getP2PConnection());
+      setAgentTerminalApi(runtime.getAgentTerminalApi());
     }
   }
 }
@@ -185,7 +197,6 @@ function useRuntimeConnectionSync(opts: {
   inP2PTransport: boolean;
   configOwner: boolean;
   mirrorAttachPhase: boolean;
-  setP2pConnection: (c: P2PConnection | null) => void;
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
   setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
@@ -198,13 +209,12 @@ function useRuntimeConnectionSync(opts: {
     inP2PTransport,
     configOwner,
     mirrorAttachPhase,
-    setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
     setTransportGeneration,
   } = opts;
-  const [p2pConnection, setLocalP2p] = useState<P2PConnection | null>(null);
+  const [agentTerminalApi, setAgentTerminalApi] = useState<TerminalAgentApi | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   useEffect(() => {
@@ -215,9 +225,8 @@ function useRuntimeConnectionSync(opts: {
       || runtime.sessionId !== sessionId
       || runtimeConfig.sessionId !== sessionId
     ) {
-      setLocalP2p(null);
+      setAgentTerminalApi(null);
       setConnectionState('disconnected');
-      setP2pConnection(null);
       setP2pState('disconnected');
       return;
     }
@@ -227,8 +236,9 @@ function useRuntimeConnectionSync(opts: {
         setConnectionState(next);
         setP2pState(next);
         if (next === 'connecting') {
-          setLocalP2p(runtime.getP2PConnection());
-          setP2pConnection(runtime.getP2PConnection());
+          // A fresh transport is being built for a candidate — surface its
+          // terminal API so I/O binds to the new socket immediately.
+          setAgentTerminalApi(runtime.getAgentTerminalApi());
         }
       })
       : () => {};
@@ -241,8 +251,7 @@ function useRuntimeConnectionSync(opts: {
         setTerminalState,
         setTransportGeneration,
         setForcedRelay,
-        setLocalP2p,
-        setP2pConnection,
+        setAgentTerminalApi,
       });
     });
 
@@ -257,16 +266,13 @@ function useRuntimeConnectionSync(opts: {
         mirrorAttachPhase,
         setTerminalState,
         setTransportGeneration,
-        setLocalP2p,
-        setP2pConnection,
+        setAgentTerminalApi,
         setConnectionState,
         setP2pState,
       });
     } else {
-      const conn = inP2PTransport ? runtime.getP2PConnection() : null;
-      setLocalP2p(conn);
-      setP2pConnection(conn);
-      const initial = conn?.connectionState ?? 'disconnected';
+      setAgentTerminalApi(inP2PTransport ? runtime.getAgentTerminalApi() : null);
+      const initial = inP2PTransport ? runtime.connectionState : 'disconnected';
       setConnectionState(initial);
       setP2pState(initial);
       setTransportGeneration(runtime.currentTransportGeneration);
@@ -281,7 +287,6 @@ function useRuntimeConnectionSync(opts: {
     runtime,
     runtimeConfig,
     inP2PTransport,
-    setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
@@ -292,16 +297,15 @@ function useRuntimeConnectionSync(opts: {
 
   useEffect(() => {
     if (!inP2PTransport) {
-      setLocalP2p(null);
+      setAgentTerminalApi(null);
       setConnectionState('disconnected');
-      setP2pConnection(null);
       setP2pState('disconnected');
     }
-  }, [inP2PTransport, setP2pConnection, setP2pState]);
+  }, [inP2PTransport, setP2pState]);
 
   return {
-    p2pConnection: inP2PTransport ? p2pConnection : null,
-    p2pState: inP2PTransport ? connectionState : 'disconnected',
+    agentTerminalApi: inP2PTransport ? agentTerminalApi : null,
+    connectionState: inP2PTransport ? connectionState : 'disconnected',
   };
 }
 
@@ -316,7 +320,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
   const lastResize = useAtomValue(lastResizeAtom);
   const transportReady = useAtomValue(terminalTransportReadyAtom);
-  const setP2pConnection = useSetAtom(p2pConnectionAtom);
   const setP2pState = useSetAtom(p2pStateAtom);
   const setTerminalState = useSetAtom(terminalSessionStateAtom);
   const setTransportGeneration = useSetAtom(transportGenerationAtom);
@@ -372,7 +375,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);
   const snapshot = useSessionRuntimeSnapshot(runtime);
 
-  const { p2pConnection, p2pState } = useRuntimeConnectionSync({
+  const { agentTerminalApi, connectionState } = useRuntimeConnectionSync({
     sessionId,
     runtime,
     runtimeConfig,
@@ -381,7 +384,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     // Deprecated callers may still opt out of the atom mirror, but this does
     // not change runtime ownership or the transport protocol.
     mirrorAttachPhase: options.transportFirst ?? true,
-    setP2pConnection,
     setP2pState,
     setForcedRelay,
     setTerminalState,
@@ -389,17 +391,19 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
   });
 
   const fileOps: FileOps | null = useMemo(() => {
-    if (!inP2PTransport || !runtime || runtime.sessionId !== sessionId || !p2pConnection) {
+    if (!inP2PTransport || !runtime || runtime.sessionId !== sessionId || !agentTerminalApi) {
       return null;
     }
-    return runtime.getFileCapability()?.toFileOps() ?? null;
-  }, [inP2PTransport, runtime, sessionId, p2pConnection]);
+    return runtime.getFilesApi()?.toFileOps() ?? null;
+  }, [inP2PTransport, runtime, sessionId, agentTerminalApi]);
 
   return {
     runtime,
     snapshot,
-    p2pConnection,
-    p2pState,
+    agentTerminalApi,
+    connectionState,
+    // Legacy alias — same gated value; consumers migrate to connectionState.
+    p2pState: connectionState,
     fileOps,
     activeUrl: runtime?.sessionId === sessionId && inP2PTransport ? runtime.activeUrl ?? null : null,
     transportKey: runtime?.sessionId === sessionId ? runtime.transportKey : null,
