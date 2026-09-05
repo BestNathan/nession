@@ -3,6 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   capsulePhysKeyGridGapClass,
+  capsuleArrowKeyButtonClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyRowClass,
@@ -32,7 +33,7 @@ export function PhysKeyRow({
   onChainStart,
   onChainAdd,
 }: PhysKeyRowProps) {
-  const KeyButton = ({ keyDef }: { keyDef: PhysKey }) => {
+  const KeyButton = ({ keyDef, isArrow = false }: { keyDef: PhysKey; isArrow?: boolean }) => {
     const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const iconEl =
@@ -78,7 +79,7 @@ export function PhysKeyRow({
       <Button
         variant="ghost"
         size="sm"
-        className={capsulePhysKeyButtonClass}
+        className={isArrow ? capsuleArrowKeyButtonClass : capsulePhysKeyButtonClass}
         disabled={disabled}
         data-testid={`phys-key-${keyDef.label}`}
         onPointerDown={handlePointerDown}
@@ -94,18 +95,24 @@ export function PhysKeyRow({
 
   return (
     <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
-      <div className={cn('grid w-full grid-cols-5', capsulePhysKeyGridGapClass)}>
+      <div
+        data-testid="phys-key-grid"
+        className={cn('grid min-w-0 flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}
+      >
         {LEFT_KEYS.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
       </div>
-      <div className={cn('grid w-fit grid-cols-3 grid-rows-2 self-center', capsulePhysKeyGridGapClass)}>
+      <div
+        data-testid="arrow-key-grid"
+        className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}
+      >
         <div />
-        <KeyButton keyDef={ARROW_KEYS[0]} />
+        <KeyButton keyDef={ARROW_KEYS[0]} isArrow />
         <div />
-        <KeyButton keyDef={ARROW_KEYS[1]} />
-        <KeyButton keyDef={ARROW_KEYS[2]} />
-        <KeyButton keyDef={ARROW_KEYS[3]} />
+        <KeyButton keyDef={ARROW_KEYS[1]} isArrow />
+        <KeyButton keyDef={ARROW_KEYS[2]} isArrow />
+        <KeyButton keyDef={ARROW_KEYS[3]} isArrow />
       </div>
     </div>
   );
