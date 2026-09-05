@@ -58,8 +58,13 @@ describe('CapsuleCommandsPopover', () => {
         showPhysKeys
       />,
     );
-    expect(screen.getByTestId('phys-key-row')).toBeInTheDocument();
-    expect(screen.queryByTestId('phys-key-overflow')).not.toBeInTheDocument();
+    const physKeyRow = screen.getByTestId('phys-key-row');
+
+    expect(physKeyRow).toBeInTheDocument();
+    expect(physKeyRow.className).toContain('flex-row');
+
+    const arrowKey = screen.getByTestId('phys-key-↑');
+    expect(arrowKey.className).toContain('min-w-0');
 
     for (const keyDef of [...LEFT_KEYS, ...ARROW_KEYS]) {
       expect(screen.getByTestId(`phys-key-${keyDef.label}`)).toBeInTheDocument();
@@ -71,6 +76,21 @@ describe('CapsuleCommandsPopover', () => {
     expect(addCommand).not.toBeDisabled();
     await userEvent.click(addCommand);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('keeps shortcut and arrow regions sized within the physical-key row', () => {
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={vi.fn()}
+        sendText={sendText}
+        showPhysKeys
+      />,
+    );
+
+    const physKeyRow = screen.getByTestId('phys-key-row');
+    expect(physKeyRow.children[0].className).toContain('flex-1');
+    expect(physKeyRow.children[1].className).toContain('shrink-0');
   });
 
   it('runs preset command on click', async () => {
