@@ -1,28 +1,19 @@
 import { useRef, useCallback } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, MoreHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  capsuleDropdownItemClass,
-  capsuleDropdownMinWidthClass,
+  capsulePhysKeyGridGapClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyIconClass,
-  capsulePhysKeyOverflowClass,
   capsulePhysKeyRowClass,
-  capsulePhysKeyScrollClass,
 } from '@/session-first/capsule/capsuleStyles';
 import {
   ARROW_KEYS,
   CHAIN_LONG_PRESS_MS,
   LEFT_KEYS,
-  QUICK_MOBILE_KEYS,
   type PhysKey,
 } from '@/session-first/capsule/physKeys';
+import { cn } from '@/lib/utils';
 
 interface PhysKeyRowProps {
   onKey: (seq: string) => void;
@@ -41,14 +32,6 @@ export function PhysKeyRow({
   onChainStart,
   onChainAdd,
 }: PhysKeyRowProps) {
-  const visibleKeys = QUICK_MOBILE_KEYS;
-  const dropdownKeys = [
-    ...LEFT_KEYS.filter(
-      (keyDef) => !visibleKeys.some((visibleKey) => visibleKey.seq === keyDef.seq),
-    ),
-    ...ARROW_KEYS,
-  ];
-
   const KeyButton = ({ keyDef }: { keyDef: PhysKey }) => {
     const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -111,43 +94,19 @@ export function PhysKeyRow({
 
   return (
     <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
-      <div data-testid="phys-key-scroll" className={capsulePhysKeyScrollClass}>
-        {visibleKeys.map((keyDef) => (
+      <div className={cn('grid min-w-0 flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}>
+        {LEFT_KEYS.map((keyDef) => (
           <KeyButton key={keyDef.label} keyDef={keyDef} />
         ))}
       </div>
-
-      {dropdownKeys.length > 0 ? (
-        <div className={capsulePhysKeyOverflowClass}>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={capsulePhysKeyButtonClass}
-                  disabled={disabled}
-                  data-testid="phys-key-overflow"
-                  aria-label="More keys"
-                >
-                  <MoreHorizontal className={capsulePhysKeyIconClass} />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className={capsuleDropdownMinWidthClass}>
-              {dropdownKeys.map((keyDef) => (
-                <DropdownMenuItem
-                  key={keyDef.label}
-                  onClick={() => onKey(keyDef.seq)}
-                  className={capsuleDropdownItemClass}
-                >
-                  {keyDef.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
+      <div className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}>
+        <div />
+        <KeyButton keyDef={ARROW_KEYS[0]} />
+        <div />
+        <KeyButton keyDef={ARROW_KEYS[1]} />
+        <KeyButton keyDef={ARROW_KEYS[2]} />
+        <KeyButton keyDef={ARROW_KEYS[3]} />
+      </div>
     </div>
   );
 }

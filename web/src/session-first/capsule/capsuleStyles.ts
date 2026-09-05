@@ -95,10 +95,7 @@ export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-ico
 export const capsulePhysKeyRowClass =
   'flex justify-between gap-[length:var(--composer-popover-gap)] border-b border-border/60 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-phys-key-pad-y)]';
 
-export const capsulePhysKeyScrollClass =
-  'flex min-w-0 flex-1 items-center gap-[length:var(--composer-phys-key-grid-gap)] overflow-x-auto scrollbar-none';
-
-export const capsulePhysKeyOverflowClass = 'shrink-0';
+export const capsulePhysKeyGridGapClass = 'gap-[length:var(--composer-phys-key-grid-gap)]';
 
 export const capsuleChainBarClass =
   'flex items-center gap-[length:var(--composer-popover-gap)] border-b border-border/60 bg-primary/10 px-[length:var(--composer-phys-key-pad-x)] py-[length:var(--composer-popover-inner-pad)] text-[length:var(--composer-font-size)]';
