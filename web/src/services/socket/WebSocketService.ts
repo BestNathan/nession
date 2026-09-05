@@ -1,0 +1,434 @@
+import { MessageRouterImpl } from './MessageRouter';
+import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  DEFAULT_RECONNECT_BASE_DELAY,
+  reconnectDelayMs,
+} from './agentSocketUtils';
+import type {
+  CapabilityPlugin,
+  ConnectionState,
+  HandshakeSurface,
+  PluginSurface,
+  RequestOptions,
+  SocketMessage,
+  WebSocketServiceOptions,
+} from './types';
+
+interface RegisteredPlugin {
+  plugin: CapabilityPlugin;
+  teardown: () => void;
+}
+
+type ConnectionWaiter = {
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
+
+/**
+ * The single WebSocket transport for the web UI.
+ *
+ * Lifecycle is SocketCore's: reconnect with exponential backoff, generation
+ * guard for stale socket events, request correlation via MessageRouterImpl.
+ * Three differences make it the transport for capability plugins:
+ *
+ * 1. Readiness gate — when `options.handshake` is provided, the state stays
+ *    'connecting' until the handshake succeeds; `connect()`/`waitForConnection()`
+ *    only resolve post-handshake and `request()` waits behind the same gate.
+ * 2. Plugin registry — `CapabilityPlugin`s install once per service lifetime
+ *    (never on reconnect) and are torn down on `dispose()`.
+ * 3. Envelope — `send(type, payload)` wraps the payload in the
+ *    `SocketMessage` envelope instead of exposing raw frames.
+ *
+ * The handshake runs again for every physical socket (each reconnect), and is
+ * given a {@link HandshakeSurface} whose `request()` bypasses the readiness
+ * gate — the socket is already OPEN at that point.
+ */
+export class WebSocketService implements PluginSurface {
+  private ws: WebSocket | null = null;
+  private generation = 0;
+  private reconnectAttempt = 0;
+  private state: ConnectionState = 'disconnected';
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectPromise: Promise<void> | null = null;
+  private userClosed = false;
+  private disposed = false;
+  private readonly stateListeners = new Set<(state: ConnectionState) => void>();
+  private readonly waiters = new Set<ConnectionWaiter>();
+  private idCounter = 0;
+  private readonly plugins = new Map<string, RegisteredPlugin>();
+  private readonly router: MessageRouterImpl;
+
+  constructor(
+    private readonly url: string,
+    plugins: CapabilityPlugin[] = [],
+    private readonly options: WebSocketServiceOptions = {},
+  ) {
+    this.router = new MessageRouterImpl({
+      send: (message) => this.sendRaw(message),
+      generateId: () => this.generateMessageId(),
+    });
+    for (const plugin of plugins) {
+      this.use(plugin);
+    }
+  }
+
+  get connectionState(): ConnectionState {
+    return this.state;
+  }
+
+  get reconnectAttempts(): number {
+    return this.reconnectAttempt;
+  }
+
+  getUrl(): string {
+    return this.url;
+  }
+
+  connect(): Promise<void> {
+    if (this.disposed || this.userClosed) {
+      return Promise.reject(new Error('WebSocketService is closed'));
+    }
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+    if (this.ws?.readyState === WebSocket.OPEN && this.state === 'connected') {
+      return Promise.resolve();
+    }
+
+    this.setState('connecting');
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      try {
+        this.openSocket(resolve, reject);
+      } catch (error) {
+        this.connectPromise = null;
+        this.setState('disconnected');
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    return this.connectPromise;
+  }
+
+  /** Stop the transport; plugins stay registered for a future connect(). */
+  disconnect(): void {
+    this.userClosed = true;
+    this.clearReconnectTimer();
+    this.teardownSocket();
+    this.connectPromise = null;
+    const error = new Error('Connection lost');
+    this.router.failPending(error);
+    this.rejectWaiters(error);
+    this.setState('disconnected');
+  }
+
+  /** Permanently stop the transport: plugins are torn down (each once). */
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.userClosed = true;
+    this.clearReconnectTimer();
+    this.teardownSocket();
+    this.connectPromise = null;
+    this.router.dispose();
+    this.rejectWaiters(new Error('WebSocketService disposed'));
+    for (const entry of this.plugins.values()) {
+      entry.teardown();
+    }
+    this.plugins.clear();
+    this.stateListeners.clear();
+  }
+
+  /** Install a capability plugin; a same-name plugin is replaced (old teardown first). */
+  use(plugin: CapabilityPlugin): void {
+    this.unregister(plugin.name);
+    const teardown = plugin.install(this);
+    this.plugins.set(plugin.name, { plugin, teardown });
+  }
+
+  /** Uninstall a plugin by name; returns false when nothing was registered. */
+  unregister(name: string): boolean {
+    const entry = this.plugins.get(name);
+    if (!entry) {
+      return false;
+    }
+    this.plugins.delete(name);
+    entry.teardown();
+    return true;
+  }
+
+  /** Envelope-send a message; only fails when the physical socket is gone. */
+  send(type: string, payload: Record<string, unknown>): void {
+    if (this.disposed) {
+      throw new Error('WebSocketService disposed');
+    }
+    this.sendRaw({
+      msg_type: type,
+      id: this.generateMessageId(),
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  request<T>(
+    type: string,
+    payload: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    if (this.disposed) {
+      return Promise.reject(new Error('WebSocketService disposed'));
+    }
+    const timeoutMs = options?.timeoutMs ?? 15_000;
+    if (this.state === 'connected') {
+      return this.router.request<T>(type, payload, { timeoutMs });
+    }
+    if (this.state === 'disconnected') {
+      return Promise.reject(new Error('Connection lost'));
+    }
+
+    // Not ready yet: wait behind the readiness gate, then send with the
+    // remaining time budget.
+    const startedAt = Date.now();
+    return this.waitForConnection(timeoutMs).then(() => {
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      if (remaining <= 0) {
+        return Promise.reject(new Error(`Request timeout: ${type}`));
+      }
+      return this.router.request<T>(type, payload, { timeoutMs: remaining });
+    });
+  }
+
+  subscribe(
+    type: string,
+    handler: (payload: unknown, raw: SocketMessage) => void,
+  ): () => void {
+    return this.router.subscribe(type, handler);
+  }
+
+  onBinary(handler: (data: ArrayBuffer) => void): () => void {
+    return this.router.onBinary(handler);
+  }
+
+  waitForConnection(timeoutMs = 15_000): Promise<void> {
+    if (this.disposed) {
+      return Promise.reject(new Error('WebSocketService disposed'));
+    }
+    if (this.state === 'connected') {
+      return Promise.resolve();
+    }
+    if (this.state === 'disconnected') {
+      return Promise.reject(new Error('Connection lost'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter: ConnectionWaiter = {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      };
+      const timer = setTimeout(() => {
+        this.waiters.delete(waiter);
+        reject(new Error('Connection timeout'));
+      }, timeoutMs);
+      this.waiters.add(waiter);
+    });
+  }
+
+  onConnectionStateChange(handler: (state: ConnectionState) => void): () => void {
+    this.stateListeners.add(handler);
+    return () => this.stateListeners.delete(handler);
+  }
+
+  private sendRaw(message: SocketMessage): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+    this.ws.send(JSON.stringify(message));
+  }
+
+  private openSocket(resolve: () => void, reject: (error: Error) => void): void {
+    const myGeneration = ++this.generation;
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      if (this.generation !== myGeneration) {
+        ws.close();
+        return;
+      }
+      this.reconnectAttempt = 0;
+      const handshake = this.options.handshake;
+      if (!handshake) {
+        this.setState('connected');
+        this.connectPromise = null;
+        resolve();
+        return;
+      }
+
+      // Readiness gate: stay 'connecting' until the handshake completes.
+      // The surface's request() bypasses the state gate — the socket is
+      // already OPEN and waiting on 'connected' would self-deadlock.
+      const surface: HandshakeSurface = {
+        send: (type, payload) => {
+          this.router.send({
+            msg_type: type,
+            id: this.generateMessageId(),
+            timestamp: Date.now(),
+            payload,
+          });
+        },
+        request: <T>(type: string, payload: Record<string, unknown>, options?: RequestOptions) =>
+          this.router.request<T>(type, payload, options),
+      };
+      handshake(surface).then(() => {
+        // The socket that ran this handshake must still be the live one.
+        // The generation guard covers a superseded physical socket; the
+        // readyState guard covers a loss before the reconnect timer fired.
+        if (
+          this.generation !== myGeneration
+          || this.ws !== ws
+          || ws.readyState !== WebSocket.OPEN
+        ) {
+          return;
+        }
+        this.connectPromise = null;
+        this.setState('connected');
+        resolve();
+      }).catch((error) => {
+        if (this.generation !== myGeneration) {
+          return;
+        }
+        this.connectPromise = null;
+        reject(error instanceof Error ? error : new Error(String(error)));
+        this.teardownSocket();
+        this.handleSocketLoss();
+      });
+    };
+
+    ws.onmessage = (event) => {
+      if (this.generation !== myGeneration) {
+        return;
+      }
+      try {
+        if (typeof event.data === 'string') {
+          const message = JSON.parse(event.data) as SocketMessage;
+          this.router.handleIncoming(message);
+        } else if (event.data instanceof ArrayBuffer) {
+          this.router.handleBinary(event.data);
+        }
+      } catch (error) {
+        this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    ws.onerror = () => {
+      if (this.generation !== myGeneration) {
+        return;
+      }
+      const error = new Error('WebSocket connection failed');
+      if (this.connectPromise) {
+        this.connectPromise = null;
+        reject(error);
+        this.teardownSocket();
+        this.router.failPending(error);
+        this.rejectWaiters(error);
+        this.setState('disconnected');
+      } else {
+        this.options.onError?.(error);
+      }
+    };
+
+    ws.onclose = () => {
+      if (this.generation !== myGeneration || this.userClosed) {
+        return;
+      }
+      if (this.connectPromise) {
+        this.connectPromise = null;
+        reject(new Error('Connection lost'));
+      }
+      this.handleSocketLoss();
+    };
+  }
+
+  private handleSocketLoss(): void {
+    const error = new Error('Connection lost');
+    this.router.failPending(error);
+    const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
+    if (this.reconnectAttempt >= maxAttempts) {
+      console.error('Max reconnection attempts reached');
+      this.setState('disconnected');
+      this.rejectWaiters(new Error('Connection lost'));
+      return;
+    }
+
+    this.reconnectAttempt += 1;
+    this.setState('reconnecting');
+    const baseDelay = this.options.reconnectBaseDelay ?? DEFAULT_RECONNECT_BASE_DELAY;
+    const delay = reconnectDelayMs(this.reconnectAttempt - 1, baseDelay);
+    console.log(`Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempt})`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.disposed && !this.userClosed) {
+        void this.connect().catch(() => {});
+      }
+    }, delay);
+  }
+
+  private setState(next: ConnectionState): void {
+    if (this.state === next) {
+      return;
+    }
+    this.state = next;
+    for (const listener of this.stateListeners) {
+      listener(next);
+    }
+    if (next === 'connected') {
+      const pending = [...this.waiters];
+      this.waiters.clear();
+      for (const waiter of pending) {
+        waiter.resolve();
+      }
+    }
+  }
+
+  private rejectWaiters(error: Error): void {
+    const pending = [...this.waiters];
+    this.waiters.clear();
+    for (const waiter of pending) {
+      waiter.reject(error);
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private teardownSocket(): void {
+    if (!this.ws) {
+      return;
+    }
+    this.ws.onopen = null;
+    this.ws.onerror = null;
+    this.ws.onmessage = null;
+    this.ws.onclose = null;
+    this.ws.close();
+    this.ws = null;
+  }
+
+  private generateMessageId(): string {
+    this.idCounter += 1;
+    const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    return `msg_${this.idCounter}_${random}`;
+  }
+}

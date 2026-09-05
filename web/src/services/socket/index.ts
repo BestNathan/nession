@@ -1,6 +1,7 @@
 export { MessageRouterImpl } from './MessageRouter';
 export { SocketCore } from './SocketCore';
 export type { SocketCoreConfig } from './SocketCore';
+export { WebSocketService } from './WebSocketService';
 export { AgentSocketClient } from './AgentSocketClient';
 export { ServerSocketClient } from './ServerSocketClient';
 export {
@@ -12,9 +13,13 @@ export {
 } from './agentSocketUtils';
 export type {
   AgentConnection,
+  CapabilityPlugin,
   ConnectionState,
+  HandshakeSurface,
   MessageRouter,
+  PluginSurface,
   RequestOptions,
   SocketClient,
   SocketMessage,
+  WebSocketServiceOptions,
 } from './types';

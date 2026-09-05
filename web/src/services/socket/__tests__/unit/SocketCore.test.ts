@@ -1,37 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SocketCore } from '@/services/socket/SocketCore';
-
-class MockWebSocket {
-  static OPEN = 1;
-  static CONNECTING = 0;
-  static instances: MockWebSocket[] = [];
-  readyState = MockWebSocket.CONNECTING;
-  binaryType = '';
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null;
-  send = vi.fn();
-  close = vi.fn();
-
-  constructor(public readonly url: string) {
-    MockWebSocket.instances.push(this);
-  }
-
-  open(): void {
-    this.readyState = MockWebSocket.OPEN;
-    this.onopen?.();
-  }
-
-  message(data: string): void {
-    this.onmessage?.({ data });
-  }
-}
+import { MockWebSocket } from '@/test/mockWebSocket';
 
 describe('SocketCore', () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('provides one request/message transport core for an endpoint', async () => {
