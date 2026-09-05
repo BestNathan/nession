@@ -91,7 +91,7 @@ export const capsulePhysKeyButtonClass =
   'h-[length:var(--composer-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-1 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
 export const capsuleArrowKeyButtonClass =
-  'h-[length:var(--composer-phys-key-height)] w-[length:var(--composer-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
+  'h-[length:var(--composer-phys-key-height)] w-[var(--composer-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-icon-size)]';
 
