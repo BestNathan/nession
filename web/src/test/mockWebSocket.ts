@@ -56,6 +56,15 @@ export class MockWebSocket {
     this.onclose?.();
   }
 
+  /**
+   * The connection attempt fails (network error, server refused): onerror
+   * fires. Mirrors the browser where readyState does not move on its own —
+   * a close event (serverClose) may follow.
+   */
+  error(): void {
+    this.onerror?.();
+  }
+
   /** Deliver a server frame: string is treated as text, ArrayBuffer as binary. */
   message(data: string | ArrayBuffer): void {
     if (this._readyState !== MockWebSocket.OPEN) {

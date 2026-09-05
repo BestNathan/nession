@@ -465,13 +465,14 @@ describe('WebSocketService', () => {
     expect(service.connectionState).toBe('connecting');
 
     service.dispose();
+    await expect(service.connect()).rejects.toThrow('WebSocketService disposed');
     await expect(outcome).resolves.toBe('WebSocketService disposed');
 
-    // The handshake completing after dispose trips the socket-identity guard
-    // and must not disturb anything (no late settle, no state flip).
+    // The handshake completing after dispose trips the socket-identity guard:
+    // no late settle, and the state stays where dispose() left it.
     gate.resolve();
     await drainMicrotasks();
-    expect(service.connectionState).toBe('connecting');
+    expect(service.connectionState).toBe('disconnected');
   });
 
   it('disconnect() rejects an in-flight connect() and is terminal for later connect() calls', async () => {
@@ -498,6 +499,59 @@ describe('WebSocketService', () => {
     gate.reject(new Error('late failure'));
     await drainMicrotasks();
     expect(service.connectionState).toBe('disconnected');
+  });
+
+  it('rejects connect(), waiters and queued requests when the socket errors while connecting', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    const outcome = connected.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+    const waiting = service.waitForConnection(5_000);
+    const request = service.request('agents.list', { all: true });
+
+    const socket = MockWebSocket.instances[0];
+    socket.error(); // attempt fails: onerror fires, no close event follows
+
+    await expect(outcome).resolves.toBe('WebSocket connection failed');
+    await expect(waiting).rejects.toThrow('WebSocket connection failed');
+    await expect(request).rejects.toThrow('WebSocket connection failed');
+    expect(socket.send).not.toHaveBeenCalled();
+    expect(service.connectionState).toBe('disconnected');
+    expect(service.reconnectAttempts).toBe(0);
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('does not double-process an onerror followed by onclose while connecting', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    const outcome = connected.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+
+    const socket = MockWebSocket.instances[0];
+    socket.error();
+    // In the browser a close event may follow the error. The error path
+    // already tore the socket down (handlers nulled), so the close must not
+    // reject twice or schedule a reconnect — a second socket after the
+    // backoff would betray double processing.
+    socket.serverClose();
+    await flushTimers(50);
+
+    await expect(outcome).resolves.toBe('WebSocket connection failed');
+    expect(service.connectionState).toBe('disconnected');
+    expect(service.reconnectAttempts).toBe(0);
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it('envelopes send() frames with a unique id, timestamp and msg_type', async () => {

@@ -86,7 +86,10 @@ export class WebSocketService implements PluginSurface {
   }
 
   connect(): Promise<void> {
-    if (this.disposed || this.userClosed) {
+    if (this.disposed) {
+      return Promise.reject(new Error('WebSocketService disposed'));
+    }
+    if (this.userClosed) {
       return Promise.reject(new Error('WebSocketService is closed'));
     }
     if (this.connectPromise) {
@@ -121,7 +124,7 @@ export class WebSocketService implements PluginSurface {
     this.userClosed = true;
     this.clearReconnectTimer();
     this.teardownSocket();
-    this.settleConnect(new Error('WebSocketService is closed'));
+    this.rejectPendingConnect(new Error('WebSocketService is closed'));
     const error = new Error('Connection lost');
     this.router.failPending(error);
     this.rejectWaiters(error);
@@ -129,8 +132,9 @@ export class WebSocketService implements PluginSurface {
   }
 
   /**
-   * Permanently stop the transport: plugins are torn down (each once) and an
-   * in-flight `connect()` is rejected with 'WebSocketService disposed'.
+   * Permanently stop the transport: plugins are torn down (each once), an
+   * in-flight `connect()` is rejected with 'WebSocketService disposed', and
+   * the state ends at 'disconnected' (never left frozen mid-connect).
    */
   dispose(): void {
     if (this.disposed) {
@@ -140,9 +144,10 @@ export class WebSocketService implements PluginSurface {
     this.userClosed = true;
     this.clearReconnectTimer();
     this.teardownSocket();
-    this.settleConnect(new Error('WebSocketService disposed'));
+    this.rejectPendingConnect(new Error('WebSocketService disposed'));
     this.router.dispose();
     this.rejectWaiters(new Error('WebSocketService disposed'));
+    this.setState('disconnected');
     for (const entry of this.plugins.values()) {
       entry.teardown();
     }
@@ -168,7 +173,11 @@ export class WebSocketService implements PluginSurface {
     return true;
   }
 
-  /** Envelope-send a message; only fails when the physical socket is gone. */
+  /**
+   * Envelope-send a message. Throws 'WebSocketService disposed' when the
+   * service was disposed, and 'WebSocket not connected' when the physical
+   * socket is gone or not yet OPEN.
+   */
   send(type: string, payload: Record<string, unknown>): void {
     if (this.disposed) {
       throw new Error('WebSocketService disposed');
@@ -440,7 +449,7 @@ export class WebSocketService implements PluginSurface {
    * ws handlers that would otherwise settle it, and a handshake completing
    * after teardown trips the socket-identity guard and returns silently.
    */
-  private settleConnect(error: Error): void {
+  private rejectPendingConnect(error: Error): void {
     if (!this.connectPromise) {
       return;
     }

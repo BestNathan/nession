@@ -51,4 +51,13 @@ describe('SocketCore', () => {
     await Promise.all([first, second]);
     expect(secondResolved).toBe(true);
   });
+
+  it('rejects a pending connect when the connection attempt errors', async () => {
+    const core = new SocketCore({ url: 'ws://agent/ws?token=t', maxReconnectAttempts: 0 });
+    const connected = core.connect();
+    MockWebSocket.instances[0].error();
+
+    await expect(connected).rejects.toThrow('WebSocket connection failed');
+    expect(core.connectionState).toBe('disconnected');
+  });
 });
