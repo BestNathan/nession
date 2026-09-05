@@ -49,7 +49,7 @@ describe('CapsuleCommandsPopover', () => {
     expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
-  it('renders the complete physical-key layout in the expanded panel', () => {
+  it('renders the complete physical-key layout and command footer in the expanded panel', async () => {
     render(
       <CapsuleCommandsPopover
         open
@@ -64,6 +64,13 @@ describe('CapsuleCommandsPopover', () => {
     for (const keyDef of [...LEFT_KEYS, ...ARROW_KEYS]) {
       expect(screen.getByTestId(`phys-key-${keyDef.label}`)).toBeInTheDocument();
     }
+
+    expect(screen.getByRole('button', { name: /Ctrl\+C/ })).toBeInTheDocument();
+    const addCommand = screen.getByTestId('capsule-add-command');
+    expect(addCommand).toBeInTheDocument();
+    expect(addCommand).not.toBeDisabled();
+    await userEvent.click(addCommand);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('runs preset command on click', async () => {
