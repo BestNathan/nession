@@ -144,6 +144,9 @@ export class SessionRuntime {
     }
     this.transportReady = ready;
     if (ready) {
+      if (this.config.forcedRelay && this.attachState.phase === 'idle') {
+        this.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      }
       this.maybeStartP2PAttach();
       this.driveRelayAttach();
     }

@@ -292,6 +292,22 @@ describe('SessionRuntime', () => {
 
 
   describe('relay reconnect across intra-budget server-ws loss', () => {
+    it('starts relay when the viewport is already ready before session lifecycle effects run', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        transportReady: false,
+        serverConnection,
+      }));
+
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(rt.attachState.phase).toBe('attached');
+      rt.dispose();
+    });
+
     it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, transportReady: true, serverConnection }));
