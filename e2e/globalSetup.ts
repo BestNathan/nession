@@ -28,6 +28,7 @@ export default async function setup(): Promise<() => Promise<void>> {
   //  - the agent has a valid working dir to spawn sessions into
   //  - the server has a place to put its SQLite db and log files
   mkdirSync(E2E_RUN, { recursive: true });
+  mkdirSync(E2E_TMUX_SOCKET, { recursive: true });
 
   // ── Kill any tmux server at the isolated socket ────────────────────────
   // Targets only the E2E socket path — never the user's real tmux.
