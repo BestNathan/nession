@@ -231,12 +231,27 @@ describe('SessionFirstWorkspace spatial shell', () => {
   it('navigates to Claude Code from the app dock and back to terminal', async () => {
     const user = userEvent.setup();
     render(<AppNavigationHarness />);
+    const pageTrack = screen.getByTestId('app-spatial-page-terminal').parentElement;
+    if (!pageTrack) {
+      throw new Error('App spatial page track is missing');
+    }
+    const pageWidth = Number.parseFloat(pageTrack.style.width) / 3;
+    const expectActivePage = (index: 1 | 2) => {
+      expect(pageTrack.style.transform).toBe(`translateX(${-index * pageWidth}px)`);
+    };
+
+    expectActivePage(1);
 
     await user.click(screen.getByTestId('app-header-workspace'));
+    await waitFor(() => {
+      expectActivePage(2);
+    });
     await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('app-tool-back'));
-    expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
+    await waitFor(() => {
+      expectActivePage(1);
+    });
   });
 });
