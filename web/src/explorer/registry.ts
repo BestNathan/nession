@@ -11,6 +11,13 @@ export function registerExtension(extension: ExplorerExtension): void {
   extensions.push(extension);
 }
 
+export function unregisterExtension(id: string): void {
+  const index = extensions.findIndex((extension) => extension.id === id);
+  if (index >= 0) {
+    extensions.splice(index, 1);
+  }
+}
+
 export function getExtensions(): readonly ExplorerExtension[] {
   return extensions;
 }

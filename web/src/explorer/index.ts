@@ -1,3 +1,4 @@
+export { Explorer } from './Explorer';
 export { ExplorerStore, ROOT_ID } from './ExplorerStore';
 export type { ExplorerEvent, ExplorerFlatNode, ExplorerStoreSnapshot } from './ExplorerStore';
 export { useExplorerStore } from './hooks/useExplorerStore';
@@ -13,6 +14,7 @@ export {
   getDecorationProviders,
   getExtensions,
   registerExtension,
+  unregisterExtension,
 } from './registry';
 export { createCoreExplorerExtension } from './commands/coreContributions';
 export { ExplorerNodeRenderer } from './renderers/ExplorerNodeRenderer';

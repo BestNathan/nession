@@ -31,17 +31,27 @@ export class ExplorerStore {
   private readonly loadStateById = new Map<NodeId, LoadState>();
   private activeId: NodeId | null = null;
   private revision = 0;
+  private cachedRevision = -1;
+  private cachedSnapshot: ExplorerStoreSnapshot | null = null;
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly provider: ExplorerDataProvider) {}
 
-  getSnapshot = (): ExplorerStoreSnapshot => ({
-    revision: this.revision,
-    flatData: this.getFlatData(),
-    expandedIds: this.expandedIds,
-    selectedIds: this.selectedIds,
-    activeId: this.activeId,
-  });
+  getSnapshot = (): ExplorerStoreSnapshot => {
+    if (this.cachedSnapshot !== null && this.cachedRevision === this.revision) {
+      return this.cachedSnapshot;
+    }
+
+    this.cachedSnapshot = {
+      revision: this.revision,
+      flatData: this.getFlatData(),
+      expandedIds: this.expandedIds,
+      selectedIds: this.selectedIds,
+      activeId: this.activeId,
+    };
+    this.cachedRevision = this.revision;
+    return this.cachedSnapshot;
+  };
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -73,6 +83,10 @@ export class ExplorerStore {
 
   getChildren(nodeId: NodeId): NodeId[] {
     return [...(this.childrenById.get(nodeId) ?? [])];
+  }
+
+  getNode(nodeId: NodeId): ExplorerNode | undefined {
+    return this.nodesById.get(nodeId);
   }
 
   async refresh(nodeId: NodeId): Promise<void> {

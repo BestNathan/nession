@@ -1,5 +1,6 @@
 import type { FileEntry } from '@/features/files';
 
+import type { ExplorerExtension } from './commands/types';
 import type { ExplorerDataProvider } from './providers/types';
 
 export type NodeId = string;
@@ -26,10 +27,15 @@ export interface ExplorerNode {
   };
 }
 
-/** Public Explorer component props — expanded in later tasks. */
+/** Public Explorer component props. */
 export interface ExplorerProps {
   provider: ExplorerDataProvider;
-  onFileActivate?: (node: ExplorerNode) => void;
+  extensions?: ExplorerExtension[];
+  onFileActivate: (node: ExplorerNode) => void;
+  onFileDeleted?: (node: ExplorerNode) => void;
+  onFileRenamed?: (node: ExplorerNode, newName: string) => void;
+  initialPath?: string;
+  className?: string;
 }
 
 export function fileEntryToExplorerNode(entry: FileEntry, parentId?: NodeId): ExplorerNode {
