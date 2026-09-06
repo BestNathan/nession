@@ -1,31 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   RefreshCw,
   FolderPlus,
   FilePlus,
   Upload,
-  Folder,
-  File,
-  ChevronRight,
-  Home,
-  Pencil,
-  Trash2,
-  FolderSync,
   FolderUp,
-  Copy,
+  FolderSync,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Skeleton } from './ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from './ui/context-menu';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -37,14 +20,9 @@ import {
   AlertDialogCancel,
 } from './ui/alert-dialog';
 import { cn } from '@/lib/utils';
-import { copyToClipboard } from '@/lib/clipboard';
-import { formatSize, formatRelativeTimeSeconds } from '@/lib/format';
-import { toastError } from '@/lib/errorHelpers';
-import { useNewEntryForm } from '../hooks/useNewEntryForm';
-import { useRenameState } from '../hooks/useRenameState';
-import { useFileBrowserDialogs } from '../hooks/useFileBrowserDialogs';
+import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/features/files';
-import { registerSeenLangKeys, scanLangKeysFromPaths } from '@/lib/codeMirrorLangs';
+import { Explorer } from '@/explorer/Explorer';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
@@ -58,393 +36,143 @@ export interface FileBrowserProps {
   onGetTerminalPwd?: () => Promise<string>;
 }
 
-const MAX_TEXT_FILE_SIZE = 50 * 1024 * 1024; // 50 MB — text reads use chunked loading above 10 MB
-const MAX_BINARY_FILE_SIZE = 10 * 1024 * 1024; // 10 MB — binary previews stay single-request
-
-type SortKey = 'name' | 'size' | 'modified';
-type SortDir = 'asc' | 'desc';
-
-export function FileBrowser({ fileOps, onFileClick, initialPath = '', onFileDeleted, onFileRenamed, onGetTerminalPwd }: FileBrowserProps) {
-  const [currentPath, setCurrentPath] = useState(initialPath);
-  const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const newEntryForm = useNewEntryForm();
-  const renameState = useRenameState();
-  const dialogs = useFileBrowserDialogs();
-
-  const loadDir = useCallback(async (path: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fileOps.listDir(path);
-      setEntries(result.entries);
-      const langKeys = scanLangKeysFromPaths(result.entries.map((e) => e.path));
-      if (langKeys.length > 0) {
-        registerSeenLangKeys(langKeys);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load directory';
-      setError(msg);
-      toastError(err, msg);
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [fileOps]);
-
-  useEffect(() => {
-    loadDir(currentPath);
-  }, [currentPath, loadDir]);
-  const handleRefresh = () => loadDir(currentPath);
-  const segments = currentPath ? currentPath.split('/').filter(Boolean) : [];
-  const handleGoToParent = () => setCurrentPath(segments.slice(0, -1).join('/'));
-  const [cwdLoading, setCwdLoading] = useState(false);
-  const handleNavigateToCwd = async () => {
-    if (!onGetTerminalPwd) { return; }
-    setCwdLoading(true);
-    try { setCurrentPath(await onGetTerminalPwd()); } catch { toast.error('Failed to get terminal directory'); }
-    finally { setCwdLoading(false); }
-  };
-  const handleEntryClick = (entry: FileEntry) => {
-    if (entry.is_dir) {
-      setCurrentPath(entry.path);
-      return;
-    }
-    const isBinary = entry.is_binary ?? false;
-    const maxSize = isBinary ? MAX_BINARY_FILE_SIZE : MAX_TEXT_FILE_SIZE;
-    if (entry.size > maxSize) {
-      const label = isBinary ? 'Binary file' : 'File';
-      toast.error(`${label} too large for preview (>${maxSize / 1024 / 1024}MB)`);
-      return;
-    }
-    onFileClick(entry);
-  };
-
-  const handleCreate = useCallback(async (name: string, kind: 'file' | 'folder') => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    const path = currentPath ? `${currentPath}/${trimmed}` : trimmed;
-    try {
-      if (kind === 'file') {
-        await fileOps.writeFile(path, '');
-        toast.success(`Created ${trimmed}`);
-      } else {
-        await fileOps.createDir(path);
-        toast.success(`Created ${trimmed}/`);
-      }
-      await loadDir(currentPath);
-      newEntryForm.reset();
-    } catch (err) {
-      toastError(err, `Failed to create ${kind}`);
-    }
-  }, [currentPath, fileOps, loadDir, newEntryForm]);
-
-  const handleCreateFile = useCallback(() => {
-    handleCreate(newEntryForm.newName, 'file');
-  }, [handleCreate, newEntryForm.newName]);
-
-  const handleCreateFolder = useCallback(() => {
-    handleCreate(newEntryForm.newName, 'folder');
-  }, [handleCreate, newEntryForm.newName]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) {return;}
-    const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name;
-    try {
-      await fileOps.uploadFile(fullPath, file);
-      toast.success(`Uploaded ${file.name}`);
-      loadDir(currentPath);
-    } catch (err) {
-      toastError(err, 'Failed to upload file');
-    }
-    e.target.value = '';
-  };
-
-  const handleRenameStart = (entry: FileEntry) => {
-    renameState.startRename(entry.path, entry.name);
-  };
-
-  const handleRenameSubmit = async () => {
-    const name = renameState.renameValue.trim();
-    if (!name) { toast.error('Name cannot be empty'); return; }
-    if (!renameState.renamingPath) {return;}
-    const lastSlash = renameState.renamingPath.lastIndexOf('/');
-    const oldName = renameState.renamingPath.substring(lastSlash + 1);
-    if (name === oldName) { renameState.cancelRename(); return; }
-    const parentPath = renameState.renamingPath.substring(0, lastSlash);
-    const newPath = parentPath ? `${parentPath}/${name}` : name;
-    try {
-      await fileOps.renameFile(renameState.renamingPath, newPath);
-      toast.success(`Renamed to ${name}`);
-      onFileRenamed?.(renameState.renamingPath, newPath);
-      renameState.cancelRename();
-      loadDir(currentPath);
-    } catch (err) {
-      toastError(err, 'Failed to rename');
-    }
-  };
-
-  const handleRenameCancel = () => {
-    renameState.cancelRename();
-  };
-
-  const handleCopyPath = (text: string, label: string) => {
-    copyToClipboard(text).then(
-      () => { toast.success(`${label} copied`); },
-      () => { toast.error(`Failed to copy ${label.toLowerCase()}`); },
-    );
-  };
-
-  const handleDelete = async (entry: FileEntry) => {
-    dialogs.setDeleteTarget(entry);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!dialogs.deleteTarget) {return;}
-    const entry = dialogs.deleteTarget;
-    dialogs.setDeleteTarget(null);
-
-    try {
-      // Directories are deleted with their contents: a non-empty folder is the
-      // normal case, and the confirm dialog already says so.
-      await fileOps.deleteFile(entry.path, entry.is_dir);
-      toast.success(`Deleted ${entry.name}`);
-      onFileDeleted?.(entry.path);
-      loadDir(currentPath);
-    } catch (err) {
-      toastError(err, 'Failed to delete');
-    }
-  };
-
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      setSortDir('asc');
-    }
-  };
-
-  const sortedEntries = [...entries].sort((a, b) => {
-    if (a.is_dir !== b.is_dir) {return a.is_dir ? -1 : 1;}
-    const dir = sortDir === 'asc' ? 1 : -1;
-    if (sortKey === 'name') {return dir * a.name.toLowerCase().localeCompare(b.name.toLowerCase());}
-    if (sortKey === 'size') {return dir * (a.size - b.size);}
-    if (sortKey === 'modified') {return dir * (a.modified - b.modified);}
-    return 0;
+export function FileBrowser({
+  fileOps,
+  onFileClick,
+  initialPath = '',
+  onFileDeleted,
+  onFileRenamed,
+  onGetTerminalPwd,
+}: FileBrowserProps) {
+  const browser = useExplorerFileBrowser({
+    fileOps,
+    initialPath,
+    onFileClick,
+    onFileDeleted,
+    onFileRenamed,
+    onGetTerminalPwd,
   });
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Toolbar */}
+    <div className="flex flex-col h-full min-h-0">
       <FileToolbar
-        loading={loading}
-        cwdLoading={cwdLoading}
-        onGoToParent={handleGoToParent}
-        parentDisabled={segments.length === 0}
-        onRefresh={handleRefresh}
-        onNewFile={() => { newEntryForm.setShowNewFile(true); newEntryForm.setShowNewFolder(false); }}
-        onNewFolder={() => { newEntryForm.setShowNewFolder(true); newEntryForm.setShowNewFile(false); }}
-        onUploadClick={() => fileInputRef.current?.click()}
-        showCwdButton={Boolean(onGetTerminalPwd)}
-        onNavigateToCwd={handleNavigateToCwd}
+        loading={browser.loading}
+        cwdLoading={browser.cwdLoading}
+        onGoToParent={browser.handleGoToParent}
+        parentDisabled={browser.parentDisabled}
+        onRefresh={() => {
+          void browser.handleRefresh();
+        }}
+        onNewFile={() => {
+          browser.newEntryForm.setShowNewFile(true);
+          browser.newEntryForm.setShowNewFolder(false);
+        }}
+        onNewFolder={() => {
+          browser.newEntryForm.setShowNewFolder(true);
+          browser.newEntryForm.setShowNewFile(false);
+        }}
+        onUploadClick={() => browser.fileInputRef.current?.click()}
+        showCwdButton={browser.showCwdButton}
+        onNavigateToCwd={() => {
+          void browser.handleNavigateToCwd();
+        }}
       />
-      <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
+      <input
+        ref={browser.fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          void browser.handleUpload(e);
+        }}
+      />
 
-      {/* New file/folder input */}
-      {(newEntryForm.showNewFile || newEntryForm.showNewFolder) && (
+      {(browser.newEntryForm.showNewFile || browser.newEntryForm.showNewFolder) && (
         <div className="flex items-center gap-1 px-2 py-1 border-b">
           <Input
             autoFocus
-            placeholder={newEntryForm.showNewFile ? 'filename.txt' : 'folder-name'}
-            value={newEntryForm.newName}
-            onChange={(e) => newEntryForm.setNewName(e.target.value)}
+            placeholder={browser.newEntryForm.showNewFile ? 'filename.txt' : 'folder-name'}
+            value={browser.newEntryForm.newName}
+            onChange={(e) => browser.newEntryForm.setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (newEntryForm.showNewFile) {handleCreateFile();} else {handleCreateFolder();}
+                if (browser.newEntryForm.showNewFile) {
+                  browser.handleCreateFile();
+                } else {
+                  browser.handleCreateFolder();
+                }
               }
-              if (e.key === 'Escape') { newEntryForm.reset(); }
+              if (e.key === 'Escape') {
+                browser.newEntryForm.reset();
+              }
             }}
             className="h-7 text-xs"
           />
-          <Button size="sm" className="h-7 text-xs" onClick={newEntryForm.showNewFile ? handleCreateFile : handleCreateFolder}>Create</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => newEntryForm.reset()}>Cancel</Button>
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              if (browser.newEntryForm.showNewFile) {
+                browser.handleCreateFile();
+              } else {
+                browser.handleCreateFolder();
+              }
+            }}
+          >
+            Create
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => browser.newEntryForm.reset()}
+          >
+            Cancel
+          </Button>
         </div>
       )}
 
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-0.5 px-2 py-1 text-xs text-muted-foreground overflow-x-auto flex-shrink-0 border-b">
-        <button onClick={() => setCurrentPath('')} className="hover:text-foreground transition-colors flex items-center gap-0.5 flex-shrink-0" title="Root">
-          <Home className="h-3 w-3" />
-        </button>
-        {segments.map((seg, i) => {
-          const path = segments.slice(0, i + 1).join('/');
-          return (
-            <span key={path} className="flex items-center gap-0.5 flex-shrink-0">
-              <ChevronRight className="h-3 w-3" />
-              <button onClick={() => setCurrentPath(path)} className="hover:text-foreground transition-colors truncate max-w-[100px]">
-                {seg}
-              </button>
-            </span>
-          );
-        })}
-      </div>
-
-      {/* Column headers */}
-      <div className="flex items-center px-2 py-0.5 text-[10px] text-muted-foreground border-b select-none">
-        {(['name', 'size', 'modified'] as const).map((key) => (
-          <button key={key} className={key === 'name' ? 'flex-1 text-left min-w-0' : 'w-[72px] text-right flex-shrink-0'} onClick={() => handleSort(key)}>
-            {key === 'name' ? 'Name' : key === 'size' ? 'Size' : 'Mod'}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-          </button>))}
-      </div>
-
-      {/* File list */}
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex flex-col p-2 gap-1">
-            {[1, 2, 3, 4, 5].map((i) => (<Skeleton key={i} className="h-6 w-full" />))}
-          </div>
-        ) : error ? (
-          <div className="p-3 text-center text-sm text-muted-foreground">
-            <p className="text-destructive mb-1">Failed to load directory</p>
-            <Button variant="outline" size="sm" onClick={handleRefresh}>Retry</Button>
-          </div>
-        ) : sortedEntries.length === 0 ? (
-          <div className="p-3 text-center text-sm text-muted-foreground">This directory is empty</div>
-        ) : (
-          sortedEntries.map((entry) => {
-            if (renameState.renamingPath === entry.path) {
-              return (
-                <FileEntryRenameRow
-                  key={entry.path}
-                  entry={entry}
-                  renameState={renameState}
-                  onRenameSubmit={handleRenameSubmit}
-                  onCancel={handleRenameCancel}
-                />
-              );
-            }
-            return (
-              <FileEntryRow
-                key={entry.path}
-                entry={entry}
-                onClick={handleEntryClick}
-                onCopyPath={handleCopyPath}
-                onRenameStart={handleRenameStart}
-                onDelete={handleDelete}
-              />
-            );
-          })
-        )}
-      </div>
-
-      <FileBrowserDialogs
-        deleteTarget={dialogs.deleteTarget}
-        onDeleteTargetChange={dialogs.setDeleteTarget}
-        onDeleteConfirm={handleDeleteConfirm}
+      <Explorer
+        provider={browser.provider}
+        onFileActivate={browser.handleFileActivate}
+        onFileRenamed={browser.handleExplorerRenamed}
+        onDeleteRequest={browser.handleDeleteRequest}
+        revealPath={browser.currentPath}
+        hideToolbar
+        storeRef={browser.storeRef}
+        className="flex-1 min-h-0"
       />
-    </div>
-  );
-}
 
-interface FileEntryRowProps {
-  entry: FileEntry;
-  onClick: (entry: FileEntry) => void;
-  onCopyPath: (text: string, label: string) => void;
-  onRenameStart: (entry: FileEntry) => void;
-  onDelete: (entry: FileEntry) => void;
-}
-
-function FileEntryRow({ entry, onClick, onCopyPath, onRenameStart, onDelete }: FileEntryRowProps) {
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        onClick={() => onClick(entry)}
-        className="flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default"
-      >
-        {entry.is_dir ? (
-          <Folder className="h-3.5 w-3.5 mr-1.5 text-info flex-shrink-0" />
-        ) : (
-          <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />
-        )}
-        <span className="flex-1 truncate min-w-0">{entry.name}</span>
-        {entry.is_binary && !entry.is_dir && (
-          <span className="px-1 rounded bg-muted text-muted-foreground text-[9px] leading-tight mr-1 flex-shrink-0">BIN</span>
-        )}
-        <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{entry.is_dir ? '' : formatSize(entry.size)}</span>
-        <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">{formatRelativeTimeSeconds(entry.modified)}</span>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-36">
-        <ContextMenuItem onClick={() => onCopyPath(entry.path, 'Path')}>
-          <Copy /> Copy path
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopyPath(entry.full_path, 'Full path')}>
-          <Copy /> Copy full path
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onRenameStart(entry)}>
-          <Pencil /> Rename
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem variant="destructive" onClick={() => onDelete(entry)}>
-          <Trash2 /> Delete
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
-interface FileEntryRenameRowProps {
-  entry: FileEntry;
-  renameState: ReturnType<typeof useRenameState>;
-  onRenameSubmit: () => void;
-  onCancel: () => void;
-}
-
-function FileEntryRenameRow({ entry, renameState, onRenameSubmit, onCancel }: FileEntryRenameRowProps) {
-  return (
-    <div className="flex items-center gap-1 w-full px-2 py-0.5">
-      {entry.is_dir ? (
-        <Folder className="h-3.5 w-3.5 mr-1 text-info flex-shrink-0" />
-      ) : (
-        <File className="h-3.5 w-3.5 mr-1 text-muted-foreground flex-shrink-0" />
-      )}
-      <Input
-        autoFocus
-        value={renameState.renameValue}
-        onChange={(e) => renameState.setRenameValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {onRenameSubmit();}
-          if (e.key === 'Escape') {onCancel();}
+      <FileBrowserDeleteDialog
+        deleteTarget={browser.dialogs.deleteTarget}
+        onDeleteTargetChange={browser.dialogs.setDeleteTarget}
+        onDeleteConfirm={() => {
+          void browser.handleDeleteConfirm();
         }}
-        className="h-6 text-xs flex-1"
       />
-      <Button size="sm" className="h-6 text-xs" onClick={onRenameSubmit}>Rename</Button>
-      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel}>Cancel</Button>
     </div>
   );
 }
 
-interface FileBrowserDialogsProps {
+interface FileBrowserDeleteDialogProps {
   deleteTarget: FileEntry | null;
   onDeleteTargetChange: (target: FileEntry | null) => void;
   onDeleteConfirm: () => void;
 }
 
-function FileBrowserDialogs({
+function FileBrowserDeleteDialog({
   deleteTarget,
   onDeleteTargetChange,
   onDeleteConfirm,
-}: FileBrowserDialogsProps) {
+}: FileBrowserDeleteDialogProps) {
   return (
-    <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) { onDeleteTargetChange(null); } }}>
+    <AlertDialog
+      open={deleteTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          onDeleteTargetChange(null);
+        }
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {deleteTarget?.is_dir ? 'directory' : 'file'}?</AlertDialogTitle>
@@ -456,7 +184,12 @@ function FileBrowserDialogs({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+          <AlertDialogAction
+            onClick={onDeleteConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -493,7 +226,14 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onGoToParent} disabled={parentDisabled} aria-label="Parent directory" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={onGoToParent}
+              disabled={parentDisabled}
+              aria-label="Parent directory"
+            />
           }
         >
           <FolderUp className="h-3.5 w-3.5" />
@@ -505,7 +245,14 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onRefresh} disabled={loading} aria-label="Refresh" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={onRefresh}
+              disabled={loading}
+              aria-label="Refresh"
+            />
           }
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
@@ -517,7 +264,13 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNewFile} aria-label="New file" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={onNewFile}
+              aria-label="New file"
+            />
           }
         >
           <FilePlus className="h-3.5 w-3.5" />
@@ -529,7 +282,13 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNewFolder} aria-label="New folder" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={onNewFolder}
+              aria-label="New folder"
+            />
           }
         >
           <FolderPlus className="h-3.5 w-3.5" />
@@ -541,7 +300,13 @@ function FileToolbar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onUploadClick} aria-label="Upload file" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={onUploadClick}
+              aria-label="Upload file"
+            />
           }
         >
           <Upload className="h-3.5 w-3.5" />
@@ -554,7 +319,14 @@ function FileToolbar({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNavigateToCwd} disabled={cwdLoading} aria-label="Go to terminal directory" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={onNavigateToCwd}
+                disabled={cwdLoading}
+                aria-label="Go to terminal directory"
+              />
             }
           >
             <FolderSync className={cn('h-3.5 w-3.5', cwdLoading && 'animate-spin')} />

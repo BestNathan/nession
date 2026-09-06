@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
 
@@ -12,7 +12,7 @@ import {
 } from './adapters/arboristAdapter';
 import { createCoreExplorerExtension } from './commands/coreContributions';
 import type { ExplorerExtension } from './commands/types';
-import { ROOT_ID } from './ExplorerStore';
+import { ExplorerStore, ROOT_ID } from './ExplorerStore';
 import { useExplorerFileActions } from './hooks/useExplorerFileActions';
 import { useExplorerStore } from './hooks/useExplorerStore';
 import { useExplorerTreeHeight } from './hooks/useExplorerTreeHeight';
@@ -27,8 +27,65 @@ export interface ExplorerComponentProps {
   onFileActivate: (node: ExplorerNode) => void;
   onFileDeleted?: (node: ExplorerNode) => void;
   onFileRenamed?: (node: ExplorerNode, newName: string) => void;
+  /** Intercept context-menu delete (e.g. confirmation dialog) instead of deleting immediately. */
+  onDeleteRequest?: (node: ExplorerNode) => void;
   initialPath?: string;
+  /** Reveal and focus this path when it changes (e.g. parent navigation, terminal CWD). */
+  revealPath?: string;
+  /** Hide the built-in refresh toolbar (when an outer shell provides its own). */
+  hideToolbar?: boolean;
+  /** Receives the ExplorerStore instance for refresh/navigation from a parent shell. */
+  storeRef?: MutableRefObject<ExplorerStore | null>;
   className?: string;
+}
+
+function revealPathInTree(
+  path: string,
+  store: ExplorerStore,
+  treeRef: RefObject<TreeApi<ArboristNode> | undefined>,
+): void {
+  const snapshot = store.getSnapshot();
+  const segments = path.split('/').filter(Boolean);
+  let built = '';
+  for (const segment of segments) {
+    built = built ? `${built}/${segment}` : segment;
+    if (!store.getNode(built)) {
+      break;
+    }
+    if (!snapshot.expandedIds.has(built)) {
+      store.expand(built);
+    }
+  }
+
+  if (path && store.getNode(path)) {
+    treeRef.current?.openParents(path);
+    treeRef.current?.open(path);
+    if (snapshot.activeId !== path) {
+      store.setActive(path);
+    }
+    return;
+  }
+
+  if (!path && snapshot.activeId !== null) {
+    store.setActive(null);
+  }
+}
+
+function ExplorerRefreshToolbar({ onRefresh }: { onRefresh: () => void }) {
+  return (
+    <div className="flex items-center px-2 py-1 border-b border-border">
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7"
+        aria-label="Refresh explorer"
+        onClick={onRefresh}
+      >
+        <RefreshCw className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
 }
 
 export function Explorer({
@@ -37,7 +94,11 @@ export function Explorer({
   onFileActivate,
   onFileDeleted,
   onFileRenamed,
+  onDeleteRequest,
   initialPath,
+  revealPath,
+  hideToolbar = false,
+  storeRef,
   className,
 }: ExplorerComponentProps) {
   const store = useExplorerStore(provider);
@@ -49,7 +110,14 @@ export function Explorer({
     store,
     onFileDeleted,
     onFileRenamed,
+    onDeleteRequest,
   });
+
+  useEffect(() => {
+    if (storeRef) {
+      storeRef.current = store;
+    }
+  }, [store, storeRef]);
 
   useEffect(() => {
     const toRegister = [createCoreExplorerExtension(), ...extensions];
@@ -67,27 +135,24 @@ export function Explorer({
     void store.ensureRootLoaded();
   }, [store]);
 
-  const { revision, flatData } = store.getSnapshot();
+  const { flatData } = store.getSnapshot();
   const treeData = useMemo(
     () => flatDataToArboristTree(flatData, store.getChildren(ROOT_ID)),
-    [flatData, revision, store],
+    [flatData, store],
   );
 
   useEffect(() => {
+    if (revealPath !== undefined) {
+      revealPathInTree(revealPath, store, treeRef);
+      return;
+    }
+
     if (!initialPath) {
       return;
     }
 
-    const segments = initialPath.split('/').filter(Boolean);
-    let path = '';
-    for (const segment of segments) {
-      path = path ? `${path}/${segment}` : segment;
-      store.expand(path);
-    }
-
-    treeRef.current?.openParents(initialPath);
-    treeRef.current?.open(initialPath);
-  }, [initialPath, store, treeData]);
+    revealPathInTree(initialPath, store, treeRef);
+  }, [initialPath, revealPath, store, treeData]);
 
   const handleToggle = useCallback(
     (id: string) => {
@@ -119,20 +184,13 @@ export function Explorer({
 
   return (
     <div className={cn('flex flex-col h-full min-h-0', className)}>
-      <div className="flex items-center px-2 py-1 border-b border-border">
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="h-7 w-7"
-          aria-label="Refresh explorer"
-          onClick={() => {
+      {!hideToolbar && (
+        <ExplorerRefreshToolbar
+          onRefresh={() => {
             void store.refresh(ROOT_ID);
           }}
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+        />
+      )}
       <div ref={containerRef} className="flex-1 min-h-0">
         <Tree
           ref={treeRef}

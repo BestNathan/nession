@@ -11,6 +11,8 @@ interface UseExplorerFileActionsOptions {
   store: ExplorerStore;
   onFileDeleted?: (node: ExplorerNode) => void;
   onFileRenamed?: (node: ExplorerNode, newName: string) => void;
+  /** When set, context-menu delete invokes this instead of deleting immediately. */
+  onDeleteRequest?: (node: ExplorerNode) => void;
 }
 
 export function useExplorerFileActions({
@@ -18,6 +20,7 @@ export function useExplorerFileActions({
   store,
   onFileDeleted,
   onFileRenamed,
+  onDeleteRequest,
 }: UseExplorerFileActionsOptions) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -65,11 +68,11 @@ export function useExplorerFileActions({
   const menuContext = useMemo<ExplorerContextMenuContext>(
     () => ({
       onRename: handleRenameStart,
-      onDelete: (node) => {
+      onDelete: onDeleteRequest ?? ((node) => {
         void handleDelete(node);
-      },
+      }),
     }),
-    [handleDelete, handleRenameStart],
+    [handleDelete, handleRenameStart, onDeleteRequest],
   );
 
   return {
