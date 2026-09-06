@@ -1,8 +1,8 @@
 import {
-  Server, Clock, Activity, Monitor, Copy, Check, FolderOpen,
+  Server, Clock, Activity, Monitor, Copy, Check,
   Cpu, Globe, Wifi, RefreshCw, Zap, Pencil, Trash2, Plus,
 } from 'lucide-react';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import type { Agent, Session } from '../types';
 import {
@@ -18,7 +18,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
 import { copyToClipboard } from '../lib/clipboard';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
-import { ClaudeCodeSection } from '../extensions/claude-code/components/ClaudeCodeSection';
 
 /** Max heartbeat entries to display in timeline. */
 const MAX_HEARTBEATS = 5;
@@ -316,7 +315,6 @@ function RecentSessions({ sessions }: { sessions: Session[] }) {
 
 const TABS = [
   { id: 'overview' as const, label: 'Overview', icon: Monitor },
-  { id: 'claude-code' as const, label: 'Claude Code', icon: FolderOpen },
 ];
 type TabId = (typeof TABS)[number]['id'];
 
@@ -531,8 +529,6 @@ export function AgentDetailPanel({
     return () => clearInterval(id);
   }, []);
 
-  const hasClaudeCode = useMemo(() => agent.metadata?.nession_version !== undefined, [agent]);
-
   const handleCopyAll = useCallback(() => {
     copyToClipboard(formatAgentDetails(agent, heartbeatHistory, sessions))
       .then(() => toast.success('Agent details copied'))
@@ -613,9 +609,6 @@ export function AgentDetailPanel({
                 >
                   <tab.icon className="w-3.5 h-3.5" />
                   {tab.label}
-                  {tab.id === 'claude-code' && hasClaudeCode && (
-                    <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-primary" />
-                  )}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -626,7 +619,6 @@ export function AgentDetailPanel({
           {activeTab === 'overview' && (
             <OverviewTab agent={agent} heartbeatHistory={heartbeatHistory} sessions={sessions} />
           )}
-          {activeTab === 'claude-code' && <ClaudeCodeSection agent={agent} />}
         </div>
 
         {/* ── Quick Actions Bar (sticky bottom) ── */}

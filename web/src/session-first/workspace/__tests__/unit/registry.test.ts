@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { WORKSPACE_TOOLS } from '../../tools';
 
 describe('workspace tool registry', () => {
-  it('registers files, session and agent', () => {
-    expect(WORKSPACE_TOOLS.map((t) => t.id)).toEqual(['files', 'session', 'agent']);
+  it('registers workspace tools in dock order', () => {
+    expect(WORKSPACE_TOOLS.map((t) => t.id)).toEqual([
+      'files',
+      'session',
+      'agent',
+      'claude-code',
+    ]);
   });
 
   it('ids are unique', () => {

@@ -7,7 +7,7 @@ import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
 // Swap only the files tool's layouts for a deterministic stub; the registry
 // entries (label/icon/availability) must stay intact so the bar renders all
-// three labels and availability logic still runs.
+// four labels and availability logic still runs.
 vi.mock('@/session-first/workspace/tools/files', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/session-first/workspace/tools/files')>();
@@ -34,10 +34,25 @@ const ctx: WorkspaceContext = {
 describe('WorkspaceShell', () => {
   it('renders the bottom floating tool bar from the registry', () => {
     render(<WorkspaceShell ctx={ctx} activeTool="files" />);
+    expect(WORKSPACE_TOOLS.map((tool) => tool.id)).toEqual([
+      'files',
+      'session',
+      'agent',
+      'claude-code',
+    ]);
+    expect(screen.getAllByRole('tab').map((tab) => tab.id)).toEqual([
+      'workspace-tool-tab-files',
+      'workspace-tool-tab-session',
+      'workspace-tool-tab-agent',
+      'workspace-tool-tab-claude-code',
+    ]);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())).toEqual([
+      'Files',
+      'Session',
+      'Agent',
+      'Claude Code',
+    ]);
     expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
-    for (const tool of WORKSPACE_TOOLS) {
-      expect(screen.getByText(tool.label)).toBeInTheDocument();
-    }
   });
 
   it('renders the active tool web layout', () => {
@@ -56,5 +71,21 @@ describe('WorkspaceShell', () => {
     render(<WorkspaceShell ctx={{ ...ctx, fileOps: {} as never }} activeTool="files" />);
     await user.click(screen.getByRole('tab', { name: 'Agent' }));
     expect(ctx.onToolChange).toHaveBeenCalledWith('agent');
+  });
+
+  it('calls onToolChange when the Claude Code tab is clicked', async () => {
+    const user = userEvent.setup();
+    const onToolChange = vi.fn();
+    const selectedContext: WorkspaceContext = {
+      ...ctx,
+      session: { session_id: 'agent-1:work' } as never,
+      agent: { agent_id: 'agent-1' } as never,
+      onToolChange,
+    };
+
+    render(<WorkspaceShell ctx={selectedContext} activeTool="claude-code" />);
+    await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
+
+    expect(onToolChange).toHaveBeenCalledWith('claude-code');
   });
 });

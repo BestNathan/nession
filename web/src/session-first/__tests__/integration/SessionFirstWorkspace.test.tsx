@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import {
   SessionFirstWorkspace,
   type SessionFirstWorkspaceProps,
 } from '@/session-first/SessionFirstWorkspace';
 import type { DomainState } from '@/session-first/domainState';
 import type { Agent, Session } from '@/types';
+import type { Surface } from '@/session-first/patterns/SessionHeader';
+import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 
 const agent: Agent = {
   agent_id: 'a1',
@@ -88,6 +91,62 @@ function baseProps(
     onLegacy: vi.fn(),
     ...overrides,
   };
+}
+
+function AppNavigationHarness() {
+  const [surface, setSurface] = useState<Surface>('terminal');
+  const [tool, setTool] = useState<WorkspaceToolId>('files');
+
+  return (
+    <SessionFirstWorkspace
+      {...baseProps({
+        isWide: false,
+        selectedId: sess.session_id,
+        selectedSession: sess,
+        selectedAgent: agent,
+        domain,
+        surface,
+        tool,
+        onSurfaceChange: setSurface,
+        onToolChange: setTool,
+        showList: false,
+        showDetail: true,
+      })}
+    />
+  );
+}
+
+type AppSpatialPage = 'terminal' | 'workspace';
+
+const appSpatialPageTestIds: Record<AppSpatialPage, string> = {
+  terminal: 'app-spatial-page-terminal',
+  workspace: 'app-spatial-page-workspace',
+};
+
+/**
+ * AppSpatialShell keeps every page mounted and exposes no active-page
+ * attribute. Its page-track transform is the current-page signal, so derive
+ * the expected offset from the track's actual children instead of duplicating
+ * the pager's page-count/layout assumptions in the test.
+ */
+function expectActiveAppPage(page: AppSpatialPage) {
+  const shell = screen.getByTestId('app-spatial-shell');
+  const pageTrack = within(shell).getByTestId('app-spatial-page-terminal').parentElement;
+  if (!pageTrack) {
+    throw new Error('App spatial page track is missing');
+  }
+
+  const pageCount = pageTrack.children.length;
+  const trackWidth = Number.parseFloat(pageTrack.style.width);
+  const pageElement = within(pageTrack).getByTestId(appSpatialPageTestIds[page]);
+  const pageIndex = Array.from(pageTrack.children).indexOf(pageElement);
+
+  expect(pageCount).toBeGreaterThan(0);
+  expect(trackWidth).toBeGreaterThan(0);
+  expect(pageIndex).toBeGreaterThanOrEqual(0);
+  expect(pageTrack.style.transform).toBe(
+    `translateX(${-(pageIndex * trackWidth) / pageCount}px)`,
+  );
 }
 
 describe('SessionFirstWorkspace spatial shell', () => {
@@ -200,5 +259,26 @@ describe('SessionFirstWorkspace spatial shell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('file-workspace')).toBeInTheDocument();
     });
+  });
+
+  it('navigates to Claude Code from the app dock and back to terminal', async () => {
+    const user = userEvent.setup();
+    render(<AppNavigationHarness />);
+
+    expectActiveAppPage('terminal');
+
+    await user.click(screen.getByTestId('app-header-workspace'));
+    await waitFor(() => {
+      expectActiveAppPage('workspace');
+    });
+    await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Claude Code' })).toHaveLength(1);
+
+    await user.click(screen.getByTestId('app-tool-back'));
+    await waitFor(() => {
+      expectActiveAppPage('terminal');
+    });
+    expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
   });
 });
