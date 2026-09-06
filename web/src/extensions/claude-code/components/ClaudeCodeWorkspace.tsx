@@ -137,7 +137,7 @@ function FileList({
                 key={file.path}
                 type="button"
                 aria-label={file.path}
-                aria-pressed={state.selectedFile?.path === file.path}
+                aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',

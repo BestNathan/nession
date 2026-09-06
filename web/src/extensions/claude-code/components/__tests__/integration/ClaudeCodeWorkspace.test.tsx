@@ -155,9 +155,9 @@ describe('ClaudeCodeWorkspace', () => {
     globalList.resolve(globalResponse);
     projectList.resolve(projectResponse);
     const fileButton = await screen.findByRole('button', { name: 'settings.json' });
-    expect(fileButton).toHaveAttribute('aria-pressed', 'false');
+    expect(fileButton).not.toHaveAttribute('aria-current');
     await user.click(fileButton);
-    expect(fileButton).toHaveAttribute('aria-pressed', 'true');
+    expect(fileButton).toHaveAttribute('aria-current', 'true');
     expect(await screen.findByText('{"enabled":true}')).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeRead).toHaveBeenCalledWith({
       agent_id: 'agent-1',
