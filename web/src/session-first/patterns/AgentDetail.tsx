@@ -1,6 +1,3 @@
-import { useMemo } from 'react';
-import { Separator } from '@/components/ui/separator';
-import { renderSlot } from '@/extensions/registry';
 import { agentDisplayName, formatRelativeTime } from '@/lib/format';
 import { ConnectionStatus } from '@/session-first/patterns/ConnectionStatus';
 import type { DomainState } from '@/session-first/domainState';
@@ -14,13 +11,6 @@ export interface AgentDetailProps {
 export function AgentDetail({ agent, state }: AgentDetailProps) {
   const name = agentDisplayName(agent);
   const metadata = agent.metadata;
-  const hasClaudeCode = useMemo(
-    () => agent.metadata?.nession_version !== undefined,
-    [agent],
-  );
-  const extensionSections = hasClaudeCode
-    ? renderSlot('agent-detail', { agent })
-    : [];
 
   return (
     <div
@@ -71,14 +61,6 @@ export function AgentDetail({ agent, state }: AgentDetailProps) {
         )}
       </dl>
 
-      {extensionSections.length > 0 ? (
-        <>
-          <Separator />
-          <div data-testid="agent-detail-extensions" className="flex flex-col gap-2">
-            {extensionSections}
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }

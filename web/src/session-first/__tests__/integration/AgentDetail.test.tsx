@@ -38,7 +38,7 @@ describe('AgentDetail', () => {
     expect(renderSlot).not.toHaveBeenCalled();
   });
 
-  it('renders agent-detail extension slot when Claude Code is available', () => {
+  it('does not render the agent-detail extension slot when Claude Code is available', () => {
     const agent: Agent = {
       agent_id: 'a1', hostname: 'devbox-01', display_name: 'devbox-01',
       ip_address: '10.0.0.1', port: 19091, status: 'online', session_count: 1,
@@ -55,9 +55,9 @@ describe('AgentDetail', () => {
 
     render(<AgentDetail agent={agent} state={state} />);
 
-    expect(renderSlot).toHaveBeenCalledWith('agent-detail', { agent });
-    expect(screen.getByTestId('agent-detail-extensions')).toBeInTheDocument();
-    expect(screen.getByTestId('claude-code-extension')).toBeInTheDocument();
+    expect(renderSlot).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('agent-detail-extensions')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('claude-code-extension')).not.toBeInTheDocument();
   });
 });
 

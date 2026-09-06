@@ -287,7 +287,7 @@ describe('AgentDetailPanel', () => {
     expect(screen.queryByText('a-very-long-agent-id-that-should-be-truncated-12345678')).not.toBeInTheDocument();
   });
 
-  it('shows Claude Code tab', () => {
+  it('does not show the legacy Claude Code tab or content', () => {
     render(
       <AgentDetailPanel
         agent={makeAgent()}
@@ -296,6 +296,7 @@ describe('AgentDetailPanel', () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Claude Code' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Claude Code')).not.toBeInTheDocument();
   });
 });
