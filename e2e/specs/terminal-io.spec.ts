@@ -110,9 +110,9 @@ test.describe('Terminal I/O', () => {
     await waitForDashboard(page);
   });
 
-  test('relay mode: echo command and verify output', async ({ page }) => {
+  test('relay mode: echo command and verify output', async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
-    const SESSION_NAME = 'e2e-terminal-relay';
+    const SESSION_NAME = `e2e-terminal-relay-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
 
@@ -129,9 +129,9 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test('P2P mode: echo command and verify output', async ({ page }) => {
+  test('P2P mode: echo command and verify output', async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
-    const SESSION_NAME = 'e2e-terminal-p2p';
+    const SESSION_NAME = `e2e-terminal-p2p-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
 
