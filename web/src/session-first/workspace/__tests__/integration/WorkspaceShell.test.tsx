@@ -46,11 +46,13 @@ describe('WorkspaceShell', () => {
       'workspace-tool-tab-agent',
       'workspace-tool-tab-claude-code',
     ]);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())).toEqual([
+      'Files',
+      'Session',
+      'Agent',
+      'Claude Code',
+    ]);
     expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
-    for (const tool of WORKSPACE_TOOLS) {
-      expect(screen.getByText(tool.label)).toBeInTheDocument();
-    }
-    expect(screen.getByRole('tab', { name: 'Claude Code' })).toBeInTheDocument();
   });
 
   it('renders the active tool web layout', () => {
