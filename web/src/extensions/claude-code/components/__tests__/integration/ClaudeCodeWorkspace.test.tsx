@@ -109,6 +109,14 @@ function mockLists(
     .mockResolvedValueOnce(project);
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('ClaudeCodeWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -118,11 +126,16 @@ describe('ClaudeCodeWorkspace', () => {
 
   it('requests both scopes and renders the global file browser', async () => {
     const user = userEvent.setup();
-    mockLists();
+    const globalList = deferred<ClaudeCodeListResponse>();
+    const projectList = deferred<ClaudeCodeListResponse>();
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockReturnValueOnce(globalList.promise)
+      .mockReturnValueOnce(projectList.promise);
     vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue(readResponse);
     render(<ClaudeCodeWorkspace ctx={makeContext()} />);
 
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading Claude Code files...')).toHaveLength(2);
     expect(screen.getByRole('tab', { name: 'Global' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Project' })).toBeInTheDocument();
     expect(screen.getByTestId('claude-code-scope-global')).toBeInTheDocument();
@@ -139,6 +152,8 @@ describe('ClaudeCodeWorkspace', () => {
         session_id: 'agent-1:work',
       });
     });
+    globalList.resolve(globalResponse);
+    projectList.resolve(projectResponse);
     const fileButton = await screen.findByRole('button', { name: 'settings.json' });
     expect(fileButton).toHaveAttribute('aria-pressed', 'false');
     await user.click(fileButton);
@@ -304,6 +319,9 @@ describe('ClaudeCodeWorkspace', () => {
     expect(screen.getByTestId('claude-code-retry-global')).toBeInTheDocument();
     expect(screen.queryByText('global failed', { selector: '[data-scope="project"]' })).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole('tab', { name: 'Project' }));
+    expect(await within(screen.getByTestId('claude-code-scope-project')).findByRole('button', { name: 'CLAUDE.md' })).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Global' }));
     await user.click(screen.getByTestId('claude-code-retry-global'));
     expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledTimes(3);
@@ -318,6 +336,13 @@ describe('ClaudeCodeWorkspace', () => {
 
   it('does not request without an agent or session and explains the missing context', () => {
     render(<ClaudeCodeWorkspace ctx={makeContext({ agent: undefined })} />);
+
+    expect(screen.getByText('Select an agent and session to browse Claude Code files.')).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeList).not.toHaveBeenCalled();
+  });
+
+  it('does not request without a session when the agent is present', () => {
+    render(<ClaudeCodeWorkspace ctx={makeContext({ session: null })} />);
 
     expect(screen.getByText('Select an agent and session to browse Claude Code files.')).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeList).not.toHaveBeenCalled();
@@ -372,6 +397,46 @@ describe('ClaudeCodeWorkspace', () => {
         agent_id: 'agent-2',
         scope: 'global',
       });
+    });
+  });
+
+  it('ignores stale list responses when only the session changes', async () => {
+    const oldGlobal = deferred<ClaudeCodeListResponse>();
+    const oldProject = deferred<ClaudeCodeListResponse>();
+    const oldGlobalResponse: ClaudeCodeListResponse = {
+      ...globalResponse,
+      categories: [{
+        ...globalResponse.categories[0],
+        files: [{ path: 'old-global.json', size: 1, content_type: 'json' }],
+      }],
+    };
+    const oldProjectResponse: ClaudeCodeListResponse = {
+      ...projectResponse,
+      categories: [{
+        ...projectResponse.categories[0],
+        files: [{ path: 'old-project.md', size: 1, content_type: 'markdown' }],
+      }],
+    };
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockReturnValueOnce(oldGlobal.promise)
+      .mockReturnValueOnce(oldProject.promise);
+    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    const nextSession: Session = { ...session, session_id: 'agent-1:review', session_name: 'review' };
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockResolvedValueOnce(globalResponse)
+      .mockResolvedValueOnce(projectResponse);
+    rerender(<ClaudeCodeWorkspace ctx={makeContext({ session: nextSession })} />);
+    oldGlobal.resolve(oldGlobalResponse);
+    oldProject.resolve(oldProjectResponse);
+
+    expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'old-global.json' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'old-project.md' })).not.toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      scope: 'project',
+      session_id: 'agent-1:review',
     });
   });
 });
