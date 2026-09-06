@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
@@ -113,6 +113,39 @@ function AppNavigationHarness() {
         showDetail: true,
       })}
     />
+  );
+}
+
+type AppSpatialPage = 'terminal' | 'workspace';
+
+const appSpatialPageTestIds: Record<AppSpatialPage, string> = {
+  terminal: 'app-spatial-page-terminal',
+  workspace: 'app-spatial-page-workspace',
+};
+
+/**
+ * AppSpatialShell keeps every page mounted and exposes no active-page
+ * attribute. Its page-track transform is the current-page signal, so derive
+ * the expected offset from the track's actual children instead of duplicating
+ * the pager's page-count/layout assumptions in the test.
+ */
+function expectActiveAppPage(page: AppSpatialPage) {
+  const shell = screen.getByTestId('app-spatial-shell');
+  const pageTrack = within(shell).getByTestId('app-spatial-page-terminal').parentElement;
+  if (!pageTrack) {
+    throw new Error('App spatial page track is missing');
+  }
+
+  const pageCount = pageTrack.children.length;
+  const trackWidth = Number.parseFloat(pageTrack.style.width);
+  const pageElement = within(pageTrack).getByTestId(appSpatialPageTestIds[page]);
+  const pageIndex = Array.from(pageTrack.children).indexOf(pageElement);
+
+  expect(pageCount).toBeGreaterThan(0);
+  expect(trackWidth).toBeGreaterThan(0);
+  expect(pageIndex).toBeGreaterThanOrEqual(0);
+  expect(pageTrack.style.transform).toBe(
+    `translateX(${-(pageIndex * trackWidth) / pageCount}px)`,
   );
 }
 
@@ -231,27 +264,20 @@ describe('SessionFirstWorkspace spatial shell', () => {
   it('navigates to Claude Code from the app dock and back to terminal', async () => {
     const user = userEvent.setup();
     render(<AppNavigationHarness />);
-    const pageTrack = screen.getByTestId('app-spatial-page-terminal').parentElement;
-    if (!pageTrack) {
-      throw new Error('App spatial page track is missing');
-    }
-    const pageWidth = Number.parseFloat(pageTrack.style.width) / 3;
-    const expectActivePage = (index: 1 | 2) => {
-      expect(pageTrack.style.transform).toBe(`translateX(${-index * pageWidth}px)`);
-    };
 
-    expectActivePage(1);
+    expectActiveAppPage('terminal');
 
     await user.click(screen.getByTestId('app-header-workspace'));
     await waitFor(() => {
-      expectActivePage(2);
+      expectActiveAppPage('workspace');
     });
     await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('app-tool-back'));
     await waitFor(() => {
-      expectActivePage(1);
+      expectActiveAppPage('terminal');
     });
+    expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
   });
 });
