@@ -125,8 +125,10 @@ describe('ClaudeCodeWorkspace', () => {
         session_id: 'agent-1:work',
       });
     });
-    expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'settings.json' }));
+    const fileButton = await screen.findByRole('button', { name: 'settings.json' });
+    expect(fileButton).toHaveAttribute('aria-pressed', 'false');
+    await user.click(fileButton);
+    expect(fileButton).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText(/2\.0 MB/)).toBeInTheDocument();
   });
 
@@ -184,6 +186,23 @@ describe('ClaudeCodeWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
+  it('preserves existing content and Load more when pagination fails', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead)
+      .mockResolvedValueOnce(readResponse)
+      .mockRejectedValueOnce(new Error('pagination failed'));
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+    await screen.findByText('{"enabled":true}');
+    await user.click(screen.getByRole('button', { name: 'Load more' }));
+
+    expect(await screen.findByText('pagination failed')).toBeInTheDocument();
+    expect(screen.getByTestId('claude-code-content').textContent).toBe('{"enabled":true}');
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+  });
+
   it('keeps the file list when reading fails and shows an inline error', async () => {
     const user = userEvent.setup();
     mockLists();
@@ -212,6 +231,13 @@ describe('ClaudeCodeWorkspace', () => {
     await user.click(screen.getByTestId('claude-code-retry-global'));
     expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows the not-installed state for an unavailable scope', async () => {
+    mockLists({ available: false, categories: [] }, projectResponse);
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    expect(await within(screen.getByTestId('claude-code-scope-global')).findByText('Claude Code not installed')).toBeInTheDocument();
   });
 
   it('does not request without an agent or session and explains the missing context', () => {

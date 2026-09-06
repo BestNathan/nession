@@ -131,6 +131,7 @@ function FileList({
                 key={file.path}
                 type="button"
                 aria-label={file.path}
+                aria-pressed={state.selectedFile?.path === file.path}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
@@ -187,7 +188,7 @@ function ScopePanel({
   if (state.available === false) {
     return (
       <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
-        <p className="text-sm text-muted-foreground">Claude Code not installed.</p>
+        <p className="text-sm text-muted-foreground">Claude Code not installed</p>
       </div>
     );
   }
