@@ -16,8 +16,8 @@
 - Modify `web/src/session-first/workspace/toolTypes.ts` — add the `claude-code` tool id.
 - Modify `web/src/session-first/workspace/tools/index.ts` — register the new tool after Agent.
 - Create `web/src/session-first/workspace/tools/claudeCode.tsx` — Workspace tool metadata and web/App layout adapters.
-- Modify `web/src/session-first/patterns/AgentDetail.tsx` — remove the extension slot rendering.
-- Modify `web/src/session-first/__tests__/integration/AgentDetail.test.tsx` — assert Agent detail no longer invokes or renders Claude Code.
+- Modify `web/src/session-first/patterns/AgentDetail.tsx` — keep the generic extension slot host while ensuring Claude Code no longer registers into it.
+- Modify `web/src/session-first/__tests__/integration/AgentDetail.test.tsx` — assert non-Claude slots still render and the default Claude Code entry does not render Claude Code.
 - Modify `web/src/session-first/workspace/__tests__/integration/WorkspaceShell.test.tsx` — cover the fourth tool and activation.
 - Create `web/src/extensions/claude-code/components/__tests__/integration/ClaudeCodeWorkspace.test.tsx` — scope, request, state reset, error, and pagination coverage.
 - Modify `web/src/components/AgentDetailPanel.tsx` — remove the legacy Claude Code tab and its imports/state.
@@ -152,8 +152,9 @@ Cover these cases:
 3. Clicking a file sends `claudeCodeRead` with the selected scope, agent id,
    session id for project scope, and `offset: 0`, then renders content and a
    `Load more` control when `has_more` is true.
-4. Clicking `Load more` requests the same file at `offset: content.length` and
-   appends the new chunk.
+4. Clicking `Load more` requests the same file at the tracked `nextOffset` and
+   appends the new chunk. The offset advances by the UTF-8 byte length of each
+   returned chunk because the Rust reader slices content by byte offset.
 5. A rejected list request renders `Retry`; clicking it calls the list API
    again. An `available: false` response renders `Claude Code not installed`.
 6. Changing the context from one session/agent to another clears the selected
@@ -263,8 +264,10 @@ Claude Code extension.
 
 - [ ] **Step 3: Remove the old composition points.**
 
-In `AgentDetail.tsx`, remove the `useMemo`, `renderSlot`, and `Separator`
-extension block; keep the normal Agent facts and connection status. In the
+In `AgentDetail.tsx`, keep the generic `renderSlot('agent-detail', { agent })`
+host and its separator so unrelated extensions remain supported; Claude Code
+will no longer populate it because its registry entry has no slots. Keep the
+normal Agent facts and connection status. In the
 legacy `AgentDetailPanel.tsx`, remove `ClaudeCodeSection`, the Claude Code tab
 definition, `hasClaudeCode`, and the conditional content; leave only Overview.
 
