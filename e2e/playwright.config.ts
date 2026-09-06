@@ -98,6 +98,8 @@ export default defineConfig({
       env: {
         TMUX_TMPDIR: E2E_TMUX_SOCKET,
         NESSION_HOME: E2E_RUN,
+        TERM: 'xterm-256color',
+        LANG: 'C.UTF-8',
         RUST_LOG: 'info',  // Force logging to stdout
         RUST_BACKTRACE: '1',  // Enable backtraces for debugging
       },
