@@ -6,6 +6,11 @@
 #   ./scripts/deploy-watch.sh prod       After merging to main — watch release + prod rollout
 #   ./scripts/deploy-watch.sh --help
 #
+# Both environments live in namespace nession (staging via -staging names,
+# issue #592 scope 2026-09-05). Deploys are gitops deploy commits now —
+# watch_ci waits out the whole workflow (prod pauses at the Environment
+# approval gate until a human approves), then watch_k8s polls ArgoCD's rollout.
+#
 # Prerequisites: gh, kubectl, jq
 
 set -euo pipefail
@@ -35,7 +40,7 @@ declare -A CI_PHASES=(
   ["Build"]="build-web|build-amd64|build-arm64|build-linux-"
   ["Docker"]="docker-"
   ["Merge manifests"]="merge"
-  ["Update kustomize"]="update-.*-kustomize"
+  ["Deploy gitops"]="deploy-staging-gitops|promote-production"
   ["Release"]="create-release"
   ["Cleanup"]="cleanup-"
 )
@@ -71,7 +76,7 @@ Flow:
   4. On success: show running pods. On timeout: show mismatch.
 
 Output:
-  CI phases (Check/Build/Docker/Merge/Kustomize) + image tag
+  CI phases (Check/Build/Docker/Merge/Deploy gitops) + image tag
   K8s rollout with image version verification
   On error: failed job logs + fix suggestions
 EOF
