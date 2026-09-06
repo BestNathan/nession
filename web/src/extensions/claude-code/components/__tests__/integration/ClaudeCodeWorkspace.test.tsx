@@ -74,6 +74,20 @@ const readResponse: ClaudeCodeReadResponse = {
   has_more: true,
 };
 
+const twoFileGlobalResponse: ClaudeCodeListResponse = {
+  ...globalResponse,
+  categories: [
+    {
+      name: 'Settings',
+      icon: null,
+      files: [
+        { path: 'a.json', size: 4, content_type: 'json' },
+        { path: 'b.json', size: 4, content_type: 'json' },
+      ],
+    },
+  ],
+};
+
 function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
   return {
     session,
@@ -129,6 +143,13 @@ describe('ClaudeCodeWorkspace', () => {
     expect(fileButton).toHaveAttribute('aria-pressed', 'false');
     await user.click(fileButton);
     expect(fileButton).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByText('{"enabled":true}')).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeRead).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      scope: 'global',
+      path: 'settings.json',
+      offset: 0,
+    });
     expect(screen.getByText(/2\.0 MB/)).toBeInTheDocument();
   });
 
@@ -186,6 +207,37 @@ describe('ClaudeCodeWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
+  it('uses UTF-8 byte offsets when loading more multibyte content', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead)
+      .mockResolvedValueOnce({
+        ...readResponse,
+        content: '你好',
+        total_size: 9,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        ...readResponse,
+        content: '世界',
+        offset: 6,
+        total_size: 12,
+        has_more: false,
+      });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load more' }));
+
+    expect(screen.getByTestId('claude-code-content').textContent).toBe('你好世界');
+    expect(claudeCodeApi.claudeCodeRead).toHaveBeenNthCalledWith(2, {
+      agent_id: 'agent-1',
+      scope: 'global',
+      path: 'settings.json',
+      offset: 6,
+    });
+  });
+
   it('preserves existing content and Load more when pagination fails', async () => {
     const user = userEvent.setup();
     mockLists();
@@ -201,6 +253,30 @@ describe('ClaudeCodeWorkspace', () => {
     expect(await screen.findByText('pagination failed')).toBeInTheDocument();
     expect(screen.getByTestId('claude-code-content').textContent).toBe('{"enabled":true}');
     expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+  });
+
+  it('ignores a late read response when a newer file selection completes first', async () => {
+    const user = userEvent.setup();
+    let resolveA: (response: ClaudeCodeReadResponse) => void = () => undefined;
+    let resolveB: (response: ClaudeCodeReadResponse) => void = () => undefined;
+    const readA = new Promise<ClaudeCodeReadResponse>((resolve) => { resolveA = resolve; });
+    const readB = new Promise<ClaudeCodeReadResponse>((resolve) => { resolveB = resolve; });
+    mockLists(twoFileGlobalResponse, projectResponse);
+    vi.mocked(claudeCodeApi.claudeCodeRead)
+      .mockReturnValueOnce(readA)
+      .mockReturnValueOnce(readB);
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'a.json' }));
+    await user.click(screen.getByRole('button', { name: 'b.json' }));
+    resolveB({ ...readResponse, content: 'content from B', has_more: false });
+    expect(await screen.findByText('content from B')).toBeInTheDocument();
+    resolveA({ ...readResponse, content: 'late content from A', has_more: false });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('claude-code-content').textContent).toBe('content from B');
+    });
+    expect(screen.queryByText('late content from A')).not.toBeInTheDocument();
   });
 
   it('keeps the file list when reading fails and shows an inline error', async () => {

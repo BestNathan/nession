@@ -24,6 +24,7 @@ interface ScopeState {
   contentType: string;
   totalSize: number;
   hasMore: boolean;
+  nextOffset: number;
   readLoading: boolean;
   readError: string | null;
 }
@@ -43,6 +44,7 @@ function createScopeState(loading: boolean): ScopeState {
     contentType: '',
     totalSize: 0,
     hasMore: false,
+    nextOffset: 0,
     readLoading: false,
     readError: null,
   };
@@ -78,6 +80,10 @@ function formatSize(bytes: number): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to load Claude Code files';
+}
+
+function responseNextOffset(response: ClaudeCodeReadResponse): number {
+  return response.offset + new TextEncoder().encode(response.content).length;
 }
 
 function scopeRequest(
@@ -350,6 +356,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
       contentType: '',
       totalSize: 0,
       hasMore: false,
+      nextOffset: 0,
       readLoading: true,
       readError: null,
     }));
@@ -366,6 +373,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         contentType: response.error ? '' : response.content_type,
         totalSize: response.error ? 0 : response.total_size,
         hasMore: response.error ? false : response.has_more,
+        nextOffset: response.error ? state.nextOffset : responseNextOffset(response),
         readLoading: false,
         readError: response.error ?? null,
       }));
@@ -391,7 +399,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     }
     const key = currentRequestKey.current;
     const requestId = ++readRequestId.current;
-    const offset = state.content.length;
+    const offset = state.nextOffset;
     updateScope(setScopeStates, scope, (current) => ({ ...current, readLoading: true, readError: null }));
     try {
       const response: ClaudeCodeReadResponse = await claudeCodeApi.claudeCodeRead(
@@ -404,6 +412,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         ...current,
         content: response.error ? current.content : current.content + response.content,
         hasMore: response.error ? current.hasMore : response.has_more,
+        nextOffset: response.error ? current.nextOffset : responseNextOffset(response),
         readLoading: false,
         readError: response.error ?? null,
       }));
