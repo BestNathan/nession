@@ -1,0 +1,275 @@
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ClaudeCodeWorkspace } from '@/extensions/claude-code/components/ClaudeCodeWorkspace';
+import { claudeCodeApi } from '@/features/claude-code';
+import type {
+  ClaudeCodeListResponse,
+  ClaudeCodeReadResponse,
+} from '@/features/claude-code/types';
+import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
+import type { Agent, Session } from '@/types';
+import type { DomainState } from '@/session-first/domainState';
+
+vi.mock('@/features/claude-code', () => ({
+  claudeCodeApi: {
+    claudeCodeList: vi.fn(),
+    claudeCodeRead: vi.fn(),
+  },
+}));
+
+const agent: Agent = {
+  agent_id: 'agent-1',
+  hostname: 'workstation',
+  ip_address: '127.0.0.1',
+  port: 19090,
+  status: 'online',
+  session_count: 1,
+  last_heartbeat: '2026-09-06T00:00:00.000Z',
+};
+
+const session: Session = {
+  session_id: 'agent-1:work',
+  agent_id: 'agent-1',
+  session_name: 'work',
+  status: 'active',
+  window_count: 1,
+  attached_clients: 1,
+  last_activity: '2026-09-06T00:00:00.000Z',
+};
+
+const domain: DomainState = {
+  agent: { channel: 'online', copy: null },
+  session: { channel: 'active', copy: null },
+  attachment: { channel: 'attached', copy: null },
+};
+
+const globalResponse: ClaudeCodeListResponse = {
+  available: true,
+  categories: [
+    {
+      name: 'Settings',
+      icon: null,
+      files: [{ path: 'settings.json', size: 2_097_152, content_type: 'json' }],
+    },
+  ],
+};
+
+const projectResponse: ClaudeCodeListResponse = {
+  available: true,
+  categories: [
+    {
+      name: 'Instructions',
+      icon: null,
+      files: [{ path: 'CLAUDE.md', size: 12, content_type: 'markdown' }],
+    },
+  ],
+};
+
+const readResponse: ClaudeCodeReadResponse = {
+  content: '{"enabled":true}',
+  content_type: 'json',
+  total_size: 2_097_152,
+  offset: 0,
+  has_more: true,
+};
+
+function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
+  return {
+    session,
+    agent,
+    domain,
+    fileOps: null,
+    experience: 'web',
+    onToolChange: vi.fn(),
+    ...overrides,
+  };
+}
+
+function mockLists(
+  global: ClaudeCodeListResponse = globalResponse,
+  project: ClaudeCodeListResponse = projectResponse,
+) {
+  vi.mocked(claudeCodeApi.claudeCodeList)
+    .mockResolvedValueOnce(global)
+    .mockResolvedValueOnce(project);
+}
+
+describe('ClaudeCodeWorkspace', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(claudeCodeApi.claudeCodeList).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeRead).mockReset();
+  });
+
+  it('requests both scopes and renders the global file browser', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue(readResponse);
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Global' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByTestId('claude-code-scope-global')).toBeInTheDocument();
+    expect(screen.getByTestId('claude-code-scope-project')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(claudeCodeApi.claudeCodeList).toHaveBeenNthCalledWith(1, {
+        agent_id: 'agent-1',
+        scope: 'global',
+      });
+      expect(claudeCodeApi.claudeCodeList).toHaveBeenNthCalledWith(2, {
+        agent_id: 'agent-1',
+        scope: 'project',
+        session_id: 'agent-1:work',
+      });
+    });
+    expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'settings.json' }));
+    expect(screen.getByText(/2\.0 MB/)).toBeInTheDocument();
+  });
+
+  it('shows scope-local project files and reads project files with a session id', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue({
+      ...readResponse,
+      content: '# Project instructions',
+      content_type: 'markdown',
+      total_size: 12,
+      has_more: false,
+    });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(screen.getByRole('tab', { name: 'Project' }));
+    const projectScope = screen.getByTestId('claude-code-scope-project');
+    await user.click(await within(projectScope).findByRole('button', { name: 'CLAUDE.md' }));
+
+    expect(await screen.findByText('# Project instructions')).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeRead).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      scope: 'project',
+      session_id: 'agent-1:work',
+      path: 'CLAUDE.md',
+      offset: 0,
+    });
+    expect(screen.getByText(/markdown/)).toBeInTheDocument();
+    expect(within(screen.getByTestId('claude-code-scope-project')).getByTestId('claude-code-file-list')).toBeInTheDocument();
+  });
+
+  it('loads more content at the current content length and appends it', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead)
+      .mockResolvedValueOnce(readResponse)
+      .mockResolvedValueOnce({
+        ...readResponse,
+        content: '\ncontinued',
+        offset: readResponse.content.length,
+        has_more: false,
+      });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+    await user.click(await screen.findByRole('button', { name: 'Load more' }));
+
+    expect(screen.getByTestId('claude-code-content').textContent).toBe('{"enabled":true}\ncontinued');
+    expect(claudeCodeApi.claudeCodeRead).toHaveBeenNthCalledWith(2, {
+      agent_id: 'agent-1',
+      scope: 'global',
+      path: 'settings.json',
+      offset: readResponse.content.length,
+    });
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the file list when reading fails and shows an inline error', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead).mockRejectedValue(new Error('read failed'));
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+
+    expect(await screen.findByText('read failed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'settings.json' })).toBeInTheDocument();
+    expect(within(screen.getByTestId('claude-code-scope-global')).getByTestId('claude-code-file-list')).toBeInTheDocument();
+  });
+
+  it('keeps list failures independent and retries each scope locally', async () => {
+    const user = userEvent.setup();
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockRejectedValueOnce(new Error('global failed'))
+      .mockResolvedValueOnce(projectResponse)
+      .mockResolvedValueOnce(globalResponse);
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    expect(await screen.findByText('global failed')).toBeInTheDocument();
+    expect(screen.getByTestId('claude-code-retry-global')).toBeInTheDocument();
+    expect(screen.queryByText('global failed', { selector: '[data-scope="project"]' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('claude-code-retry-global'));
+    expect(await screen.findByRole('button', { name: 'settings.json' })).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not request without an agent or session and explains the missing context', () => {
+    render(<ClaudeCodeWorkspace ctx={makeContext({ agent: undefined })} />);
+
+    expect(screen.getByText('Select an agent and session to browse Claude Code files.')).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeList).not.toHaveBeenCalled();
+  });
+
+  it('resets scope and selection when the agent or session changes', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeRead).mockResolvedValue({ ...readResponse, has_more: false });
+    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+    expect(await screen.findByText('{"enabled":true}')).toBeInTheDocument();
+
+    const nextSession: Session = { ...session, session_id: 'agent-1:review', session_name: 'review' };
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockResolvedValueOnce(projectResponse)
+      .mockResolvedValueOnce(globalResponse);
+    rerender(<ClaudeCodeWorkspace ctx={makeContext({ session: nextSession })} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('{"enabled":true}')).not.toBeInTheDocument();
+      expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledWith({
+        agent_id: 'agent-1',
+        scope: 'project',
+        session_id: 'agent-1:review',
+      });
+    });
+    expect(screen.getByRole('tab', { name: 'Global' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('ignores a stale list response from the previous agent and session', async () => {
+    let resolveOldGlobal: (response: ClaudeCodeListResponse) => void = () => undefined;
+    const oldGlobal = new Promise<ClaudeCodeListResponse>((resolve) => {
+      resolveOldGlobal = resolve;
+    });
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockReturnValueOnce(oldGlobal)
+      .mockResolvedValueOnce(projectResponse);
+    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    const nextAgent: Agent = { ...agent, agent_id: 'agent-2' };
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockResolvedValueOnce({ ...globalResponse, categories: [] })
+      .mockResolvedValueOnce({ ...projectResponse, categories: [] });
+    rerender(<ClaudeCodeWorkspace ctx={makeContext({ agent: nextAgent })} />);
+    resolveOldGlobal(globalResponse);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'settings.json' })).not.toBeInTheDocument();
+      expect(claudeCodeApi.claudeCodeList).toHaveBeenCalledWith({
+        agent_id: 'agent-2',
+        scope: 'global',
+      });
+    });
+  });
+});
