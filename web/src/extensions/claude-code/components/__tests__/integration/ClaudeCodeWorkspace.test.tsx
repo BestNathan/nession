@@ -196,6 +196,28 @@ describe('ClaudeCodeWorkspace', () => {
     expect(within(screen.getByTestId('claude-code-scope-project')).getByTestId('claude-code-file-list')).toBeInTheDocument();
   });
 
+  it('keeps pending reads isolated between global and project scopes', async () => {
+    const user = userEvent.setup();
+    const globalRead = deferred<ClaudeCodeReadResponse>();
+    const projectRead = deferred<ClaudeCodeReadResponse>();
+    mockLists(globalResponse, projectResponse);
+    vi.mocked(claudeCodeApi.claudeCodeRead)
+      .mockReturnValueOnce(globalRead.promise)
+      .mockReturnValueOnce(projectRead.promise);
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'settings.json' }));
+    await user.click(screen.getByRole('tab', { name: 'Project' }));
+    await user.click(await within(screen.getByTestId('claude-code-scope-project')).findByRole('button', { name: 'CLAUDE.md' }));
+    projectRead.resolve({ ...readResponse, content: 'project content', has_more: false });
+    expect(await screen.findByText('project content')).toBeInTheDocument();
+
+    globalRead.resolve({ ...readResponse, content: 'global content', has_more: false });
+    await user.click(screen.getByRole('tab', { name: 'Global' }));
+    expect(await screen.findByText('global content')).toBeInTheDocument();
+    expect(screen.queryByText('Loading content...')).not.toBeInTheDocument();
+  });
+
   it('loads more content at the current content length and appends it', async () => {
     const user = userEvent.setup();
     mockLists();
@@ -438,5 +460,68 @@ describe('ClaudeCodeWorkspace', () => {
       scope: 'project',
       session_id: 'agent-1:review',
     });
+  });
+
+  it('ignores an old list response when the context changes A to B to A', async () => {
+    const oldGlobal = deferred<ClaudeCodeListResponse>();
+    const oldProject = deferred<ClaudeCodeListResponse>();
+    const oldGlobalResponse: ClaudeCodeListResponse = {
+      ...globalResponse,
+      categories: [{ ...globalResponse.categories[0], files: [{ path: 'old-a.json', size: 1, content_type: 'json' }] }],
+    };
+    const oldProjectResponse: ClaudeCodeListResponse = {
+      ...projectResponse,
+      categories: [{ ...projectResponse.categories[0], files: [{ path: 'old-a.md', size: 1, content_type: 'markdown' }] }],
+    };
+    const agentB: Agent = { ...agent, agent_id: 'agent-2' };
+    const bGlobalResponse: ClaudeCodeListResponse = {
+      ...globalResponse,
+      categories: [{ ...globalResponse.categories[0], files: [{ path: 'b.json', size: 1, content_type: 'json' }] }],
+    };
+    const bProjectResponse: ClaudeCodeListResponse = {
+      ...projectResponse,
+      categories: [{ ...projectResponse.categories[0], files: [{ path: 'b.md', size: 1, content_type: 'markdown' }] }],
+    };
+    const newAGlobalResponse: ClaudeCodeListResponse = {
+      ...globalResponse,
+      categories: [{ ...globalResponse.categories[0], files: [{ path: 'new-a.json', size: 1, content_type: 'json' }] }],
+    };
+    const newAProjectResponse: ClaudeCodeListResponse = {
+      ...projectResponse,
+      categories: [{ ...projectResponse.categories[0], files: [{ path: 'new-a.md', size: 1, content_type: 'markdown' }] }],
+    };
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockReturnValueOnce(oldGlobal.promise)
+      .mockReturnValueOnce(oldProject.promise);
+    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockResolvedValueOnce(bGlobalResponse)
+      .mockResolvedValueOnce(bProjectResponse);
+    rerender(<ClaudeCodeWorkspace ctx={makeContext({ agent: agentB })} />);
+    expect(await screen.findByRole('button', { name: 'b.json' })).toBeInTheDocument();
+
+    vi.mocked(claudeCodeApi.claudeCodeList)
+      .mockResolvedValueOnce(newAGlobalResponse)
+      .mockResolvedValueOnce(newAProjectResponse);
+    rerender(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    oldGlobal.resolve(oldGlobalResponse);
+    oldProject.resolve(oldProjectResponse);
+
+    expect(await screen.findByRole('button', { name: 'new-a.json' })).toBeInTheDocument();
+    expect(screen.queryByText('old-a.json')).not.toBeInTheDocument();
+    expect(screen.queryByText('old-a.md')).not.toBeInTheDocument();
+  });
+
+  it('keeps the browser heading on web and defers the app heading to AppToolHeader', () => {
+    mockLists();
+    const { unmount } = render(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'web' })} />);
+    expect(screen.getByRole('heading', { name: 'Claude Code' })).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(claudeCodeApi.claudeCodeList).mockReset();
+    mockLists();
+    render(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'app' })} />);
+    expect(screen.queryByRole('heading', { name: 'Claude Code' })).not.toBeInTheDocument();
   });
 });

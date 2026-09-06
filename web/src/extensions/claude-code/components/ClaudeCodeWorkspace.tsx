@@ -30,6 +30,7 @@ interface ScopeState {
 }
 
 type ScopeStates = Record<Scope, ScopeState>;
+type ScopeRequestIds = Record<Scope, number>;
 
 const SCOPES: Scope[] = ['global', 'project'];
 
@@ -264,26 +265,34 @@ function useScopeLoader({
   requestKey,
   setActiveScope,
   setScopeStates,
-  readRequestId,
+  readRequestIds,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
   requestKey: string | null;
   setActiveScope: React.Dispatch<React.SetStateAction<Scope>>;
   setScopeStates: React.Dispatch<React.SetStateAction<ScopeStates>>;
-  readRequestId: React.MutableRefObject<number>;
+  readRequestIds: React.MutableRefObject<ScopeRequestIds>;
 }) {
   const currentRequestKey = useRef<string | null>(null);
-  const loadScope = useCallback(async (scope: Scope, key: string) => {
+  const contextGeneration = useRef(0);
+  const listRequestIds = useRef<ScopeRequestIds>({ global: 0, project: 0 });
+  const loadScope = useCallback(async (scope: Scope, key: string, generation: number) => {
     if (!agentId || !sessionId || currentRequestKey.current !== key) {
       return;
     }
+    const requestId = ++listRequestIds.current[scope];
+    const isCurrentRequest = () => (
+      currentRequestKey.current === key
+      && contextGeneration.current === generation
+      && listRequestIds.current[scope] === requestId
+    );
     updateScope(setScopeStates, scope, (state) => ({ ...state, loading: true, error: null }));
     try {
       const response: ClaudeCodeListResponse = await claudeCodeApi.claudeCodeList(
         scopeRequest(agentId, sessionId, scope),
       );
-      if (currentRequestKey.current !== key) {
+      if (!isCurrentRequest()) {
         return;
       }
       updateScope(setScopeStates, scope, (state) => ({
@@ -294,7 +303,7 @@ function useScopeLoader({
         error: response.error ?? null,
       }));
     } catch (error) {
-      if (currentRequestKey.current !== key) {
+      if (!isCurrentRequest()) {
         return;
       }
       updateScope(setScopeStates, scope, (state) => ({
@@ -306,49 +315,52 @@ function useScopeLoader({
   }, [agentId, sessionId, setScopeStates]);
 
   useEffect(() => {
+    contextGeneration.current += 1;
+    const generation = contextGeneration.current;
     currentRequestKey.current = requestKey;
-    readRequestId.current += 1;
+    readRequestIds.current.global += 1;
+    readRequestIds.current.project += 1;
     setActiveScope('global');
     setScopeStates(createScopeStates(Boolean(requestKey)));
     if (!requestKey) {
       return;
     }
-    void loadScope('global', requestKey);
-    void loadScope('project', requestKey);
-  }, [loadScope, requestKey, readRequestId, setActiveScope, setScopeStates]);
+    void loadScope('global', requestKey, generation);
+    void loadScope('project', requestKey, generation);
+  }, [loadScope, readRequestIds, requestKey, setActiveScope, setScopeStates]);
 
-  return { currentRequestKey, loadScope };
+  return { contextGeneration, currentRequestKey, loadScope };
 }
 
 function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
   const requestKey = agentId && sessionId ? `${agentId}:${sessionId}` : null;
-  const readRequestId = useRef(0);
+  const readRequestIds = useRef<ScopeRequestIds>({ global: 0, project: 0 });
   const [activeScope, setActiveScope] = useState<Scope>('global');
   const [scopeStates, setScopeStates] = useState<ScopeStates>(() => createScopeStates(true));
 
-  const { currentRequestKey, loadScope } = useScopeLoader({
+  const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
     agentId,
     sessionId,
     requestKey,
     setActiveScope,
     setScopeStates,
-    readRequestId,
+    readRequestIds,
   });
 
   const handleRetry = useCallback((scope: Scope) => {
     if (currentRequestKey.current) {
-      void loadScope(scope, currentRequestKey.current);
+      void loadScope(scope, currentRequestKey.current, contextGeneration.current);
     }
-  }, [currentRequestKey, loadScope]);
+  }, [contextGeneration, currentRequestKey, loadScope]);
 
   const handleFileClick = useCallback(async (scope: Scope, file: ConfigFile) => {
     if (!agentId || !sessionId || !currentRequestKey.current) {
       return;
     }
     const key = currentRequestKey.current;
-    const requestId = ++readRequestId.current;
+    const requestId = ++readRequestIds.current[scope];
     updateScope(setScopeStates, scope, (state) => ({
       ...state,
       selectedFile: file,
@@ -364,7 +376,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
       const response: ClaudeCodeReadResponse = await claudeCodeApi.claudeCodeRead(
         scopeReadRequest({ agentId, sessionId, scope, path: file.path, offset: 0 }),
       );
-      if (currentRequestKey.current !== key || readRequestId.current !== requestId) {
+      if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
       updateScope(setScopeStates, scope, (state) => ({
@@ -378,7 +390,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         readError: response.error ?? null,
       }));
     } catch (error) {
-      if (currentRequestKey.current !== key || readRequestId.current !== requestId) {
+      if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
       updateScope(setScopeStates, scope, (state) => ({
@@ -387,7 +399,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         readError: errorMessage(error),
       }));
     }
-  }, [agentId, currentRequestKey, sessionId]);
+  }, [agentId, currentRequestKey, readRequestIds, sessionId]);
 
   const handleLoadMore = useCallback(async (scope: Scope) => {
     if (!agentId || !sessionId || !currentRequestKey.current) {
@@ -398,14 +410,14 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
       return;
     }
     const key = currentRequestKey.current;
-    const requestId = ++readRequestId.current;
+    const requestId = ++readRequestIds.current[scope];
     const offset = state.nextOffset;
     updateScope(setScopeStates, scope, (current) => ({ ...current, readLoading: true, readError: null }));
     try {
       const response: ClaudeCodeReadResponse = await claudeCodeApi.claudeCodeRead(
         scopeReadRequest({ agentId, sessionId, scope, path: state.selectedFile.path, offset }),
       );
-      if (currentRequestKey.current !== key || readRequestId.current !== requestId) {
+      if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
       updateScope(setScopeStates, scope, (current) => ({
@@ -417,7 +429,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         readError: response.error ?? null,
       }));
     } catch (error) {
-      if (currentRequestKey.current !== key || readRequestId.current !== requestId) {
+      if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
       updateScope(setScopeStates, scope, (current) => ({
@@ -426,7 +438,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
         readError: errorMessage(error),
       }));
     }
-  }, [agentId, currentRequestKey, scopeStates, sessionId]);
+  }, [agentId, currentRequestKey, readRequestIds, scopeStates, sessionId]);
 
   return {
     agentId,
@@ -461,13 +473,16 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   }
 
   const activeState = scopeStates[activeScope];
+  const showHeading = ctx.experience !== 'app';
   return (
     <div data-testid="claude-code-workspace" className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center justify-between gap-4 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <FolderOpen className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-semibold">Claude Code</h1>
-        </div>
+        {showHeading ? (
+          <div className="flex items-center gap-2">
+            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            <h1 className="text-sm font-semibold">Claude Code</h1>
+          </div>
+        ) : null}
         <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as Scope)}>
           <TabsList>
             <TabsTrigger value="global">Global</TabsTrigger>
