@@ -14,6 +14,7 @@ export {
   getExtensions,
   registerExtension,
 } from './registry';
+export { createCoreExplorerExtension } from './commands/coreContributions';
 export type {
   ExplorerAction,
   ExplorerActionProvider,
