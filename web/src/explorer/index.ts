@@ -15,6 +15,8 @@ export {
   registerExtension,
 } from './registry';
 export { createCoreExplorerExtension } from './commands/coreContributions';
+export { ExplorerNodeRenderer } from './renderers/ExplorerNodeRenderer';
+export type { ExplorerNodeRendererProps } from './renderers/ExplorerNodeRenderer';
 export type {
   ExplorerAction,
   ExplorerActionProvider,
