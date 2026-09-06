@@ -247,6 +247,9 @@ describe('SessionFirstShell', () => {
     expect(screen.getByRole('tab', { name: 'Files' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Agent' }));
     expect(screen.getByTestId('agent-detail')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-detail')).not.toBeInTheDocument();
   });
 
   it('shows empty copy when there are no sessions', () => {

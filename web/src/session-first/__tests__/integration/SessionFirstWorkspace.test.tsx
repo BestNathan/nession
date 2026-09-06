@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import {
   SessionFirstWorkspace,
   type SessionFirstWorkspaceProps,
 } from '@/session-first/SessionFirstWorkspace';
 import type { DomainState } from '@/session-first/domainState';
 import type { Agent, Session } from '@/types';
+import type { Surface } from '@/session-first/patterns/SessionHeader';
+import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 
 const agent: Agent = {
   agent_id: 'a1',
@@ -88,6 +91,29 @@ function baseProps(
     onLegacy: vi.fn(),
     ...overrides,
   };
+}
+
+function AppNavigationHarness() {
+  const [surface, setSurface] = useState<Surface>('terminal');
+  const [tool, setTool] = useState<WorkspaceToolId>('files');
+
+  return (
+    <SessionFirstWorkspace
+      {...baseProps({
+        isWide: false,
+        selectedId: sess.session_id,
+        selectedSession: sess,
+        selectedAgent: agent,
+        domain,
+        surface,
+        tool,
+        onSurfaceChange: setSurface,
+        onToolChange: setTool,
+        showList: false,
+        showDetail: true,
+      })}
+    />
+  );
 }
 
 describe('SessionFirstWorkspace spatial shell', () => {
@@ -200,5 +226,17 @@ describe('SessionFirstWorkspace spatial shell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('file-workspace')).toBeInTheDocument();
     });
+  });
+
+  it('navigates to Claude Code from the app dock and back to terminal', async () => {
+    const user = userEvent.setup();
+    render(<AppNavigationHarness />);
+
+    await user.click(screen.getByTestId('app-header-workspace'));
+    await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('app-tool-back'));
+    expect(screen.getByTestId('terminal-well')).not.toHaveClass('hidden');
   });
 });
