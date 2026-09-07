@@ -45,7 +45,8 @@ impl Drop for TestSession {
     fn drop(&mut self) {
         // Synchronous by necessity: Drop cannot await. A non-zero status just
         // means the test already cleaned up, so the result is ignored.
-        let _ = std::process::Command::new("tmux")
+        let _ = crate::tmux::cmd::global()
+            .std()
             .args(["kill-session", "-t", &self.name])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

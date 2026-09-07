@@ -2483,11 +2483,21 @@ mod tests {
     }
 
     /// Write an executable `tmux` shim script that dispatches on `$1`.
+    ///
+    /// The shim is prefixed with the same `-S <socket>` strip a real tmux does,
+    /// because every command nession builds carries that flag (see
+    /// `crate::tmux::cmd`). Without the strip, `$1` would be `-S` and a script
+    /// matching on subcommands would silently fall through to its catch-all —
+    /// the shim would "work" while testing nothing.
     #[cfg(unix)]
     fn write_fake_tmux(dir: &std::path::Path, script: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join("tmux");
-        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\nif [ \"$1\" = \"-S\" ]; then shift 2; fi\n{script}\n"),
+        )
+        .unwrap();
         let mut perms = std::fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).unwrap();

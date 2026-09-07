@@ -7,11 +7,13 @@
 //! by tmux — no `-C` control-mode parsing required.
 
 use anyhow::{Context, Result};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::error;
+
+use super::cmd;
 
 /// Buffer size for reading from the PTY master — 4 KiB per read.
 const READ_BUF_SIZE: usize = 4096;
@@ -55,17 +57,20 @@ impl PtySession {
         // Hide the tmux status bar for this session only — the web UI has
         // its own chrome.  Using `-t` instead of `-g` avoids a global
         // side-effect that would affect every session on the machine.
-        let _ = std::process::Command::new("tmux")
+        let _ = cmd::global()
+            .std()
             .args(["set-option", "-t", session_name, "status", "off"])
             .status();
 
         // Build the command using portable-pty's CommandBuilder
-        // and spawn it on the slave side of the PTY.
-        let mut cmd = CommandBuilder::new("tmux");
-        cmd.args(["attach", "-t", session_name]);
+        // and spawn it on the slave side of the PTY.  portable-pty has its own
+        // command type, so this goes through TmuxCmd::pty() rather than the
+        // std/tokio builders — the socket flag has to be applied per API.
+        let mut attach = cmd::global().pty();
+        attach.args(["attach", "-t", session_name]);
         let child = pty
             .slave
-            .spawn_command(cmd)
+            .spawn_command(attach)
             .with_context(|| format!("failed to spawn tmux attach -t {session_name}"))?;
 
         // Obtain separate reader + writer handles from the master PTY.
@@ -155,7 +160,8 @@ impl Drop for PtySession {
         // Detach the tmux client gracefully using a blocking command (Drop is
         // sync so we cannot wait on the async child).  SIGKILL on a tmux
         // attach client is less risky than control-mode, but be safe.
-        let _ = std::process::Command::new("tmux")
+        let _ = cmd::global()
+            .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -189,7 +195,8 @@ impl super::session::TmuxSession for PtySession {
 
     async fn close(&mut self) -> Result<()> {
         // Detach the tmux client gracefully before killing the subprocess.
-        let _ = std::process::Command::new("tmux")
+        let _ = cmd::global()
+            .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

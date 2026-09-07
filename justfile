@@ -32,8 +32,8 @@ coverage:
 # Fast pre-commit checks (fmt + clippy)
 quick: fmt lint
 
-# Full CI checks (fmt + lint + coverage — coverage already runs all tests)
-check: fmt lint coverage
+# Full CI checks (fmt + lint + tmux-socket gate + coverage — coverage runs all tests)
+check: fmt lint check-tmux-socket coverage
 
 # ── Design tokens ───────────────────────────────────────────────────────────
 
@@ -86,6 +86,14 @@ check-test-isolation-selftest:
 # Diagnostic: run every test binary twice at once (slow, probabilistic — not a gate)
 check-test-concurrency:
     ./scripts/check-test-concurrency.sh
+
+# Static check: every tmux spawn carries an explicit -S socket (runs in pre-commit)
+check-tmux-socket:
+    ./scripts/check-tmux-socket.sh
+
+# Prove the tmux-socket checker still detects each spawn form it claims to
+check-tmux-socket-selftest:
+    ./scripts/check-tmux-socket-selftest.sh
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
 # Unit tests for both Rust and web (pre-commit)

@@ -73,7 +73,21 @@ async fn main() -> Result<()> {
     info!("Listen address: {}", config.listen_address);
 
     eprintln!("[DIAGNOSTIC] About to check tmux availability...");
-    // 3. Check tmux availability
+    // 3. Bind tmux to nession's own socket, before any tmux command runs.
+    // Every later tmux invocation addresses this socket explicitly, so
+    // nession's sessions are invisible to `tmux ls` on the default socket and
+    // cannot be taken down along with the user's own tmux server. A socket that
+    // cannot be prepared is fatal — falling back to the default socket is the
+    // behaviour this replaces (#575).
+    let tmux_socket = nession_agent::tmux::cmd::configure(config.tmux_socket_path.as_deref())?;
+    eprintln!("[DIAGNOSTIC] tmux socket: {}", tmux_socket.display());
+    info!("tmux socket: {}", tmux_socket.display());
+    info!(
+        "attach a session by hand with: tmux -S {} attach -t <name>",
+        tmux_socket.display()
+    );
+
+    // 3.5. Check tmux availability
     match nession_agent::tmux::util::check_tmux_available().await {
         Ok(true) => {
             eprintln!("[DIAGNOSTIC] tmux check returned true");
@@ -156,7 +170,7 @@ async fn main() -> Result<()> {
             .join(", ")
     );
 
-    let tmux_version = get_tmux_version().await;
+    let tmux_version = nession_agent::tmux::util::tmux_version().await;
     let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
 
     let metadata = AgentMetadata {
@@ -410,21 +424,4 @@ fn extract_port(addr: &str) -> u16 {
         .next()
         .and_then(|p| p.parse().ok())
         .unwrap_or(0)
-}
-
-/// Get the tmux version string by running `tmux -V`.
-async fn get_tmux_version() -> String {
-    tokio::process::Command::new("tmux")
-        .arg("-V")
-        .output()
-        .await
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "unknown".to_string())
 }

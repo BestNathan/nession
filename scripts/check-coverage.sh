@@ -8,6 +8,14 @@
 
 set -euo pipefail
 
+# Private tmux socket for this run. The coverage run executes the same tests as
+# `just test`, so it creates real tmux sessions and needs the same isolation —
+# and it is the gate CI runs, where a shared socket would be shared with
+# whatever else the runner is doing.
+# shellcheck source=scripts/tmux-run-socket.sh
+. "$(dirname "$0")/tmux-run-socket.sh"
+trap 'nession_tmux_run_cleanup' EXIT INT TERM
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

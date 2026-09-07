@@ -12,9 +12,10 @@
 use anyhow::{Context, Result};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::mpsc;
 
+use super::cmd;
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
 use super::util::run_tmux_command;
 
@@ -71,7 +72,8 @@ impl ControlModeSession {
         )
         .await?;
 
-        let mut child = Command::new("tmux")
+        let mut child = cmd::global()
+            .tokio()
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -175,7 +177,8 @@ impl Drop for ControlModeSession {
         // SIGKILL (start_kill / kill -9) on a control-mode client crashes
         // the tmux server on macOS (Homebrew tmux 3.6b: "server exited
         // unexpectedly").  We must always detach cleanly.
-        let _ = std::process::Command::new("tmux")
+        let _ = cmd::global()
+            .std()
             .args(["detach-client", "-t", &self.session_name])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
