@@ -606,6 +606,34 @@ mod window_size_lock_tests {
     }
 
     #[test]
+    fn every_manager_addresses_the_process_socket() {
+        // ~60 call sites build a SessionManager with ::new(), and nothing tells
+        // them which socket they got. If one stopped inheriting the process-wide
+        // one, its sessions would land on a second tmux server: create would
+        // succeed, list would not see it, and nothing would report an error.
+        assert_eq!(
+            SessionManager::new().socket_path(),
+            cmd::global().socket_path()
+        );
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            SessionManager::with_script_dir(dir.path().to_path_buf()).socket_path(),
+            cmd::global().socket_path(),
+            "with_script_dir must change only the env-script dir, not the socket"
+        );
+    }
+
+    #[test]
+    fn injecting_a_fake_tmux_keeps_the_socket() {
+        // The test seam swaps the binary; a seam that also reset the socket
+        // would make fake-tmux tests pass while proving nothing about -S.
+        let mut mgr = SessionManager::new();
+        let expected = mgr.socket_path().to_path_buf();
+        mgr.with_tmux_bin("/nonexistent/fake-tmux");
+        assert_eq!(mgr.socket_path(), expected);
+    }
+
+    #[test]
     fn stopped_server_counts_as_no_sessions() {
         assert!(is_no_sessions_stderr(
             "no server running on /tmp/nession-501/tmux.sock"
