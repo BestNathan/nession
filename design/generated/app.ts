@@ -44,6 +44,7 @@ export const composer = {
   popoverWidth: "22rem",
   popoverViewportInset: "1rem",
   popoverMaxHeight: "45vh",
+  commandsPanelMaxHeight: "20vh",
   popoverListMaxHeight: "38vh",
   popoverBodyMaxHeight: "42vh",
   popoverPad: "0.5rem",

@@ -1,0 +1,76 @@
+import { useCallback, useState } from 'react';
+import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  capsuleCaptionTextClass,
+  capsuleCommandsPanelClass,
+  capsuleCommandsPanelHeaderClass,
+} from '@/session-first/capsule/capsuleStyles';
+import { cn } from '@/lib/utils';
+import { CapsuleAddCommandDialog } from '@/session-first/capsule/CapsuleAddCommandDialog';
+import { CapsuleCommandsPanelBody } from '@/session-first/capsule/CapsuleCommandsPanelBody';
+import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
+
+interface CapsuleCommandsPanelProps {
+  sendText: (text: string) => void;
+  disabled?: boolean;
+  showPhysKeys: boolean;
+  onClose: () => void;
+}
+
+export function CapsuleCommandsPanel({
+  sendText,
+  disabled = false,
+  showPhysKeys,
+  onClose,
+}: CapsuleCommandsPanelProps) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const commands = useCapsuleCommands(sendText);
+  const { handleRun: runCommand, addCommand, ...panelBodyProps } = commands;
+
+  const handleRun = useCallback(
+    (command: Parameters<typeof runCommand>[0]) => {
+      runCommand(command);
+      onClose();
+    },
+    [runCommand, onClose],
+  );
+
+  const openAddCommandDialog = useCallback(() => {
+    onClose();
+    setDialogOpen(true);
+  }, [onClose]);
+
+  return (
+    <>
+      <div data-testid="capsule-commands-panel" className={capsuleCommandsPanelClass}>
+        <div className={capsuleCommandsPanelHeaderClass}>
+          <h2 className={cn(capsuleCaptionTextClass, 'font-medium')}>Quick commands</h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close commands"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </div>
+        <CapsuleCommandsPanelBody
+          disabled={disabled}
+          showPhysKeys={showPhysKeys}
+          onAddCommandClick={openAddCommandDialog}
+          handleRun={handleRun}
+          {...panelBodyProps}
+        />
+      </div>
+      <CapsuleAddCommandDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        disabled={disabled}
+        onAddPlain={(label, command) => addCommand(label, command, false)}
+        onAddCombo={(label, seq) => addCommand(label, seq, true)}
+      />
+    </>
+  );
+}

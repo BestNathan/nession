@@ -21,11 +21,21 @@ export const capsuleSecondaryIconButtonClass =
 export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
 
-/** Dialog/sheet layer above composer popovers (--composer-popover-zindex is 100). */
+/** Dialog layer above composer popovers (--composer-popover-zindex is 100). */
 export const capsuleDialogOverlayClass = 'z-[110]';
 export const capsuleDialogContentClass = 'z-[110]';
-export const capsuleSheetOverlayClass = 'z-[109]';
-export const capsuleSheetContentClass = 'z-[110]';
+
+export const capsuleCommandsPanelClass =
+  'flex max-h-[length:var(--composer-commands-panel-max-height)] flex-col overflow-hidden border-t border-border/60 bg-popover text-popover-foreground rounded-t-xl';
+
+export const capsuleCommandsPanelHeaderClass =
+  'flex items-center justify-between gap-[length:var(--composer-popover-gap)] p-[length:var(--composer-popover-pad)]';
+
+export const capsuleCommandsPanelListClass =
+  'min-h-0 flex-1 overflow-y-auto max-h-[length:var(--composer-commands-panel-max-height)]';
+
+export const capsuleCommandsDismissLayerClass =
+  'absolute inset-x-0 top-0 z-10 cursor-default';
 
 /** Floating control surface — elevation only, no border (visual-language §3, terminal-capsule § Surface treatment). */
 export const capsuleFloatingSurfaceClass =
