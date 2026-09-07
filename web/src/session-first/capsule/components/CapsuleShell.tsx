@@ -44,7 +44,6 @@ export function CapsuleShell({
 }: CapsuleShellProps) {
   const { commandsOpen } = useCapsuleContext();
   const isCommandsMode = mode === 'commands';
-  const commandsPanelExpanded = isCommandsMode && commandsOpen;
   const showLayout = !isCommandsMode;
   const isApp = experience === 'app';
   const usePillShape =
@@ -70,24 +69,20 @@ export function CapsuleShell({
         ref={shellRef}
         data-testid="capsule-shell"
         className={cn(
-          'flex min-h-[length:var(--control-md)]',
+          'flex min-h-[length:var(--control-md)] items-center',
           capsuleShellInnerClass,
           capsuleShellSurfaceClass,
           usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
-          commandsPanelExpanded
-            ? 'flex-col'
-            : cn('items-center', isCommandsMode && capsuleShellContentGapClass),
+          isCommandsMode && capsuleShellContentGapClass,
         )}
       >
         <div
           ref={contentRef}
           data-testid="capsule-shell-content"
           className={cn(
-            'flex min-w-0 flex-1 overflow-hidden',
-            commandsPanelExpanded
-              ? 'flex-col items-stretch'
-              : cn('items-center', isCommandsMode && capsuleShellContentGapClass),
+            'flex min-w-0 flex-1 items-center overflow-hidden',
+            isCommandsMode && capsuleShellContentGapClass,
           )}
         >
           {children}

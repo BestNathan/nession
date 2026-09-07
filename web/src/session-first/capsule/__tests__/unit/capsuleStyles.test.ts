@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   capsuleCommandsDismissLayerClass,
-  capsuleCommandsPanelClass,
+  capsuleCommandsOverlayPanelClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
@@ -38,8 +38,9 @@ describe('capsuleStyles', () => {
     );
   });
 
-  it('uses 20vh commands panel max-height token', () => {
-    expect(capsuleCommandsPanelClass).toContain('var(--composer-commands-panel-max-height)');
+  it('overlay panel is absolutely positioned over the terminal host', () => {
+    expect(capsuleCommandsOverlayPanelClass).toContain('absolute');
+    expect(capsuleCommandsOverlayPanelClass).toContain('z-[15]');
   });
 
   it('dismiss layer sits below capsule dock z-index', () => {

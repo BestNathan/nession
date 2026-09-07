@@ -2,11 +2,9 @@ import { useCallback, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
-  capsuleCaptionTextClass,
   capsuleCommandsPanelClass,
   capsuleCommandsPanelHeaderClass,
 } from '@/session-first/capsule/capsuleStyles';
-import { cn } from '@/lib/utils';
 import { CapsuleAddCommandDialog } from '@/session-first/capsule/CapsuleAddCommandDialog';
 import { CapsuleCommandsPanelBody } from '@/session-first/capsule/CapsuleCommandsPanelBody';
 import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
@@ -14,14 +12,12 @@ import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
 interface CapsuleCommandsPanelProps {
   sendText: (text: string) => void;
   disabled?: boolean;
-  showPhysKeys: boolean;
   onClose: () => void;
 }
 
 export function CapsuleCommandsPanel({
   sendText,
   disabled = false,
-  showPhysKeys,
   onClose,
 }: CapsuleCommandsPanelProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -45,7 +41,6 @@ export function CapsuleCommandsPanel({
     <>
       <div data-testid="capsule-commands-panel" className={capsuleCommandsPanelClass}>
         <div className={capsuleCommandsPanelHeaderClass}>
-          <h2 className={cn(capsuleCaptionTextClass, 'font-medium')}>Quick commands</h2>
           <Button
             type="button"
             variant="ghost"
@@ -58,7 +53,7 @@ export function CapsuleCommandsPanel({
         </div>
         <CapsuleCommandsPanelBody
           disabled={disabled}
-          showPhysKeys={showPhysKeys}
+          layout="overlay"
           onAddCommandClick={openAddCommandDialog}
           handleRun={handleRun}
           {...panelBodyProps}

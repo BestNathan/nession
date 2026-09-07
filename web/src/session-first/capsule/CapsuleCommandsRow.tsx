@@ -2,7 +2,6 @@ import { useCapsuleCommands } from '@/session-first/capsule/useCapsuleCommands';
 import { QUICK_MOBILE_KEYS } from '@/session-first/capsule/physKeys';
 import { Button } from '@/components/ui/button';
 import { CapsuleCommandsMoreTrigger } from '@/session-first/capsule/CapsuleCommandsPopover';
-import { CapsuleCommandsPanel } from '@/session-first/capsule/CapsuleCommandsPanel';
 import { CapsuleChainBar } from '@/session-first/capsule/CapsuleChainBar';
 import {
   capsuleCommandsMoreClass,
@@ -67,14 +66,6 @@ export function CapsuleCommandsRow({
           />
         </div>
       </div>
-      {commandsOpen ? (
-        <CapsuleCommandsPanel
-          sendText={sendText}
-          disabled={disabled}
-          showPhysKeys
-          onClose={() => onCommandsOpenChange(false)}
-        />
-      ) : null}
     </div>
   );
 }
