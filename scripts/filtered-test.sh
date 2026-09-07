@@ -7,8 +7,13 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Private tmux socket for this run — tests create real tmux sessions, and two
+# runs sharing a server sabotage each other. Defines nession_tmux_run_cleanup.
+# shellcheck source=scripts/tmux-run-socket.sh
+. "$(dirname "$0")/tmux-run-socket.sh"
+
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp"; nession_tmux_run_cleanup' EXIT INT TERM
 
 cargo test --workspace --color=always "$@" >"$tmp" 2>&1
 rc=$?
