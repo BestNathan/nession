@@ -26,6 +26,7 @@ export default tseslint.config(
       'nession/no-cross-experience-token': 'error',
       'nession/no-capsule-magic-metrics': 'error',
       'nession/no-sf-overlay-vars': 'error',
+      'nession/no-reverse-imports': 'warn', // Phase 0: warn during migration, will become error
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
