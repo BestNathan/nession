@@ -74,6 +74,7 @@ export function CapsuleHistoryPopover({
               triggerClassName,
             )}
             aria-label="Command history"
+            onPointerDown={(event) => event.preventDefault()}
           >
             <History />
           </Button>

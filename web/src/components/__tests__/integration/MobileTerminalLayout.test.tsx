@@ -18,45 +18,30 @@ function setup(
   } = {},
 ) {
   const { toolbarDisabled = false, controller = null, terminalOnly = false } = options;
-  const onScrollPages = vi.fn();
-  const onScrollToBottom = vi.fn();
   render(
     <MobileTerminalLayout
       terminalElement={terminalElement}
       sessionId="session-1"
       sendText={vi.fn()}
       toolbarDisabled={toolbarDisabled}
-      onScrollPages={onScrollPages}
-      onScrollToBottom={onScrollToBottom}
       controller={controller as TerminalController | null | undefined}
       terminalOnly={terminalOnly}
     />,
   );
-  return { onScrollPages, onScrollToBottom };
 }
 
 describe('MobileTerminalLayout', () => {
-  it('renders the scroll overlay over the terminal panel', () => {
+  it('renders the terminal panel without scroll overlay chrome', () => {
     setup();
     expect(screen.getByTestId('terminal')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Scroll up one page' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Scroll down one page' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Scroll to bottom' })).toBeInTheDocument();
-  });
-
-  it('overlay taps invoke the scroll callbacks', () => {
-    const { onScrollPages, onScrollToBottom } = setup();
-    fireEvent.click(screen.getByRole('button', { name: 'Scroll up one page' }));
-    expect(onScrollPages).toHaveBeenCalledWith(-1);
-    fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }));
-    expect(onScrollToBottom).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not render the overlay when terminalElement is null (desktop path)', () => {
-    setup(null);
     expect(screen.queryByRole('button', { name: 'Scroll up one page' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Scroll down one page' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).not.toBeInTheDocument();
+  });
+
+  it('does not render scroll overlay when terminalElement is null (desktop path)', () => {
+    setup(null);
+    expect(screen.queryByRole('button', { name: 'Scroll up one page' })).not.toBeInTheDocument();
   });
 });
 

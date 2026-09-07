@@ -62,7 +62,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           data-testid="capsule-input-field"
           data-input-width={fieldFirstLayout ? 'full' : 'column'}
           className={cn(
-            'min-w-0 w-full',
+            'min-w-0 w-full overflow-hidden',
             !fieldFirstLayout && 'col-start-1 row-start-1',
           )}
         >

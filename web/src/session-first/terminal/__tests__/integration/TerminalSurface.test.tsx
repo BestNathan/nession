@@ -30,8 +30,6 @@ describe('TerminalSurface', () => {
       <TerminalSurface
         inputDisabled={false}
         controller={null}
-        onScrollPages={vi.fn()}
-        onScrollToBottom={vi.fn()}
       >
         <div data-testid="terminal-viewport-slot" />
       </TerminalSurface>,

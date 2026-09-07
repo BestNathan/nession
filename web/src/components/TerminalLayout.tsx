@@ -17,10 +17,6 @@ interface TerminalLayoutProps {
   sessionId: string;
   sessionName?: string;
   sendText: (text: string) => void;
-  /** Scroll the terminal scrollback by pages (negative = towards history). */
-  onScrollPages: (pages: number) => void;
-  /** Jump the terminal viewport to the newest output. */
-  onScrollToBottom: () => void;
   toolbarDisabled: boolean;
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
@@ -139,8 +135,6 @@ export function TerminalLayout({
   sessionId,
   sessionName,
   sendText,
-  onScrollPages,
-  onScrollToBottom,
   toolbarDisabled,
   fileOps,
   onTerminalReveal,
@@ -235,8 +229,6 @@ export function TerminalLayout({
           sessionId={sessionId}
           sessionName={sessionName}
           sendText={sendText}
-          onScrollPages={onScrollPages}
-          onScrollToBottom={onScrollToBottom}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
           onTerminalReveal={onTerminalReveal}

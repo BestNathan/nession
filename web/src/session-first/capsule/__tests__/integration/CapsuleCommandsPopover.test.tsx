@@ -223,4 +223,20 @@ describe('CapsuleCommandsPopover', () => {
     expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
   });
+
+  it('renders bottom sheet when presentation is sheet', () => {
+    render(
+      <CapsuleCommandsPopover
+        open
+        onOpenChange={vi.fn()}
+        sendText={sendText}
+        showPhysKeys
+        presentation="sheet"
+        trigger={<button type="button" data-testid="capsule-commands-more">More</button>}
+      />,
+    );
+    const sheet = document.querySelector('[data-slot="sheet-content"][data-side="bottom"]');
+    expect(sheet).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
+  });
 });
