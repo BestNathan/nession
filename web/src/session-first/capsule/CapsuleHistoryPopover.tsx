@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { History } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Popover,
@@ -15,6 +14,7 @@ import {
   capsuleCaptionTextClass,
   capsuleEmptyStatePadClass,
   capsuleHistoryItemClass,
+  capsuleIconButtonClass,
   capsulePopoverHeaderClass,
   capsulePopoverPanelClass,
   capsulePopoverScrollClass,
@@ -62,23 +62,19 @@ export function CapsuleHistoryPopover({
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         nativeButton
+        type="button"
         disabled={disabled}
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={disabled}
-            data-testid="capsule-history-trigger"
-            className={cn(
-              "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
-              triggerClassName,
-            )}
-            aria-label="Command history"
-          >
-            <History />
-          </Button>
-        }
-      />
+        data-testid="capsule-history-trigger"
+        aria-label="Command history"
+        className={cn(
+          capsuleIconButtonClass,
+          'inline-flex items-center justify-center rounded-lg',
+          "[&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]",
+          triggerClassName,
+        )}
+      >
+        <History />
+      </PopoverTrigger>
       <PopoverContent
         align="end"
         side="top"

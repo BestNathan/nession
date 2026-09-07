@@ -182,6 +182,22 @@ html {
   flex: 1 1 0%;
   min-height: 0;
   background: var(--terminal-well-background);
+  isolation: isolate;
+}
+
+/* xterm fills the well; the floating capsule must win hit-testing on mobile. */
+[data-terminal-capsule-host] [data-terminal-viewport] {
+  position: relative;
+  z-index: 0;
+  pointer-events: none;
+}
+
+[data-terminal-capsule-host] [data-terminal-viewport] .xterm {
+  pointer-events: auto;
+}
+
+[data-terminal-capsule-host] [data-testid='terminal-capsule'] {
+  z-index: 30;
 }
 
 [data-terminal-capsule-host][data-terminal-scrollback-mode='local-buffer'] {

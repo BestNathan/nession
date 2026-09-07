@@ -81,14 +81,14 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           >
             <div
               data-testid="capsule-input-leading-slot"
-              className={cn('min-w-0 shrink-0', !hasLeading && 'hidden')}
+              className={cn('relative z-[1] min-w-0 shrink-0', !hasLeading && 'hidden')}
             >
               <CapsuleInputLeading leading={leading} />
             </div>
             <div
               data-testid="capsule-input-actions-slot"
               data-flip-id="tools-actions"
-              className="ml-auto shrink-0"
+              className="relative z-[1] ml-auto shrink-0"
             >
               <CapsuleInputTrailingActions
                 historyOpen={historyOpen}
