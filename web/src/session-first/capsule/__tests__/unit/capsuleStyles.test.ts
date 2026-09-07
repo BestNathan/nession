@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capsuleCommandsDismissLayerClass,
+  capsuleCommandsPanelClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
@@ -34,5 +36,13 @@ describe('capsuleStyles', () => {
     expect(capsulePhysKeyIconClass).toContain(
       'var(--composer-phys-key-icon-size)',
     );
+  });
+
+  it('uses 20vh commands panel max-height token', () => {
+    expect(capsuleCommandsPanelClass).toContain('var(--composer-commands-panel-max-height)');
+  });
+
+  it('dismiss layer sits below capsule dock z-index', () => {
+    expect(capsuleCommandsDismissLayerClass).toContain('z-10');
   });
 });

@@ -24,8 +24,6 @@ import {
   capsulePopoverHeaderClass,
   capsulePopoverItemClass,
   capsulePopoverPanelClass,
-  capsuleSheetContentClass,
-  capsuleSheetOverlayClass,
 } from '@/session-first/capsule/capsuleStyles';
 import { readPopoverSideOffset } from '@/session-first/capsule/measure/readPopoverSideOffset';
 import { cn } from '@/lib/utils';
@@ -204,10 +202,10 @@ export function CapsuleCommandsPopover({
           />
           <SheetContent
             side="bottom"
-            overlayClassName={capsuleSheetOverlayClass}
+            overlayClassName="z-[109]"
             className={cn(
               capsulePopoverPanelClass,
-              capsuleSheetContentClass,
+              'z-[110]',
               'w-full max-w-none rounded-t-xl pb-[env(safe-area-inset-bottom)]',
             )}
           >
