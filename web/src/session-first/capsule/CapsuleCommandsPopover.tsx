@@ -24,6 +24,8 @@ import {
   capsulePopoverHeaderClass,
   capsulePopoverItemClass,
   capsulePopoverPanelClass,
+  capsuleSheetContentClass,
+  capsuleSheetOverlayClass,
 } from '@/session-first/capsule/capsuleStyles';
 import { readPopoverSideOffset } from '@/session-first/capsule/measure/readPopoverSideOffset';
 import { cn } from '@/lib/utils';
@@ -164,15 +166,6 @@ export function CapsuleCommandsPopover({
     },
     [runCommand, onOpenChange],
   );
-  const handlePhysKey = useCallback(
-    (seq: string) => {
-      sendPhysKey(seq);
-    },
-    [sendPhysKey],
-  );
-  const sendChain = useCallback(() => {
-    sendCommandChain();
-  }, [sendCommandChain]);
   const openAddCommandDialog = useCallback(() => {
     onOpenChange(false);
     setDialogOpen(true);
@@ -185,8 +178,8 @@ export function CapsuleCommandsPopover({
       onAddCommandClick={openAddCommandDialog}
       {...commands}
       handleRun={handleRun}
-      handlePhysKey={handlePhysKey}
-      sendChain={sendChain}
+      handlePhysKey={sendPhysKey}
+      sendChain={sendCommandChain}
     />
   );
 
@@ -211,8 +204,10 @@ export function CapsuleCommandsPopover({
           />
           <SheetContent
             side="bottom"
+            overlayClassName={capsuleSheetOverlayClass}
             className={cn(
               capsulePopoverPanelClass,
+              capsuleSheetContentClass,
               'w-full max-w-none rounded-t-xl pb-[env(safe-area-inset-bottom)]',
             )}
           >

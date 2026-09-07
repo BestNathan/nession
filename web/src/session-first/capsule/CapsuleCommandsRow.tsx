@@ -52,7 +52,6 @@ export function CapsuleCommandsRow({
               disabled={disabled}
               data-testid={`capsule-quick-key-${keyDef.label}`}
               className={capsuleQuickKeyButtonClass}
-              onPointerDown={(event) => event.preventDefault()}
               onClick={() => handlePhysKey(keyDef.seq)}
               onContextMenu={(event) => event.preventDefault()}
             >

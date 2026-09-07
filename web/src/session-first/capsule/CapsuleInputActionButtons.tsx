@@ -66,7 +66,6 @@ export function CapsuleInputActionButtons({
                 data-testid="capsule-paste"
                 aria-label="Paste"
                 className={secondaryIconClass}
-                onPointerDown={(event) => event.preventDefault()}
                 onClick={onPaste}
               >
                 <ClipboardPaste />
@@ -85,7 +84,6 @@ export function CapsuleInputActionButtons({
                 data-testid="capsule-copy"
                 aria-label="Copy"
                 className={secondaryIconClass}
-                onPointerDown={(event) => event.preventDefault()}
                 onClick={() => {
                   void onCopy();
                 }}
@@ -113,7 +111,6 @@ export function CapsuleInputActionButtons({
                 ? 'bg-foreground text-background hover:bg-foreground/90'
                 : 'bg-muted text-muted-foreground',
             )}
-            onPointerDown={(event) => event.preventDefault()}
             onClick={onSend}
           >
             <ArrowUp />

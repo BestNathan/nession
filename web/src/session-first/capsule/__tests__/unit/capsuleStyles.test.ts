@@ -13,6 +13,7 @@ describe('capsuleStyles', () => {
     expect(capsulePopoverPanelClass).toContain(
       'max-w-[calc(100vw-var(--composer-popover-viewport-inset))]',
     );
+    expect(capsulePopoverPanelClass).toContain('var(--composer-popover-zindex)');
   });
 
   it('provides the shared physical-key grid gap token', () => {

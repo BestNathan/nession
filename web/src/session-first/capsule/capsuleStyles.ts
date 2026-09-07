@@ -12,18 +12,20 @@ export const capsuleFieldPadClass =
 
 /** Primary actions (Send) — full touch/control band. */
 export const capsuleIconButtonClass =
-  "h-[length:var(--control-md)] w-[length:var(--control-md)] shrink-0 [&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]";
+  "h-[length:var(--control-md)] w-[length:var(--control-md)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]";
 
 /** Secondary toolbar icons — smaller band so the field keeps width. */
 export const capsuleSecondaryIconButtonClass =
-  "h-[length:var(--control-sm)] w-[length:var(--control-sm)] shrink-0 [&_svg:not([class*='size-'])]:size-[length:var(--icon-sm)]";
+  "h-[length:var(--control-sm)] w-[length:var(--control-sm)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-sm)]";
 
 export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
 
-/** Dialog layer above composer popovers (--composer-popover-z-index is 100). */
+/** Dialog/sheet layer above composer popovers (--composer-popover-zindex is 100). */
 export const capsuleDialogOverlayClass = 'z-[110]';
 export const capsuleDialogContentClass = 'z-[110]';
+export const capsuleSheetOverlayClass = 'z-[109]';
+export const capsuleSheetContentClass = 'z-[110]';
 
 /** Floating control surface — elevation only, no border (visual-language §3, terminal-capsule § Surface treatment). */
 export const capsuleFloatingSurfaceClass =
@@ -66,7 +68,7 @@ export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--composer-toolbar
 export const capsuleShellContentGapClass = 'gap-[length:var(--composer-shell-content-gap)]';
 
 export const capsulePopoverPanelClass =
-  'z-[length:var(--composer-popover-z-index)] max-h-[length:var(--composer-popover-max-height)] w-[length:var(--composer-popover-width)] max-w-[calc(100vw-var(--composer-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
+  'z-[length:var(--composer-popover-zindex)] max-h-[length:var(--composer-popover-max-height)] w-[length:var(--composer-popover-width)] max-w-[calc(100vw-var(--composer-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
 
 export const capsulePopoverHeaderClass =
   'gap-[length:var(--composer-popover-gap)] border-b border-border/60 p-[length:var(--composer-popover-pad)]';
