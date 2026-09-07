@@ -39,24 +39,26 @@ export function CapsuleCommandsRow({
       {isChaining ? (
         <CapsuleChainBar buffer={chainBuffer} onCancel={cancelChain} onSend={sendChain} />
       ) : null}
-      <div className={capsuleCommandsRowClass}>
-        <div className={cn(capsuleCommandsScrollClass, capsuleQuickKeyRowClass)}>
-          {QUICK_MOBILE_KEYS.map((keyDef) => (
-            <Button
-              key={keyDef.label}
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              data-testid={`capsule-quick-key-${keyDef.label}`}
-              className={capsuleQuickKeyButtonClass}
-              onClick={() => handlePhysKey(keyDef.seq)}
-              onContextMenu={(event) => event.preventDefault()}
-            >
-              {keyDef.label}
-            </Button>
-          ))}
-        </div>
+      <div className={cn(capsuleCommandsRowClass, commandsOpen && 'justify-end')}>
+        {!commandsOpen ? (
+          <div className={cn(capsuleCommandsScrollClass, capsuleQuickKeyRowClass)}>
+            {QUICK_MOBILE_KEYS.map((keyDef) => (
+              <Button
+                key={keyDef.label}
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                data-testid={`capsule-quick-key-${keyDef.label}`}
+                className={capsuleQuickKeyButtonClass}
+                onClick={() => handlePhysKey(keyDef.seq)}
+                onContextMenu={(event) => event.preventDefault()}
+              >
+                {keyDef.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
         <div className={capsuleCommandsMoreClass}>
           <CapsuleCommandsMoreTrigger
             disabled={disabled}
