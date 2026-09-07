@@ -8,5 +8,6 @@ pub mod logging;
 pub mod paths;
 pub mod protocol;
 pub mod system;
+pub mod tmux_socket;
 
 pub use error::{NessionError, Result};

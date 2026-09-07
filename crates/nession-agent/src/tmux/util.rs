@@ -6,7 +6,8 @@
 //! reporting.
 
 use anyhow::{Context, Result};
-use tokio::process::Command;
+
+use super::cmd;
 
 /// Run a tmux subcommand against a named session.
 ///
@@ -14,10 +15,12 @@ use tokio::process::Command;
 /// `Ok(())` on success, or an error with the command description and exit
 /// status on failure.
 ///
-/// Prefer this over ad-hoc `Command::new("tmux")` calls — it ensures
-/// consistent error reporting (including the exit status in the message).
+/// Prefer this for session-scoped subcommands — it gives consistent error
+/// reporting (including the exit status in the message). It is not the
+/// isolation boundary: every tmux process in this crate, this one included, is
+/// spawned by [`super::cmd`], which is what guarantees the `-S` socket flag.
 pub async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
-    let mut cmd = Command::new("tmux");
+    let mut cmd = cmd::global().tokio();
     cmd.args(args)
         .arg("-t")
         .arg(session)
@@ -35,7 +38,8 @@ pub async fn run_tmux_command(session: &str, args: &[&str]) -> Result<()> {
 
 /// Send a line of keystrokes to a session, followed by Enter.
 pub async fn send_keys(session_name: &str, keys: &str) -> Result<()> {
-    let status = Command::new("tmux")
+    let status = cmd::global()
+        .tokio()
         .args(["send-keys", "-t", session_name, keys, "Enter"])
         .stderr(std::process::Stdio::null())
         .status()
@@ -50,12 +54,35 @@ pub async fn send_keys(session_name: &str, keys: &str) -> Result<()> {
 
 /// Check whether the `tmux` binary is available on `PATH`.
 pub async fn check_tmux_available() -> Result<bool> {
-    let status = Command::new("tmux")
+    let status = cmd::global()
+        .tokio()
         .arg("-V")
         .stderr(std::process::Stdio::null())
         .status()
         .await?;
     Ok(status.success())
+}
+
+/// Version string reported by `tmux -V`, or `"unknown"` if it cannot be read.
+///
+/// Shared by the agent binary and the CLI's bare-metal agent mode; both used to
+/// keep their own copy, and a copy is a place for an un-socketed tmux spawn to
+/// reappear.
+pub async fn tmux_version() -> String {
+    cmd::global()
+        .tokio()
+        .arg("-V")
+        .output()
+        .await
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Capture the last `lines` lines of scrollback for a session's active pane,
@@ -70,7 +97,8 @@ pub async fn capture_scrollback(
     lines: u32,
 ) -> Result<Option<(Vec<u8>, u16, u16)>, std::io::Error> {
     // First, get the session dimensions
-    let dims_output = Command::new("tmux")
+    let dims_output = cmd::global()
+        .tokio()
         .args([
             "display-message",
             "-t",
@@ -99,7 +127,8 @@ pub async fn capture_scrollback(
 
     // Then capture the scrollback
     let lines_str = lines.to_string();
-    let output = Command::new("tmux")
+    let output = cmd::global()
+        .tokio()
         .args([
             "capture-pane",
             "-t",

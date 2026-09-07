@@ -60,6 +60,8 @@ pub async fn start(
         let exe = std::env::current_exe()?;
 
         // Spawn the agent process with proper daemonization on Unix
+        // not-tmux: re-executes this CLI binary (`nession agent start
+        // --foreground`); the tmux socket is bound by that child at startup.
         let mut cmd = Command::new(&exe);
         let mut child_args: Vec<String> = vec![
             "agent".to_string(),
@@ -311,6 +313,18 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
 
+    // Bind tmux to nession's own socket before any tmux command runs. The
+    // resolution rule is shared with the agent binary (config key, then
+    // $NESSION_TMUX_SOCKET, then the default), so both see the same sessions —
+    // a CLI resolving differently would just report an empty list.
+    let tmux_socket = nession_agent::tmux::cmd::configure(config.tmux_socket_path.as_deref())
+        .context("failed to prepare the tmux socket")?;
+    info!("tmux socket: {}", tmux_socket.display());
+    info!(
+        "attach a session by hand with: tmux -S {} attach -t <name>",
+        tmux_socket.display()
+    );
+
     // Import and run the agent components
     use nession_agent::connection::ServerClient;
     use nession_agent::server::AgentServer;
@@ -359,7 +373,7 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
         );
         finalised
     };
-    let tmux_version = get_tmux_version().await;
+    let tmux_version = nession_agent::tmux::util::tmux_version().await;
     let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
 
     let metadata = AgentMetadata {
@@ -549,21 +563,4 @@ fn extract_port(addr: &str) -> u16 {
         .next()
         .and_then(|p| p.parse().ok())
         .unwrap_or(0)
-}
-
-/// Get tmux version.
-async fn get_tmux_version() -> String {
-    tokio::process::Command::new("tmux")
-        .arg("-V")
-        .output()
-        .await
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "unknown".to_string())
 }

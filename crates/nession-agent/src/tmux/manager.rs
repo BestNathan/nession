@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
 
+use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
 
 /// Fixed width for tmux sessions. Individual clients get independent
@@ -32,6 +33,24 @@ const TMUX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 /// Timeout for the multi-stage `create_session` (new-session + env setup).
 const TMUX_CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Variables never forwarded from the agent process into a tmux session.
+///
+/// `TERM`/`LANG`/`LC_ALL` are forced explicitly below, whatever the host has.
+///
+/// `TMUX`/`TMUX_TMPDIR` describe whichever tmux server happened to start the
+/// agent (they are set for every process inside a tmux pane). Forwarding them
+/// makes every shell in a nession session believe it belongs to *that* server,
+/// so a bare `tmux kill-server` typed inside a nession session would reach the
+/// user's real sessions. nession addresses tmux by `-S` alone and passes none of
+/// this on.
+const NEVER_FORWARDED_ENV: [&str; 5] = ["TERM", "LANG", "LC_ALL", "TMUX", "TMUX_TMPDIR"];
+
+/// Whether an inherited env var is withheld from a new session — either
+/// forced/stripped by policy, or superseded by a caller-supplied value.
+fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
+    NEVER_FORWARDED_ENV.contains(&key) || caller_keys.contains(&key)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub name: String,
@@ -49,8 +68,9 @@ pub struct SessionInfo {
 /// through [`SessionManager::env`].
 pub struct SessionManager {
     env: EnvManager,
-    /// tmux binary name or path. Injectable so tests can substitute a fake.
-    tmux_bin: String,
+    /// tmux binary and socket. Every command this manager spawns is built here,
+    /// so all of them address nession's own tmux server — see [`crate::tmux::cmd`].
+    cmd: TmuxCmd,
     list_timeout: Duration,
     kill_timeout: Duration,
     create_timeout: Duration,
@@ -62,7 +82,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             env: EnvManager::new(std::env::temp_dir()),
-            tmux_bin: "tmux".to_string(),
+            cmd: cmd::global().clone(),
             list_timeout: TMUX_LIST_TIMEOUT,
             kill_timeout: TMUX_KILL_TIMEOUT,
             create_timeout: TMUX_CREATE_TIMEOUT,
@@ -79,10 +99,16 @@ impl SessionManager {
         }
     }
 
-    /// Test seam: override the tmux binary (inject a fake `tmux`).
+    /// The tmux socket every command from this manager addresses.
+    pub fn socket_path(&self) -> &std::path::Path {
+        self.cmd.socket_path()
+    }
+
+    /// Test seam: override the tmux binary (inject a fake `tmux`), keeping the
+    /// socket unchanged.
     #[cfg(test)]
     pub(crate) fn with_tmux_bin(&mut self, tmux_bin: impl Into<String>) -> &mut Self {
-        self.tmux_bin = tmux_bin.into();
+        self.cmd = self.cmd.with_bin(tmux_bin);
         self
     }
 
@@ -106,7 +132,7 @@ impl SessionManager {
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
-        let mut cmd = Command::new(&self.tmux_bin);
+        let mut cmd = self.cmd.tokio();
         cmd.args([
             "list-sessions",
             "-F",
@@ -119,8 +145,7 @@ impl SessionManager {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr = stderr.trim();
-            // "no server running" means no tmux sessions exist — expected, not an error
-            if stderr.contains("no server running") {
+            if is_no_sessions_stderr(stderr) {
                 tracing::debug!("tmux list-sessions: {} (no tmux server running)", stderr);
             } else {
                 tracing::warn!(
@@ -161,7 +186,7 @@ impl SessionManager {
 
     /// Query the current working directory of a tmux session's active pane.
     pub async fn get_session_cwd(&self, session_name: &str) -> Result<String> {
-        let mut cmd = Command::new(&self.tmux_bin);
+        let mut cmd = self.cmd.tokio();
         cmd.args([
             "display-message",
             "-p",
@@ -226,7 +251,7 @@ impl SessionManager {
         // into the shell process so they take effect before bashrc runs — the
         // only reliable way to set PS1 on Debian (bashrc unconditionally
         // overwrites it).
-        let mut cmd = Command::new(&self.tmux_bin);
+        let mut cmd = self.cmd.tokio();
         cmd.args([
             "new-session",
             "-d",
@@ -250,11 +275,7 @@ impl SessionManager {
         let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         let process_env: Vec<(String, String)> = std::env::vars().collect();
         for (key, value) in process_env.iter() {
-            if key == "TERM"
-                || key == "LANG"
-                || key == "LC_ALL"
-                || caller_keys.iter().any(|k| *k == key)
-            {
+            if skip_env(key, &caller_keys) {
                 continue;
             }
             cmd.arg("-e").arg(format!("{key}={value}"));
@@ -286,7 +307,7 @@ impl SessionManager {
             // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
             // Retry without it, then inject via set-environment for future
             // windows and send-keys for the already-running initial shell.
-            let mut cmd2 = Command::new(&self.tmux_bin);
+            let mut cmd2 = self.cmd.tokio();
             cmd2.args([
                 "new-session",
                 "-d",
@@ -319,11 +340,7 @@ impl SessionManager {
             // Inject env vars into the live shell via send-keys.
             let mut init_cmd = String::from("export TERM=xterm-256color;export LANG=C.UTF-8;");
             for (key, value) in &process_env {
-                if key == "TERM"
-                    || key == "LANG"
-                    || key == "LC_ALL"
-                    || caller_keys.iter().any(|k| *k == key)
-                {
+                if skip_env(key, &caller_keys) {
                     continue;
                 }
                 init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
@@ -341,12 +358,16 @@ impl SessionManager {
                 );
             }
             if !init_cmd.is_empty() {
-                let _ = Command::new(&self.tmux_bin)
+                let _ = self
+                    .cmd
+                    .tokio()
                     .args(["send-keys", "-t", name, &init_cmd, "Enter"])
                     .stderr(std::process::Stdio::null())
                     .status()
                     .await;
-                let _ = Command::new(&self.tmux_bin)
+                let _ = self
+                    .cmd
+                    .tokio()
                     .args(["clear-history", "-t", name])
                     .stderr(std::process::Stdio::null())
                     .status()
@@ -355,44 +376,52 @@ impl SessionManager {
         }
 
         // Stage 3: set-environment for future windows/panes (both paths).
-        let _ = Command::new(&self.tmux_bin)
+        let _ = self
+            .cmd
+            .tokio()
             .args(["set-environment", "-t", name, "TERM", "xterm-256color"])
             .stderr(std::process::Stdio::null())
             .status()
             .await;
-        let _ = Command::new(&self.tmux_bin)
+        let _ = self
+            .cmd
+            .tokio()
             .args(["set-environment", "-t", name, "LANG", "C.UTF-8"])
             .stderr(std::process::Stdio::null())
             .status()
             .await;
         for (key, value) in &process_env {
-            if key == "TERM"
-                || key == "LANG"
-                || key == "LC_ALL"
-                || caller_keys.iter().any(|k| *k == key)
-            {
+            if skip_env(key, &caller_keys) {
                 continue;
             }
-            let _ = Command::new(&self.tmux_bin)
+            let _ = self
+                .cmd
+                .tokio()
                 .args(["set-environment", "-t", name, key, value])
                 .stderr(std::process::Stdio::null())
                 .status()
                 .await;
         }
         for (key, value) in env {
-            let _ = Command::new(&self.tmux_bin)
+            let _ = self
+                .cmd
+                .tokio()
                 .args(["set-environment", "-t", name, key, value])
                 .stderr(std::process::Stdio::null())
                 .status()
                 .await;
         }
         if !has_ps1 {
-            let _ = Command::new(&self.tmux_bin)
+            let _ = self
+                .cmd
+                .tokio()
                 .args(["set-environment", "-t", name, "NESSON_PS1", DEFAULT_PS1])
                 .stderr(std::process::Stdio::null())
                 .status()
                 .await;
-            let _ = Command::new(&self.tmux_bin)
+            let _ = self
+                .cmd
+                .tokio()
                 .args([
                     "set-environment",
                     "-t",
@@ -409,7 +438,9 @@ impl SessionManager {
         // (copy-mode scroll, pane selection, and forwarding to TUI apps).
         // The web client lets xterm.js use its default behaviour — mouse
         // clicks pass through to the PTY; hold Shift for local selection.
-        let _ = Command::new(&self.tmux_bin)
+        let _ = self
+            .cmd
+            .tokio()
             .args(["set-option", "-t", name, "mouse", "on"])
             .stderr(std::process::Stdio::null())
             .status()
@@ -419,7 +450,7 @@ impl SessionManager {
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
-        let mut cmd = Command::new(&self.tmux_bin);
+        let mut cmd = self.cmd.tokio();
         cmd.args(["kill-session", "-t", name])
             .stderr(std::process::Stdio::null());
         let status = tmux_status(&mut cmd, self.kill_timeout).await?;
@@ -444,6 +475,24 @@ impl Default for SessionManager {
     }
 }
 
+/// Whether a failed `list-sessions` just means "there are no sessions".
+///
+/// tmux words this two different ways depending on whether the socket file
+/// exists yet, and both are the normal state for an idle agent:
+///
+/// - `no server running on <path>` — the socket file is there, its server is not
+/// - `error connecting to <path> (No such file or directory)` — nothing has
+///   created the socket yet
+///
+/// The second case only started appearing once nession moved to its own socket
+/// (#575): on tmux's default socket some other server had usually already made
+/// the file. Treating it as a failure logged a warning on every poll — every 5s
+/// for a freshly started agent with no sessions, which reads as a fault.
+fn is_no_sessions_stderr(stderr: &str) -> bool {
+    stderr.contains("no server running")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
+}
+
 /// Run a tmux command, failing with a timeout error if it exceeds `timeout`.
 async fn tmux_output(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
     match tokio::time::timeout(timeout, cmd.output()).await {
@@ -466,7 +515,8 @@ mod window_size_lock_tests {
     use crate::test_support::TestSession;
 
     async fn read_window_size_option(session: &str) -> Result<String> {
-        let out = Command::new("tmux")
+        let out = cmd::global()
+            .tokio()
             .args(["show-option", "-t", session, "-v", "window-size"])
             .output()
             .await?;
@@ -476,7 +526,7 @@ mod window_size_lock_tests {
     #[tokio::test]
     async fn create_session_does_not_lock_window_size() {
         // Skip on machines without tmux (CI covers it).
-        if Command::new("tmux").arg("-V").status().await.is_err() {
+        if cmd::global().tokio().arg("-V").status().await.is_err() {
             eprintln!("tmux not available, skipping");
             return;
         }
@@ -502,7 +552,7 @@ mod window_size_lock_tests {
 
     #[tokio::test]
     async fn get_session_cwd_returns_path() {
-        if Command::new("tmux").arg("-V").status().await.is_err() {
+        if cmd::global().tokio().arg("-V").status().await.is_err() {
             eprintln!("tmux not available, skipping");
             return;
         }
@@ -544,5 +594,34 @@ mod window_size_lock_tests {
         cmd.arg("30");
         let res = tmux_status(&mut cmd, Duration::from_millis(100)).await;
         assert!(res.is_err(), "expected timeout error, got {res:?}");
+    }
+
+    #[test]
+    fn missing_socket_file_counts_as_no_sessions() {
+        // The exact wording tmux 3.6b emits for a socket path that does not
+        // exist yet — the normal state of an agent that has created no session.
+        assert!(is_no_sessions_stderr(
+            "error connecting to /tmp/nession-501/tmux.sock (No such file or directory)"
+        ));
+    }
+
+    #[test]
+    fn stopped_server_counts_as_no_sessions() {
+        assert!(is_no_sessions_stderr(
+            "no server running on /tmp/nession-501/tmux.sock"
+        ));
+    }
+
+    #[test]
+    fn real_failures_are_not_treated_as_no_sessions() {
+        // A permission problem or an over-long path must still warn — silencing
+        // those would hide the failures this socket work is meant to surface.
+        assert!(!is_no_sessions_stderr(
+            "error connecting to /tmp/nession-501/tmux.sock (Permission denied)"
+        ));
+        assert!(!is_no_sessions_stderr(
+            "error connecting to /tmp/x/tmux.sock (File name too long)"
+        ));
+        assert!(!is_no_sessions_stderr("lost server"));
     }
 }

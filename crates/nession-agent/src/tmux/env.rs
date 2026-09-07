@@ -7,8 +7,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::process::Command;
 
+use super::cmd;
 use super::util::send_keys;
 
 /// Path for the source script of a given (client, session, env-name) triple.
@@ -48,7 +48,8 @@ impl EnvManager {
     ) -> Result<(), Vec<String>> {
         let mut warnings = Vec::new();
         for (key, value) in vars {
-            let status = Command::new("tmux")
+            let status = cmd::global()
+                .tokio()
                 .args([
                     "set-environment",
                     "-t",
@@ -101,7 +102,8 @@ impl EnvManager {
         send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the source command
-        let _ = Command::new("tmux")
+        let _ = cmd::global()
+            .tokio()
             .args(["clear-history", "-t", session_name])
             .stderr(std::process::Stdio::null())
             .output()
@@ -132,7 +134,8 @@ impl EnvManager {
         send_keys(session_name, &cmd).await?;
 
         // Clear tmux scrollback history to hide the unsource command
-        let _ = Command::new("tmux")
+        let _ = cmd::global()
+            .tokio()
             .args(["clear-history", "-t", session_name])
             .stderr(std::process::Stdio::null())
             .output()
