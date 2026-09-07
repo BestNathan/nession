@@ -1,7 +1,7 @@
 # Capsule Commands — Inline Panel (Mobile App)
 
 **Date:** 2026-09-07  
-**Status:** Draft — pending review  
+**Status:** Implemented  
 **Parent:** [terminal-capsule.md](../../design/design-system/patterns/terminal-capsule.md), [#492](https://github.com/BestNathan/nession/issues/492)  
 **Supersedes (App overflow only):** Bottom `Sheet` presentation for `CapsuleCommandsPopover` (`presentation="sheet"`) introduced in PR #643 / #644  
 **Builds on:** V4 mobile polish intent ([2026-08-28-session-first-chatgpt-shell-v4-design.md](./2026-08-28-session-first-chatgpt-shell-v4-design.md)) — compact expanded height, xterm stays readable
