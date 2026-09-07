@@ -65,7 +65,7 @@ describe('CapsuleCommandsRow', () => {
     expect(onCommandsOpenChange).toHaveBeenCalledWith(true);
   });
 
-  it('renders inline commands panel when open', () => {
+  it('renders inline panel with phys keys and commands, not duplicate quick-key bar', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -74,6 +74,8 @@ describe('CapsuleCommandsRow', () => {
       />,
     );
     expect(screen.getByTestId('capsule-commands-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('phys-key-row')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-quick-key-Tab')).not.toBeInTheDocument();
     expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close commands' })).toBeInTheDocument();
