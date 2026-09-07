@@ -23,7 +23,11 @@
     /* Path mapping */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@app/*": ["src/App.tsx", "src/main.tsx", "src/session-first/*"],
+      "@core/*": ["src/runtime/*", "src/services/websocket/*"],
+      "@features/*": ["src/features/*", "src/terminal/*", "src/explorer/*", "src/components/*", "src/hooks/*"],
+      "@shared/*": ["src/lib/*", "src/types.ts"]
     }
   },
   "include": ["src"],

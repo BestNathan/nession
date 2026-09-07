@@ -67,6 +67,7 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "jsdom": "^29.1.1",
+    "madge": "^8.0.0",
     "typescript": "^5.3.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^5.1.6",
