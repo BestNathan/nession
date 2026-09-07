@@ -65,7 +65,7 @@ describe('CapsuleCommandsRow', () => {
     expect(onCommandsOpenChange).toHaveBeenCalledWith(true);
   });
 
-  it('renders inline panel with phys keys and commands, not duplicate quick-key bar', () => {
+  it('hides quick keys when open and does not render inline panel', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -73,12 +73,10 @@ describe('CapsuleCommandsRow', () => {
         onCommandsOpenChange={vi.fn()}
       />,
     );
-    expect(screen.getByTestId('capsule-commands-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('phys-key-row')).toBeInTheDocument();
+    expect(screen.queryByTestId('capsule-commands-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
     expect(screen.queryByTestId('capsule-quick-key-Tab')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close commands' })).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-commands-more')).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps more trigger outside the scrollable quick-key row', () => {

@@ -26,13 +26,22 @@ export const capsuleDialogOverlayClass = 'z-[110]';
 export const capsuleDialogContentClass = 'z-[110]';
 
 export const capsuleCommandsPanelClass =
-  'flex max-h-[length:var(--composer-commands-panel-max-height)] flex-col overflow-hidden border-t border-border/60 bg-popover text-popover-foreground rounded-t-xl';
+  'flex h-full min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground';
+
+export const capsuleCommandsOverlayPanelClass =
+  'pointer-events-auto absolute inset-x-[length:var(--composer-shell-inset)] z-[15] flex flex-col overflow-hidden rounded-t-xl border border-border/60 bg-popover text-popover-foreground shadow-lg';
+
+export const capsuleCommandsPanelKeysRegionClass =
+  'flex min-h-0 flex-1 flex-col justify-center border-b border-border/60';
+
+export const capsuleCommandsPanelCommandsRegionClass =
+  'flex min-h-0 flex-1 flex-col overflow-hidden';
 
 export const capsuleCommandsPanelHeaderClass =
-  'flex items-center justify-between gap-[length:var(--composer-popover-gap)] p-[length:var(--composer-popover-pad)]';
+  'flex shrink-0 items-center justify-end gap-[length:var(--composer-popover-gap)] px-[length:var(--composer-popover-pad)] pt-[length:var(--composer-popover-inner-pad)]';
 
 export const capsuleCommandsPanelListClass =
-  'min-h-0 flex-1 overflow-y-auto max-h-[length:var(--composer-commands-panel-max-height)]';
+  'min-h-0 flex-1 overflow-y-auto';
 
 export const capsuleCommandsDismissLayerClass =
   'absolute inset-x-0 top-0 z-10 cursor-default';

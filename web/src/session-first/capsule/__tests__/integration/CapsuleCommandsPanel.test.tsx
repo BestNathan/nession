@@ -22,13 +22,12 @@ vi.mock('@/hooks/useCommandHistory', () => ({
 }));
 
 describe('CapsuleCommandsPanel', () => {
-  it('renders inline panel with close button and phys keys', async () => {
+  it('renders overlay panel with close button, phys keys, and commands regions', async () => {
     const onClose = vi.fn();
     render(
       <CapsuleCommandsPanel
         sendText={vi.fn()}
         disabled={false}
-        showPhysKeys
         onClose={onClose}
       />,
     );

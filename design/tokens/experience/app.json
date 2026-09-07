@@ -44,7 +44,7 @@
     "popoverWidth": { "value": "22rem" },
     "popoverViewportInset": { "value": "1rem" },
     "popoverMaxHeight": { "value": "45vh" },
-    "commandsPanelMaxHeight": { "value": "20vh" },
+    "commandsPanelMaxHeight": { "value": "40vh" },
     "popoverListMaxHeight": { "value": "38vh" },
     "popoverBodyMaxHeight": { "value": "42vh" },
     "popoverPad": { "value": "0.5rem" },
