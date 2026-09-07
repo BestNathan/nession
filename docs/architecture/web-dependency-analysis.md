@@ -201,8 +201,12 @@ npx madge src --extensions ts,tsx --circular --json > circular-deps.json
 ## 下一步
 
 1. ✅ 依赖图分析完成
-2. ⏳ 建立 tsconfig path aliases
-3. ⏳ 配置 ESLint import boundary rules
+2. ⏳ 建立 tsconfig path aliases (延迟到 Phase 1,待目录结构建立后)
+3. ✅ 配置 ESLint import boundary rules
 4. ⏳ 为关键 feature 创建 public.ts
 5. ⏳ 添加 CI 循环依赖检查
 6. ⏳ 补充关键流程回归测试
+
+## 备注
+
+Phase 0 暂不添加 tsconfig path aliases,因为目标目录结构(`@app/*`, `@core/*`, `@features/*`, `@shared/*`)尚未建立。这些别名将在 Phase 1 建立 Workbench 时添加,以确保映射到实际存在的目录。

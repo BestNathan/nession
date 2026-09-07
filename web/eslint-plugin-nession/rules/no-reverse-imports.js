@@ -6,6 +6,7 @@
  */
 
 // Import direction map: which layers can import which
+// Note: Layer aliases (@app/*, @core/*, etc.) will be added in Phase 1 when directories exist
 const ALLOWED_IMPORTS = {
   'app': ['features', 'core', 'shared'],
   'features': ['core', 'shared'],
@@ -27,11 +28,7 @@ const LEGACY_TO_LAYER = {
 };
 
 function getSourceLayer(importPath, currentFilePath) {
-  // Handle alias imports (@app/*, @core/*, etc.)
-  if (importPath.startsWith('@app/')) return 'app';
-  if (importPath.startsWith('@core/')) return 'core';
-  if (importPath.startsWith('@features/')) return 'features';
-  if (importPath.startsWith('@shared/')) return 'shared';
+  // Handle alias imports (@/)
   if (importPath.startsWith('@/')) {
     // Extract directory from @/ path
     const match = importPath.match(/^@\/([^/]+)/);
@@ -48,7 +45,7 @@ function getSourceLayer(importPath, currentFilePath) {
     }
   }
 
-  // Check for new layer directories
+  // Check for new layer directories (will be used in Phase 1+)
   if (currentFilePath.includes('/src/app/')) return 'app';
   if (currentFilePath.includes('/src/features/')) return 'features';
   if (currentFilePath.includes('/src/core/')) return 'core';
@@ -58,12 +55,6 @@ function getSourceLayer(importPath, currentFilePath) {
 }
 
 function getTargetLayer(importPath) {
-  // Handle alias imports
-  if (importPath.startsWith('@app/')) return 'app';
-  if (importPath.startsWith('@core/')) return 'core';
-  if (importPath.startsWith('@features/')) return 'features';
-  if (importPath.startsWith('@shared/')) return 'shared';
-
   // Handle @/ imports
   if (importPath.startsWith('@/')) {
     const match = importPath.match(/^@\/([^/]+)/);
@@ -95,7 +86,8 @@ export default {
         const importPath = node.source.value;
 
         // Skip external packages (no @/ prefix and not relative)
-        if (!importPath.startsWith('@/') && !importPath.startsWith('.') && !importPath.startsWith('@app/') && !importPath.startsWith('@core/') && !importPath.startsWith('@features/') && !importPath.startsWith('@shared/')) {
+        // Note: Layer-specific aliases (@app/*, @core/*, etc.) will be added in Phase 1
+        if (!importPath.startsWith('@/') && !importPath.startsWith('.')) {
           return;
         }
 
