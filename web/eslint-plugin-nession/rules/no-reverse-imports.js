@@ -6,7 +6,6 @@
  */
 
 // Import direction map: which layers can import which
-// Note: Layer aliases (@app/*, @core/*, etc.) will be added in Phase 1 when directories exist
 const ALLOWED_IMPORTS = {
   'app': ['features', 'core', 'shared'],
   'features': ['core', 'shared'],
@@ -28,9 +27,14 @@ const LEGACY_TO_LAYER = {
 };
 
 function getSourceLayer(importPath, currentFilePath) {
-  // Handle alias imports (@/)
+  // Handle layer alias imports (@app/*, @features/*, @core/*, @shared/*)
+  if (importPath.startsWith('@app/')) return 'app';
+  if (importPath.startsWith('@features/')) return 'features';
+  if (importPath.startsWith('@core/')) return 'core';
+  if (importPath.startsWith('@shared/')) return 'shared';
+
+  // Handle generic @/ imports
   if (importPath.startsWith('@/')) {
-    // Extract directory from @/ path
     const match = importPath.match(/^@\/([^/]+)/);
     if (match) {
       const dir = match[1];
@@ -45,7 +49,7 @@ function getSourceLayer(importPath, currentFilePath) {
     }
   }
 
-  // Check for new layer directories (will be used in Phase 1+)
+  // Check for new layer directories
   if (currentFilePath.includes('/src/app/')) return 'app';
   if (currentFilePath.includes('/src/features/')) return 'features';
   if (currentFilePath.includes('/src/core/')) return 'core';
@@ -55,6 +59,12 @@ function getSourceLayer(importPath, currentFilePath) {
 }
 
 function getTargetLayer(importPath) {
+  // Handle layer aliases
+  if (importPath.startsWith('@app/')) return 'app';
+  if (importPath.startsWith('@features/')) return 'features';
+  if (importPath.startsWith('@core/')) return 'core';
+  if (importPath.startsWith('@shared/')) return 'shared';
+
   // Handle @/ imports
   if (importPath.startsWith('@/')) {
     const match = importPath.match(/^@\/([^/]+)/);
