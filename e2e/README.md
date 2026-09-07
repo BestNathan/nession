@@ -19,7 +19,8 @@ e2e/
 │   ├── login.spec.ts      # Authentication tests
 │   ├── session-lifecycle.spec.ts  # Session create/kill tests
 │   └── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
-├── globalSetup.ts         # Pre-test cleanup and isolation
+├── runtime.ts             # Per-run paths (unique tmux socket)
+├── globalSetup.ts         # Pre-test setup + teardown
 └── playwright.config.ts   # Playwright configuration
 ```
 
@@ -57,15 +58,40 @@ E2E tests use several isolation mechanisms to prevent interference with the host
 
 ### tmux Socket Isolation
 
-Tests use a dedicated tmux socket directory to avoid conflicts with the user's tmux sessions:
+Each run gets its own tmux socket, which the Rust processes address as an explicit
+`tmux -S <path>`. The run's sessions therefore live on a tmux server of their own:
+invisible to `tmux ls`, and impossible to kill together with the developer's real
+sessions.
 
 ```typescript
-// playwright.config.ts
+// e2e/runtime.ts generates this once per run and publishes it via process.env
 env: {
-  TMUX_TMPDIR: '/tmp/nession-e2e/tmux',
+  NESSION_TMUX_SOCKET: '/tmp/nession-e2e-tmux-<8 hex>/tmux.sock',
   NESSION_HOME: '/tmp/nession-e2e',
 }
 ```
+
+**`TMUX_TMPDIR` is not used, and must not be reintroduced.** tmux ignores it whenever
+`$TMUX` is set — i.e. whenever anything runs from inside a tmux session — and silently
+uses the default socket instead. An earlier version of `globalSetup.ts` ran
+`TMUX_TMPDIR=… tmux kill-server` before each run believing it was isolated; it was
+landing on the developer's real socket and destroyed a live session (#574). `-S` is
+immune to `$TMUX` (measured). `scripts/check-tmux-socket.sh` fails the commit if
+either pattern comes back.
+
+#### Orphans after a hard kill
+
+There is no pre-run sweep any more, by design. A run killed with Ctrl-C or SIGKILL
+never reaches its teardown, so its socket, tmux server and directory survive — and
+because every run picks a new path, those orphans accumulate rather than being
+overwritten. Clean up by hand:
+
+```bash
+for s in /tmp/nession-e2e-tmux-*/tmux.sock; do tmux -S "$s" kill-server; done
+rm -rf /tmp/nession-e2e-tmux-*
+```
+
+A recovery tool is tracked in #582.
 
 ### Database Isolation
 

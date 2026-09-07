@@ -6,6 +6,15 @@
 # the unique_session_name helpers in the unit tests). Nothing else uses that
 # prefix, so matching on it can never touch a developer's own session.
 #
+# ⚠ This script looks at the DEFAULT tmux socket, which since #575 is no longer
+# where the tests put their sessions: a test run now gets its own socket under
+# $TMPDIR/nession-test-tmux.*/tmux.sock (scripts/tmux-run-socket.sh), and each
+# run's socket is cleaned up by that run. So this script's expected output is now
+# "no strays" — anything it does find predates that change. Recovering orphans on
+# the new per-run sockets needs a different tool, tracked in #582; converting
+# this one was deliberately left out of #575's scope (Open Question 1).
+# scripts/check-tmux-socket.sh exempts this file by name for that reason.
+#
 # Usage:
 #   ./scripts/sweep-test-sessions.sh            # list strays, kill nothing
 #   ./scripts/sweep-test-sessions.sh --kill     # kill them
