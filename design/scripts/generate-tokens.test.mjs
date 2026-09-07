@@ -139,3 +139,17 @@ test('production domain.json contains no raw oklch / hex / rgb values', () => {
   const json = JSON.parse(readFileSync(path, 'utf8'));
   assert.equal(findRawColor(json), null);
 });
+
+test('production web.css uses one composer body size on web and app', () => {
+  const generatedCss = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../generated/web.css'),
+    'utf8',
+  );
+  const rootMatch = generatedCss.match(/:root \{[\s\S]*?--composer-font-size: ([^;]+);/);
+  const appBlock = generatedCss.match(/\[data-experience="app"\] \{([\s\S]*?)\n\}/);
+  assert.equal(rootMatch?.[1]?.trim(), '1rem');
+  assert.match(appBlock?.[1] ?? '', /--composer-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--composer-quick-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--composer-phys-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--composer-caption-font-size: 1rem/);
+});

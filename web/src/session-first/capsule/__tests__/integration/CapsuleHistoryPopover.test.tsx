@@ -16,6 +16,19 @@ vi.mock('@/hooks/useCommandHistory', () => ({
 }));
 
 describe('CapsuleHistoryPopover', () => {
+  it('opens from the trigger when closed', async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <CapsuleHistoryPopover
+        open={false}
+        onOpenChange={onOpenChange}
+        onSelect={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('capsule-history-trigger'));
+    expect(onOpenChange.mock.calls[0]?.[0]).toBe(true);
+  });
+
   it('opens popover and selects a history row', async () => {
     const onSelect = vi.fn();
     const onOpenChange = vi.fn();

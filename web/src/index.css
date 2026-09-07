@@ -205,6 +205,12 @@ html {
   line-height: var(--composer-text-line-height);
 }
 
+/* Capsule add-command dialog sits above composer popovers (z-index 100). */
+.session-first-shell [data-slot='dialog-portal']:has([data-slot='dialog-content'].z-\[110\]) [data-slot='dialog-overlay'],
+.session-first-shell [data-slot='dialog-content'].z-\[110\] {
+  z-index: 110;
+}
+
 /* Capsule composer: no focus ring on the inline textarea (ChatGPT-style) */
 .session-first-shell [data-testid='capsule-ghost-input']:focus,
 .session-first-shell [data-testid='capsule-ghost-input']:focus-visible {

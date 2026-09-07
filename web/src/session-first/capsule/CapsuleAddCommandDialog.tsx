@@ -16,6 +16,7 @@ import {
   capsuleChipButtonClass,
   capsuleChipRowClass,
   capsuleDialogActionRowClass,
+  capsuleDialogContentClass,
   capsuleDialogInputClass,
   capsuleDialogMaxWidthClass,
   capsuleDialogStackClass,
@@ -205,7 +206,7 @@ export function CapsuleAddCommandDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={capsuleDialogMaxWidthClass}>
+      <DialogContent className={cn(capsuleDialogMaxWidthClass, capsuleDialogContentClass)}>
         <DialogHeader>
           <DialogTitle>Add Command</DialogTitle>
         </DialogHeader>

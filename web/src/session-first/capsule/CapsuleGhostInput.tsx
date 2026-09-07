@@ -86,7 +86,7 @@ export function CapsuleGhostInput({
   };
 
   return (
-    <div className={cn('relative min-w-0 flex-1', className)}>
+    <div className={cn('relative flex min-w-0 flex-1 items-center', className)}>
       <div
         aria-hidden
         className={cn(
