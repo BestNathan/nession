@@ -26,6 +26,8 @@ export default tseslint.config(
       'nession/no-cross-experience-token': 'error',
       'nession/no-capsule-magic-metrics': 'error',
       'nession/no-sf-overlay-vars': 'error',
+      'nession/no-reverse-imports': 'error', // Enforce layered architecture import direction
+      // no-new-legacy-files is enforced by scripts/check-legacy-frozen.sh (pre-commit), not ESLint
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],

@@ -95,6 +95,10 @@ check-tmux-socket:
 check-tmux-socket-selftest:
     ./scripts/check-tmux-socket-selftest.sh
 
+# Check that no new files were added to legacy directories (architecture migration)
+check-legacy-frozen:
+    ./scripts/check-legacy-frozen.sh
+
 # ── Full pre-push ───────────────────────────────────────────────────────────
 # Unit tests for both Rust and web (pre-commit)
 # Note: web-test-unit dependency added in Phase 2 (Task 2.4)
