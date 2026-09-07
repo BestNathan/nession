@@ -52,7 +52,7 @@ describe('CapsuleCommandsRow', () => {
     expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
-  it('opens bottom sheet when more trigger is clicked', async () => {
+  it('toggles commands panel when more trigger is clicked', async () => {
     const onCommandsOpenChange = vi.fn();
     render(
       <CapsuleCommandsRow
@@ -62,11 +62,10 @@ describe('CapsuleCommandsRow', () => {
       />,
     );
     await userEvent.click(screen.getByTestId('capsule-commands-more'));
-    expect(onCommandsOpenChange).toHaveBeenCalled();
-    expect(onCommandsOpenChange.mock.calls[0]?.[0]).toBe(true);
+    expect(onCommandsOpenChange).toHaveBeenCalledWith(true);
   });
 
-  it('renders the opened commands panel as a bottom sheet', () => {
+  it('renders inline commands panel when open', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -74,9 +73,10 @@ describe('CapsuleCommandsRow', () => {
         onCommandsOpenChange={vi.fn()}
       />,
     );
-    expect(document.querySelector('[data-slot="sheet-content"][data-side="bottom"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-slot="popover-content"]')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-commands-panel')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close commands' })).toBeInTheDocument();
   });
 
   it('keeps more trigger outside the scrollable quick-key row', () => {
