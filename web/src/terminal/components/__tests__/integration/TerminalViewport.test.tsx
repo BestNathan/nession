@@ -17,13 +17,14 @@ describe('TerminalViewport', () => {
     expect(el).toHaveClass('h-full', 'w-full', 'bg-terminal-background');
   });
 
-  it('reserves the capsule occlusion inside the xterm viewport', () => {
+  it('does not apply capsule occlusion as xterm layout padding', () => {
     const controller = makeController();
     const { container } = render(<TerminalViewport controller={controller} />);
 
-    expect(container.firstElementChild).toHaveStyle({
+    expect(container.firstElementChild).not.toHaveStyle({
       paddingBottom: 'var(--terminal-content-bottom-inset, 0px)',
     });
+    expect(container.firstElementChild).toHaveAttribute('data-terminal-viewport');
   });
 
   it('calls controller.attach on mount and detach on unmount', () => {

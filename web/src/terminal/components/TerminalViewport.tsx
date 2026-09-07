@@ -33,7 +33,6 @@ export function TerminalViewport({
       ref={containerRef}
       data-terminal-viewport
       className="h-full w-full box-border bg-terminal-background"
-      style={{ paddingBottom: 'var(--terminal-content-bottom-inset, 0px)' }}
     />
   );
 }

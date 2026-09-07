@@ -202,7 +202,7 @@ export class CapsuleOcclusionScroll {
     );
   }
 
-  /** Pin to the real xterm bottom; the viewport reserves the capsule space. */
+  /** Pin to the real xterm bottom; the host overlay hides the occluded band. */
   scrollToMarginBottom(): void {
     this.setMode('following');
     this.terminal.scrollToBottom();
