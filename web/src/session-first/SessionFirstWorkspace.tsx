@@ -45,7 +45,6 @@ export interface SessionFirstWorkspaceProps {
   showList: boolean;
   showDetail: boolean;
   onBackToSessions?: () => void;
-  onOpenEnv: () => void;
   onLegacy: () => void;
   /**
    * Fixture/testing override for the terminal surface. Defaults to the real
@@ -62,7 +61,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
     onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
-    onBackToSessions, onOpenEnv, onLegacy, terminal,
+    onBackToSessions, onLegacy, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
@@ -79,11 +78,11 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
-    onKill, onOpenEnv, onLegacy,
+    onKill, onLegacy,
   };
 
   const mainShared = {
-    selectedSession, selectedAgent, domain, tool, fileOps, connectionStatus,
+    selectedSession, selectedAgent, agents, domain, tool, fileOps, connectionStatus,
     onSurfaceChange, onToolChange, onOpenAgent,
   };
 

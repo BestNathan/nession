@@ -55,7 +55,6 @@ export function FixtureShell() {
     onRefresh: () => {},
     onSelect: () => {},
     onKill: () => {},
-    onOpenEnv: () => {},
     onLegacy: () => {},
   };
 
@@ -103,7 +102,6 @@ export function FixtureShell() {
           showList
           showDetail
           onBackToSessions={() => {}}
-          onOpenEnv={() => {}}
           onLegacy={() => {}}
           connectionStatus="connected"
           terminal={<FixtureTerminal />}

@@ -138,10 +138,12 @@ function FileListPanel({ files, loading, search, onSearchChange, selected, isNew
 
 interface EnvManagerProps {
   agents: Agent[];
-  onBack: () => void;
+  onBack?: () => void;
+  /** When true, fills the workspace tool panel instead of the full shell. */
+  embedded?: boolean;
 }
 
-export function EnvManager({ agents, onBack }: EnvManagerProps) {
+export function EnvManager({ agents, onBack, embedded = false }: EnvManagerProps) {
   const { files, loading, refresh, deleteFile, uploadFile } = useEnvManager();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<EnvFileInfo | null>(null);
@@ -193,12 +195,14 @@ export function EnvManager({ agents, onBack }: EnvManagerProps) {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className={cn('flex flex-col bg-background', embedded ? 'h-full min-h-0' : 'h-screen')}>
       {/* Top bar — simplified on mobile when detail is active */}
       <header className="border-b px-3 sm:px-4 py-2 sm:py-2.5 flex items-center gap-2 sm:gap-3 flex-shrink-0">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="w-4 h-4 mr-1" /> <span className="max-sm:hidden">Back</span>
-        </Button>
+        {!embedded && onBack ? (
+          <Button variant="ghost" size="sm" onClick={() => onBack()}>
+            <ArrowLeft className="w-4 h-4 mr-1" /> <span className="max-sm:hidden">Back</span>
+          </Button>
+        ) : null}
         <h1 className="text-sm sm:text-base font-bold truncate">Env Files</h1>
         <span className="text-xs text-muted-foreground max-sm:hidden">({files.length})</span>
         <div className="flex-1" />

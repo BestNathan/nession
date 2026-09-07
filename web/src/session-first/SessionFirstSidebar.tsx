@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 import { SessionList } from '@/session-first/patterns/SessionList';
 import { SessionListHeader } from '@/session-first/patterns/SessionListHeader';
-import { SessionFirstOverflowMenu } from '@/session-first/SessionFirstOverflowMenu';
+import { SessionFirstSidebarFooter } from '@/session-first/SessionFirstSidebarFooter';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
 import type { Agent, Session } from '@/types';
 
@@ -25,7 +25,6 @@ export interface SessionFirstSidebarProps {
   onRefresh: () => void;
   onSelect: (session: Session) => void;
   onKill: (session: Session) => void;
-  onOpenEnv: () => void;
   onLegacy: () => void;
 }
 
@@ -49,7 +48,6 @@ export function SessionFirstSidebar({
   onRefresh,
   onSelect,
   onKill,
-  onOpenEnv,
   onLegacy,
 }: SessionFirstSidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
@@ -96,7 +94,7 @@ export function SessionFirstSidebar({
         data-testid="session-first-sidebar-footer"
         className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <SessionFirstOverflowMenu onOpenEnv={onOpenEnv} onLegacy={onLegacy} />
+        <SessionFirstSidebarFooter onLegacy={onLegacy} />
       </div>
     </aside>
   );

@@ -32,7 +32,6 @@ export function useSessionFirstShellState() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<WorkspaceToolId>('files');
-  const [showEnv, setShowEnv] = useState(false);
   const { isWide, showList, showDetail, openDetail, openList } =
     useSessionFirstMobileNav(selectedId);
 
@@ -88,8 +87,6 @@ export function useSessionFirstShellState() {
     selectedId,
     surface,
     tool,
-    showEnv,
-    setShowEnv,
     selectedSession,
     selectedAgent,
     domain,

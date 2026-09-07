@@ -33,9 +33,11 @@ const WEB_VERSION = pkg.version;
 
 export interface ServerInfoMenuProps {
   refreshKey?: number;
+  /** Footer bar: compact info button only (no inline desktop strip). */
+  variant?: 'default' | 'footer';
 }
 
-export function ServerInfoMenu({ refreshKey = 0 }: ServerInfoMenuProps) {
+export function ServerInfoMenu({ refreshKey = 0, variant = 'default' }: ServerInfoMenuProps) {
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const fetchedAtRef = useRef<number>(0);
   const [, setTick] = useState(0);
@@ -82,32 +84,37 @@ export function ServerInfoMenu({ refreshKey = 0 }: ServerInfoMenuProps) {
 
   return (
     <>
+      {variant === 'default' ? (
+        <div
+          data-testid="server-info-inline"
+          className="hidden min-w-0 items-center gap-2 text-[11px] text-muted-foreground/70 md:flex"
+        >
+          <span className="flex items-center gap-1">
+            <Server className="h-3 w-3" />
+            srv {srvVersion}
+          </span>
+          <span className="text-border">·</span>
+          <span className="flex items-center gap-1">web {webVersion}</span>
+          {buildTime ? (
+            <>
+              <span className="text-border">·</span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />built {buildTime}
+              </span>
+            </>
+          ) : null}
+          <span className="text-border">·</span>
+          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{uptime}</span>
+          <span className="text-border">·</span>
+          <span className="flex items-center gap-1"><Cpu className="h-3 w-3" />{info.online_agent_count}/{info.agent_count}</span>
+          <span className="text-border">·</span>
+          <span>{info.session_count} sessions</span>
+        </div>
+      ) : null}
       <div
-        data-testid="server-info-inline"
-        className="hidden min-w-0 items-center gap-2 text-[11px] text-muted-foreground/70 md:flex"
+        data-testid="server-info-mobile"
+        className={variant === 'footer' ? undefined : 'md:hidden'}
       >
-        <span className="flex items-center gap-1">
-          <Server className="h-3 w-3" />
-          srv {srvVersion}
-        </span>
-        <span className="text-border">·</span>
-        <span className="flex items-center gap-1">web {webVersion}</span>
-        {buildTime ? (
-          <>
-            <span className="text-border">·</span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />built {buildTime}
-            </span>
-          </>
-        ) : null}
-        <span className="text-border">·</span>
-        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{uptime}</span>
-        <span className="text-border">·</span>
-        <span className="flex items-center gap-1"><Cpu className="h-3 w-3" />{info.online_agent_count}/{info.agent_count}</span>
-        <span className="text-border">·</span>
-        <span>{info.session_count} sessions</span>
-      </div>
-      <div data-testid="server-info-mobile" className="md:hidden">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

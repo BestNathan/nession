@@ -92,6 +92,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
   return {
     session,
     agent,
+    agents: [agent],
     domain,
     fileOps: null,
     experience: 'web',

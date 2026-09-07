@@ -40,6 +40,7 @@ function makeFileOps(): FileOps {
 const ctx: WorkspaceContext = {
   session: null,
   agent: undefined,
+  agents: [],
   domain: null,
   fileOps: makeFileOps(),
   experience: 'app',

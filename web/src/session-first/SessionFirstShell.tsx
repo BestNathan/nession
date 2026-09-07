@@ -1,5 +1,4 @@
 import { Loader2, X } from 'lucide-react';
-import { EnvManager } from '@/components/env/EnvManager';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProbePolling } from '@/hooks/useProbePolling';
@@ -32,21 +31,6 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
       onAttachClose={state.cancelAttach}
     />
   );
-
-  if (state.showEnv) {
-    return (
-      <>
-        <div
-          data-testid="session-first-shell"
-          data-sf-design="polish"
-          className="session-first-shell flex h-[100dvh] flex-col bg-background"
-        >
-          <EnvManager agents={data.agents} onBack={() => state.setShowEnv(false)} />
-        </div>
-        {dialogs}
-      </>
-    );
-  }
 
   return (
     <>
@@ -122,7 +106,6 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
-            onOpenEnv={() => state.setShowEnv(true)}
             onLegacy={onLegacy}
           />
         )}

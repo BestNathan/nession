@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
 import type { DomainState } from '@/session-first/domainState';
+import type { Agent } from '@/types';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
 let lastCtx: WorkspaceContext | null = null;
@@ -24,6 +25,7 @@ const domain: DomainState = {
 const base = {
   selectedSession: { session_id: 's1', agent_id: 'devbox-01', session_name: 'fix-terminal-reconnect', status: 'active' as const, window_count: 2, attached_clients: 1, last_activity: '2026-09-01T09:00:00Z' },
   selectedAgent: undefined,
+  agents: [] as Agent[],
   domain: null,
   surface: 'terminal' as const,
   tool: 'files' as const,

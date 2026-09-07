@@ -19,6 +19,7 @@ type SidebarFields = Omit<SessionFirstSidebarProps, 'className' | 'onSelect'>;
 interface MainShared {
   selectedSession: Session | null;
   selectedAgent: Agent | undefined;
+  agents: Agent[];
   domain: DomainState | null;
   tool: WorkspaceToolId;
   fileOps: FileOps | null;

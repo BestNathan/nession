@@ -87,7 +87,6 @@ function baseProps(
     showList: true,
     showDetail: true,
     onBackToSessions: vi.fn(),
-    onOpenEnv: vi.fn(),
     onLegacy: vi.fn(),
     ...overrides,
   };

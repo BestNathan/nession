@@ -7,7 +7,7 @@ import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 
 // Swap only the files tool's layouts for a deterministic stub; the registry
 // entries (label/icon/availability) must stay intact so the bar renders all
-// four labels and availability logic still runs.
+// five labels and availability logic still runs.
 vi.mock('@/session-first/workspace/tools/files', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/session-first/workspace/tools/files')>();
@@ -25,6 +25,7 @@ vi.mock('@/session-first/workspace/tools/files', async (importOriginal) => {
 const ctx: WorkspaceContext = {
   session: null,
   agent: undefined,
+  agents: [],
   domain: null,
   fileOps: null,
   experience: 'web',
@@ -38,18 +39,21 @@ describe('WorkspaceShell', () => {
       'files',
       'session',
       'agent',
+      'env',
       'claude-code',
     ]);
     expect(screen.getAllByRole('tab').map((tab) => tab.id)).toEqual([
       'workspace-tool-tab-files',
       'workspace-tool-tab-session',
       'workspace-tool-tab-agent',
+      'workspace-tool-tab-env',
       'workspace-tool-tab-claude-code',
     ]);
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())).toEqual([
       'Files',
       'Session',
       'Agent',
+      'Env',
       'Claude Code',
     ]);
     expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
@@ -80,6 +84,7 @@ describe('WorkspaceShell', () => {
       ...ctx,
       session: { session_id: 'agent-1:work' } as never,
       agent: { agent_id: 'agent-1' } as never,
+      agents: [{ agent_id: 'agent-1' } as never],
       onToolChange,
     };
 
