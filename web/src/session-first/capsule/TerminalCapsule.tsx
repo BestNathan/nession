@@ -5,6 +5,7 @@ import { CapsuleShell } from '@/session-first/capsule/components/CapsuleShell';
 import { CommandsComposer } from '@/session-first/capsule/components/CommandsComposer';
 import { InputComposer } from '@/session-first/capsule/components/InputComposer';
 import { ComposerMeasureMirror } from '@/session-first/capsule/components/ComposerMeasureMirror';
+import { CapsuleCommandsDismissPortal } from '@/session-first/capsule/components/CapsuleCommandsDismissPortal';
 import { CapsuleProvider } from '@/session-first/capsule/state/CapsuleProvider';
 import { useComposerMeasure } from '@/session-first/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/session-first/capsule/state/useCapsuleState';
@@ -136,6 +137,7 @@ export function TerminalCapsule({
           />
         )}
       </CapsuleShell>
+      <CapsuleCommandsDismissPortal dockRef={dockRef} />
     </CapsuleProvider>
   );
 }
