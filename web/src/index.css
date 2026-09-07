@@ -211,6 +211,16 @@ html {
   z-index: 110;
 }
 
+/* Capsule commands sheet — content above blurred overlay (see capsuleSheet* classes). */
+.session-first-shell [data-slot='sheet-portal']:has([data-slot='sheet-content'].z-\[110\]) [data-slot='sheet-overlay'],
+.session-first-shell [data-slot='sheet-content'].z-\[110\] {
+  z-index: 110;
+}
+
+.session-first-shell [data-slot='sheet-portal']:has([data-slot='sheet-content'].z-\[110\]) [data-slot='sheet-overlay'].z-\[109\] {
+  z-index: 109;
+}
+
 /* Capsule composer: no focus ring on the inline textarea (ChatGPT-style) */
 .session-first-shell [data-testid='capsule-ghost-input']:focus,
 .session-first-shell [data-testid='capsule-ghost-input']:focus-visible {
