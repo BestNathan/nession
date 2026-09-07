@@ -19,7 +19,11 @@ export const capsuleSecondaryIconButtonClass =
   "h-[length:var(--control-sm)] w-[length:var(--control-sm)] shrink-0 [&_svg:not([class*='size-'])]:size-[length:var(--icon-sm)]";
 
 export const capsuleControlRowClass =
-  'flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
+  'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
+
+/** Dialog layer above composer popovers (--composer-popover-z-index is 100). */
+export const capsuleDialogOverlayClass = 'z-[110]';
+export const capsuleDialogContentClass = 'z-[110]';
 
 /** Floating control surface — elevation only, no border (visual-language §3, terminal-capsule § Surface treatment). */
 export const capsuleFloatingSurfaceClass =

@@ -58,5 +58,10 @@
       "mocha-base": { "value": "#1e1e2e" }
     }
   },
-  "radius": { "value": "0.625rem" }
+  "radius": { "value": "0.625rem" },
+  "typography": {
+    "$description": "Shared body scale for composer/capsule — web and app consume via experience composer refs, not directly.",
+    "size": { "value": "1rem" },
+    "lineHeight": { "value": "1.5rem" }
+  }
 }

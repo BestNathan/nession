@@ -37,8 +37,7 @@ interface CapsuleCommandsPopoverProps {
 interface CapsuleCommandsPanelBodyProps {
   disabled: boolean;
   showPhysKeys: boolean;
-  dialogOpen: boolean;
-  setDialogOpen: (open: boolean) => void;
+  onAddCommandClick: () => void;
   allCommands: ReturnType<typeof useCapsuleCommands>['allCommands'];
   presetIds: ReturnType<typeof useCapsuleCommands>['presetIds'];
   chainBuffer: string[];
@@ -49,15 +48,13 @@ interface CapsuleCommandsPanelBodyProps {
   handleChainAdd: ReturnType<typeof useCapsuleCommands>['handleChainAdd'];
   cancelChain: ReturnType<typeof useCapsuleCommands>['cancelChain'];
   sendChain: ReturnType<typeof useCapsuleCommands>['sendChain'];
-  addCommand: ReturnType<typeof useCapsuleCommands>['addCommand'];
   deleteCommand: ReturnType<typeof useCapsuleCommands>['deleteCommand'];
 }
 
 function CapsuleCommandsPanelBody({
   disabled,
   showPhysKeys,
-  dialogOpen,
-  setDialogOpen,
+  onAddCommandClick,
   allCommands,
   presetIds,
   chainBuffer,
@@ -68,7 +65,6 @@ function CapsuleCommandsPanelBody({
   handleChainAdd,
   cancelChain,
   sendChain,
-  addCommand,
   deleteCommand,
 }: CapsuleCommandsPanelBodyProps) {
   return (
@@ -113,14 +109,7 @@ function CapsuleCommandsPanelBody({
         })}
       </div>
       <div className="border-t border-border/60">
-        <CapsuleAddCommandDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          disabled={disabled}
-          onAddPlain={(label, command) => addCommand(label, command, false)}
-          onAddCombo={(label, seq) => addCommand(label, seq, true)}
-        />
-        <CapsuleAddCommandButton disabled={disabled} onClick={() => setDialogOpen(true)} />
+        <CapsuleAddCommandButton disabled={disabled} onClick={onAddCommandClick} />
       </div>
     </div>
   );
@@ -172,12 +161,16 @@ export function CapsuleCommandsPopover({
   const sendChain = useCallback(() => {
     sendCommandChain();
   }, [sendCommandChain]);
+  const openAddCommandDialog = useCallback(() => {
+    onOpenChange(false);
+    setDialogOpen(true);
+  }, [onOpenChange]);
+
   const panelBody = (
     <CapsuleCommandsPanelBody
       disabled={disabled}
       showPhysKeys={showPhysKeys}
-      dialogOpen={dialogOpen}
-      setDialogOpen={setDialogOpen}
+      onAddCommandClick={openAddCommandDialog}
       {...commands}
       handleRun={handleRun}
       handlePhysKey={handlePhysKey}
@@ -186,24 +179,33 @@ export function CapsuleCommandsPopover({
   );
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger
-        nativeButton
+    <>
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger
+          nativeButton
+          disabled={disabled}
+          render={triggerElement}
+        />
+        <PopoverContent
+          align="end"
+          side="top"
+          sideOffset={readPopoverSideOffset()}
+          className={capsulePopoverPanelClass}
+        >
+          <PopoverHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60')}>
+            <PopoverTitle>Quick commands</PopoverTitle>
+          </PopoverHeader>
+          {panelBody}
+        </PopoverContent>
+      </Popover>
+      <CapsuleAddCommandDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
         disabled={disabled}
-        render={triggerElement}
+        onAddPlain={(label, command) => commands.addCommand(label, command, false)}
+        onAddCombo={(label, seq) => commands.addCommand(label, seq, true)}
       />
-      <PopoverContent
-        align="end"
-        side="top"
-        sideOffset={readPopoverSideOffset()}
-        className={capsulePopoverPanelClass}
-      >
-        <PopoverHeader className={cn(capsulePopoverHeaderClass, 'border-b border-border/60')}>
-          <PopoverTitle>Quick commands</PopoverTitle>
-        </PopoverHeader>
-        {panelBody}
-      </PopoverContent>
-    </Popover>
+    </>
   );
 }
 

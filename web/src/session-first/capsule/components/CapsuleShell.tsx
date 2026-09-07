@@ -58,7 +58,7 @@ export function CapsuleShell({
       data-dock-height={showLayout ? dockHeightFromLayout(layout) : 'single'}
       data-shell-shape={usePillShape ? 'pill' : 'capsule'}
       className={cn(
-        'absolute z-10 flex flex-col',
+        'absolute z-20 flex flex-col',
         isApp ? capsuleShellAppOuterClass : capsuleShellWebOuterClass,
         isApp ? capsuleShellAppDockBottomClass : capsuleShellDockBottomClass,
       )}

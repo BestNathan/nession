@@ -114,7 +114,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           <div
             data-testid="capsule-input-actions-slot"
             data-flip-id="tools-actions"
-            className="col-start-2 row-start-1 shrink-0 justify-self-end"
+            className="col-start-2 row-start-1 relative z-[1] shrink-0 justify-self-end"
           >
             <CapsuleInputTrailingActions
               historyOpen={historyOpen}

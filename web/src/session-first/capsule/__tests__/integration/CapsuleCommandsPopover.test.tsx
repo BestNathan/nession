@@ -106,17 +106,23 @@ describe('CapsuleCommandsPopover', () => {
     expect(sendText).toHaveBeenCalledWith('\x03');
   });
 
-  it('opens add command dialog', async () => {
+  it('closes the commands popover before opening add-command dialog', async () => {
+    const onOpenChange = vi.fn();
     render(
       <CapsuleCommandsPopover
         open
-        onOpenChange={vi.fn()}
+        onOpenChange={onOpenChange}
         sendText={sendText}
         showPhysKeys={false}
       />,
     );
     await userEvent.click(screen.getByTestId('capsule-add-command'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Plain' }));
+    const labelInput = screen.getByPlaceholderText('Label');
+    await userEvent.type(labelInput, 'my cmd');
+    expect(labelInput).toHaveValue('my cmd');
   });
 
   it('closes after running a built-in command', async () => {
