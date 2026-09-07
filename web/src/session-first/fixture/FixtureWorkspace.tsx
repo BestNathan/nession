@@ -35,6 +35,7 @@ export function FixtureWorkspace() {
   const ctx: WorkspaceContext = {
     session: selectedSession,
     agent: selectedAgent,
+    agents: FIXTURE_AGENTS,
     domain,
     fileOps: fixtureOps,
     experience: 'web',

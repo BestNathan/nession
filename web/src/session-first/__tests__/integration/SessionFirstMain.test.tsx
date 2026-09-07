@@ -47,6 +47,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={sess}
         selectedAgent={agent}
+        agents={[agent]}
         domain={domain}
         surface="terminal"
         tool="files"
@@ -71,6 +72,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={sess}
         selectedAgent={agent}
+        agents={[agent]}
         domain={domain}
         surface="terminal"
         tool="files"
@@ -92,6 +94,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={sess}
         selectedAgent={agent}
+        agents={[agent]}
         domain={domain}
         surface="terminal"
         tool="files"
@@ -111,6 +114,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={sess}
         selectedAgent={agent}
+        agents={[agent]}
         domain={domain}
         surface="terminal"
         tool="files"
@@ -127,6 +131,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={sess}
         selectedAgent={agent}
+        agents={[agent]}
         domain={domain}
         surface="terminal"
         tool="files"
@@ -146,6 +151,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={null}
         selectedAgent={undefined}
+        agents={[]}
         domain={null}
         surface="terminal"
         tool="files"
@@ -176,6 +182,7 @@ describe('SessionFirstMain', () => {
       <SessionFirstMain
         selectedSession={null}
         selectedAgent={undefined}
+        agents={[]}
         domain={null}
         surface="terminal"
         tool="files"

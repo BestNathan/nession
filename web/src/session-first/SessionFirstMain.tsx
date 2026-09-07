@@ -22,6 +22,7 @@ import type { ConnectionState } from '@/services/socket';
 interface WorkspaceTabPanelProps {
   selectedSession: Session;
   selectedAgent: Agent | undefined;
+  agents: Agent[];
   domain: DomainState;
   surface: Surface;
   tool: WorkspaceToolId;
@@ -34,6 +35,7 @@ interface WorkspaceTabPanelProps {
 function WorkspaceTabPanel({
   selectedSession,
   selectedAgent,
+  agents,
   domain,
   surface,
   tool,
@@ -59,6 +61,7 @@ function WorkspaceTabPanel({
         ctx={{
           session: selectedSession,
           agent: selectedAgent,
+          agents,
           domain,
           fileOps,
           experience,
@@ -73,6 +76,7 @@ function WorkspaceTabPanel({
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
   selectedAgent: Agent | undefined;
+  agents: Agent[];
   domain: DomainState | null;
   surface: Surface;
   tool: WorkspaceToolId;
@@ -97,6 +101,7 @@ export interface SessionFirstMainProps {
 export function SessionFirstMain({
   selectedSession,
   selectedAgent,
+  agents,
   domain,
   surface,
   tool,
@@ -192,6 +197,7 @@ export function SessionFirstMain({
               <WorkspaceTabPanel
                 selectedSession={selectedSession}
                 selectedAgent={selectedAgent}
+                agents={agents}
                 domain={domain}
                 surface={surface}
                 tool={tool}

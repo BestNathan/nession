@@ -7,6 +7,7 @@ describe('workspace tool registry', () => {
       'files',
       'session',
       'agent',
+      'env',
       'claude-code',
     ]);
   });

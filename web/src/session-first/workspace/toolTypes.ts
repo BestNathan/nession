@@ -5,13 +5,14 @@ import type { DomainState } from '@/session-first/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 
-export type WorkspaceToolId = 'files' | 'session' | 'agent' | 'claude-code';
+export type WorkspaceToolId = 'files' | 'session' | 'agent' | 'claude-code' | 'env';
 export type Experience = CapsuleExperience;
 
 /** Everything a tool layout needs from the workspace framework. */
 export interface WorkspaceContext {
   session: Session | null;
   agent: Agent | undefined;
+  agents: Agent[];
   domain: DomainState | null;
   fileOps: FileOps | null;
   experience: Experience;

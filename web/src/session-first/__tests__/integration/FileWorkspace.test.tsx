@@ -32,6 +32,7 @@ function makeCtx(fileOps: FileOps | null): WorkspaceContext {
   return {
     session: null,
     agent: undefined,
+    agents: [],
     domain: null,
     fileOps,
     experience: 'web',

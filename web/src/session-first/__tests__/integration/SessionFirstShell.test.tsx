@@ -70,6 +70,11 @@ vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
+vi.mock('@/components/env/EnvManager', () => ({
+  EnvManager: ({ embedded }: { embedded?: boolean }) => (
+    <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
+  ),
+}));
 vi.mock('@/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="create-session-dialog" /> : null,
@@ -247,6 +252,8 @@ describe('SessionFirstShell', () => {
     expect(screen.getByRole('tab', { name: 'Files' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Agent' }));
     expect(screen.getByTestId('agent-detail')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Env' }));
+    expect(screen.getByTestId('env-manager')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Claude Code' }));
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-detail')).not.toBeInTheDocument();
@@ -297,15 +304,14 @@ describe('SessionFirstShell', () => {
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
 
-  it('opens env manager from sidebar footer overflow and returns on back', async () => {
+  it('opens env files from workspace dock when a session is selected', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-first-open-drawer'));
-    await userEvent.click(screen.getByTestId('session-first-overflow'));
-    await userEvent.click(await screen.findByTestId('session-first-env'));
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Env' }));
     expect(screen.getByTestId('env-manager')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.queryByTestId('env-manager')).not.toBeInTheDocument();
   });
 
   it('renders without the global chrome bar', () => {

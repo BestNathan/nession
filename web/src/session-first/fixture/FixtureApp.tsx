@@ -70,13 +70,13 @@ export function FixtureApp() {
     onCreate: () => {},
     onRefresh: () => {},
     onKill: () => {},
-    onOpenEnv: () => {},
     onLegacy: () => {},
   };
 
   const mainShared = {
     selectedSession,
     selectedAgent,
+    agents: FIXTURE_AGENTS,
     domain,
     tool,
     fileOps: fixtureOps,
