@@ -1,6 +1,5 @@
 import { forwardRef, useCallback, useState, type ButtonHTMLAttributes } from 'react';
 import { MoreHorizontal, Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
@@ -40,16 +39,16 @@ export function CapsuleCommandsPopover({
   const commands = useCapsuleCommands(sendText);
 
   const defaultTrigger = (
-    <Button
+    <PopoverTrigger
+      nativeButton
       type="button"
-      variant="ghost"
       disabled={disabled}
       data-testid="capsule-commands-trigger"
-      className={cn(capsuleIconButtonClass, 'rounded-lg')}
       aria-label="Quick commands"
+      className={cn(capsuleIconButtonClass, 'inline-flex items-center justify-center rounded-lg')}
     >
       <Terminal />
-    </Button>
+    </PopoverTrigger>
   );
 
   const triggerElement = trigger ?? defaultTrigger;
@@ -75,11 +74,11 @@ export function CapsuleCommandsPopover({
   return (
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger
-          nativeButton
-          disabled={disabled}
-          render={triggerElement}
-        />
+        {trigger ? (
+          <PopoverTrigger nativeButton disabled={disabled} render={triggerElement} />
+        ) : (
+          defaultTrigger
+        )}
         <PopoverContent
           align="end"
           side="top"
