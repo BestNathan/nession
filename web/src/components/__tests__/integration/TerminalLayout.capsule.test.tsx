@@ -42,8 +42,6 @@ function renderDesktopCapsule() {
       terminalElement={<div data-testid="terminal" />}
       sessionId="session-1"
       sendText={vi.fn()}
-      onScrollPages={vi.fn()}
-      onScrollToBottom={vi.fn()}
       toolbarDisabled={false}
       toolbar="capsule"
     />,
@@ -64,8 +62,6 @@ describe('TerminalLayout desktop capsule toolbar', () => {
         terminalElement={<div data-testid="terminal" />}
         sessionId="session-1"
         sendText={vi.fn()}
-        onScrollPages={vi.fn()}
-        onScrollToBottom={vi.fn()}
         toolbarDisabled={false}
       />,
     );

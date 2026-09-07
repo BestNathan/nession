@@ -131,11 +131,6 @@ export const capsuleCommandsScrollClass =
 export const capsuleCommandsMoreClass =
   'shrink-0';
 
-export const capsuleScrollOverlaySurfaceClass =
-  `${capsuleFloatingSurfaceClass} rounded-[var(--radius-capsule)] p-[length:var(--composer-popover-inner-pad)]`;
-
-export const capsuleScrollOverlayButtonClass = capsuleSecondaryIconButtonClass;
-
 export const capsuleDropdownMinWidthClass =
   'min-w-[length:var(--composer-dropdown-min-width)]';
 

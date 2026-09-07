@@ -6,7 +6,6 @@ import { EnvPanel } from './env/EnvPanel';
 import { FileBrowser } from './FileBrowser';
 import { FileViewer } from './FileViewer';
 import { SwipeableViewport } from './SwipeableViewport';
-import { TerminalScrollOverlay } from './TerminalScrollOverlay';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
@@ -22,10 +21,6 @@ interface MobileTerminalLayoutProps {
   sessionId: string;
   sessionName?: string;
   sendText: (text: string) => void;
-  /** Scroll the terminal scrollback by pages (negative = towards history). */
-  onScrollPages: (pages: number) => void;
-  /** Jump the terminal viewport to the newest output. */
-  onScrollToBottom: () => void;
   toolbarDisabled: boolean;
   fileOps?: FileOps | null;
   onTerminalReveal?: () => void;
@@ -372,8 +367,6 @@ function FilesPanel({ fileOps, onGetTerminalPwd }: FilesPanelProps) {
 export function MobileTerminalLayout({
   terminalElement,
   sessionId,
-  onScrollPages,
-  onScrollToBottom,
   toolbarDisabled,
   fileOps,
   onTerminalReveal,
@@ -403,10 +396,6 @@ export function MobileTerminalLayout({
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {terminalElement}
           </div>
-          <TerminalScrollOverlay
-            onScrollPages={onScrollPages}
-            onScrollToBottom={onScrollToBottom}
-          />
           {terminalOnly ? (
             <TerminalCapsule
               experience="app"

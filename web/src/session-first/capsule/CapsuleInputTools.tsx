@@ -98,6 +98,7 @@ export function CapsuleInputTrailingActions({
         onPaste={onPaste}
         onCopy={onCopy}
         secondaryIconClass={secondaryIconClass}
+        showTooltips={!compactSecondary}
       />
     </div>
   );

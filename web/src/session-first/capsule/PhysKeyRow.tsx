@@ -35,6 +35,7 @@ export function PhysKeyRow({
 }: PhysKeyRowProps) {
   const KeyButton = ({ keyDef, isArrow = false }: { keyDef: PhysKey; isArrow?: boolean }) => {
     const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const tapHandledByPointerRef = useRef(false);
 
     const iconEl =
       keyDef.label === '←' ? <ArrowLeft className={capsulePhysKeyIconClass} /> :
@@ -57,9 +58,28 @@ export function PhysKeyRow({
     };
 
     const handlePointerUp = () => {
+      if (disabled) {
+        return;
+      }
       if (pressTimerRef.current) {
         clearTimeout(pressTimerRef.current);
         pressTimerRef.current = null;
+      }
+      tapHandledByPointerRef.current = true;
+      if (isChaining) {
+        onChainAdd(keyDef.seq);
+      } else {
+        onKey(keyDef.seq);
+      }
+    };
+
+    const handleClick = () => {
+      if (disabled || pressTimerRef.current) {
+        return;
+      }
+      if (tapHandledByPointerRef.current) {
+        tapHandledByPointerRef.current = false;
+        return;
       }
       if (isChaining) {
         onChainAdd(keyDef.seq);
@@ -85,6 +105,7 @@ export function PhysKeyRow({
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
+        onClick={handleClick}
         onContextMenu={(event) => event.preventDefault()}
         aria-label={keyDef.label}
       >

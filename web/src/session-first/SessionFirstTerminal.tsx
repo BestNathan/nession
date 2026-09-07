@@ -40,8 +40,6 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
           inputDisabled={inputDisabled}
           controller={controller}
           isSwitching={isSwitching}
-          onScrollPages={(pages) => controller?.scrollPages(pages)}
-          onScrollToBottom={() => controller?.scrollToBottom()}
         >
           <SessionFirstTerminalPane
             sessionId={sessionId}

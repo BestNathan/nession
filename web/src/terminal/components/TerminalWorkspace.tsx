@@ -239,8 +239,6 @@ export function TerminalWorkspace({ onBack, onDisconnect, onError }: TerminalWor
           sendText={(text) => {
             if (banner === 'none') { controller?.send(text); }
           }}
-          onScrollPages={(pages) => controller?.scrollPages(pages)}
-          onScrollToBottom={() => controller?.scrollToBottom()}
           toolbarDisabled={toolbarDisabled}
           fileOps={fileOps}
           onTerminalReveal={() => {}}

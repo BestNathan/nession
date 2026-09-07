@@ -52,7 +52,7 @@ describe('CapsuleCommandsRow', () => {
     expect(screen.queryByTestId('phys-key-row')).not.toBeInTheDocument();
   });
 
-  it('opens anchored popover when more trigger is clicked', async () => {
+  it('opens bottom sheet when more trigger is clicked', async () => {
     const onCommandsOpenChange = vi.fn();
     render(
       <CapsuleCommandsRow
@@ -66,7 +66,7 @@ describe('CapsuleCommandsRow', () => {
     expect(onCommandsOpenChange.mock.calls[0]?.[0]).toBe(true);
   });
 
-  it('renders the opened commands panel as an anchored popover', () => {
+  it('renders the opened commands panel as a bottom sheet', () => {
     render(
       <CapsuleCommandsRow
         sendText={vi.fn()}
@@ -74,9 +74,8 @@ describe('CapsuleCommandsRow', () => {
         onCommandsOpenChange={vi.fn()}
       />,
     );
-    expect(document.querySelector('[data-slot="popover-content"]')).toBeInTheDocument();
-    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-content"][data-side="bottom"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="popover-content"]')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Quick commands' })).toBeInTheDocument();
   });
 

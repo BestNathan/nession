@@ -1,15 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { TerminalScrollOverlay } from '@/components/TerminalScrollOverlay';
 import { TerminalCapsule, type CapsuleMode } from '@/session-first/capsule/TerminalCapsule';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (SessionFirstTerminalPane). */
   children: ReactNode;
-  onScrollPages: (pages: number) => void;
-  onScrollToBottom: () => void;
   inputDisabled: boolean;
   controller: TerminalController | null;
   /** Address route switch in progress — subtle veil over viewport. */
@@ -17,13 +14,11 @@ export interface TerminalSurfaceProps {
 }
 
 /**
- * Session-first terminal surface: well host + floating capsule + optional scroll chrome.
+ * Session-first terminal surface: well host + floating capsule.
  * Does not import legacy TerminalLayout / MobileTerminalLayout / BottomBar.
  */
 export function TerminalSurface({
   children,
-  onScrollPages,
-  onScrollToBottom,
   inputDisabled,
   controller,
   isSwitching = false,
@@ -58,12 +53,6 @@ export function TerminalSurface({
         )}
         {children}
       </div>
-      {!isDesktop && (
-        <TerminalScrollOverlay
-          onScrollPages={onScrollPages}
-          onScrollToBottom={onScrollToBottom}
-        />
-      )}
       <TerminalCapsule
         experience={capsuleExperience}
         mode={capsuleMode}

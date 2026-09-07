@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { TerminalScrollOverlay } from '@/components/TerminalScrollOverlay';
 import {
   AppSpatialShell,
   type SpatialPageIndex,
@@ -115,10 +114,6 @@ export function FixtureApp() {
               terminal={
                 <div className="relative h-full">
                   <FixtureTerminal />
-                  <TerminalScrollOverlay
-                    onScrollPages={() => {}}
-                    onScrollToBottom={() => {}}
-                  />
                 </div>
               }
             />
