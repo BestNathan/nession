@@ -11,6 +11,7 @@ import {
   capsuleShellSurfaceClass,
   capsuleShellWebOuterClass,
 } from '@/session-first/capsule/capsuleStyles';
+import { useCapsuleContext } from '@/session-first/capsule/state/useCapsuleContext';
 import type {
   CapsuleExperience,
   CapsuleMode,
@@ -41,11 +42,13 @@ export function CapsuleShell({
   measureMirror,
   children,
 }: CapsuleShellProps) {
+  const { commandsOpen } = useCapsuleContext();
   const isCommandsMode = mode === 'commands';
+  const commandsPanelExpanded = isCommandsMode && commandsOpen;
   const showLayout = !isCommandsMode;
   const isApp = experience === 'app';
   const usePillShape =
-    (isApp && isCommandsMode) ||
+    (isApp && isCommandsMode && !commandsOpen) ||
     (!isCommandsMode && layout === 'flat' && !isApp);
 
   return (
@@ -72,17 +75,19 @@ export function CapsuleShell({
           capsuleShellSurfaceClass,
           usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
           capsuleShellInnerPadClass,
-          isCommandsMode
-            ? cn('items-center', capsuleShellContentGapClass)
-            : 'items-center',
+          commandsPanelExpanded
+            ? 'flex-col'
+            : cn('items-center', isCommandsMode && capsuleShellContentGapClass),
         )}
       >
         <div
           ref={contentRef}
           data-testid="capsule-shell-content"
           className={cn(
-            'flex min-w-0 flex-1 items-center overflow-hidden',
-            isCommandsMode && capsuleShellContentGapClass,
+            'flex min-w-0 flex-1 overflow-hidden',
+            commandsPanelExpanded
+              ? 'flex-col items-stretch'
+              : cn('items-center', isCommandsMode && capsuleShellContentGapClass),
           )}
         >
           {children}
