@@ -128,13 +128,10 @@ Alternative (if sibling is awkward): host-level listener in `TerminalCapsule` â€
 
 ### Tokens (design source)
 
-Add under `[data-experience="app"]` in token pipeline:
+Add under `[data-experience="app"]` in `design/tokens` (same pipeline as other `experience.app.composer.*` ids):
 
-```yaml
-experience.app.composer.commandsPanelMaxHeight: 20vh  # id TBD in tokens.json
-```
-
-Generated CSS: `--composer-commands-panel-max-height: 20vh`
+- **Token id:** `experience.app.composer.commandsPanelMaxHeight`
+- **Generated CSS var:** `--composer-commands-panel-max-height: 20vh`
 
 Do **not** reuse `--composer-popover-max-height` (45vh) for the inline panel.
 
