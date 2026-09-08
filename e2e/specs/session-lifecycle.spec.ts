@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForDashboard } from '../helpers/dashboard';
+import { waitForSessionFirst } from '../helpers/sessionFirst';
 
 // NOTE: session-lifecycle test is skipped due to tmux terminal initialization
 // issues in CI environment ("terminal does not support clear").
@@ -14,14 +14,15 @@ test.describe('Session lifecycle', () => {
     // so any non-empty token is accepted.
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
     await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForDashboard(page);
+    await waitForSessionFirst(page);
   });
 
   test.skip('create a session, verify it appears, then kill it', async ({ page }) => {
     // ── Wait for the agent to register ──
-    // The "Create" button is enabled only when at least one agent is online.
-    // In CI, cargo build + agent startup + heartbeat can take 30-60 seconds.
-    const createButton = page.getByRole('button', { name: 'Create' });
+    // The sidebar "Create session" button is enabled only when at least one
+    // agent is online. In CI, cargo build + agent startup + heartbeat can
+    // take 30-60 seconds.
+    const createButton = page.getByTestId('session-first-create');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
 
     // ── Create session ──
@@ -43,24 +44,24 @@ test.describe('Session lifecycle', () => {
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
     // ── Verify session appears in the list ──
-    // Session rows show the session name in a <p> with font-medium class
-    const sessionRow = page.locator(`p.font-medium:has-text("${SESSION_NAME}")`);
+    // Session-first rows show the session name in a span.font-medium
+    const sessionRow = page.locator('[data-testid="session-item-row"]', {
+      hasText: SESSION_NAME,
+    });
     await expect(sessionRow).toBeVisible({ timeout: 10_000 });
 
-    // The meta line should contain the agent_id
-    const metaLine = page.locator('p.text-xs.text-muted-foreground', {
-      hasText: 'e2e-test-node',
-    });
-    await expect(metaLine).toBeVisible({ timeout: 5_000 });
+    // The meta line should contain the agent label
+    await expect(
+      sessionRow.locator('span.text-xs.text-muted-foreground'),
+    ).toContainText('e2e-test-node', { timeout: 5_000 });
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the
     // row-level hover class to scope the search, since CSS-selector
     // traversal with ".." is fragile across the nested flex layout.
-    const row = page.locator('div[class*="hover:bg-accent"]', {
-      has: page.locator(`p:has-text("${SESSION_NAME}")`),
-    });
-    await row.getByRole('button', { name: 'Kill', exact: true }).click();
+    // The Kill button appears on row hover (or when the row is selected).
+    await sessionRow.hover();
+    await sessionRow.getByRole('button', { name: 'Kill session' }).click();
 
     // KillConfirmDialog should open (it's an AlertDialog)
     const killDialog = page.getByRole('alertdialog');

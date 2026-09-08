@@ -16,10 +16,6 @@
  * are mapped to this layer. They will be gradually moved into features/.
  */
 
-// Legacy directory mappings (to be removed after migration):
-// - components/ → features/
-// - hooks/ → features/
-
 // DONE (Phase 3): terminal/ migrated.
 // - terminal/ runtime → core/terminal-runtime/ (React-free)
 // - terminal/ UI + state → features/terminal/ (components/, hooks/, state/)
@@ -39,10 +35,19 @@
 // - features/agents reads the session-workspace channel vocabulary through
 //   features/sessions (model/domainState + ConnectionStatus) — recorded in
 //   each feature README
-// - legacy components/ + hooks/ + session-first/ still hold the Dashboard
-//   shell chrome (SessionList/SessionsSection, useDashboard composition),
-//   attach domain (SessionDropdown, AttachDialog, atoms/), and the
-//   session-first shell layouts — remaining Phase-5 slices
+// DONE (Phase 5 complete, #655): env/commands/claude-code/server UI + remaining
+// hooks converged; Dashboard predecessor deleted and the default flipped to
+// the session-first shell; the session-first tree moved physically to app/;
+// legacy dirs components/ (non-ui), hooks/, session-first/ deleted.
+// - env UI + envRef/useEnvManager + generic env hooks → features/env/
+// - quick commands (presets, wire types, useQuickCommands) → features/commands/
+// - terminal attach/history/runtime hooks → features/terminal/hooks/
+// - generic hooks (useWebSocket/useMediaQuery/useAddressPlan/useDialogReset)
+//   → shared/hooks/
+// - SearchBar + filter vocabulary + AttachDialog → features/sessions/
+// - ServerInfoMenu → features/server/; useScheduledGithubTheme → features/files/
+// - Dashboard-only UI deleted (agents grid, sessions preview dialog, legacy
+//   terminal layouts, TerminalWorkspace)
 
 // TODO: Export feature public APIs as they are migrated
 // export * as terminal from './terminal/public';

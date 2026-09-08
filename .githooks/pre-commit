@@ -98,7 +98,7 @@ if [ -n "$STAGED_TSX" ]; then
 fi
 
 # ── Capsule design-token gate (eslint rule + selftest on script change) ─────
-STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/session-first/capsule/.*\.(ts|tsx)$' || true)
+STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/features/terminal/capsule/.*\.(ts|tsx)$' || true)
 STAGED_TOKEN_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^design/tokens/' || true)
 STAGED_TOKEN_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-design-tokens' || true)
 if [ -n "$STAGED_CAPSULE$STAGED_TOKEN_SRC$STAGED_TOKEN_CHECK" ]; then

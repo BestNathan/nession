@@ -8,7 +8,7 @@ import type {
   ClaudeCodeReadResponse,
 } from '@/features/claude-code/types';
 import { cn } from '@/lib/utils';
-import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
+import type { WorkspaceContext } from '@/app/workspace/toolTypes';
 
 type Scope = 'global' | 'project';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];

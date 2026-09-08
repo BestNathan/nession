@@ -56,9 +56,10 @@ When architecture and shipping code disagree, treat `docs/design/` as the **targ
 
 | Rule | Detail |
 |------|--------|
-| Hooks | All custom hooks live in `src/hooks/` (or a feature's `hooks/`, e.g. `src/features/terminal/hooks/`). Never put `use*` modules under `src/components/`. |
-| Components | `src/components/` is UI only. If a file starts with `use`, it belongs in hooks. |
-| WebSocket | New capabilities go in `src/services/websocket/plugins/`, not in core `WebSocketService`. |
+| Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
+| Components | `src/components/ui/` holds only shared shadcn primitives. Feature UI belongs in `features/<feature>/components/`; shell UI in `src/app/`. |
+| Layers | Import direction app → features → core → shared (`nession/no-reverse-imports`). Full module map: `docs/architecture/web.md`. |
+| WebSocket | New capabilities go in `src/services/socket/plugins/` (constructor-injected `CapabilityPlugin`s), not in core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. **One** stylesheet: `src/index.css`. Component styles = Tailwind utilities only. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -94,26 +95,29 @@ When architecture and shipping code disagree, treat `docs/design/` as the **targ
 
 ```text
 src/
-├── App.tsx / main.tsx     # Root shell, router entry, toaster
+├── App.tsx / main.tsx     # Auth gate → SessionFirstShell | LoginPage; router entry
 ├── index.css              # Sole global CSS (Tailwind + theme)
 ├── types.ts               # Shared TS types
+├── app/                   # App layer — the session-first shell + app hooks (app/public.ts)
+│   ├── SessionFirstShell / Workspace / Sidebar / Main / Terminal / …
+│   ├── patterns/, app-spatial/, workspace/ (+ tools/), fixture/
+│   ├── useAppConnection, useDashboard(+Filter/Modals), useProbePolling, …
+│   └── LoginPage.tsx
+├── features/              # Domain features — each = plugin + components/hooks (+ model)
+│   ├── terminal/ explorer/ files/ sessions/ agents/ env/ commands/ server/ claude-code/
+├── shared/                # Shared layer — hooks/ (generic React hooks)
+├── components/
+│   └── ui/                # shadcn primitives (generated + wrappers) — shared
+├── core/terminal-runtime/ # React-free terminal runtime (controller, transport, input)
+├── runtime/               # SessionRuntime ownership + attach state machines
 ├── atoms/                 # Jotai atoms (connection, session, probe, …)
-├── components/            # React UI (feature + ui/ primitives)
-│   └── ui/                # shadcn primitives (generated + wrappers)
-├── hooks/                 # App-level custom hooks
-├── services/              # WS client, file ops, deep link, prefs, …
-│   └── websocket/         # Core service + plugins/
-├── core/terminal-runtime/ # React-free terminal runtime (controller, transport, input, xterm lifecycle)
-├── features/terminal/     # Terminal feature: capability plugins, viewport components, hooks, state, capsule
-├── features/explorer/     # Extensible file-tree framework (Explorer, ExplorerStore, instance registry)
-├── features/files/        # Files feature: file RPC capability, browser/viewer UI, file hooks, viewer dispatch
-├── features/sessions/     # Sessions feature: session list/details UI, CRUD dialogs, list hooks, domain-state model
-├── features/agents/       # Agents feature: agent cards/detail/delete, workspace agent page, agent data hooks
-├── markdown/              # Markdown preview pipeline
+├── services/              # WS client (socket/), attach prefs, deep link (core layer)
 ├── lib/                   # Pure helpers (cn, encoding, language id, …)
-├── extensions/            # Extension registry (e.g. claude-code)
+├── markdown/              # Markdown preview pipeline
+├── extensions/            # Extension registry (e.g. claude-code UI contributions)
 └── test/                  # Vitest setup
 ```
+Layers: see `docs/architecture/web.md`. E2E Playwright lives in repo-root `e2e/`.
 
 E2E Playwright lives in repo-root `e2e/`, not under `web/`.
 
@@ -132,7 +136,7 @@ E2E Playwright lives in repo-root `e2e/`, not under `web/`.
 ## 7. State and data
 
 - **Jotai** atoms under `src/atoms/` (and `src/features/terminal/state/`) split by domain (connection, session, layout, input, …). Prefer small atoms over mega-stores.
-- Dashboard / attach / file flows go through hooks (`useDashboard`, `useAppConnection`, `useFileViewer`, …) rather than embedding WS calls deep in presentational components.
+- Session / attach / file flows go through app-composition hooks (`app/useDashboard`, `app/useAppConnection`) and feature hooks rather than embedding WS calls deep in presentational components.
 - Terminal attach supports **relay** (via server) and **P2P** (direct to agent). Respect existing `ConnectionManager` / transport boundaries.
 
 ---

@@ -8,7 +8,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { useCommandHistory } from '@/hooks/useCommandHistory';
+import { useCommandHistory } from '@/features/terminal/hooks/useCommandHistory';
 import { cn } from '@/lib/utils';
 import {
   capsuleCaptionTextClass,

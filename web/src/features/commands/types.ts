@@ -1,13 +1,28 @@
-/**
- * Commands wire types. The item type lives today in
- * `components/quickCommands/types.ts` and is re-exported by
- * `web/src/types.ts` (shared with the legacy facade); this module is the
- * feature's stable import point.
- */
-export type {
-  CommandsAddResponse,
-  CommandsListResponse,
-  CommandsRemoveResponse,
-  CommandsUpdateResponse,
-  QuickCommandItem,
-} from '@/types';
+export interface QuickCommandItem {
+  id: string;
+  label: string;
+  command: string;
+  raw?: boolean;
+  sort_order?: number;
+  created_at?: number;
+}
+
+export interface CommandsListResponse {
+  commands: QuickCommandItem[];
+}
+
+export interface CommandsAddResponse {
+  success: boolean;
+  id?: string;
+  error?: string;
+}
+
+export interface CommandsRemoveResponse {
+  success: boolean;
+  error?: string;
+}
+
+export interface CommandsUpdateResponse {
+  success: boolean;
+  error?: string;
+}

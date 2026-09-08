@@ -4,7 +4,7 @@ import { Toaster } from 'sonner'
 import App from './App.tsx'
 import { initExtensions } from './extensions/registry'
 import './index.css'
-import { useMediaQuery } from './hooks/useMediaQuery'
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery'
 import { normalizeHashRouterLocation } from './lib/hashRouterUrl'
 
 function Root() {

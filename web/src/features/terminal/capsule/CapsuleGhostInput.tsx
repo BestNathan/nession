@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { useCommandHistory } from '@/hooks/useCommandHistory';
+import { useCommandHistory } from '@/features/terminal/hooks/useCommandHistory';
 import {
   capsuleFieldPadClass,
   capsuleFieldTypeClass,

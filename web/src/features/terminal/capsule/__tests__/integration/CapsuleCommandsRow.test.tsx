@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsRow } from '@/features/terminal/capsule/CapsuleCommandsRow';
 import { QUICK_MOBILE_KEYS } from '@/features/terminal/capsule/physKeys';
 
-vi.mock('@/hooks/useQuickCommands', () => ({
+vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),
@@ -12,7 +12,7 @@ vi.mock('@/hooks/useQuickCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],

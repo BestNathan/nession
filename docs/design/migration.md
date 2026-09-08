@@ -42,6 +42,11 @@ The slice must validate both the IA and the new design system (tokens from #467,
 
 ## From the current UI
 
+> **Status (2026-09-08):** the v2 column below is now the *shipping* IA — the
+> Dashboard predecessor shell was deleted and the default flipped to the
+> session-first shell in #655 (Phase 5). This table is kept as design history;
+> the current module map lives in [`architecture/web.md`](web.md).
+
 The shipping shell (see [UI Design Protocol](../superpowers/specs/2026-08-08-ui-design-protocol.md)) is Agent/dashboard-first and often keeps Terminal adjacent to Files. v2 changes that:
 
 | Current (shipping) | v2 |

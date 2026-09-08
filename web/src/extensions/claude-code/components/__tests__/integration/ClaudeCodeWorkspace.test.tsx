@@ -7,7 +7,7 @@ import type {
   ClaudeCodeListResponse,
   ClaudeCodeReadResponse,
 } from '@/features/claude-code/types';
-import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
+import type { WorkspaceContext } from '@/app/workspace/toolTypes';
 import type { Agent, Session } from '@/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
 

@@ -1,5 +1,5 @@
 import type { Session } from '../types';
-import type { AttachChoice } from '../components/env/AttachDialog';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { sessionsApi } from '../features/sessions';
 import type { AgentProbe } from '../atoms/probe';
 import { loadAttachPrefs } from './attachPrefs';

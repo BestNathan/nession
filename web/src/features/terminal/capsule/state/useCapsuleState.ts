@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useCommandHistory } from '@/hooks/useCommandHistory';
+import { useCommandHistory } from '@/features/terminal/hooks/useCommandHistory';
 import { layoutFromLineCount } from '@/features/terminal/capsule/measure/layoutFromLineCount';
 import type {
   CapsuleMode,

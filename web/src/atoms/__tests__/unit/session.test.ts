@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
-import type { AttachChoice } from '@/components/env/AttachDialog';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { p2pStateAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,

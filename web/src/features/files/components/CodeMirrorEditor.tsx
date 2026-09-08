@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Extension } from '@codemirror/state';
 import CodeMirror from '@uiw/react-codemirror';
-import { useScheduledGithubTheme } from '@/hooks/useScheduledGithubTheme';
+import { useScheduledGithubTheme } from '@/features/files/hooks/useScheduledGithubTheme';
 import {
   ensureLangsModule,
   loadLangExtensionForFile,

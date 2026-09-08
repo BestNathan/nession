@@ -1,7 +1,7 @@
 // web/src/atoms/session.ts
 import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
-import type { AttachChoice } from '../components/env/AttachDialog';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { p2pStateAtom, routeIntentEpochAtom } from './connection';
 import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom } from './probe';

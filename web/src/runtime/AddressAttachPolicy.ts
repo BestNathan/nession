@@ -1,5 +1,5 @@
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/hooks/useAddressPlan';
+import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 
 export type AddressPolicyAction =
   | { type: 'none' }

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useHistoryGhost } from '@/features/terminal/capsule/useHistoryGhost';
-import type { HistoryEntry } from '@/hooks/useCommandHistory';
+import type { HistoryEntry } from '@/features/terminal/hooks/useCommandHistory';
 
 const entries: HistoryEntry[] = [
   { id: '1', command: 'aaa --verbose', timestamp: 200 },
