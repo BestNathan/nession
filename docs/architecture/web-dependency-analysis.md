@@ -1,7 +1,9 @@
 # Web 模块依赖图分析
 
 **日期**: 2026-09-08  
-**基线**: staging 分支 (commit b01ca17c)  
+**基线**: staging 分支 (commit b01ca17c) — **superseded** by #655 (Phase 5:
+Dashboard deleted, session-first → `app/`, legacy dirs removed); tree snapshot
+below no longer matches `main`/`staging`. See [`web.md`](web.md) for the live map.
 **工具**: madge + TypeScript AST 分析
 
 ## 当前目录结构

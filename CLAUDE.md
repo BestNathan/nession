@@ -52,25 +52,32 @@ nession/
 │
 ├── web/                      # React frontend (Vite + TypeScript)
 │   └── src/
-│       ├── App.tsx           # Root: connection state → LoginPage or Dashboard
+│       ├── App.tsx           # Root: auth gate → SessionFirstShell or LoginPage
 │       ├── main.tsx          # Entry point + Sonner Toaster
 │       ├── index.css         # Tailwind v4 + shadcn/ui dark theme
 │       ├── types.ts           # Shared TypeScript types
-│       ├── lib/utils.ts      # cn() helper (clsx + tailwind-merge)
-│       ├── services/
-│       │   └── websocket.ts  # WebSocketService singleton (connection, auth, events)
+│       ├── app/              # App layer (composition root): SessionFirstShell tree,
+│       │                     #   app-spatial/, workspace/ tools, fixture/, app hooks
+│       │                     #   (useAppConnection, useDashboard, …), LoginPage
+│       ├── features/         # Feature layer (see features/*/README.md ownership maps)
+│       │   ├── terminal/     # Terminal feature: plugins, viewport, hooks, state, capsule
+│       │   ├── explorer/     # Extensible file-tree framework (Explorer, ExplorerStore, registry)
+│       │   ├── files/        # Files feature: RPC capability, browser/viewer UI, file hooks
+│       │   ├── sessions/     # Sessions feature: session list/details UI, CRUD dialogs, attach
+│       │   ├── agents/       # Agents feature: workspace agent page, agent data hooks
+│       │   ├── env/          # Env files: capability plugin + env manager UI/dialogs
+│       │   ├── commands/     # Quick commands: capability plugin + presets
+│       │   ├── server/       # Server capability plugin + ServerInfoMenu
+│       │   └── claude-code/  # Claude Code capability plugin
+│       ├── shared/           # Shared layer: hooks/ (generic React hooks importable by all layers)
+│       ├── components/
+│       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
 │       ├── core/terminal-runtime/  # React-free terminal runtime (controller, transport, input)
-│       ├── features/terminal/      # Terminal feature: plugins, viewport, hooks, state, capsule
-│       ├── features/explorer/      # Extensible file-tree framework (Explorer, ExplorerStore, registry)
-│       ├── features/files/         # Files feature: RPC capability, browser/viewer UI, file hooks
-│       ├── features/sessions/      # Sessions feature: session list/details UI, CRUD dialogs, list hooks, domain-state model
-│       ├── features/agents/        # Agents feature: agent cards/detail/delete, workspace agent page, agent data hooks
-│       ├── runtime/           # SessionRuntime ownership + attach state machines (core candidate)
-│       └── components/          # Legacy shell chrome (Dashboard, SessionsSection, env/, …)
-│           ├── ui/           # shadcn/ui primitives (21 components + 2 custom wrappers, auto-generated)
-│           ├── LoginPage.tsx         # Connection form (Card + Input + Button + Badge)
-│           ├── Dashboard.tsx         # Dashboard shell (predecessor of session-first)
-│           └── env/                # Env manager UI (env feature — not yet converged)
+│       ├── runtime/          # SessionRuntime ownership + attach state machines (core layer)
+│       ├── atoms/            # Shared Jotai atoms (connection, session, probe) (shared layer)
+│       ├── lib/              # Pure helpers (shared layer)
+│       ├── services/         # WS client, attach prefs, deep link (core layer)
+│       └── extensions/       # Extension registry (e.g. claude-code UI contributions)
 │
 ├── deploy/                   # Docker runtime scripts & configs
 │   ├── docker-compose.yml
@@ -117,8 +124,8 @@ tmux sessions (per-node)
 
 ### Frontend Conventions
 
-- **hooks/**: All custom hooks. Never place hooks in `components/`.
-- **components/**: UI components only. If a file starts with `use`, it belongs in `hooks/`.
+- **hooks placement**: shared hooks in `shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `app/`. Never place hooks in `components/`.
+- **components/**: only the shared `ui/` shadcn primitives live under `components/ui/`; feature UI belongs in `features/<feature>/components/`, shell UI in `app/`.
 - **services/websocket/plugins/**: WebSocket functionality is plugin-based. New capabilities go in a plugin, not in the core.
 - **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
 

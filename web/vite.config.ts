@@ -97,35 +97,19 @@ export default defineConfig(({ mode }) => {
         'src/components/ui/**',
         'src/test/**',
         'src/App.tsx',
-        // Glue / orchestration components (covered by integration)
-        'src/features/terminal/components/TerminalWorkspace.tsx',
-        
-        // Complex UI component with WebSocket integration - covered by E2E
-        'src/components/env/EnvPanel.tsx',
         // Deep link restoration - requires react-router integration testing
-        'src/hooks/useDeepLinkRestore.ts',
+        'src/app/useDeepLinkRestore.ts',
         // ── Browser-only terminal internals (xterm lifecycle, mouse) ──
         'src/core/terminal-runtime/MouseIntentResolver.ts',
-        'src/hooks/useSwipeGesture.ts',
-        'src/components/SwipeableViewport.tsx',
-        // ── Layout / chrome components (covered by integration) ──
-        'src/components/TerminalLayout.tsx',
-        'src/components/DashboardHeader.tsx',
-        'src/components/ModeBar.tsx',
-        'src/components/SessionsSection.tsx',
-        'src/components/RenderTerminal.tsx',
-        
-        'src/features/terminal/components/TerminalTabs.tsx',
-        'src/features/terminal/components/TerminalBanner.tsx',
         // ── WebSocket / interval integration (browser-only, covered by E2E) ──
-        'src/hooks/useProbePolling.ts',
-        'src/hooks/useQuickCommands.ts',
-        'src/hooks/useVisibilityReconnect.ts',
+        'src/app/useProbePolling.ts',
+        'src/features/commands/hooks/useQuickCommands.ts',
+        'src/app/useVisibilityReconnect.ts',
         // Browser-only PNG export (DOM manipulation, offscreen xterm)
         'src/lib/previewPng.ts',
-        'src/components/env/EnvUploadDialog.tsx',
-        'src/components/env/EnvInlineEditor.tsx',
-        'src/components/env/useEnvManager.ts',
+        'src/features/env/components/EnvUploadDialog.tsx',
+        'src/features/env/components/EnvInlineEditor.tsx',
+        'src/features/env/hooks/useEnvManager.ts',
       ],
     },
   },

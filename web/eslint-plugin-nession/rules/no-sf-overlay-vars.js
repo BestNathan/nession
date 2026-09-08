@@ -17,7 +17,7 @@ export default function noSfOverlayVars() {
       type: 'problem',
       docs: {
         description:
-          'Disallow legacy --sf-* CSS variables in session-first shell components',
+          'Disallow legacy --sf-* CSS variables in app-layer shell components',
       },
       schema: [],
       messages: {

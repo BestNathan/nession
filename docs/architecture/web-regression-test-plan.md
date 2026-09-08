@@ -2,7 +2,9 @@
 
 **日期**: 2026-09-08  
 **Issue**: #650 (Phase 0)  
-**目标**: 在架构迁移期间保护关键流程不被破坏
+**目标**: 在架构迁移期间保护关键流程不被破坏  
+**Status**: 迁移已收官 (#655) — legacy 目录/`check-legacy-frozen` 门禁已删除;
+回归面现在是 session-first 单 shell + e2e(见 [`web.md`](web.md))。
 
 ## 测试策略
 
@@ -214,7 +216,7 @@ just web-coverage  # Web coverage thresholds
 - just check          # Rust lint
 - just web-lint       # Web lint
 - just web-test       # Web tests
-- just check-legacy-frozen  # Legacy directory check (NEW)
+# (removed in #655 — no legacy directories remain)
 ```
 
 ## 测试覆盖率阈值

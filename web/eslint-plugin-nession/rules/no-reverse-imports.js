@@ -13,15 +13,19 @@ const ALLOWED_IMPORTS = {
   'shared': [], // shared cannot import any business layer
 };
 
-// Legacy directory mappings (to be removed after migration)
+// Physical directory -> layer. The legacy feature dirs (hooks/,
+// session-first/, non-ui components/) were deleted in Phase 5 (#655);
+// components/ now holds only the shared shadcn ui/ primitives.
 const LEGACY_TO_LAYER = {
-  'components': 'features',
-  'hooks': 'features',
-  'session-first': 'app',
-  'services/websocket': 'core',
-  'runtime': 'core',
+  'components': 'shared', // components/ui only
   'lib': 'shared',
   'atoms': 'shared', // atoms are shared state
+  'services': 'core', // services/socket, attachPrefs, deepLinkAttach
+  'runtime': 'core',
+  'core': 'core',
+  'shared': 'shared',
+  'features': 'features',
+  'app': 'app',
 };
 
 function getSourceLayer(importPath, currentFilePath) {

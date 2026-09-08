@@ -14,7 +14,6 @@ tree framework itself — that lives in `features/explorer`.
 | `components/FileBrowser.tsx` | Browser chrome (toolbar, new-entry row, upload, delete confirm) composing `Explorer` from features/explorer |
 | `components/FileViewer.tsx` + viewer components | Viewer dispatch: image/video/audio/pdf/markdown/code-mirror; content load + dirty tracking live in `hooks/useFileViewer` |
 | `hooks/useExplorerFileBrowser.ts` | Provider wiring, navigation state, mutations for FileBrowser |
-| `hooks/useFileTabs.ts` | Open-files tab strip state (legacy desktop `components/FileTabs` only) |
 | `hooks/useFileViewer.ts` | Per-viewer content/read-state (`useFileLoader`: read/chunked/blob/markdown detection) |
 | `model/viewerRegistry.ts`, `model/codeMirrorLangs.ts` | Extension → viewer-type dispatch; code-mirror language preloading from paths |
 
@@ -64,10 +63,10 @@ rules above: instance-per-workspace, keyed by workspace/session, owned by
 `features/files/model`, and exposed to layouts through the feature public
 surface — never through module globals.
 
-## Legacy consumers
+## Consumers
 
-`components/FileTabs.tsx`, `components/MobileTerminalLayout.tsx` (frozen
-legacy terminal layouts) and `session-first/workspace/tools/files*.tsx`
-(app-layer tools) compose `features/files` components. They import through
-`@/features/files/...` subpaths; the layouts themselves are scheduled for
-removal in the Phase-5 legacy cleanup, not for extension here.
+The app shell (`app/workspace/tools/files*.tsx`) composes the feature
+through `@/features/files/...` subpaths. The legacy desktop terminal layouts
+(`components/FileTabs.tsx`, `components/MobileTerminalLayout.tsx`) that also
+composed it — and the now-dead `useFileTabs` tab-strip state — were deleted
+with the Dashboard shell in #655.
