@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type { FileOps, FileEntry } from '@/features/files';
 import type { FontSizeManager } from '@/terminal/FontSizeManager';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
-import { TerminalCapsule, type CapsuleMode } from '@/session-first/TerminalCapsule';
+import { TerminalCapsule, type CapsuleMode } from '@/features/terminal/capsule';
 import { cn } from '@/lib/utils';
 
 interface MobileTerminalLayoutProps {

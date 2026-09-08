@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useCapsuleDockClearance } from '@/session-first/capsule/hooks/useCapsuleDockClearance';
+import { useCapsuleDockClearance } from '@/features/terminal/capsule/hooks/useCapsuleDockClearance';
 
 describe('useCapsuleDockClearance', () => {
   let observe: ReturnType<typeof vi.fn>;
