@@ -5,7 +5,7 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/session-first/fixture/fixtureData';
-import { mapDomainState } from '@/session-first/domainState';
+import { mapDomainState } from '@/features/sessions/model/domainState';
 import { SessionDrawer } from '@/session-first/SessionDrawer';
 import { SessionFirstSidebar } from '@/session-first/SessionFirstSidebar';
 import { SessionFirstWorkspace } from '@/session-first/SessionFirstWorkspace';

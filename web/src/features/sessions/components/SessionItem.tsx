@@ -3,7 +3,7 @@ import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { AgentChannel, DomainState } from '@/session-first/domainState';
+import type { AgentChannel, DomainState } from '@/features/sessions/model/domainState';
 import type { Session } from '@/types';
 
 function agentCopyClass(channel: AgentChannel): string {

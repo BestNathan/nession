@@ -9,14 +9,14 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from './ui/dialog';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Skeleton } from './ui/skeleton';
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { RefreshCw, Download } from 'lucide-react';
-import { useSessionPreview, type PreviewStatus } from '../hooks/useSessionPreview';
-import { useDialogReset } from '../hooks/useDialogReset';
+import { useSessionPreview, type PreviewStatus } from '@/features/sessions/hooks/useSessionPreview';
+import { useDialogReset } from '@/hooks/useDialogReset';
 import { exportSessionPreviewPng } from '@/lib/previewPng';
 import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
 

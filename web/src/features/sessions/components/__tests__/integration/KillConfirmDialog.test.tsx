@@ -11,9 +11,9 @@ vi.mock('@/features/sessions', () => ({
   sessionsApi: { killSession: killSessionMock },
 }));
 
-let KillConfirmDialogModule: typeof import('@/components/KillConfirmDialog');
+let KillConfirmDialogModule: typeof import('@/features/sessions/components/KillConfirmDialog');
 beforeEach(async () => {
-  KillConfirmDialogModule = await import('@/components/KillConfirmDialog');
+  KillConfirmDialogModule = await import('@/features/sessions/components/KillConfirmDialog');
   killSessionMock.mockReset();
   killSessionMock.mockResolvedValue({ success: true });
 });

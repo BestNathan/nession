@@ -1,4 +1,4 @@
-import type { Agent, Session } from '../types';
+import type { Agent, Session } from '@/types';
 
 export type AgentChannel = 'online' | 'offline' | 'error';
 export type SessionChannel = 'active' | 'exited' | 'unknown';

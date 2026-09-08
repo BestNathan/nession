@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { SessionList } from '@/session-first/patterns/SessionList';
+import { SessionList } from '@/features/sessions/components/SessionList';
 import { SessionListHeader } from '@/session-first/patterns/SessionListHeader';
 import { SessionFirstSidebarFooter } from '@/session-first/SessionFirstSidebarFooter';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';

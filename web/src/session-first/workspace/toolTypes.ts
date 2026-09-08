@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 

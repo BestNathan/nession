@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SessionPreviewDialog } from '@/components/SessionPreviewDialog';
-import { useSessionPreview } from '@/hooks/useSessionPreview';
+import { SessionPreviewDialog } from '@/features/sessions/components/SessionPreviewDialog';
+import { useSessionPreview } from '@/features/sessions/hooks/useSessionPreview';
 
-vi.mock('@/hooks/useSessionPreview');
+vi.mock('@/features/sessions/hooks/useSessionPreview');
 vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn().mockImplementation(() => ({
     loadAddon: vi.fn(),

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import type { Session } from '../types';
-import { sessionsApi } from '../features/sessions';
+import type { Session } from '@/types';
+import { sessionsApi } from '@/features/sessions';
 
 /** Options for {@link useSessionData}'s `fetchSessions`. */
 export interface FetchSessionsOptions {

@@ -5,22 +5,22 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from './ui/dialog';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-} from './ui/select';
-import type { Agent, EnvFileInfo, EnvFileRef } from '../types';
-import { agentDisplayName } from '../lib/format';
-import { EnvFileMultiSelect } from './env/EnvFileMultiSelect';
+} from '@/components/ui/select';
+import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
+import { agentDisplayName } from '@/lib/format';
+import { EnvFileMultiSelect } from '@/components/env/EnvFileMultiSelect';
 import { envApi } from '@/features/env';
 import { sessionsApi } from '@/features/sessions';
-import { useDialogReset } from '../hooks/useDialogReset';
+import { useDialogReset } from '@/hooks/useDialogReset';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;

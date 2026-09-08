@@ -28,9 +28,9 @@ vi.mock('@/components/ui/dialog', () => ({
 
 // Now import the component (after the mocks are set up)
 // We need to dynamically import because the mocks must be in place first
-let CreateSessionDialogModule: typeof import('@/components/CreateSessionDialog');
+let CreateSessionDialogModule: typeof import('@/features/sessions/components/CreateSessionDialog');
 beforeEach(async () => {
-  CreateSessionDialogModule = await import('@/components/CreateSessionDialog');
+  CreateSessionDialogModule = await import('@/features/sessions/components/CreateSessionDialog');
   createSessionMock.mockReset();
   createSessionMock.mockResolvedValue({ success: true });
   listEnvFilesMock.mockReset();

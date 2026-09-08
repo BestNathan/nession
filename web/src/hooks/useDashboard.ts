@@ -3,7 +3,7 @@ import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/socket';
 import { useWebSocket } from './useWebSocket';
 import { useAgentData } from './useAgentData';
-import { useSessionData, type FetchSessionsOptions } from './useSessionData';
+import { useSessionData, type FetchSessionsOptions } from '@/features/sessions/hooks/useSessionData';
 import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from './useDashboardFilter';
 import { useDashboardModals } from './useDashboardModals';
 import { useRealtimeUpdates } from './useRealtimeUpdates';

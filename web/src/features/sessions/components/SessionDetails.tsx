@@ -1,6 +1,6 @@
 import { formatRelativeTime } from '@/lib/format';
-import { ConnectionStatus } from '@/session-first/patterns/ConnectionStatus';
-import type { DomainState } from '@/session-first/domainState';
+import { ConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Session } from '@/types';
 
 export interface SessionDetailsProps {

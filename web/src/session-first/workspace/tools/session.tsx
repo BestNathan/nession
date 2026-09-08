@@ -1,7 +1,7 @@
 import { Settings2 } from 'lucide-react';
 import type { WorkspaceTool } from '../toolTypes';
 import { AppToolScroll } from '../AppToolScroll';
-import { SessionDetails } from '@/session-first/SessionDetails';
+import { SessionDetails } from '@/features/sessions/components/SessionDetails';
 
 export const sessionTool: WorkspaceTool = {
   id: 'session',

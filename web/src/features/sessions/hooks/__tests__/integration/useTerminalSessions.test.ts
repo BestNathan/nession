@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useTerminalSessions } from '@/hooks/useTerminalSessions';
+import { useTerminalSessions } from '@/features/sessions/hooks/useTerminalSessions';
 import type { WebSocketService } from '@/services/socket';
 import type { Session } from '@/types';
 

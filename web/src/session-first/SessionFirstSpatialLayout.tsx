@@ -7,7 +7,7 @@ import {
   SessionFirstSidebar,
   type SessionFirstSidebarProps,
 } from '@/session-first/SessionFirstSidebar';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 import type { FileOps } from '@/features/files';

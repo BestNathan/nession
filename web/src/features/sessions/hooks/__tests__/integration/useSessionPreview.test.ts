@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSessionPreview } from '@/hooks/useSessionPreview';
+import { useSessionPreview } from '@/features/sessions/hooks/useSessionPreview';
 
 // The hook captures through the sessions feature singleton, so the whole
 // service dependency collapses into one mocked module.

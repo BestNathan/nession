@@ -4,7 +4,7 @@ import type {
   AttachmentChannel,
   DomainState,
   SessionChannel,
-} from '@/session-first/domainState';
+} from '@/features/sessions/model/domainState';
 
 function agentValueClass(channel: AgentChannel): string {
   switch (channel) {

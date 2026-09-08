@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Agent, Session } from '@/types';
-import { mapDomainState } from '@/session-first/domainState';
+import { mapDomainState } from '@/features/sessions/model/domainState';
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {

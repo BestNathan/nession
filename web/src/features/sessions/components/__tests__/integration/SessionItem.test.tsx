@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SessionItem } from '@/session-first/patterns/SessionItem';
-import type { DomainState } from '@/session-first/domainState';
+import { SessionItem } from '@/features/sessions/components/SessionItem';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Session } from '@/types';
 
 const session: Session = {

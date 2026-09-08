@@ -5,7 +5,7 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/session-first/fixture/fixtureData';
-import { mapDomainState } from '@/session-first/domainState';
+import { mapDomainState } from '@/features/sessions/model/domainState';
 import { fixtureFileOps } from './fixtureFileOps';
 
 // Module-stable — the stub is immutable and stateless, so a single instance

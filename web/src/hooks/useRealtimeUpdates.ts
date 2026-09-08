@@ -3,7 +3,7 @@ import type { WebSocketService } from '../services/socket';
 import { agentsApi } from '../features/agents';
 import { sessionsApi } from '../features/sessions';
 import type { useAgentData } from './useAgentData';
-import type { useSessionData } from './useSessionData';
+import type { useSessionData } from '@/features/sessions/hooks/useSessionData';
 
 type AgentDataReturn = ReturnType<typeof useAgentData>;
 type SessionDataReturn = ReturnType<typeof useSessionData>;

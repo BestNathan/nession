@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
-import { useSessionData } from '@/hooks/useSessionData';
+import { useSessionData } from '@/features/sessions/hooks/useSessionData';
 import type { Session } from '@/types';
 
 vi.mock('sonner', () => ({

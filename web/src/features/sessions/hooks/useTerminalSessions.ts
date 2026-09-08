@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import type { Session } from '../types';
-import { sessionsApi } from '../features/sessions';
-import type { WebSocketService } from '../services/socket';
+import type { Session } from '@/types';
+import { sessionsApi } from '@/features/sessions';
+import type { WebSocketService } from '@/services/socket';
 
 export function useTerminalSessions(wsService: WebSocketService | null) {
   const [sessions, setSessions] = useState<Session[]>([]);

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { sessionsApi } from '../features/sessions';
+import { sessionsApi } from '@/features/sessions';
 
 export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 

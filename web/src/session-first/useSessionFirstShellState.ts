@@ -8,7 +8,7 @@ import { useSessionRuntime } from '@/hooks/useSessionRuntime';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { relayServerHandle } from '@/runtime/relayServerConnection';
 import { sessionIdAtom } from '@/atoms/session';
-import { mapDomainState } from '@/session-first/domainState';
+import { mapDomainState } from '@/features/sessions/model/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 import type { Session } from '@/types';
