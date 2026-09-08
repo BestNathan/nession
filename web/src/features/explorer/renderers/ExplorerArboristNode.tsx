@@ -1,10 +1,11 @@
+import { useContext } from 'react';
 import type { NodeRendererProps } from 'react-arborist';
 
 import type { ArboristNode } from '../adapters/arboristAdapter';
 import type { ExplorerContextMenuContext } from '../commands/types';
 import { resolveDecorations } from '../decorations/resolveDecorations';
 import type { ExplorerStore } from '../ExplorerStore';
-import { getContextMenuContributions, getDecorationProviders } from '../registry';
+import { ExplorerRegistryContext } from '../ExplorerRegistryContext';
 import type { ExplorerNode } from '../types';
 
 import { ExplorerNodeRenderer } from './ExplorerNodeRenderer';
@@ -33,14 +34,18 @@ export function ExplorerArboristNode({
   onFileActivate,
 }: ExplorerArboristNodeProps) {
   const { node, style, dragHandle } = nodeProps;
+  const registry = useContext(ExplorerRegistryContext);
   const explorerNode = store.getNode(node.id);
   if (!explorerNode) {
     return null;
   }
 
-  const decorations = resolveDecorations(explorerNode, getDecorationProviders());
-  const contextMenuItems = getContextMenuContributions(explorerNode).map((contribution) =>
-    contribution.render(explorerNode, menuContext),
+  const decorations = resolveDecorations(
+    explorerNode,
+    registry?.getDecorationProviders() ?? [],
+  );
+  const contextMenuItems = (registry?.getContextMenuContributions(explorerNode) ?? []).map(
+    (contribution) => contribution.render(explorerNode, menuContext),
   );
 
   return (

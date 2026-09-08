@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { FileBrowser } from '@/features/files/components/FileBrowser';
-import { resetExplorerRegistry } from '@/features/explorer/registry';
 import type { FileOps, FileEntry } from '@/features/files';
 
 vi.mock('sonner', () => ({
@@ -56,7 +55,6 @@ describe('FileBrowser copy path', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    resetExplorerRegistry();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
       configurable: true,
@@ -99,7 +97,6 @@ describe('FileBrowser copy path', () => {
 describe('FileBrowser parent directory button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetExplorerRegistry();
   });
 
   it('is disabled when at root', async () => {
@@ -159,7 +156,6 @@ describe('FileBrowser parent directory button', () => {
 describe('FileBrowser tree expansion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetExplorerRegistry();
   });
 
   it('loads nested entries when expanding a folder', async () => {

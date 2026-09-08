@@ -2,11 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createCoreExplorerExtension } from '@/features/explorer/commands/coreContributions';
 import type { ExplorerContextMenuContribution } from '@/features/explorer/commands/types';
-import {
-  getContextMenuContributions,
-  registerExtension,
-  resetExplorerRegistry,
-} from '@/features/explorer/registry';
+import { ExplorerRegistry } from '@/features/explorer/registry';
 import type { ExplorerNode } from '@/features/explorer/types';
 
 const CORE_MENU_IDS = [
@@ -51,12 +47,14 @@ function matchesWhen(id: string, node: ExplorerNode): boolean {
   return contribution.when === undefined || contribution.when(node);
 }
 
-beforeEach(() => {
-  resetExplorerRegistry();
-  registerExtension(createCoreExplorerExtension());
-});
-
 describe('createCoreExplorerExtension', () => {
+  let registry: ExplorerRegistry;
+
+  beforeEach(() => {
+    registry = new ExplorerRegistry();
+    registry.register(createCoreExplorerExtension());
+  });
+
   it('returns an extension with id core', () => {
     expect(createCoreExplorerExtension().id).toBe('core');
   });
@@ -68,13 +66,13 @@ describe('createCoreExplorerExtension', () => {
   });
 
   it('filters contributions by when predicates via registry', () => {
-    const menus = getContextMenuContributions(READ_ONLY_FILE);
+    const menus = registry.getContextMenuContributions(READ_ONLY_FILE);
 
     expect(menus.map((item) => item.id)).toEqual(['core.copy-path']);
   });
 
   it('includes rename and delete when capabilities allow', () => {
-    const menus = getContextMenuContributions(FILE_NODE);
+    const menus = registry.getContextMenuContributions(FILE_NODE);
 
     expect(menus.map((item) => item.id)).toEqual([...CORE_MENU_IDS]);
   });

@@ -8,13 +8,7 @@ export type { ExplorerDataProvider } from './providers/types';
 export type { ExplorerDecoration, ExplorerDecorationProvider } from './decorations/types';
 export { resolveDecorations } from './decorations/resolveDecorations';
 export type { ResolvedDecorations } from './decorations/resolveDecorations';
-export {
-  getContextMenuContributions,
-  getDecorationProviders,
-  getExtensions,
-  registerExtension,
-  unregisterExtension,
-} from './registry';
+export { ExplorerRegistry } from './registry';
 export { createCoreExplorerExtension } from './commands/coreContributions';
 export { ExplorerNodeRenderer } from './renderers/ExplorerNodeRenderer';
 export type { ExplorerNodeRendererProps } from './renderers/ExplorerNodeRenderer';

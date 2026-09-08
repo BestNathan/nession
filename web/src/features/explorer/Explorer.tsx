@@ -13,11 +13,12 @@ import {
 import { createCoreExplorerExtension } from './commands/coreContributions';
 import type { ExplorerExtension } from './commands/types';
 import { ExplorerStore, ROOT_ID } from './ExplorerStore';
+import { ExplorerRegistryContext } from './ExplorerRegistryContext';
 import { useExplorerFileActions } from './hooks/useExplorerFileActions';
+import { useExplorerRegistry } from './hooks/useExplorerRegistry';
 import { useExplorerStore } from './hooks/useExplorerStore';
 import { useExplorerTreeHeight } from './hooks/useExplorerTreeHeight';
 import type { ExplorerDataProvider } from './providers/types';
-import { registerExtension, unregisterExtension } from './registry';
 import { ExplorerArboristNode } from './renderers/ExplorerArboristNode';
 import type { ExplorerNode } from './types';
 
@@ -90,7 +91,7 @@ function ExplorerRefreshToolbar({ onRefresh }: { onRefresh: () => void }) {
 
 export function Explorer({
   provider,
-  extensions = [],
+  extensions,
   onFileActivate,
   onFileDeleted,
   onFileRenamed,
@@ -102,6 +103,10 @@ export function Explorer({
   className,
 }: ExplorerComponentProps) {
   const store = useExplorerStore(provider);
+  // Stabilize the default: a bare `extensions ?? []` would hand the effect a
+  // fresh array per render, re-registering (and re-rendering) every time.
+  const extensionList = useMemo(() => extensions ?? [], [extensions]);
+  const registry = useExplorerRegistry();
   const treeRef = useRef<TreeApi<ArboristNode> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const treeHeight = useExplorerTreeHeight(containerRef);
@@ -120,16 +125,16 @@ export function Explorer({
   }, [store, storeRef]);
 
   useEffect(() => {
-    const toRegister = [createCoreExplorerExtension(), ...extensions];
+    const toRegister = [createCoreExplorerExtension(), ...extensionList];
     for (const extension of toRegister) {
-      registerExtension(extension);
+      registry.register(extension);
     }
     return () => {
       for (const extension of toRegister) {
-        unregisterExtension(extension.id);
+        registry.unregister(extension.id);
       }
     };
-  }, [extensions]);
+  }, [extensionList, registry]);
 
   useEffect(() => {
     void store.ensureRootLoaded();
@@ -192,22 +197,24 @@ export function Explorer({
         />
       )}
       <div ref={containerRef} className="flex-1 min-h-0">
-        <Tree
-          ref={treeRef}
-          data={treeData}
-          width="100%"
-          height={treeHeight}
-          rowHeight={EXPLORER_ROW_HEIGHT}
-          indent={16}
-          openByDefault={false}
-          onToggle={handleToggle}
-          disableDrag
-          disableDrop
-          disableEdit
-          disableMultiSelection
-        >
-          {renderNode}
-        </Tree>
+        <ExplorerRegistryContext.Provider value={registry}>
+          <Tree
+            ref={treeRef}
+            data={treeData}
+            width="100%"
+            height={treeHeight}
+            rowHeight={EXPLORER_ROW_HEIGHT}
+            indent={16}
+            openByDefault={false}
+            onToggle={handleToggle}
+            disableDrag
+            disableDrop
+            disableEdit
+            disableMultiSelection
+          >
+            {renderNode}
+          </Tree>
+        </ExplorerRegistryContext.Provider>
       </div>
     </div>
   );

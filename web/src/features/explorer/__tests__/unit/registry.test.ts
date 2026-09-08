@@ -1,13 +1,7 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ExplorerExtension } from '@/features/explorer/commands/types';
-import {
-  getContextMenuContributions,
-  getDecorationProviders,
-  getExtensions,
-  registerExtension,
-  resetExplorerRegistry,
-} from '@/features/explorer/registry';
+import { ExplorerRegistry } from '@/features/explorer/registry';
 import type { ExplorerNode } from '@/features/explorer/types';
 
 const FILE_NODE: ExplorerNode = {
@@ -26,33 +20,70 @@ const DIR_NODE: ExplorerNode = {
   capabilities: { rename: true, delete: true, createChild: true },
 };
 
-beforeEach(() => {
-  resetExplorerRegistry();
-});
-
-describe('explorer registry', () => {
-  it('registerExtension and getExtensions return registered extensions', () => {
+describe('ExplorerRegistry', () => {
+  it('register and getExtensions return registered extensions', () => {
+    const registry = new ExplorerRegistry();
     const extA: ExplorerExtension = { id: 'ext-a' };
     const extB: ExplorerExtension = { id: 'ext-b' };
 
-    registerExtension(extA);
-    registerExtension(extB);
+    registry.register(extA);
+    registry.register(extB);
 
-    expect(getExtensions()).toEqual([extA, extB]);
+    expect(registry.getExtensions()).toEqual([extA, extB]);
+  });
+
+  it('throws when the same extension id is registered twice', () => {
+    const registry = new ExplorerRegistry();
+
+    registry.register({ id: 'dup' });
+
+    expect(() => registry.register({ id: 'dup' })).toThrow(/already registered/);
+  });
+
+  it('unregister removes an extension and tolerates unknown ids', () => {
+    const registry = new ExplorerRegistry();
+
+    registry.register({ id: 'ext-a' });
+    registry.unregister('ext-a');
+    registry.unregister('ext-a');
+
+    expect(registry.getExtensions()).toEqual([]);
+  });
+
+  it('bumps version and notifies subscribers on register/unregister', () => {
+    const registry = new ExplorerRegistry();
+    const listener = vi.fn();
+    const unsubscribe = registry.subscribe(listener);
+
+    registry.register({ id: 'ext-a' });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(registry.getVersion()).toBe(1);
+
+    registry.unregister('ext-a');
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(registry.getVersion()).toBe(2);
+
+    unsubscribe();
+    registry.register({ id: 'ext-b' });
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(registry.getVersion()).toBe(3);
   });
 
   it('getDecorationProviders flattens providers from all extensions', () => {
+    const registry = new ExplorerRegistry();
     const providerA = { provide: () => ({ badge: 'A' }) };
     const providerB = { provide: () => ({ badge: 'B' }) };
 
-    registerExtension({ id: 'one', decorations: [providerA] });
-    registerExtension({ id: 'two', decorations: [providerB] });
+    registry.register({ id: 'one', decorations: [providerA] });
+    registry.register({ id: 'two', decorations: [providerB] });
 
-    expect(getDecorationProviders()).toEqual([providerA, providerB]);
+    expect(registry.getDecorationProviders()).toEqual([providerA, providerB]);
   });
 
   it('getContextMenuContributions filters by when predicate', () => {
-    registerExtension({
+    const registry = new ExplorerRegistry();
+
+    registry.register({
       id: 'menus',
       contextMenus: [
         {
@@ -72,10 +103,10 @@ describe('explorer registry', () => {
       ],
     });
 
-    const fileMenus = getContextMenuContributions(FILE_NODE);
+    const fileMenus = registry.getContextMenuContributions(FILE_NODE);
     expect(fileMenus.map((item) => item.id)).toEqual(['all-nodes', 'files-only']);
 
-    const dirMenus = getContextMenuContributions(DIR_NODE);
+    const dirMenus = registry.getContextMenuContributions(DIR_NODE);
     expect(dirMenus.map((item) => item.id)).toEqual(['all-nodes', 'dirs-only']);
   });
 });

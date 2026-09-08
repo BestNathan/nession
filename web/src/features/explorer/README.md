@@ -1,17 +1,30 @@
 # Explorer Extension API
 
 The Explorer is an extensible file-tree framework. Extensions register decoration
-providers, context-menu contributions, and other hooks via a central registry.
+providers, context-menu contributions, and other hooks on a **per-Explorer
+registry**.
+
+## Lifecycle and scoping
+
+Every `Explorer` mount owns one `ExplorerRegistry` instance (`useState`), so
+extensions are scoped to one tree instance and can never leak across sessions,
+workspaces or test cases. The registry dies with the mount; there is no module
+global and nothing to reset between tests. `Explorer` registers the built-in
+core extension plus the `extensions` prop on mount and unregisters them on
+unmount or when the prop changes.
+
+A register/unregister bumps the registry version and notifies subscribers.
+`Explorer` subscribes via `useSyncExternalStore`, so replacing `extensions`
+(prop identity) — or a future store-driven provider re-registering — re-resolves
+decorations and context menus **incrementally, without remounting the tree**.
 
 ## Quick start
 
-Pass extensions through `Explorer` props, or call `registerExtension` directly
-(lifetime is managed by `Explorer` when using props):
+Pass extensions through `Explorer` props; lifetime is managed by `Explorer`:
 
 ```tsx
 import {
   Explorer,
-  registerExtension,
   type ExplorerExtension,
   type ExplorerDecorationProvider,
 } from '@/features/explorer';
@@ -36,9 +49,20 @@ const gitExtension: ExplorerExtension = {
   decorations: [gitDecorationProvider],
 };
 
-registerExtension(gitExtension);
-// Prefer props when mounting Explorer:
-// <Explorer extensions={[gitExtension]} ... />
+// <Explorer provider={...} extensions={[gitExtension]} ... />
+```
+
+For programmatic registration (e.g. an effect reacting to a store), construct
+or receive an `ExplorerRegistry` instance directly — it is plain TypeScript,
+framework-free:
+
+```ts
+import { ExplorerRegistry, type ExplorerExtension } from '@/features/explorer';
+
+const registry = new ExplorerRegistry();
+registry.register(gitExtension); // throws on duplicate id
+registry.unregister(gitExtension.id);
+const unsubscribe = registry.subscribe(() => { /* re-resolve */ });
 ```
 
 ## Extension shape
@@ -84,10 +108,11 @@ Render shadcn `ContextMenuItem` nodes. Optional `when` filters by node.
 ## Core extension
 
 Built-in rename/delete/copy actions live in `createCoreExplorerExtension()`.
-`Explorer` always registers core plus any `extensions` prop, and unregisters on
-unmount.
+`Explorer` always registers core plus any `extensions` prop on its own
+registry instance, and unregisters both on unmount.
 
 ## Testing
 
-Use `resetExplorerRegistry()` in unit tests. See `testing/mockExtension.tsx`
-for a minimal decoration + context-menu example.
+Unit tests construct `new ExplorerRegistry()` per test — no global reset
+needed. See `testing/mockExtension.tsx` for a minimal decoration + context-menu
+example.

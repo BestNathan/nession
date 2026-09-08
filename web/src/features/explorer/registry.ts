@@ -5,36 +5,75 @@ import type {
 import type { ExplorerDecorationProvider } from './decorations/types';
 import type { ExplorerNode } from './types';
 
-const extensions: ExplorerExtension[] = [];
+/**
+ * Instance-scoped extension registry for one Explorer mount.
+ *
+ * The registry is created per Explorer instance (useState) and dies with it —
+ * extensions never leak across trees, sessions or workspaces, so no global
+ * reset is needed between tests. Register/unregister notify subscribers and
+ * bump a monotonic version; Explorer subscribes via useSyncExternalStore so a
+ * contribution change re-resolves decorations and context menus incrementally
+ * without remounting the tree.
+ */
+export class ExplorerRegistry {
+  private readonly extensions = new Map<string, ExplorerExtension>();
+  private readonly listeners = new Set<() => void>();
+  private version = 0;
 
-export function registerExtension(extension: ExplorerExtension): void {
-  extensions.push(extension);
-}
-
-export function unregisterExtension(id: string): void {
-  const index = extensions.findIndex((extension) => extension.id === id);
-  if (index >= 0) {
-    extensions.splice(index, 1);
+  /** Registers an extension; throws when the id is already registered here. */
+  register(extension: ExplorerExtension): void {
+    if (this.extensions.has(extension.id)) {
+      throw new Error(`Explorer extension '${extension.id}' is already registered`);
+    }
+    this.extensions.set(extension.id, extension);
+    this.changed();
   }
-}
 
-export function getExtensions(): readonly ExplorerExtension[] {
-  return extensions;
-}
+  /** Removes an extension by id. No-op when the id is not registered. */
+  unregister(id: string): void {
+    if (this.extensions.delete(id)) {
+      this.changed();
+    }
+  }
 
-export function getDecorationProviders(): ExplorerDecorationProvider[] {
-  return extensions.flatMap((extension) => extension.decorations ?? []);
-}
+  getExtensions(): readonly ExplorerExtension[] {
+    return [...this.extensions.values()];
+  }
 
-export function getContextMenuContributions(
-  node: ExplorerNode,
-): ExplorerContextMenuContribution[] {
-  return extensions
-    .flatMap((extension) => extension.contextMenus ?? [])
-    .filter((contribution) => contribution.when === undefined || contribution.when(node));
-}
+  getDecorationProviders(): ExplorerDecorationProvider[] {
+    return [...this.extensions.values()].flatMap(
+      (extension) => extension.decorations ?? [],
+    );
+  }
 
-/** Clears all registered extensions — for unit tests only. */
-export function resetExplorerRegistry(): void {
-  extensions.length = 0;
+  getContextMenuContributions(
+    node: ExplorerNode,
+  ): ExplorerContextMenuContribution[] {
+    return [...this.extensions.values()]
+      .flatMap((extension) => extension.contextMenus ?? [])
+      .filter((contribution) => contribution.when === undefined || contribution.when(node));
+  }
+
+  /**
+   * Subscribes to register/unregister changes and returns an unsubscribe
+   * function. Pairs with {@link getVersion} as a useSyncExternalStore snapshot.
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Monotonic version bumped on every register/unregister. */
+  getVersion(): number {
+    return this.version;
+  }
+
+  private changed(): void {
+    this.version += 1;
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
 }
