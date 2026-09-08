@@ -6,7 +6,7 @@ import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
 import type { EnvFileInfo } from '../../types';
 import { envApi } from '@/features/env';
-import { refKey, toRef, sourceLabel } from './envRef';
+import { refKey, toRef, sourceLabel } from '@/features/env/model/envRef';
 import { EnvEditorDialog } from './EnvEditorDialog';
 
 interface EnvPanelProps {

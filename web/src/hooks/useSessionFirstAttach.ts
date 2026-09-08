@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
-import type { AttachChoice } from '../components/env/AttachDialog';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { attachDialogSessionAtom, attachToSessionAtom } from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import type { Session } from '../types';

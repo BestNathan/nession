@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsPanel } from '@/features/terminal/capsule/CapsuleCommandsPanel';
 
-vi.mock('@/hooks/useQuickCommands', () => ({
+vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),
@@ -11,7 +11,7 @@ vi.mock('@/hooks/useQuickCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],

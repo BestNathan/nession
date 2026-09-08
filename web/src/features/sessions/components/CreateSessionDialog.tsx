@@ -17,10 +17,10 @@ import {
 } from '@/components/ui/select';
 import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
 import { agentDisplayName } from '@/lib/format';
-import { EnvFileMultiSelect } from '@/components/env/EnvFileMultiSelect';
+import { EnvFileMultiSelect } from '@/features/env/components/EnvFileMultiSelect';
 import { envApi } from '@/features/env';
 import { sessionsApi } from '@/features/sessions';
-import { useDialogReset } from '@/hooks/useDialogReset';
+import { useDialogReset } from '@/shared/hooks/useDialogReset';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;

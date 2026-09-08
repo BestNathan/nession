@@ -6,7 +6,7 @@ import {
 } from 'react-router-dom';
 import { Dashboard } from './components/Dashboard';
 import { LoginPage } from './components/LoginPage';
-import { WebSocketContext } from './hooks/useWebSocket';
+import { WebSocketContext } from '@/shared/hooks/useWebSocket';
 import { useAppConnection } from './hooks/useAppConnection';
 import { isSessionFirst, setSessionFirst } from './lib/sessionFirst';
 import { FixtureApp } from './session-first/fixture/FixtureApp';

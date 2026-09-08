@@ -10,7 +10,7 @@ const { wsListeners } = vi.hoisted(() => ({
   wsListeners: [] as Array<(state: ConnectionState) => void>,
 }));
 
-vi.mock('@/hooks/useP2PAttachTransport', () => ({
+vi.mock('@/features/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
     agentTerminalApi: null,
@@ -22,7 +22,7 @@ vi.mock('@/features/terminal/useSessionFirstTerminalAttach', () => ({
   useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
 vi.mock('@/features/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
-vi.mock('@/hooks/useWebSocket', () => ({
+vi.mock('@/shared/hooks/useWebSocket', () => ({
   // The new-core WebSocketService surface: useTerminalOrchestration wraps the
   // service in a relayServerHandle and subscribes to connection-state changes
   // for the banner (durable 'connected'/'disconnected' edges). The remaining

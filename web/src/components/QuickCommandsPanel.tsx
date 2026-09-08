@@ -21,9 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
-import { PRESETS, type QuickCommand } from './quickCommands';
-import { useQuickCommands } from '../hooks/useQuickCommands';
-import { useCommandHistory } from '../hooks/useCommandHistory';
+import { PRESETS, type QuickCommand } from '@/features/commands/quickCommands';
+import { useQuickCommands } from '@/features/commands/hooks/useQuickCommands';
+import { useCommandHistory } from '@/features/terminal/hooks/useCommandHistory';
 
 /* ── Physical key row — left-right layout ──────────────────────────── */
 

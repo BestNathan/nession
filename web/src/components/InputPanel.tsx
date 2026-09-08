@@ -3,7 +3,7 @@ import { X, Copy, ClipboardPaste, SendHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { useCommandHistory, type HistoryEntry } from '../hooks/useCommandHistory';
+import { useCommandHistory, type HistoryEntry } from '@/features/terminal/hooks/useCommandHistory';
 
 interface InputPanelProps {
   sendText: (text: string) => void;

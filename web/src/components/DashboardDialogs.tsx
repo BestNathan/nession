@@ -2,7 +2,7 @@ import type { Agent, Session } from '../types';
 import { CreateSessionDialog } from '@/features/sessions/components/CreateSessionDialog';
 import { KillConfirmDialog } from '@/features/sessions/components/KillConfirmDialog';
 import { DeleteAgentConfirmDialog } from '@/features/agents/components/DeleteAgentConfirmDialog';
-import { AttachDialog, type AttachChoice } from './env/AttachDialog';
+import { AttachDialog, type AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { SessionPreviewDialog } from '@/features/sessions/components/SessionPreviewDialog';
 
 interface DashboardDialogsProps {

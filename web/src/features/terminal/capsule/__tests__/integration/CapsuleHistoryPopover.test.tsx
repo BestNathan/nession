@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleHistoryPopover } from '@/features/terminal/capsule/CapsuleHistoryPopover';
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     filterHistory: () => [
       { id: '1', command: 'npm test', timestamp: Date.now() },

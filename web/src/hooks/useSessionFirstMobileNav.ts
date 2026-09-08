@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 
 /** Mobile shell: full-width session list XOR active session detail below lg. Above lg the list is hidden (sessions live in the drawer); showDetail stays true. */
 export function useSessionFirstMobileNav(selectedId: string | null) {

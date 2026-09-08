@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import type { HistoryEntry } from '@/hooks/useCommandHistory';
+import type { HistoryEntry } from '@/features/terminal/hooks/useCommandHistory';
 
 export function useHistoryGhost(inputValue: string, entries: HistoryEntry[]) {
   const ghostSuffix = useMemo(() => {

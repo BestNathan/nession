@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import type { Agent } from '@/types';
 import { agentDisplayName } from '@/lib/format';
 import { agentsApi } from '@/features/agents';
-import { useDialogReset } from '@/hooks/useDialogReset';
+import { useDialogReset } from '@/shared/hooks/useDialogReset';
 
 interface DeleteAgentConfirmDialogProps {
   isOpen: boolean;

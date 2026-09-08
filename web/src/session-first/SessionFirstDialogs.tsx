@@ -1,6 +1,6 @@
 import { CreateSessionDialog } from '@/features/sessions/components/CreateSessionDialog';
 import { KillConfirmDialog } from '@/features/sessions/components/KillConfirmDialog';
-import { AttachDialog, type AttachChoice } from '@/components/env/AttachDialog';
+import { AttachDialog, type AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { useDashboard } from '@/hooks/useDashboard';
 import type { Session } from '@/types';
 

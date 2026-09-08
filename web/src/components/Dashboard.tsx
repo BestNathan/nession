@@ -14,9 +14,9 @@ import {
   attachToSessionAtom, disconnectAtom, attachDialogSessionAtom,
 } from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
-import { type AttachChoice } from './env/AttachDialog';
+import { type AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { RenderTerminal } from './RenderTerminal';
-import { EnvManager } from './env/EnvManager';
+import { EnvManager } from '@/features/env/components/EnvManager';
 import { DashboardMainView } from './DashboardMainView';
 
 interface DashboardProps {

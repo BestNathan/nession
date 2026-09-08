@@ -1,8 +1,8 @@
 import { useCallback, useEffect } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { useAtom, useAtomValue } from 'jotai';
-import type { AttachChoice } from '@/components/env/AttachDialog';
-import type { AttachedSession } from '@/features/terminal/components/TerminalWorkspace';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
+import type { AttachedSession } from '@/features/terminal/types';
 import {
   attachInfoAtom,
   hasActiveSessionAtom,

@@ -5,7 +5,7 @@ import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { MobileTerminalLayout } from './MobileTerminalLayout';
 import { BottomBar, type BottomTab } from './BottomBar';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { TerminalCapsule } from '@/features/terminal/capsule';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/features/files';

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useP2PAttachTransport } from '@/features/terminal/hooks/useP2PAttachTransport';
+import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/features/env';
 import type { TerminalAgentApi } from '@/features/terminal/agent';
 import type { ConnectionState } from '@/services/socket/types';

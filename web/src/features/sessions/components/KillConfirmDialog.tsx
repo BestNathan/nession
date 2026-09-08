@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Session } from '@/types';
 import { sessionsApi } from '@/features/sessions';
-import { useDialogReset } from '@/hooks/useDialogReset';
+import { useDialogReset } from '@/shared/hooks/useDialogReset';
 
 interface KillConfirmDialogProps {
   isOpen: boolean;

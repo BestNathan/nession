@@ -2,11 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { TerminalSurface } from '@/features/terminal/TerminalSurface';
 
-vi.mock('@/hooks/useMediaQuery', () => ({
+vi.mock('@/shared/hooks/useMediaQuery', () => ({
   useMediaQuery: () => true,
 }));
 
-vi.mock('@/hooks/useQuickCommands', () => ({
+vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),
@@ -14,7 +14,7 @@ vi.mock('@/hooks/useQuickCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],

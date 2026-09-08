@@ -4,7 +4,7 @@ import { useAtom, useSetAtom } from 'jotai';
 import type { ProbedAddress, AddressLatency } from '../types';
 import { manualOverrideAtom, switchAddressAtom } from '../atoms/session';
 import { activeUrlAtom, isSwitchingAtom } from '../atoms/connection';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import {
   Select,
   SelectContent,

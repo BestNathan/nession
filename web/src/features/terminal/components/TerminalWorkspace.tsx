@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, Loader2, Eye } from 'lucide-react';
 import { useAtom } from 'jotai';
-import type { AttachInfo, AddressLatency, Session, EnvFileRef } from '@/types';
+import type { AttachInfo, AddressLatency, Session } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { AddressSelector } from '@/components/AddressSelector';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/runtime/relayServerConnection';
 import { useTerminalSessions } from '@/features/sessions/hooks/useTerminalSessions';
 import { SessionDropdown } from '@/components/SessionDropdown';
@@ -88,25 +88,6 @@ function TerminalHeader({
       </Tooltip>
     </header>
   );
-}
-
-/**
- * Shell attach descriptor for deep-link restoration. Dashboard derives this
- * from the jotai atoms and passes it to useDeepLinkRestore; TerminalView itself
- * no longer consumes it — all session state now lives in atoms.
- */
-export interface AttachedSession {
-  attachInfo: AttachInfo;
-  sessionId: string;
-  sessionName: string;
-  orderedUrls?: string[];
-  latencies?: AddressLatency[];
-  selectedAddress?: string;
-  /** Manual relay endpoint URL from the attach dialog (null = auto). */
-  relayUrl?: string | null;
-  renderer?: 'webgl' | 'canvas';
-  /** Env files chosen in the attach dialog to source once the terminal is live. */
-  envRefs?: EnvFileRef[];
 }
 
 interface TerminalWorkspaceProps {

@@ -21,7 +21,7 @@ import {
 import type { Agent, EnvFileInfo, EnvSource } from '../../types';
 import { parseEnv } from '@/lib/envParser';
 import { useEnvEditor } from './useEnvEditor';
-import { EnvDiff } from './EnvDiff';
+import { EnvDiff } from '@/features/env/components/EnvDiff';
 
 interface EnvEditorDialogProps {
   isOpen: boolean;

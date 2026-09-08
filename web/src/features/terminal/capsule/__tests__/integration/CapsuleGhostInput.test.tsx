@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleGhostInput } from '@/features/terminal/capsule/CapsuleGhostInput';
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     history: [{ id: '1', command: 'aaa --verbose', timestamp: 1 }],
     addEntry: vi.fn(),

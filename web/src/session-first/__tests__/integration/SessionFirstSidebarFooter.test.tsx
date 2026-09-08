@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionFirstSidebarFooter } from '@/session-first/SessionFirstSidebarFooter';
 
-vi.mock('@/components/ServerInfoMenu', () => ({
+vi.mock('@/features/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
 

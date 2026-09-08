@@ -3,7 +3,7 @@ import type { NavigateFunction } from 'react-router-dom';
 import type { Agent, Session } from '../types';
 import type { ConnectionState } from '@/services/socket';
 import type { useDashboard } from '../hooks/useDashboard';
-import { type AttachChoice } from './env/AttachDialog';
+import { type AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { AgentSection } from '@/features/agents/components/AgentSection';
 import { DashboardHeader } from './DashboardHeader';
 import { SessionsSection } from './SessionsSection';

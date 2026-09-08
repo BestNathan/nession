@@ -1,5 +1,5 @@
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/hooks/useAddressPlan';
+import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/services/socket';
 import type { ConnectionState } from '@/services/socket/types';

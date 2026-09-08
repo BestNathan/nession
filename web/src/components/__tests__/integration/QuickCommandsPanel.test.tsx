@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QuickCommandsPanel } from '@/components/QuickCommandsPanel';
-import { PRESETS } from '@/components/quickCommands';
+import { PRESETS } from '@/features/commands/quickCommands';
 
-vi.mock( '@/hooks/useQuickCommands', () => ({
+vi.mock( '@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: vi.fn(),
 }));
 
-vi.mock( '@/hooks/useCommandHistory', () => ({
+vi.mock( '@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],
@@ -17,7 +17,7 @@ vi.mock( '@/hooks/useCommandHistory', () => ({
   }),
 }));
 
-import { useQuickCommands } from '@/hooks/useQuickCommands';
+import { useQuickCommands } from '@/features/commands/hooks/useQuickCommands';
 
 const mockAddCommand = vi.fn().mockResolvedValue(undefined);
 const mockDeleteCommand = vi.fn().mockResolvedValue(undefined);

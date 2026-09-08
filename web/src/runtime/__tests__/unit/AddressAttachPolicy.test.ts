@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/hooks/useAddressPlan';
+import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 
 function makeAttachInfo(): AttachInfo {
   return {

@@ -6,7 +6,7 @@ const mockAddEntry = vi.fn();
 const mockFilterHistory = vi.fn().mockReturnValue([]);
 const mockClearHistory = vi.fn();
 
-vi.mock( '@/hooks/useCommandHistory', () => ({
+vi.mock( '@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     history: [
       { id: '1', command: 'git status', timestamp: Date.now() - 60000 },

@@ -11,3 +11,12 @@ export type {
   Session,
   SessionsListResponse,
 } from '@/types';
+
+/**
+ * Filter / sort vocabulary for the session list. Declared here so both the
+ * search UI (feature) and the app-layer composers (useDashboardFilter) can
+ * share it without a feature->app import.
+ */
+export type StatusFilter = 'all' | 'online' | 'offline' | 'degraded';
+export type SortField = 'name' | 'activity';
+export type SortDirection = 'asc' | 'desc';

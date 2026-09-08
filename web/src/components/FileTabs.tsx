@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { SidePanel } from './SidePanel';
 import { FileBrowser } from '@/features/files/components/FileBrowser';
 import { FileViewer } from '@/features/files/components/FileViewer';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { useFileTabs, type OpenFile } from '@/features/files/hooks/useFileTabs';
 import { BottomBar, type BottomTab } from './BottomBar';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable';

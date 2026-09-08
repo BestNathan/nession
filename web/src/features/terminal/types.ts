@@ -1,4 +1,6 @@
 /** Viewport size shared by the agent (P2P) and server (relay) terminal APIs. */
+import type { AttachInfo, AddressLatency, EnvFileRef } from '@/types';
+
 export interface TerminalSize {
   cols: number;
   rows: number;
@@ -11,3 +13,21 @@ export interface TerminalSize {
  * union so callers never handle a thrown attach.
  */
 export type AttachResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Shell attach descriptor for deep-link restoration. The app shell derives
+ * this from the jotai atoms and passes it to useDeepLinkRestore.
+ */
+export interface AttachedSession {
+  attachInfo: AttachInfo;
+  sessionId: string;
+  sessionName: string;
+  orderedUrls?: string[];
+  latencies?: AddressLatency[];
+  selectedAddress?: string;
+  /** Manual relay endpoint URL from the attach dialog (null = auto). */
+  relayUrl?: string | null;
+  renderer?: 'webgl' | 'canvas';
+  /** Env files chosen in the attach dialog to source once the terminal is live. */
+  envRefs?: EnvFileRef[];
+}

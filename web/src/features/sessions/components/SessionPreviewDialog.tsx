@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RefreshCw, Download } from 'lucide-react';
 import { useSessionPreview, type PreviewStatus } from '@/features/sessions/hooks/useSessionPreview';
-import { useDialogReset } from '@/hooks/useDialogReset';
+import { useDialogReset } from '@/shared/hooks/useDialogReset';
 import { exportSessionPreviewPng } from '@/lib/previewPng';
 import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
 

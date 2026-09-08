@@ -1,8 +1,8 @@
 import { X, FileCog } from 'lucide-react';
 import type { ConnectionState } from '@/services/socket';
 import type { StatusFilter } from '../hooks/useDashboard';
-import { SearchBar } from './SearchBar';
-import { ServerInfoMenu } from './ServerInfoMenu';
+import { SearchBar } from '@/features/sessions/components/SearchBar';
+import { ServerInfoMenu } from '@/features/server/components/ServerInfoMenu';
 import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
 import { RefreshButton } from './ui/RefreshButton';
 import { Button } from './ui/button';

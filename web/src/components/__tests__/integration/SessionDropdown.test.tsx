@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { SessionDropdown } from '@/components/SessionDropdown';
-import { WebSocketContext } from '@/hooks/useWebSocket';
+import { WebSocketContext } from '@/shared/hooks/useWebSocket';
 import { sessionIdAtom } from '@/atoms/session';
 import type { Session } from '@/types';
 import type { WebSocketService } from '@/services/socket';

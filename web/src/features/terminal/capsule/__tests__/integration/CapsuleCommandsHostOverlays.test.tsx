@@ -7,7 +7,7 @@ import { CapsuleProvider } from '@/features/terminal/capsule/state/CapsuleProvid
 import { CAPSULE_EXPERIENCE } from '@/features/terminal/capsule/config/experience';
 import type { CapsuleContextValue } from '@/features/terminal/capsule/state/capsuleContext';
 
-vi.mock('@/hooks/useQuickCommands', () => ({
+vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),
@@ -15,7 +15,7 @@ vi.mock('@/hooks/useQuickCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCommandHistory', () => ({
+vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],

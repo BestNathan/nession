@@ -1,6 +1,6 @@
 import { LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ServerInfoMenu } from '@/components/ServerInfoMenu';
+import { ServerInfoMenu } from '@/features/server/components/ServerInfoMenu';
 import { setSessionFirst } from '@/lib/sessionFirst';
 import { shellIconButtonClass, shellMotionClass } from '@/session-first/shellStyles';
 import { cn } from '@/lib/utils';

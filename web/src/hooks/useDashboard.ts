@@ -1,10 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/socket';
-import { useWebSocket } from './useWebSocket';
+import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { useAgentData } from '@/features/agents/hooks/useAgentData';
 import { useSessionData, type FetchSessionsOptions } from '@/features/sessions/hooks/useSessionData';
-import { useDashboardFilter, type StatusFilter, type SortField, type SortDirection } from './useDashboardFilter';
+import { useDashboardFilter } from './useDashboardFilter';
+import type { StatusFilter, SortField, SortDirection } from '@/features/sessions/types';
 import { useDashboardModals } from './useDashboardModals';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
 

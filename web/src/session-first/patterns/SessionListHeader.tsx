@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, Filter, Plus } from 'lucide-react';
-import { SearchBar } from '@/components/SearchBar';
+import { SearchBar } from '@/features/sessions/components/SearchBar';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';

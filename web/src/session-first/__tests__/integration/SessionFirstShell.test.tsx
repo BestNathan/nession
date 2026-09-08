@@ -70,7 +70,7 @@ vi.mock('@/session-first/workspace/tools/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/components/env/EnvManager', () => ({
+vi.mock('@/features/env/components/EnvManager', () => ({
   EnvManager: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
@@ -83,17 +83,17 @@ vi.mock('@/features/sessions/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
-vi.mock('@/components/env/EnvManager', () => ({
+vi.mock('@/features/env/components/EnvManager', () => ({
   EnvManager: ({ onBack }: { onBack: () => void }) => (
     <div data-testid="env-manager">
       <button type="button" onClick={() => onBack()}>Back</button>
     </div>
   ),
 }));
-vi.mock('@/components/ServerInfoMenu', () => ({
+vi.mock('@/features/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
-vi.mock('@/components/env/AttachDialog', () => ({
+vi.mock('@/features/sessions/components/AttachDialog', () => ({
   AttachDialog: ({
     isOpen,
     onConfirm,
@@ -117,7 +117,7 @@ vi.mock('@/components/env/AttachDialog', () => ({
 // relayServerHandle(wsService), whose transport members delegate to
 // onConnectionStateChange + connectionState (runtime/relayServerConnection.ts).
 // 'connected' mirrors the shell's post-handshake render state.
-vi.mock('@/hooks/useWebSocket', () => ({
+vi.mock('@/shared/hooks/useWebSocket', () => ({
   useWebSocket: () => ({
     connectionState: 'connected',
     onConnectionStateChange: vi.fn(() => () => {}),
