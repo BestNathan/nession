@@ -23,7 +23,6 @@ LEGACY_DIRS=(
   "web/src/components/"
   "web/src/hooks/"
   "web/src/session-first/"
-  "web/src/explorer/"
 )
 
 # Allowed patterns (files that can be added to legacy dirs)

@@ -105,6 +105,8 @@ src/
 │   └── websocket/         # Core service + plugins/
 ├── core/terminal-runtime/ # React-free terminal runtime (controller, transport, input, xterm lifecycle)
 ├── features/terminal/     # Terminal feature: capability plugins, viewport components, hooks, state, capsule
+├── features/explorer/     # Extensible file-tree framework (Explorer, ExplorerStore, instance registry)
+├── features/files/        # Files feature: file RPC capability, browser/viewer UI, file hooks, viewer dispatch
 ├── markdown/              # Markdown preview pipeline
 ├── lib/                   # Pure helpers (cn, encoding, language id, …)
 ├── extensions/            # Extension registry (e.g. claude-code)
