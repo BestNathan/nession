@@ -3,26 +3,11 @@ import { atom } from 'jotai';
 import { sessionIdAtom, sessionNameAtom } from '../../atoms/session';
 import { effectiveModeAtom } from '../../atoms/connection';
 
-export type TerminalStatus =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'attached'
-  | 'reconnecting'
-  | 'failed';
-
-/**
- * Local terminal connection instance — distinct from the backend `Session`
- * concept. Derived from the global session atoms; `startedAt` is stamped on
- * write (e.g. when an attach begins).
- */
-export interface TerminalSession {
-  id: string;
-  name: string;
-  status: TerminalStatus;
-  mode: 'p2p' | 'relay';
-  startedAt: number;
-}
+// TerminalStatus/TerminalSession live in core/terminal-runtime so runtime
+// consumers never depend on the Jotai state layer; re-exported here for
+// React-side imports.
+import type { TerminalSession, TerminalStatus } from '@/core/terminal-runtime/types';
+export type { TerminalSession, TerminalStatus } from '@/core/terminal-runtime/types';
 
 /** Private: pinned by terminalSessionAtom's write so startedAt stays stable. */
 const startedAtAtom = atom<number>(0);

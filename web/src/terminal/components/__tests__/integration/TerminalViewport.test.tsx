@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { TerminalViewport } from '@/terminal/components/TerminalViewport';
-import type { TerminalController } from '@/terminal/controller/TerminalController';
+import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 
 function makeController(): TerminalController {
   return { attach: vi.fn(), detach: vi.fn() } as unknown as TerminalController;

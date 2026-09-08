@@ -1,5 +1,5 @@
 import { useAtomValue } from 'jotai';
-import type { TerminalController } from '../controller/TerminalController';
+import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 import { terminalViewModelAtomFamily } from '../state';
 import { TerminalBanner } from './TerminalBanner';
 import { TerminalViewport } from './TerminalViewport';

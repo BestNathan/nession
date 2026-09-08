@@ -1,16 +1,16 @@
 import { createElement, StrictMode, type ReactNode } from 'react';
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TerminalController } from '@/terminal/controller/TerminalController';
+import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 import { useTerminal } from '@/terminal/hooks/useTerminal';
-import type { TerminalTransport } from '@/terminal/transport/TerminalTransport';
+import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
 
 const { controllerCtor, disposeMock } = vi.hoisted(() => ({
   controllerCtor: vi.fn(),
   disposeMock: vi.fn(),
 }));
 
-vi.mock('@/terminal/controller/TerminalController', () => ({
+vi.mock('@/core/terminal-runtime/controller/TerminalController', () => ({
   TerminalController: controllerCtor,
 }));
 

@@ -1,5 +1,5 @@
 import { useLayoutEffect, type RefObject } from 'react';
-import { TERMINAL_CAPSULE_OCCLUSION_EVENT } from '@/terminal/capsule/occlusionScroll';
+import { TERMINAL_CAPSULE_OCCLUSION_EVENT } from '@/core/terminal-runtime/capsule/occlusionScroll';
 
 /**
  * Publishes --terminal-capsule-occlusion on the nearest [data-terminal-capsule-host].

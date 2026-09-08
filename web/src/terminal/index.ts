@@ -1,33 +1,33 @@
-// Legacy manager classes (kept for backward compatibility)
-export { AddonManager } from './AddonManager';
-export { Renderer } from './Renderer';
-export { ThemeManager, CATPPUCCIN_MOCHA } from './ThemeManager';
-export { ConnectionManager } from './ConnectionManager';
-export { MouseIntentResolver } from './MouseIntentResolver';
-export { FontSizeManager } from './FontSizeManager';
-export { PROFILES, detectProfile } from './DeviceProfile';
+// React-free runtime re-exports — canonical home is core/terminal-runtime.
+export { AddonManager } from '@/core/terminal-runtime/AddonManager';
+export { Renderer } from '@/core/terminal-runtime/Renderer';
+export { ThemeManager, CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
+export { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
+export { MouseIntentResolver } from '@/core/terminal-runtime/MouseIntentResolver';
+export { FontSizeManager } from '@/core/terminal-runtime/FontSizeManager';
+export { PROFILES, detectProfile } from '@/core/terminal-runtime/DeviceProfile';
 export type {
   DeviceProfile,
   ConnectionOptions,
   ReconnectBanner,
-} from './types';
+} from '@/core/terminal-runtime/types';
 
 // New architecture: controller
-export { TerminalController, ResizeController } from './controller/TerminalController';
+export { TerminalController, ResizeController } from '@/core/terminal-runtime/controller/TerminalController';
 
 // New architecture: instance
-export { TerminalInstance } from './instance/TerminalInstance';
-export type { TerminalInstanceOptions } from './types';
+export { TerminalInstance } from '@/core/terminal-runtime/instance/TerminalInstance';
+export type { TerminalInstanceOptions } from '@/core/terminal-runtime/types';
 
 // New architecture: input
-export { InputRouter } from './input/InputRouter';
-export { InputSourceManager } from './input/InputSourceManager';
-export { TerminalInputHandler } from './input/TerminalInputHandler';
-export type { InputHandler } from './input/InputHandler';
-export type { InputSource, InputEvent } from './types';
+export { InputRouter } from '@/core/terminal-runtime/input/InputRouter';
+export { InputSourceManager } from '@/core/terminal-runtime/input/InputSourceManager';
+export { TerminalInputHandler } from '@/core/terminal-runtime/input/TerminalInputHandler';
+export type { InputHandler } from '@/core/terminal-runtime/input/InputHandler';
+export type { InputSource, InputEvent } from '@/core/terminal-runtime/types';
 
 // New architecture: transport
-export type { TerminalTransport } from './transport/TerminalTransport';
+export type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
 
 // New architecture: state
 export {

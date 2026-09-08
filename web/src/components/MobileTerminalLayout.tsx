@@ -11,8 +11,8 @@ import { Separator } from './ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type { FileOps, FileEntry } from '@/features/files';
-import type { FontSizeManager } from '@/terminal/FontSizeManager';
-import type { TerminalController } from '@/terminal/controller/TerminalController';
+import type { FontSizeManager } from '@/core/terminal-runtime/FontSizeManager';
+import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 import { TerminalCapsule, type CapsuleMode } from '@/features/terminal/capsule';
 import { cn } from '@/lib/utils';
 

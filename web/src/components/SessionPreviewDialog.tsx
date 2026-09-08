@@ -18,7 +18,7 @@ import { RefreshCw, Download } from 'lucide-react';
 import { useSessionPreview, type PreviewStatus } from '../hooks/useSessionPreview';
 import { useDialogReset } from '../hooks/useDialogReset';
 import { exportSessionPreviewPng } from '@/lib/previewPng';
-import { CATPPUCCIN_MOCHA } from '@/terminal/ThemeManager';
+import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
 
 interface SessionPreviewDialogProps {
   isOpen: boolean;

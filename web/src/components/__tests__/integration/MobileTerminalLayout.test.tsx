@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MobileTerminalLayout } from '@/components/MobileTerminalLayout';
-import type { TerminalController } from '@/terminal/controller/TerminalController';
+import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 
 // Heavy children are coverage-excluded components with WebSocket/DOM deps —
 // stub them so this test stays focused on the layout wiring.

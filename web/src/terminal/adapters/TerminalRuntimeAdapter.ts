@@ -1,5 +1,5 @@
 import { getDefaultStore } from 'jotai';
-import type { TerminalControllerEvents } from '../controller/TerminalController';
+import type { TerminalControllerEvents } from '@/core/terminal-runtime/controller/TerminalController';
 import { inputModeAtomFamily } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
 import { terminalTransportReadyAtom } from '../state/transport';

@@ -2,13 +2,10 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 
-/** Discriminated union of terminal input modes. */
-export type InputMode =
-  | { type: 'terminal' }
-  | { type: 'command' }
-  | { type: 'search' }
-  | { type: 'ai' }
-  | { type: 'custom'; id: string };
+// InputMode lives in core/terminal-runtime so runtime consumers never
+// depend on the Jotai state layer; re-exported here for React-side imports.
+import type { InputMode } from '@/core/terminal-runtime/types';
+export type { InputMode } from '@/core/terminal-runtime/types';
 
 export const inputModeAtomFamily = atomFamily((_sessionId: string) => {
   void _sessionId;

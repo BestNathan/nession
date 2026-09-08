@@ -1,10 +1,10 @@
 // web/src/terminal/hooks/useTerminal.ts
 import { useMemo, useEffect, useRef } from 'react';
-import { TerminalController } from '../controller/TerminalController';
+import { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 import { createTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter';
 import type { TerminalSession } from '../state/session';
-import type { TerminalTransport } from '../transport/TerminalTransport';
-import type { DeviceProfile, TerminalScrollbackMode } from '../types';
+import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
+import type { DeviceProfile, TerminalScrollbackMode } from '@/core/terminal-runtime/types';
 import type { SessionRuntime } from '@/runtime/SessionRuntime';
 
 export interface UseTerminalOptions {
