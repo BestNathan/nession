@@ -14,14 +14,14 @@ description: Use when troubleshooting CI/CD pipeline failures for nession, modif
 
 ```
 Local dev → verify locally
-  → branch off main → PR to staging → quality gate passes → rebase-merge to staging
+  → branch off main → PR to staging → quality gate passes → merge to staging
   → staging builds + deploys to staging environment → validate on staging
   → audit what is being released → PR staging → main with every `Closes #N` → --merge
   → version bump if warranted → release builds multi-arch images → ArgoCD syncs to production
   → sync main → staging (fast-forward)
 ```
 
-**Every merge is `--rebase` except the release, which must be `--merge`.** Nothing is ever squashed. The asymmetry is deliberate — see **Why the release uses a merge commit**.
+**Every merge is `--merge`.** Nothing is ever rebased or squashed — `--rebase` rewrites commits and orphans the branch tip, `--squash` collapses N commits into one unmatched patch; both leave a class of re-conflicting orphans behind. See **Why every merge is `--merge`**.
 
 ## Deployment Monitoring
 
@@ -123,12 +123,12 @@ EnterWorktree name: "chore/workflow-fix"
 git cherry-pick <workflow-commit-hash>
 git push -u origin chore/workflow-fix
 gh pr create --title "chore: ..." --body "..."
-gh pr merge <N> --rebase
+gh pr merge <N> --merge
 ```
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → rebase-merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
+For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -136,7 +136,7 @@ git push origin <branch-name>
 gh pr create --base staging --title "feat: ..." --body "..."
 
 # 2. Auto-merge to staging when quality gate passes
-gh pr merge <PR-NUMBER> --auto --rebase
+gh pr merge <PR-NUMBER> --auto --merge
 
 # 3. Watch staging workflow + rollout
 ./scripts/deploy-watch.sh staging
@@ -144,9 +144,9 @@ gh pr merge <PR-NUMBER> --auto --rebase
 # 4. After staging validation, open the release PR (see "Release: staging → main")
 ```
 
-**`--rebase`, not `--squash`.** Rebase-merge replays the branch's commits onto `staging` individually, each keeping its own message. It leaves the feature branch itself on orphaned SHAs, which costs nothing — the branch is dead after merge and nobody syncs back to it. (That is exactly why the *release* cannot use `--rebase`: `staging` is long-lived and does get synced back.) Two consequences:
+**`--merge`, never `--rebase` or `--squash`.** `--merge` records the head branch's tip as a second parent, so every landed commit stays in the target's ancestry with its **original SHA** — nothing is ever orphaned, no matter how long-lived the target is. `--rebase` always rewrites and orphans the branch tip; `--squash` collapses N commits into one whose patch-id matches nothing. Both failure classes are measured below under **Why every merge is `--merge`**. Two consequences:
 
-- **Commit messages are the permanent record.** No merge method in this flow writes the PR body to a commit. Measured: PR #301 rebase-merged as `673664f` and kept the commit's own message while the (different, Chinese) PR body was discarded; squash-merged PR #303 became `3a35e20` whose message *is* `PR_TITLE` + `PR_BODY`; and `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`. The repo still has `squash_merge_commit_message = PR_BODY` configured, but nothing squashes any more.
+- **Commit messages are the permanent record.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, never the PR body, and each commit keeps its own message. (Measured before the all-merge rule: PR #301 rebase-merged as `673664f` kept the commit's own message while the (different, Chinese) PR body was discarded; squash-merged PR #303 became `3a35e20` whose message *is* `PR_TITLE` + `PR_BODY`.) The repo still has `squash_merge_commit_message = PR_BODY` configured, but nothing squashes any more.
 - **Clean up the branch locally before merging.** `wip`/`fixup` commits land verbatim. Squash them with `git rebase -i` on the branch, not with a squash-merge.
 
 
@@ -191,13 +191,13 @@ git push origin origin/main:refs/heads/staging
 
 **Step 5 goes last** because the bump and `release.yml`'s `chore: update prod image tags` both land on `main` after step 3 — syncing earlier just leaves `staging` two commits behind again. It is still a fast-forward at that point: `staging`'s tip is an ancestor of the merge commit, which is an ancestor of everything added after it.
 
-### Why the release uses a merge commit
+### Why every merge is `--merge`
 
-**`--merge` records `staging`'s tip as a second parent**, so `staging` stays an ancestor of `main` and step 5 is a fast-forward forever. No orphaned commits are created and `staging` never needs a force push.
+**`--merge` records the head branch's tip as a second parent**, so every landed branch stays reachable from the target with its original SHAs. For the release that means `staging` stays an ancestor of `main` and step 5 is a fast-forward forever — no orphaned commits anywhere, no force push. That is the whole point of the rule: a feature branch merged into `staging` keeps its original SHAs in `staging`'s ancestry, so the orphan class below never starts.
 
-**`--rebase` cannot give that**, because GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
+**`--rebase` rewrites and orphans, so no merge in this flow may use it.** GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
 
-Those orphans are *usually* harmless — a later rebase skips them by patch-id:
+The class this rule eliminates was measured on the 0.29.0 release — at that point the release itself was rebase-merged, so the rebased commits landed on `main` while their originals stayed on `staging`. Such orphans are *usually* harmless — a later rebase skips them by patch-id:
 
 | Orphan on `staging` | patch-id | Twin on `main` | patch-id | Next release |
 |---|---|---|---|---|
@@ -206,20 +206,41 @@ Those orphans are *usually* harmless — a later rebase skips them by patch-id:
 
 Both rows are from the single 0.29.0 release. The second diverged because that commit's release rebase **resolved a conflict**, so what landed on `main` is not the same patch as what `staging` still holds. Such an orphan re-conflicts on *every* subsequent release until someone drops it by hand. Confirmed in a controlled repro: identical patch-id → rebase skips the orphan and replays only the new work; divergent patch-id → the orphan replays and collides.
 
-So the choice is not "rebase is broken" — it is that rebase makes correctness depend on patch-id de-duplication continuing to hold, while `--merge` removes the class outright. Feature branches keep using `--rebase` precisely because they are dead after merge and orphaning them is free.
+So the choice is not "rebase is broken" — it is that rebase makes correctness depend on patch-id de-duplication continuing to hold, while `--merge` removes the class outright. Feature branches used to keep using `--rebase` because they were dead after merge and orphaning them was free; the all-merge rule closes that too — an orphaned commit is only "free" until a conflict changes its patch-id, and nothing in the flow needs that risk. Every merge is `--merge`, feature-to-staging included.
 
 **`--squash` is wrong for a further reason:** N commits collapse into one whose combined patch-id matches nothing, so a later replay re-applies all N. Measured historically: release PR #268 was squash-merged and the next release conflicted on `web/src/terminal/DeviceProfile.ts` — a file the offending PR never touched.
 
-### ArgoCD tracks `main`, not the `staging` branch
+### ArgoCD tracks the `gitops` orphan branch (since issue #592 cutover, 2026-09-05)
 
-Worth knowing independently of merge strategy, because it explains why `staging.yml` writes to `main`:
+Desired state left `main` entirely — the `gitops` branch holds the app-of-apps
+(`argocd/`), the env-agnostic base and one overlay per environment. The
+self-managed `nession-root` Application owns the children:
 
-| App | path | targetRevision |
+| App | path (on `gitops`) | notes |
 |---|---|---|
-| `nession` | `k8s/overlays/production` | `main` |
-| `nession-staging` | `k8s/overlays/staging` | `main` |
+| `nession` | `environments/production/nession` | zero-copy PVs; promotion needs Environment approval |
+| `nession-staging` | `environments/staging/nession` | retained legacy staging env, byte-identical to the old overlay |
+| `nession-staging-01` | `environments/staging-01/nession` | on-demand SHA deploys (`deploy.yml`) |
+| `nession-preprod` | `environments/preprod/nession` | dormant |
 
-The `staging` **branch** is not the deploy source for the staging **environment** — `staging.yml` builds on a push to `staging` but writes the overlay tag to `main`, and only that write reaches the cluster. Measured 2026-08-18: the `staging` branch's own overlay said `agent-67afd56` while the running staging pods were on `agent-aeb25f8`, the value from `main`. A consequence worth remembering: the overlay file on the `staging` branch is inert, so never "fix" a stale-looking tag there.
+Deploys are bot commits (`deploy(<env>): <ref>`) written by
+`scripts/gitops-commit.sh` from `staging.yml` / `release.yml` / `deploy.yml` —
+never a kustomize commit on `main`. Rollback is `git revert` of a deploy
+commit on `gitops`; ArgoCD syncs back.
+
+**Two deploy lanes** (owner model 2026-09-05, issue #592):
+
+- **Staging lane — any sha.** `staging` auto-deploys on every staging-branch
+  push (`staging.yml` → `deploy-staging-gitops`). `deploy.yml` deploys any
+  env dir at **any commit whose ghcr images exist** — merging to staging
+  builds `{server,agent,ui}-<sha7>` (quality gate already ran), so a small
+  fix merged to staging can be pulled onto `staging-01` and validated
+  standalone before the next release.
+- **Release lane — needs a version.** `production` deploys only via
+  `release.yml` `promote-production` at SemVer tags, behind GitHub
+  Environment `production` approval. `gitops-commit.sh` refuses non-SemVer
+  refs for production, and a manual `deploy.yml` against `production` fails
+  with that refusal — production never carries arbitrary SHAs.
 
 **If the release PR reports `mergeable: false`, do NOT back-merge `main` into `staging`.** Move the conflict onto a throwaway worktree off `origin/main`:
 
@@ -230,7 +251,7 @@ cd .claude/worktrees/chore-release-<sha>
 git cherry-pick <staging-commit>...          # resolve conflicts here
 git push -u origin chore/release-<sha>
 gh pr create --base main --head chore/release-<sha> --title "chore: release (...)" --body "..."
-gh pr merge <PR-NUMBER> --rebase
+gh pr merge <PR-NUMBER> --merge
 ```
 
 Then sync step 5 as usual. Measured 2026-08-17: `staging → main` reported `mergeable: false` (conflict on `k8s/overlays/staging/kustomization.yaml`); `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. The cherry-pick branch (PR #300) merged cleanly and `staging` was never touched. Under this flow the conflict should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes it.
@@ -256,12 +277,12 @@ EnterWorktree name: "chore/bump-version-X.Y.Z"
 git add -A && git commit -m "chore: bump version to X.Y.Z"
 git push -u origin chore/bump-version-X.Y.Z
 gh pr create --base main --title "chore: bump version to X.Y.Z" --body "Version bump"
-gh pr merge <PR-NUMBER> --rebase  # Direct merge, no --auto (no checks to wait on)
+gh pr merge <PR-NUMBER> --merge  # Direct merge, no --auto (no checks to wait on)
 ```
 
 Not every release needs one. Decide by what shipped: user-visible feature → minor, fix only → patch, docs/chore only → none.
 
-**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no `k8s/overlays/production` update, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
+**But "none" means the release never reaches production.** 15 of `release.yml`'s 16 jobs carry `if: needs.version-check.outputs.version_changed == 'true'` — `version-check` is the only ungated job. The release PR itself changes no version file, so `version-check` reports `false` and everything downstream skips — no images, no GitHub Release, no production deploy commit, nothing for ArgoCD to sync. Measured on release PR #287: `version-check: success`, everything else `skipped`.
 
 So the rule is:
 
@@ -284,7 +305,7 @@ EnterWorktree name: "docs/<slug>"    # or chore/<slug>
 git add -A && git commit -m "docs: ..."
 git push -u origin docs/<slug>
 gh pr create --base main --title "docs: ..." --body "..."
-gh pr merge <PR-NUMBER> --rebase      # no --auto: no checks to wait on
+gh pr merge <PR-NUMBER> --merge      # no --auto: no checks to wait on
 ```
 
 Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, and `k8s/**` manifests.
@@ -298,19 +319,15 @@ Two consequences to accept:
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so nothing can de-duplicate them, and they ride into `main` on the release as noise. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
-### Why `main` and `staging` diverge between releases
+### Why `main` and `staging` never diverge anymore
 
-`staging.yml` writes `chore: update staging image tags` commits to **`main`**, not to `staging` (it checks out `ref: main` while running on a push to `staging`). So `main` gains a commit `staging` lacks after every staging build, and the two diverge between releases.
-
-Those kustomize commits touch only `k8s/overlays/staging/kustomization.yaml`, while feature work touches `crates/` and `web/src/` — **disjoint paths, so the release does not conflict.** Verified 2026-08-18 by dry-running the release merge in the steady state (`staging` ahead by one feature commit, `main` ahead by one kustomize commit): clean.
-
-That only holds while feature branches never carry a snapshot of the overlay file. **The overlay files under `k8s/overlays/**` are CI-owned on `main`; a feature branch must never touch them.** The 0.29.0 release conflict came from exactly that: a branch cut from `main` inherited a previous overlay bump and carried it into `staging`, where it then collided with `main`'s newer value.
+Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch, never on `main` — so `main` and `staging` only differ by unreleased feature work. The old mechanism (staging.yml writing kustomize commits to `main`) and its whole conflict class (0.29.0, overlay snapshots riding feature branches into release PRs) are gone: `main` is no longer a deploy target for anything.
 
 | Step | Method | Effect |
 |------|--------|--------|
-| `feature → staging` | `--rebase` | Commits replayed individually, each keeping its own message. Orphans the (now dead) feature branch, which costs nothing. |
-| `staging → main` | `--merge` | Records `staging`'s tip as a second parent, so `staging` stays an ancestor of `main`. No orphans. |
-| `main → staging` sync | fast-forward push | Possible only because the release used a merge commit. Never force-push. |
+| `feature → staging` | `--merge` | Records the head tip as a second parent — original SHAs stay in `staging`'s ancestry. No orphans anywhere. |
+| `staging → main` | `--merge` | Same, and it keeps `staging` an ancestor of `main`, which makes the sync a fast-forward. |
+| `main → staging` sync | fast-forward push | Possible only because every release merged with `--merge`. Never force-push. |
 
 After the sync the refs are identical, and the next staging build puts `main` exactly 1 commit ahead again. That is the expected steady state.
 
@@ -347,7 +364,7 @@ This is why the release PR needs an audit step: nothing upstream carries the iss
 gh pr view <RELEASE-PR> --json closingIssuesReferences   # verify before merging
 ```
 
-**The PR body is review material, not git history.** Under rebase-merge it is never written to a commit — each replayed commit keeps its own message (measured: PR #301 → `673664f`). Still keep the body a change record — 变更内容 + 测试报告, plus `Closes #N` on the release PR — because it is what a reviewer and the release audit read. Screenshots go in a PR comment (`gh pr comment`) rather than the body, now purely so the body stays scannable.
+**The PR body is review material, not git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE` to the merge commit, never the PR body, and each commit keeps its own message — so the body never enters history by any path. Still keep the body a change record — 变更内容 + 测试报告, plus `Closes #N` on the release PR — because it is what a reviewer and the release audit read. Screenshots go in a PR comment (`gh pr comment`) rather than the body, now purely so the body stays scannable.
 
 **PR 状态判断（详见 nession-development PR Workflow）：**
 
@@ -367,16 +384,16 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 2. Builds web UI (`npm ci && npm run build`)
 3. Builds Rust binaries natively for amd64 AND arm64
 4. Creates multi-arch Docker images tagged with **hash** (`server-{sha}`, `agent-{sha}`, `ui-{sha}`)
-5. Updates `k8s/overlays/staging/kustomization.yaml` on main with hash-based image tags (commit with `[skip ci]`)
-6. ArgoCD detects the kustomize change and syncs to staging k8s
+5. `deploy-staging-gitops` writes `deploy(staging): <sha>` to `gitops/environments/staging` via `scripts/gitops-commit.sh`
+6. ArgoCD detects the gitops change and syncs the staging environment
 
 **After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`), bump the version if warranted, then sync `main` → `staging` last. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
-3. Updates `k8s/overlays/production/kustomization.yaml` with version-based image tags
+3. `promote-production` waits for GitHub Environment `production` approval, then writes `deploy(production): <version>` to `gitops/environments/production`
 4. ArgoCD syncs to production k8s
 
-**No manual steps after merge.** CI → ArgoCD is fully automatic.
+**No manual steps after merge** (except approving the production Environment). CI → ArgoCD is fully automatic.
 
 ## Quick Reference
 
@@ -400,8 +417,9 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 | `.github/workflows/quality.yml` | PR quality gate (rust-check + web-check) |
 | `.github/workflows/staging.yml` | Staging build + deploy (push to staging) |
 | `.github/workflows/release.yml` | Release build + deploy (push to main) |
-| `k8s/overlays/staging/kustomization.yaml` | Staging image tags (auto-updated by staging.yml) |
-| `k8s/overlays/production/kustomization.yaml` | Production image tags (auto-updated by release.yml) |
+| `.github/workflows/deploy.yml` | Manual SHA deploy to any gitops env (dispatch) |
+| `scripts/gitops-commit.sh` | The only gitops writer (deploy commits) |
+| `gitops` branch `environments/<env>/nession/kustomization.yaml` | Per-env image tags (deploy commits) |
 
 ### Observing Deployments
 
@@ -432,8 +450,9 @@ Merge to staging:
   → build-amd64 + build-arm64 (parallel): cargo zigbuild --release
   → docker: build + push hash-tagged images (server-{sha}-{arch}, etc.)
   → merge: docker buildx imagetools create (multi-arch manifests)
-  → update-staging-kustomize: commit hash-based tags to main (with [skip ci])
-  → ArgoCD: auto-sync to staging k8s
+  → deploy-staging-gitops: scripts/gitops-commit.sh staging <sha>
+    (gitops commit "deploy(staging): <sha>")
+  → ArgoCD: auto-sync staging environment from gitops
 
 Merge to main (release PR merged with --merge, then optional version bump):
   → release.yml:
@@ -442,8 +461,9 @@ Merge to main (release PR merged with --merge, then optional version bump):
   → merge: multi-arch version manifests
   → build-macos: native macOS binaries
   → create-release: GitHub Release with all binaries
-  → update-prod-kustomize: commit version-based tags to main
-  → ArgoCD: auto-sync to production k8s
+  → promote-production (Environment `production` approval gate):
+    scripts/gitops-commit.sh production <version>
+  → ArgoCD: auto-sync production from gitops
 ```
 
 ## Common Mistakes

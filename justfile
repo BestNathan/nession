@@ -83,6 +83,10 @@ check-test-isolation:
 check-test-isolation-selftest:
     ./scripts/check-test-isolation-selftest.sh
 
+# Shell regression tests for pre-push diff-base resolution
+check-git-diff-base:
+    ./scripts/test-pre-push-diff-base.sh
+
 # Diagnostic: run every test binary twice at once (slow, probabilistic — not a gate)
 check-test-concurrency:
     ./scripts/check-test-concurrency.sh
