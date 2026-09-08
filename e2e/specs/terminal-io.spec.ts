@@ -37,9 +37,24 @@ async function waitForTerminal(page: import('@playwright/test').Page): Promise<v
   }).toPass({ timeout: 5_000 });
 }
 
+/**
+ * The session-first shell collapses its sessions list into the left drawer
+ * unless a wide two-pane list is showing. Open the drawer when the list is
+ * not visible so list actions (create / select) are reachable.
+ */
+async function ensureSessionsList(page: import('@playwright/test').Page): Promise<void> {
+  const create = page.getByTestId('session-first-create');
+  try {
+    await expect(create).toBeVisible({ timeout: 1_000 });
+  } catch {
+    await page.getByTestId('session-first-open-drawer').click();
+    await expect(create).toBeVisible({ timeout: 10_000 });
+  }
+}
+
 /** Create a session via the UI and return its name. */
 async function createSession(page: import('@playwright/test').Page, name: string): Promise<void> {
-  // The sidebar "Create session" button is enabled once an agent is online.
+  await ensureSessionsList(page);
   const createButton = page.getByTestId('session-first-create');
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click();
@@ -62,6 +77,7 @@ async function attachToSession(
 ): Promise<void> {
   // Find the session row and click it — the session-first list selects a
   // session by opening AttachDialog pre-seeded with that session.
+  await ensureSessionsList(page);
   const row = page.locator('[data-testid="session-item-row"]', { hasText: sessionName });
   await expect(row).toBeVisible();
   await row.getByRole('button').first().click();
