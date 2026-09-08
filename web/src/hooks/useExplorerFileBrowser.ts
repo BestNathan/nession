@@ -2,10 +2,10 @@ import { useCallback, useMemo, useRef, useState, type ChangeEvent, type MutableR
 import { toast } from 'sonner';
 
 import type { FileOps, FileEntry } from '@/features/files';
-import { ExplorerStore, ROOT_ID } from '@/explorer/ExplorerStore';
-import { createNessionFileSystemProvider } from '@/explorer/providers/NessionFileSystemProvider';
-import type { ExplorerDataProvider } from '@/explorer/providers/types';
-import type { ExplorerNode } from '@/explorer/types';
+import { ExplorerStore, ROOT_ID } from '@/features/explorer/ExplorerStore';
+import { createNessionFileSystemProvider } from '@/features/files/adapters/NessionFileSystemProvider';
+import type { ExplorerDataProvider } from '@/features/explorer/providers/types';
+import type { ExplorerNode } from '@/features/explorer/types';
 import { registerSeenLangKeys, scanLangKeysFromPaths } from '@/lib/codeMirrorLangs';
 import { toastError } from '@/lib/errorHelpers';
 

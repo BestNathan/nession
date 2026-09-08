@@ -5,7 +5,6 @@ export { useExplorerStore } from './hooks/useExplorerStore';
 export { fileEntryToExplorerNode } from './types';
 export type { ExplorerNode, ExplorerProps, LoadState, NodeId } from './types';
 export type { ExplorerDataProvider } from './providers/types';
-export { createNessionFileSystemProvider } from './providers/NessionFileSystemProvider';
 export type { ExplorerDecoration, ExplorerDecorationProvider } from './decorations/types';
 export { resolveDecorations } from './decorations/resolveDecorations';
 export type { ResolvedDecorations } from './decorations/resolveDecorations';

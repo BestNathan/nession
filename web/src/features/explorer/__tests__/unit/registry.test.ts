@@ -1,14 +1,14 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 
-import type { ExplorerExtension } from '@/explorer/commands/types';
+import type { ExplorerExtension } from '@/features/explorer/commands/types';
 import {
   getContextMenuContributions,
   getDecorationProviders,
   getExtensions,
   registerExtension,
   resetExplorerRegistry,
-} from '@/explorer/registry';
-import type { ExplorerNode } from '@/explorer/types';
+} from '@/features/explorer/registry';
+import type { ExplorerNode } from '@/features/explorer/types';
 
 const FILE_NODE: ExplorerNode = {
   id: 'readme.md',

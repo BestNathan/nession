@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileEntry, FileOps } from '@/features/files';
-import { createNessionFileSystemProvider } from '@/explorer/providers/NessionFileSystemProvider';
-import type { ExplorerNode } from '@/explorer/types';
+import { createNessionFileSystemProvider } from '@/features/files/adapters/NessionFileSystemProvider';
+import type { ExplorerNode } from '@/features/explorer/types';
 
 const DIR_NODE: ExplorerNode = {
   id: 'src',

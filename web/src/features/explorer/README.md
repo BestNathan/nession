@@ -14,7 +14,7 @@ import {
   registerExtension,
   type ExplorerExtension,
   type ExplorerDecorationProvider,
-} from '@/explorer';
+} from '@/features/explorer';
 
 const gitDecorationProvider: ExplorerDecorationProvider = {
   provide(node) {

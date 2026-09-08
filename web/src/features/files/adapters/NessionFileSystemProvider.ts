@@ -1,7 +1,6 @@
-import type { FileOps } from '@/features/files';
+import type { FileOps } from '../types';
 
-import { fileEntryToExplorerNode, type ExplorerNode } from '../types';
-import type { ExplorerDataProvider } from './types';
+import { fileEntryToExplorerNode, type ExplorerDataProvider, type ExplorerNode } from '@/features/explorer';
 
 function joinPath(parent: string, name: string): string {
   return parent ? `${parent}/${name}` : name;
