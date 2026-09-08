@@ -106,7 +106,7 @@ export default tseslint.config(
 
   // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/components/FileBrowser.tsx', 'src/components/TerminalView.tsx', 'src/terminal/components/TerminalWorkspace.tsx'],
+    files: ['src/features/files/components/FileBrowser.tsx', 'src/components/TerminalView.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },
@@ -123,13 +123,4 @@ export default tseslint.config(
     },
   },
 
-  {
-    files: [
-      'src/terminal/ThemeManager.ts',
-      'src/terminal/__tests__/unit/ThemeManager.test.ts',
-    ],
-    rules: {
-      'nession/no-primitive-tokens': 'off',
-    },
-  },
 )

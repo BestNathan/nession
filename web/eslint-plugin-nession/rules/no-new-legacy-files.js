@@ -8,8 +8,6 @@
  * - src/components/ (except ui/) — should migrate to features/
  * - src/hooks/ — should migrate to features/
  * - src/session-first/ — should migrate to app/workbench/
-
- * - src/explorer/ — should consolidate into features/explorer/
  *
  * Allowed operations in legacy directories:
  * - Bug fixes (small, targeted changes)
@@ -26,8 +24,6 @@ const LEGACY_DIRS = [
   'src/components/',
   'src/hooks/',
   'src/session-first/',
-
-  'src/explorer/',
 ];
 
 // Files that are allowed to exist in legacy dirs (already there, not new)

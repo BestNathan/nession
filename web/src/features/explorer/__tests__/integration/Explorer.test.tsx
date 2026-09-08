@@ -1,0 +1,246 @@
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+import { Explorer } from '@/features/explorer/Explorer';
+import { ROOT_ID } from '@/features/explorer/ExplorerStore';
+import type { ExplorerExtension } from '@/features/explorer/commands/types';
+import type { ExplorerDataProvider } from '@/features/explorer/providers/types';
+import { mockExplorerExtension } from '@/features/explorer/testing/mockExtension';
+import type { ExplorerNode } from '@/features/explorer/types';
+
+function makeNode(
+  id: string,
+  kind: 'file' | 'directory',
+  parentId?: string,
+): ExplorerNode {
+  return {
+    id,
+    uri: id,
+    name: id.split('/').pop() ?? id,
+    kind,
+    parentId,
+    capabilities:
+      kind === 'directory'
+        ? { rename: true, delete: true, createChild: true }
+        : { rename: true, delete: true, move: true },
+  };
+}
+
+function createMockProvider(
+  tree: Record<string, ExplorerNode[]>,
+): ExplorerDataProvider & { loadChildren: ReturnType<typeof vi.fn> } {
+  const loadChildren = vi.fn(async (node: ExplorerNode | null) => {
+    const key = node?.id ?? ROOT_ID;
+    return tree[key] ?? [];
+  });
+
+  return { loadChildren };
+}
+
+describe('Explorer integration', () => {
+  it('renders tree with mock provider and loads children when expanding a folder once', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory'), makeNode('root/b', 'directory')],
+      'root/a': [
+        makeNode('root/a/file.txt', 'file', 'root/a'),
+        makeNode('root/a/test-file.txt', 'file', 'root/a'),
+      ],
+      'root/b': [],
+    });
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer
+          provider={provider}
+          extensions={[mockExplorerExtension]}
+          onFileActivate={vi.fn()}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+    expect(provider.loadChildren).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('root'));
+
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+      expect(screen.getByText('b')).toBeInTheDocument();
+    });
+    expect(provider.loadChildren).toHaveBeenCalledTimes(2);
+    expect(provider.loadChildren).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'root', kind: 'directory' }),
+    );
+
+    fireEvent.click(screen.getByText('root'));
+    fireEvent.click(screen.getByText('root'));
+
+    expect(provider.loadChildren).toHaveBeenCalledTimes(2);
+  });
+
+  it('calls onFileActivate when clicking a file', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/file.txt', 'file', 'root/a')],
+    });
+    const onFileActivate = vi.fn();
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer provider={provider} extensions={[]} onFileActivate={onFileActivate} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('file.txt'));
+
+    expect(onFileActivate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'root/a/file.txt', kind: 'file' }),
+    );
+  });
+
+  it('shows mock extension badge on test-file.txt', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/test-file.txt', 'file', 'root/a')],
+    });
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer
+          provider={provider}
+          extensions={[mockExplorerExtension]}
+          onFileActivate={vi.fn()}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('test-file.txt')).toBeInTheDocument();
+      expect(screen.getByText('MOCK')).toBeInTheDocument();
+    });
+  });
+
+  it('includes mock extension context menu item on files', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/file.txt', 'file', 'root/a')],
+    });
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer
+          provider={provider}
+          extensions={[mockExplorerExtension]}
+          onFileActivate={vi.fn()}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByText('file.txt'));
+
+    expect(await screen.findByText('Mock action')).toBeInTheDocument();
+  });
+
+  it('re-resolves decorations incrementally when extensions change without remounting', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/file.txt', 'file', 'root/a')],
+    });
+    const extA: ExplorerExtension = {
+      id: 'deco-a',
+      decorations: [
+        {
+          provide: (node) => (node.kind === 'file' ? { badge: 'A' } : undefined),
+        },
+      ],
+    };
+    const extB: ExplorerExtension = {
+      id: 'deco-b',
+      decorations: [
+        {
+          provide: (node) => (node.kind === 'file' ? { badge: 'B' } : undefined),
+        },
+      ],
+    };
+    const onFileActivate = vi.fn();
+
+    const { rerender } = render(
+      <div style={{ height: 400 }}>
+        <Explorer provider={provider} extensions={[extA]} onFileActivate={onFileActivate} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+      expect(screen.getByText('A')).toBeInTheDocument();
+    });
+    const loadsBefore = provider.loadChildren.mock.calls.length;
+
+    rerender(
+      <div style={{ height: 400 }}>
+        <Explorer provider={provider} extensions={[extB]} onFileActivate={onFileActivate} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('B')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('A')).not.toBeInTheDocument();
+    // The tree was not remounted: replacing the extension did not reload
+    // already-loaded children through the provider.
+    expect(provider.loadChildren.mock.calls.length).toBe(loadsBefore);
+  });
+});

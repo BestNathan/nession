@@ -6,8 +6,8 @@ import type { TerminalController } from '@/core/terminal-runtime/controller/Term
 // Heavy children are coverage-excluded components with WebSocket/DOM deps —
 // stub them so this test stays focused on the layout wiring.
 vi.mock( '@/components/env/EnvPanel', () => ({ EnvPanel: () => <div data-testid="env-panel" /> }));
-vi.mock( '@/components/FileBrowser', () => ({ FileBrowser: () => <div data-testid="file-browser" /> }));
-vi.mock( '@/components/FileViewer', () => ({ FileViewer: () => <div data-testid="file-viewer" /> }));
+vi.mock( '@/features/files/components/FileBrowser', () => ({ FileBrowser: () => <div data-testid="file-browser" /> }));
+vi.mock( '@/features/files/components/FileViewer', () => ({ FileViewer: () => <div data-testid="file-viewer" /> }));
 
 function setup(
   terminalElement: React.ReactNode = <div data-testid="terminal" />,

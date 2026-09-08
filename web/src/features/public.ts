@@ -19,12 +19,17 @@
 // Legacy directory mappings (to be removed after migration):
 // - components/ → features/
 // - hooks/ → features/
-// - explorer/ → features/explorer/
 
 // DONE (Phase 3): terminal/ migrated.
 // - terminal/ runtime → core/terminal-runtime/ (React-free)
 // - terminal/ UI + state → features/terminal/ (components/, hooks/, state/)
 // - Capsule → features/terminal/capsule/
+
+// DONE (Phase 4): explorer/ + file browser/viewer UI migrated.
+// - explorer/ → features/explorer/ (tree framework; extensions, stores)
+// - FileBrowser/FileViewer/viewers + file hooks → features/files/
+//   (components/, hooks/, model/, adapters/)
+// - legacy components/ + hooks/ still hold terminal layouts and app chrome
 
 // TODO: Export feature public APIs as they are migrated
 // export * as terminal from './terminal/public';

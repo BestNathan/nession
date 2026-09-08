@@ -17,7 +17,6 @@ const ALLOWED_IMPORTS = {
 const LEGACY_TO_LAYER = {
   'components': 'features',
   'hooks': 'features',
-  'explorer': 'features',
   'session-first': 'app',
   'services/websocket': 'core',
   'runtime': 'core',

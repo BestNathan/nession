@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileBrowser } from '@/components/FileBrowser';
-import { FileViewer } from '@/components/FileViewer';
+import { FileBrowser } from '@/features/files/components/FileBrowser';
+import { FileViewer } from '@/features/files/components/FileViewer';
 import { AppBackButton } from '@/session-first/patterns/AppBackButton';
 import {
   AlertDialog,

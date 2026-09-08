@@ -61,6 +61,8 @@ nession/
 │       │   └── websocket.ts  # WebSocketService singleton (connection, auth, events)
 │       ├── core/terminal-runtime/  # React-free terminal runtime (controller, transport, input)
 │       ├── features/terminal/      # Terminal feature: plugins, viewport, hooks, state, capsule
+│       ├── features/explorer/      # Extensible file-tree framework (Explorer, ExplorerStore, registry)
+│       ├── features/files/         # Files feature: RPC capability, browser/viewer UI, file hooks
 │       ├── runtime/           # SessionRuntime ownership + attach state machines (core candidate)
 │       └── components/
 │           ├── ui/           # shadcn/ui primitives (21 components + 2 custom wrappers, auto-generated)
