@@ -1,4 +1,4 @@
-import { TerminalWorkspace } from '../terminal/components/TerminalWorkspace';
+import { TerminalWorkspace } from '@/features/terminal/components/TerminalWorkspace';
 
 export function RenderTerminal({
   handleBackToDashboard,

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Session } from '../types';
-import type { AttachedSession } from '../components/TerminalView';
+import type { AttachedSession } from '@/features/terminal/components/TerminalWorkspace';
 import type { AttachChoice } from '../components/env/AttachDialog';
 import type { AgentProbe } from '../atoms/probe';
 import { resolveDeepLinkAttachChoice } from '../services/deepLinkAttach';

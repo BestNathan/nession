@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TerminalCapsule } from '@/session-first/capsule/TerminalCapsule';
+import { TerminalCapsule } from '@/features/terminal/capsule/TerminalCapsule';
 
 vi.mock('@/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({

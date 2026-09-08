@@ -98,14 +98,14 @@ export default defineConfig(({ mode }) => {
         'src/test/**',
         'src/App.tsx',
         // Glue / orchestration components (covered by integration)
-        'src/components/TerminalView.tsx',
-        'src/terminal/components/TerminalWorkspace.tsx',
+        'src/features/terminal/components/TerminalWorkspace.tsx',
+        
         // Complex UI component with WebSocket integration - covered by E2E
         'src/components/env/EnvPanel.tsx',
         // Deep link restoration - requires react-router integration testing
         'src/hooks/useDeepLinkRestore.ts',
         // ── Browser-only terminal internals (xterm lifecycle, mouse) ──
-        'src/terminal/MouseIntentResolver.ts',
+        'src/core/terminal-runtime/MouseIntentResolver.ts',
         'src/hooks/useSwipeGesture.ts',
         'src/components/SwipeableViewport.tsx',
         // ── Layout / chrome components (covered by integration) ──
@@ -114,9 +114,9 @@ export default defineConfig(({ mode }) => {
         'src/components/ModeBar.tsx',
         'src/components/SessionsSection.tsx',
         'src/components/RenderTerminal.tsx',
-        'src/components/TerminalBanner.tsx',
-        'src/terminal/components/TerminalTabs.tsx',
-        'src/terminal/components/TerminalBanner.tsx',
+        
+        'src/features/terminal/components/TerminalTabs.tsx',
+        'src/features/terminal/components/TerminalBanner.tsx',
         // ── WebSocket / interval integration (browser-only, covered by E2E) ──
         'src/hooks/useProbePolling.ts',
         'src/hooks/useQuickCommands.ts',

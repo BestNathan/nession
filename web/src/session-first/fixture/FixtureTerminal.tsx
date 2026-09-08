@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { CATPPUCCIN_MOCHA } from '@/terminal/ThemeManager';
+import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
 
 const FIXTURE_BUFFER = [
   '$ git status --short',

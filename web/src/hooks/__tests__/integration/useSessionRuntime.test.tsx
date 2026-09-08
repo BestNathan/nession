@@ -13,7 +13,7 @@ import {
   manualOverrideAtom,
 } from '@/atoms/session';
 import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
-import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/terminal/state';
+import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/features/terminal/state';
 import type { ConnectionState } from '@/services/socket/types';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 import type { AttachInfo } from '@/types';

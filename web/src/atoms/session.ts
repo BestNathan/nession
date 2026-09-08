@@ -3,7 +3,7 @@ import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
 import type { AttachChoice } from '../components/env/AttachDialog';
 import { p2pStateAtom, routeIntentEpochAtom } from './connection';
-import { terminalSessionStateAtom } from '../terminal/state/session';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 

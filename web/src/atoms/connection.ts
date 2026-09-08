@@ -4,7 +4,7 @@ import type { ConnectionState } from '@/services/socket/types';
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
 } from './session';
-import { terminalSessionStateAtom } from '../terminal/state/session';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 

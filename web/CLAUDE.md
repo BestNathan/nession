@@ -56,7 +56,7 @@ When architecture and shipping code disagree, treat `docs/design/` as the **targ
 
 | Rule | Detail |
 |------|--------|
-| Hooks | All custom hooks live in `src/hooks/` (or `src/terminal/hooks/`). Never put `use*` modules under `src/components/`. |
+| Hooks | All custom hooks live in `src/hooks/` (or a feature's `hooks/`, e.g. `src/features/terminal/hooks/`). Never put `use*` modules under `src/components/`. |
 | Components | `src/components/` is UI only. If a file starts with `use`, it belongs in hooks. |
 | WebSocket | New capabilities go in `src/services/websocket/plugins/`, not in core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` when needed for compatibility. |
@@ -103,7 +103,8 @@ src/
 ├── hooks/                 # App-level custom hooks
 ├── services/              # WS client, file ops, deep link, prefs, …
 │   └── websocket/         # Core service + plugins/
-├── terminal/              # xterm lifecycle, transport, input, state, UI
+├── core/terminal-runtime/ # React-free terminal runtime (controller, transport, input, xterm lifecycle)
+├── features/terminal/     # Terminal feature: capability plugins, viewport components, hooks, state, capsule
 ├── markdown/              # Markdown preview pipeline
 ├── lib/                   # Pure helpers (cn, encoding, language id, …)
 ├── extensions/            # Extension registry (e.g. claude-code)
@@ -126,7 +127,7 @@ E2E Playwright lives in repo-root `e2e/`, not under `web/`.
 
 ## 7. State and data
 
-- **Jotai** atoms under `src/atoms/` (and `src/terminal/state/`) split by domain (connection, session, layout, input, …). Prefer small atoms over mega-stores.
+- **Jotai** atoms under `src/atoms/` (and `src/features/terminal/state/`) split by domain (connection, session, layout, input, …). Prefer small atoms over mega-stores.
 - Dashboard / attach / file flows go through hooks (`useDashboard`, `useAppConnection`, `useFileViewer`, …) rather than embedding WS calls deep in presentational components.
 - Terminal attach supports **relay** (via server) and **P2P** (direct to agent). Respect existing `ConnectionManager` / transport boundaries.
 

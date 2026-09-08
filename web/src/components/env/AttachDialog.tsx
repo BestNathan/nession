@@ -15,7 +15,7 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { envApi } from '@/features/env';
 import { sessionsApi } from '@/features/sessions';
 import { loadAttachPrefs } from '../../services/attachPrefs';
-import { detectWebGLSupport } from '../../terminal/Renderer';
+import { detectWebGLSupport } from '../../core/terminal-runtime/Renderer';
 import { probeResultsAtom, probeRefreshRequestAtom } from '../../atoms/probe';
 import { EnvFileMultiSelect } from './EnvFileMultiSelect';
 

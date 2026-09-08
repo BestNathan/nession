@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/session-first/shellStyles';
-import type { CapsuleExperience } from '@/session-first/capsule/types';
+import type { CapsuleExperience } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/session-first/domainState';
 import type { ConnectionState } from '@/services/socket';
 

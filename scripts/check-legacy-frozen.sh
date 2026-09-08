@@ -23,7 +23,6 @@ LEGACY_DIRS=(
   "web/src/components/"
   "web/src/hooks/"
   "web/src/session-first/"
-  "web/src/terminal/"
   "web/src/explorer/"
 )
 

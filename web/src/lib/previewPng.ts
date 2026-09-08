@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { CanvasAddon } from '@xterm/addon-canvas';
-import { CATPPUCCIN_MOCHA } from '@/terminal/ThemeManager';
+import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
 
 /**
  * Render ANSI text to an offscreen terminal and download it as PNG.
