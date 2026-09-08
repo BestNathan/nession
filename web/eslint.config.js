@@ -95,17 +95,9 @@ export default tseslint.config(
     },
   },
 
-  // ── Terminal xterm.js integration ────────────────────────────────────
-  {
-    files: ['src/components/Terminal.tsx'],
-    rules: {
-      'max-lines-per-function': ['error', { max: 450, skipBlankLines: true, skipComments: true }],
-    },
-  },
-
   // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/features/files/components/FileBrowser.tsx', 'src/components/TerminalView.tsx'],
+    files: ['src/features/files/components/FileBrowser.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },
