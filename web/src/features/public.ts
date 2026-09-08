@@ -31,6 +31,19 @@
 //   (components/, hooks/, model/, adapters/)
 // - legacy components/ + hooks/ still hold terminal layouts and app chrome
 
+// DONE (Phase 5 slice 1): sessions + agents domain UI/data migrated.
+// - session list/details + shared dialogs + list hooks + domainState model
+//   → features/sessions/ (components/, hooks/, model/)
+// - agent cards/detail/delete + workspace agent page + agent data hooks
+//   → features/agents/ (components/, hooks/)
+// - features/agents reads the session-workspace channel vocabulary through
+//   features/sessions (model/domainState + ConnectionStatus) — recorded in
+//   each feature README
+// - legacy components/ + hooks/ + session-first/ still hold the Dashboard
+//   shell chrome (SessionList/SessionsSection, useDashboard composition),
+//   attach domain (SessionDropdown, AttachDialog, atoms/), and the
+//   session-first shell layouts — remaining Phase-5 slices
+
 // TODO: Export feature public APIs as they are migrated
 // export * as terminal from './terminal/public';
 // export * as explorer from './explorer/public';
