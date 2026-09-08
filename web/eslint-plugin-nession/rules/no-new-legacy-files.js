@@ -8,7 +8,7 @@
  * - src/components/ (except ui/) — should migrate to features/
  * - src/hooks/ — should migrate to features/
  * - src/session-first/ — should migrate to app/workbench/
- * - src/terminal/ — should consolidate into features/terminal/
+
  * - src/explorer/ — should consolidate into features/explorer/
  *
  * Allowed operations in legacy directories:
@@ -26,7 +26,7 @@ const LEGACY_DIRS = [
   'src/components/',
   'src/hooks/',
   'src/session-first/',
-  'src/terminal/',
+
   'src/explorer/',
 ];
 

@@ -12,15 +12,19 @@
  * Each feature should expose its public API through this file or through
  * feature-specific subdirectories (e.g., features/terminal/public.ts).
  *
- * During migration, legacy directories (components/, hooks/, terminal/, explorer/)
+ * During migration, legacy directories (components/, hooks/, explorer/)
  * are mapped to this layer. They will be gradually moved into features/.
  */
 
 // Legacy directory mappings (to be removed after migration):
 // - components/ → features/
 // - hooks/ → features/
-// - terminal/ → features/terminal/
 // - explorer/ → features/explorer/
+
+// DONE (Phase 3): terminal/ migrated.
+// - terminal/ runtime → core/terminal-runtime/ (React-free)
+// - terminal/ UI + state → features/terminal/ (components/, hooks/, state/)
+// - Capsule → features/terminal/capsule/
 
 // TODO: Export feature public APIs as they are migrated
 // export * as terminal from './terminal/public';

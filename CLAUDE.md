@@ -59,6 +59,9 @@ nession/
 │       ├── lib/utils.ts      # cn() helper (clsx + tailwind-merge)
 │       ├── services/
 │       │   └── websocket.ts  # WebSocketService singleton (connection, auth, events)
+│       ├── core/terminal-runtime/  # React-free terminal runtime (controller, transport, input)
+│       ├── features/terminal/      # Terminal feature: plugins, viewport, hooks, state, capsule
+│       ├── runtime/           # SessionRuntime ownership + attach state machines (core candidate)
 │       └── components/
 │           ├── ui/           # shadcn/ui primitives (21 components + 2 custom wrappers, auto-generated)
 │           ├── LoginPage.tsx         # Connection form (Card + Input + Button + Badge)
