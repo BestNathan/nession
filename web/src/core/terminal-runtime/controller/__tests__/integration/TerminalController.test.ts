@@ -2,7 +2,7 @@
 // web/src/terminal/controller/__tests__/TerminalController.test.ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
-import type { TerminalSession, TerminalStatus } from '@/terminal/state/session';
+import type { TerminalSession, TerminalStatus } from '@/features/terminal/state/session';
 import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
 import { CapsuleOcclusionScroll } from '@/core/terminal-runtime/capsule/occlusionScroll';
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
 import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pStateAtom } from '@/atoms/connection';
-import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
+import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/features/terminal/state';
 import { useAddressPlan } from '@/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
@@ -114,7 +114,7 @@ interface RuntimeConnectionSyncResult {
 function applyRuntimeMirrorSnapshot(opts: {
   snapshot: import('@/runtime/SessionRuntime').RuntimeMirrorSnapshot;
   inP2PTransport: boolean;
-  setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+  setTerminalState: (s: import('@/features/terminal/state/session').TerminalStatus) => void;
   setTransportGeneration: (n: number) => void;
   setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
   setConnectionState: (s: ConnectionState) => void;
@@ -141,7 +141,7 @@ function handleRuntimeEvent(
   ctx: {
     runtime: SessionRuntime;
     inP2PTransport: boolean;
-    setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+    setTerminalState: (s: import('@/features/terminal/state/session').TerminalStatus) => void;
     setTransportGeneration: (n: number) => void;
     setForcedRelay: (v: boolean) => void;
     setAgentTerminalApi: (api: TerminalAgentApi | null) => void;
@@ -184,7 +184,7 @@ function useRuntimeConnectionSync(opts: {
   configOwner: boolean;
   setP2pState: (s: ConnectionState) => void;
   setForcedRelay: (v: boolean) => void;
-  setTerminalState: (s: import('@/terminal/state/session').TerminalStatus) => void;
+  setTerminalState: (s: import('@/features/terminal/state/session').TerminalStatus) => void;
   setTransportGeneration: (n: number) => void;
 }): RuntimeConnectionSyncResult {
   const {

@@ -5,7 +5,7 @@ import { forcedRelayAtom } from '@/atoms/session';
 import {
   terminalSessionStateAtom,
   type TerminalStatus,
-} from '@/terminal/state';
+} from '@/features/terminal/state';
 
 export { P2P_MAX_RECONNECT, ATTACH_TIMEOUT_MS } from '@/runtime/AttachStateMachine';
 

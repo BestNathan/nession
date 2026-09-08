@@ -25,14 +25,14 @@ import {
   routeIntentEpochAtom,
   transportGenerationAtom,
 } from '@/atoms/connection';
-import { useTerminal } from '@/terminal/hooks/useTerminal';
+import { useTerminal } from '@/features/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/features/terminal/useSessionFirstTerminalAttach';
 import { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
 import { createAttachGate } from '@/core/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/core/terminal-runtime/DeviceProfile';
 import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
-import type { TerminalStatus } from '@/terminal/state/session';
-import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/terminal/state/ui';
+import type { TerminalStatus } from '@/features/terminal/state/session';
+import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/features/terminal/state/ui';
 
 function useSessionEnvSourcing(opts: {
   envRefs: EnvFileRef[];

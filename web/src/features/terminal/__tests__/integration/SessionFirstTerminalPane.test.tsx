@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { SessionFirstTerminalPane } from '@/features/terminal/SessionFirstTerminalPane';
 import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 
-vi.mock('@/terminal/components/TerminalViewport', () => ({
+vi.mock('@/features/terminal/components/TerminalViewport', () => ({
   TerminalViewport: () => <div data-testid="terminal-viewport" />,
 }));
 
-vi.mock('@/terminal/components/input/TerminalInputOverlay', () => ({
+vi.mock('@/features/terminal/components/input/TerminalInputOverlay', () => ({
   TerminalInputOverlay: () => null,
 }));
 

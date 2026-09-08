@@ -14,7 +14,7 @@ import {
   forcedRelayAtom,
   manualOverrideAtom,
 } from '@/atoms/session';
-import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/terminal/state';
+import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/features/terminal/state';
 import type { ConnectionState } from '@/services/socket/types';
 import type { AttachResult, TerminalAgentApi } from '@/features/terminal';
 import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';

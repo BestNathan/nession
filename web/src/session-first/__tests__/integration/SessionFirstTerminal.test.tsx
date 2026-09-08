@@ -3,7 +3,7 @@ import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/session-first/SessionFirstTerminal';
 import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
-import { bannerAtomFamily } from '@/terminal/state/ui';
+import { bannerAtomFamily } from '@/features/terminal/state/ui';
 import type { ConnectionState } from '@/services/socket/types';
 
 const { wsListeners } = vi.hoisted(() => ({
@@ -21,7 +21,7 @@ vi.mock('@/hooks/useP2PAttachTransport', () => ({
 vi.mock('@/features/terminal/useSessionFirstTerminalAttach', () => ({
   useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
-vi.mock('@/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
+vi.mock('@/features/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/hooks/useWebSocket', () => ({
   // The new-core WebSocketService surface: useTerminalOrchestration wraps the
   // service in a relayServerHandle and subscribes to connection-state changes
