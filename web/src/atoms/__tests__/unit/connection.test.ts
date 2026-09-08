@@ -1,18 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import {
-  p2pStateAtom, p2pConnectionAtom,
+  p2pStateAtom,
   activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
 } from '@/atoms/connection';
-import { terminalSessionStateAtom } from '@/terminal/state/session';
-import { lastResizeAtom } from '@/terminal/state/terminal';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { lastResizeAtom } from '@/features/terminal/state/terminal';
 import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom, orderedUrlsAtom } from '@/atoms/session';
 
 describe('base atoms', () => {
   it('start with defaults', () => {
     const store = createStore();
     expect(store.get(p2pStateAtom)).toBe('disconnected');
-    expect(store.get(p2pConnectionAtom)).toBeNull();
     expect(store.get(terminalSessionStateAtom)).toBe('idle');
     expect(store.get(lastResizeAtom)).toBeNull();
   });
@@ -58,6 +57,9 @@ describe('derived atoms', () => {
     store.set(manualOverrideAtom, 'ws://b/ws');
     expect(store.get(isSwitchingAtom)).toBe(true);
     store.set(p2pStateAtom, 'connected');
+    expect(store.get(isSwitchingAtom)).toBe(false);
+    store.set(p2pStateAtom, 'disconnected');
+    store.set(terminalSessionStateAtom, 'failed');
     expect(store.get(isSwitchingAtom)).toBe(false);
   });
 });

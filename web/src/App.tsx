@@ -4,10 +4,19 @@ import {
   RouterProvider,
   Navigate,
 } from 'react-router-dom';
-import { Dashboard } from './components/Dashboard';
-import { LoginPage } from './components/LoginPage';
-import { WebSocketContext } from './hooks/useWebSocket';
-import { useAppConnection } from './hooks/useAppConnection';
+import { LoginPage } from './app/LoginPage';
+import { WebSocketContext } from '@/shared/hooks/useWebSocket';
+import { useAppConnection } from './app/useAppConnection';
+import { FixtureApp } from './app/fixture/FixtureApp';
+import { FixtureShell } from './app/fixture/FixtureShell';
+import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
+import { SessionFirstShell } from './app/SessionFirstShell';
+
+// Module-stable (static element, immutable) — safe to create once at module
+// scope and reuse in both routers without a useMemo dependency.
+const fixtureRoute = { path: '/fixture', element: <FixtureShell /> };
+const fixtureWorkspaceRoute = { path: '/fixture/workspace', element: <FixtureWorkspace /> };
+const fixtureAppRoute = { path: '/fixture/app', element: <FixtureApp /> };
 
 function ReconnectingShell() {
   return (
@@ -33,6 +42,9 @@ function App() {
 
   const loginRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
+      fixtureWorkspaceRoute,
+      fixtureRoute,
       {
         path: '*',
         element: (
@@ -53,17 +65,19 @@ function App() {
 
   const appRouter = useMemo(
     () => createHashRouter([
+      fixtureAppRoute,
+      fixtureWorkspaceRoute,
+      fixtureRoute,
       {
         path: '/',
         element: (
           <WebSocketContext.Provider value={wsService!}>
-            <Dashboard connectionStatus={connectionStatus} />
+            <SessionFirstShell connectionStatus={connectionStatus} />
           </WebSocketContext.Provider>
         ),
         children: [
           { index: true, element: null },
           { path: 'terminal/:sessionId', element: null },
-          { path: 'env', element: null },
           { path: '*', element: <Navigate to="/" replace /> },
         ],
       },
@@ -71,7 +85,7 @@ function App() {
     [connectionStatus, wsService],
   );
 
-  if (isRestoringSession || (isAuthenticated && !wsService)) {
+  if (isRestoringSession) {
     return <ReconnectingShell />;
   }
 

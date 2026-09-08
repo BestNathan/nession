@@ -49,7 +49,13 @@ impl Drop for TestSession {
     fn drop(&mut self) {
         // Synchronous by necessity: Drop cannot await. A non-zero status just
         // means the test already cleaned up, so the result is ignored.
-        let _ = std::process::Command::new("tmux")
+        //
+        // Goes through tmux::cmd like every other tmux call in the workspace, so
+        // this kill lands on nession's socket. A bare `tmux kill-session` here
+        // would target the developer's real tmux server, where a name collision
+        // would kill *their* session.
+        let _ = nession_agent::tmux::cmd::global()
+            .std()
             .args(["kill-session", "-t", &self.name])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

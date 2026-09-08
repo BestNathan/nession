@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+import { E2E_ISOLATION_ENV } from './runtime';
+
 /**
  * E2E test configuration.
  *
@@ -22,33 +24,32 @@ import { defineConfig } from '@playwright/test';
  *   4173  — vite preview (default)
  *
  * ── Isolation ────────────────────────────────────────────────────────────
- * The agent's tmux commands use the system tmux socket at
- * $TMUX_TMPDIR/tmux-<uid>/default (default: /tmp/tmux-<uid>/default).
- * Without isolation the E2E agent would share a tmux server with the
- * developer's real tmux — session names collide, env files leak in, and
- * `create` fails silently whenever a leftover from a previous run has
- * the same name.
+ * Every Rust process below is launched with NESSION_TMUX_SOCKET pointing at
+ * this run's own socket, which the agent passes to tmux as an explicit
+ * `-S <path>`. The run's tmux sessions therefore live on a server of their
+ * own: invisible to `tmux ls`, and impossible to kill together with the
+ * developer's real sessions.
  *
- * webServer.env below forces TMUX_TMPDIR + NESSION_HOME to live under
- * /tmp/nession-e2e. Every Rust process the config spawns uses an
- * isolated tmux socket, and the server's env-files lookup (driven by
- * NESSION_HOME, not HOME) and explicit db_path (/tmp/nession-e2e/nession.db)
- * cover the on-disk state.
+ * TMUX_TMPDIR is NOT used. It is ignored whenever $TMUX is set — i.e. whenever
+ * anything runs from inside a tmux session — and tmux then silently uses the
+ * default socket, which is how an earlier version of this file ended up killing
+ * a developer's real tmux server (#574). `-S` is immune to $TMUX (measured).
+ *
+ * NESSION_HOME points into the same per-run directory, covering the server's
+ * env-files lookup and its SQLite db. Both paths come from ./runtime.ts, which
+ * generates them once per run and publishes them via process.env so every
+ * process Playwright spawns agrees on them.
  *
  * Crucially, HOME is NOT overridden here — `cargo run` invokes rustup,
  * which reads $HOME/.rustup and $HOME/.cargo. Setting HOME to the
- * isolated dir made rustup try to download the toolchain into
- * /tmp/nession-e2e/.rustup and fail with "No such file or directory".
+ * isolated dir made rustup try to download the toolchain into the run
+ * directory and fail with "No such file or directory".
  * The agent's working dir is set via `default_working_dir` in its
  * fixture config instead.
  *
- * globalSetup runs BEFORE the webServer processes spawn, so it clears
- * the runtime directory and kills any tmux server that might still hold
- * the socket from a prior aborted run.
+ * globalSetup runs BEFORE the webServer processes spawn; it creates the run
+ * directory and registers the teardown that kills this run's tmux server.
  */
-
-const E2E_RUN = '/tmp/nession-e2e';
-const E2E_TMUX_SOCKET = '/tmp/nession-e2e/tmux';
 
 export default defineConfig({
   testDir: './specs',
@@ -57,6 +58,15 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: 'html',
+  snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
+
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.02,
+      animations: 'disabled',
+      caret: 'hide',
+    },
+  },
 
   globalSetup: require.resolve('./globalSetup'),
 
@@ -70,8 +80,7 @@ export default defineConfig({
       command: `cargo run -p nession-server -- ${__dirname}/fixtures/server/config.toml`,
       cwd: `${__dirname}/..`,
       env: {
-        TMUX_TMPDIR: E2E_TMUX_SOCKET,
-        NESSION_HOME: E2E_RUN,
+        ...E2E_ISOLATION_ENV,
         RUST_LOG: 'info',  // Force logging to stdout
         RUST_BACKTRACE: '1',  // Enable backtraces for debugging
       },
@@ -87,8 +96,9 @@ export default defineConfig({
       command: `sleep 5 && cargo run -p nession-agent -- ${__dirname}/fixtures/agent-config.e2e.toml`,
       cwd: `${__dirname}/..`,
       env: {
-        TMUX_TMPDIR: E2E_TMUX_SOCKET,
-        NESSION_HOME: E2E_RUN,
+        ...E2E_ISOLATION_ENV,
+        TERM: 'xterm-256color',
+        LANG: 'C.UTF-8',
         RUST_LOG: 'info',  // Force logging to stdout
         RUST_BACKTRACE: '1',  // Enable backtraces for debugging
       },

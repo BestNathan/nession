@@ -474,7 +474,8 @@ fn parse_listen_address(addr: &str) -> (String, u16) {
 /// Returns `(cols, rows)`. Errors if the command fails, the output cannot
 /// be parsed, or the two dimensions cannot both be read as `u16`.
 async fn query_window_size(session_name: &str) -> Result<(u16, u16)> {
-    let output = tokio::process::Command::new("tmux")
+    let output = crate::tmux::cmd::global()
+        .tokio()
         .args([
             "display-message",
             "-p",

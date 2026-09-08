@@ -2,9 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
-import type { AttachChoice } from '@/components/env/AttachDialog';
-import { p2pConnectionAtom, p2pStateAtom, p2pEpochAtom } from '@/atoms/connection';
-import type { P2PConnection } from '@/hooks/useP2PConnection';
+import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
+import { p2pStateAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
   manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
@@ -12,7 +11,7 @@ import {
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom,
 } from '@/atoms/session';
-import { terminalSessionStateAtom } from '@/terminal/state/session';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 
 const navigate = () => {};
 
@@ -85,11 +84,42 @@ describe('action atoms', () => {
     expect(store.get(attachDialogSessionAtom)).toBeNull();
   });
 
-  it('attachToSessionAtom clears the previous P2P connection (session switch)', () => {
+  it('attachToSessionAtom bumps the route intent when re-attaching the session already attached', () => {
+    // Repro for #668: a second confirm on the SAME session carries a fresh
+    // connection token (server mints one per attach-info request). Without a
+    // route-intent bump the leased SessionRuntime silently rebuilds its agent
+    // socket under the stale 'attached' phase and never re-attaches — the
+    // terminal freezes (no output, no input, tmux client dropped).
     const store = createStore();
-    store.set(p2pConnectionAtom, {} as P2PConnection);
-    store.set(attachToSessionAtom, { session: makeSession(), choice: makeChoice(makeSession()), navigate });
-    expect(store.get(p2pConnectionAtom)).toBeNull();
+    const session = makeSession();
+    const first = makeChoice(session);
+    store.set(attachToSessionAtom, { session, choice: first, navigate });
+    const epochAfterFirst = store.get(routeIntentEpochAtom);
+    expect(epochAfterFirst).toBe(0);
+    store.set(terminalSessionStateAtom, 'attached');
+
+    const second = makeChoice(session);
+    second.attachInfo.connection_token = 'tok2'; // fresh token per dialog confirm
+    store.set(attachToSessionAtom, { session, choice: second, navigate });
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst + 1);
+    expect(store.get(attachInfoAtom)?.connection_token).toBe('tok2');
+  });
+
+  it('attachToSessionAtom does not bump the route intent when attaching a different session', () => {
+    // A different session changes sessionIdAtom, which releases the old
+    // runtime and creates a fresh one from phase 'idle' — no route-intent
+    // bump needed, and keeping the epoch stable keeps transport keys tidy.
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    const epochAfterFirst = store.get(routeIntentEpochAtom);
+
+    const other = makeSession();
+    other.session_id = 'agent:other';
+    other.session_name = 'other';
+    store.set(attachToSessionAtom, { session: other, choice: makeChoice(other), navigate });
+    expect(store.get(sessionIdAtom)).toBe('agent:other');
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst);
   });
 
   it('disconnectAtom clears all atoms', () => {
@@ -116,7 +146,7 @@ describe('action atoms', () => {
     const store = createStore();
     // First switch sets the override.
     store.set(switchAddressAtom, 'ws://same/ws');
-    const epochAfterFirst = store.get(p2pEpochAtom);
+    const epochAfterFirst = store.get(routeIntentEpochAtom);
     expect(epochAfterFirst).toBe(1);
 
     // Simulate connection having come up since the first switch — so the
@@ -127,7 +157,7 @@ describe('action atoms', () => {
     // (would otherwise flash a spinner for a logical no-op).
     store.set(switchAddressAtom, 'ws://same/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://same/ws');
-    expect(store.get(p2pEpochAtom)).toBe(epochAfterFirst); // epoch unchanged
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst); // epoch unchanged
     expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
 
@@ -139,14 +169,14 @@ describe('action atoms', () => {
     expect(store.get(manualOverrideAtom)).toBeNull();
     store.set(switchAddressAtom, 'ws://auto-resolved/ws');
     expect(store.get(manualOverrideAtom)).toBe('ws://auto-resolved/ws');
-    expect(store.get(p2pEpochAtom)).toBe(1);
+    expect(store.get(routeIntentEpochAtom)).toBe(1);
   });
 
   it('switchAddressAtom is a no-op when re-selecting Auto (null → null)', () => {
     const store = createStore();
     // Start in Auto mode (manualOverride is null).
     expect(store.get(manualOverrideAtom)).toBeNull();
-    const epochInitial = store.get(p2pEpochAtom);
+    const epochInitial = store.get(routeIntentEpochAtom);
     expect(epochInitial).toBe(0);
 
     // Simulate connection having come up.
@@ -158,7 +188,7 @@ describe('action atoms', () => {
     // times → no content".
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(p2pEpochAtom)).toBe(epochInitial); // epoch unchanged
+    expect(store.get(routeIntentEpochAtom)).toBe(epochInitial); // epoch unchanged
     expect(store.get(terminalSessionStateAtom)).toBe('attached'); // state preserved
   });
 
@@ -167,12 +197,12 @@ describe('action atoms', () => {
     const session = makeSession();
     store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
     store.set(switchAddressAtom, 'ws://a/ws');
-    const epochAfterExplicit = store.get(p2pEpochAtom);
+    const epochAfterExplicit = store.get(routeIntentEpochAtom);
     store.set(terminalSessionStateAtom, 'attached');
 
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit);
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit);
     expect(store.get(terminalSessionStateAtom)).toBe('attached');
   });
 
@@ -183,10 +213,23 @@ describe('action atoms', () => {
     choice.orderedUrls = ['ws://best/ws'];
     store.set(attachToSessionAtom, { session, choice, navigate });
     store.set(switchAddressAtom, 'ws://slow/ws');
-    const epochAfterExplicit = store.get(p2pEpochAtom);
+    const epochAfterExplicit = store.get(routeIntentEpochAtom);
 
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
-    expect(store.get(p2pEpochAtom)).toBe(epochAfterExplicit + 1);
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit + 1);
+  });
+
+  it('switchAddressAtom reconnects when failed manual → Auto resolves to same URL', () => {
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    store.set(switchAddressAtom, 'ws://a/ws');
+    const epochAfterExplicit = store.get(routeIntentEpochAtom);
+    store.set(terminalSessionStateAtom, 'failed');
+
+    store.set(switchAddressAtom, null);
+    expect(store.get(manualOverrideAtom)).toBeNull();
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit + 1);
   });
 });

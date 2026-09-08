@@ -1,650 +1,397 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { WebSocketService, createWebSocketService, destroyWebSocketService, getWebSocketService } from '@/services/websocket';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WebSocketService } from '@/services/socket';
+import type { CapabilityPlugin, SocketMessage } from '@/services/socket/types';
+import { agentsApi } from '@/features/agents';
+import { sessionsApi } from '@/features/sessions';
+import { serverApi } from '@/features/server';
+import { envApi } from '@/features/env';
+import { commandsApi } from '@/features/commands';
+import { claudeCodeApi } from '@/features/claude-code';
+import { terminalServerApi } from '@/features/terminal';
+import { MockWebSocket } from '@/test/mockWebSocket';
+import type { Agent, AuthResponse, Session } from '@/types';
 
-const WS = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
-
-interface MockWs {
-  _readyState: number;
-  onopen: ((ev: Event) => void) | null;
-  onmessage: ((ev: MessageEvent) => void) | null;
-  onerror: ((ev: Event) => void) | null;
-  onclose: ((ev: CloseEvent) => void) | null;
-  send: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  _mockSendCalls: string[];
-}
-
-let mocks: MockWs[] = [];
 const OriginalWebSocket = globalThis.WebSocket;
 
-function setupMock() {
-  mocks = [];
+const TEST_URL = 'ws://integration.test/ws';
+const AUTH_PAYLOAD = { auth_token: 'test-token', client_id: 'test-client' };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  function MockCtor(this: MockWs, _url: string) {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-    self._readyState = WS.CONNECTING;
-    self.onopen = null;
-    self.onmessage = null;
-    self.onerror = null;
-    self.onclose = null;
-    self._mockSendCalls = [];
-    self.send = vi.fn((data: string) => { self._mockSendCalls.push(data); });
-    self.close = vi.fn(function (this: MockWs) {
-      (self as unknown as { readyState: number }).readyState = WS.CLOSED;
-      self.onclose?.(new CloseEvent('close'));
-    });
-    Object.defineProperty(self, 'readyState', {
-      get() { return self._readyState; },
-      set(v: number) { self._readyState = v; },
-      configurable: true,
-    });
-    mocks.push(self);
+/**
+ * Transport + features integration suite.
+ *
+ * The legacy websocket integration suite drove the old singleton facade
+ * (create/get/destroy cycle, 'authenticated' status) over a fake socket. The
+ * singleton facade is gone; this file exercises the replacement — the
+ * WebSocketService transport with the app's full capability set installed —
+ * over the same fake WebSocket, proving the wire-level semantics the per-unit
+ * suites assume: handshake-then-connected, request correlation, push fan-out
+ * into the feature singletons' consumers, plugin replace/unregister, and the
+ * re-login remount that keeps a newer service alive across a stale teardown.
+ *
+ * The plugin list mirrors useAppConnection's SERVER_CAPABILITIES (the module
+ * singletons install into whichever service owns them); the handshake mirrors
+ * the app's client.auth + auth_token/client_id flow. `maxReconnectAttempts: 0`
+ * keeps failure paths deterministic — no timers ever get scheduled.
+ */
+const SERVER_CAPABILITIES = [
+  agentsApi,
+  sessionsApi,
+  serverApi,
+  envApi,
+  commandsApi,
+  claudeCodeApi,
+  terminalServerApi,
+];
+
+/** Services created during the current test; disposed (idempotently) in afterEach. */
+const activeServices = new Set<WebSocketService>();
+
+/** Yield to the microtask queue a few times (promise chains settle in order). */
+async function drainMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await Promise.resolve();
   }
-  (MockCtor as unknown as { CONNECTING: number }).CONNECTING = WS.CONNECTING;
-  (MockCtor as unknown as { OPEN: number }).OPEN = WS.OPEN;
-  (MockCtor as unknown as { CLOSING: number }).CLOSING = WS.CLOSING;
-  (MockCtor as unknown as { CLOSED: number }).CLOSED = WS.CLOSED;
-  globalThis.WebSocket = MockCtor as unknown as typeof WebSocket;
 }
 
-function last(): MockWs { return mocks[mocks.length - 1]; }
-function findSendCall(mock: MockWs, prefix: string): string | undefined {
-  return mock._mockSendCalls.find((c) => c.includes(prefix));
+/** Parse the nth JSON frame a mock socket sent over the wire. */
+function frameAt(socket: MockWebSocket, index: number): SocketMessage {
+  const raw = socket.send.mock.calls[index]?.[0] as string | undefined;
+  return JSON.parse(raw ?? '') as SocketMessage;
 }
 
-describe('WebSocketService', () => {
-  beforeEach(() => { destroyWebSocketService(); setupMock(); });
-  afterEach(() => { globalThis.WebSocket = OriginalWebSocket; destroyWebSocketService(); });
+/** Last frame a mock socket sent (auth frames and requests alike). */
+function lastFrame(socket: MockWebSocket): SocketMessage {
+  return frameAt(socket, socket.send.mock.calls.length - 1);
+}
 
-  // Helper: drive a successful connect+auth
-  async function connectAndAuth(ws: WebSocketService) {
-    const p = ws.connect();
-    const mock = last();
-    mock._readyState = WS.OPEN;
-    mock.onopen!(new Event('open'));
-    const authId = JSON.parse(findSendCall(mock, 'client.auth')!).id;
-    mock.onmessage!(new MessageEvent('message', {
-      data: JSON.stringify({ msg_type: 'ok', id: authId, timestamp: Date.now(), payload: { status: 'success', message: 'ok' } }),
-    }));
-    await p;
-  }
+/** Encode a server → client frame (string payloads only in this suite). */
+function encodeFrame(type: string, id: string, payload: Record<string, unknown>): string {
+  return JSON.stringify({ msg_type: type, id, timestamp: Date.now(), payload });
+}
 
-  describe('connect / auth', () => {
-    it('authenticates on success', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      expect(ws.getConnectionStatus()).toBe('authenticated');
-    });
+/** Answer a request frame with a response that echoes type + envelope id. */
+function reply(socket: MockWebSocket, request: SocketMessage, payload: Record<string, unknown>): void {
+  socket.message(encodeFrame(request.msg_type, request.id, payload));
+}
 
-    it('rejects on auth failure', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const p = ws.connect();
-      const mock = last();
-      mock._readyState = WS.OPEN;
-      mock.onopen!(new Event('open'));
-      const authId = JSON.parse(findSendCall(mock, 'client.auth')!).id;
-      mock.onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: authId, timestamp: Date.now(), payload: { status: 'failed', message: 'bad token' } }),
-      }));
-      await expect(p).rejects.toThrow('bad token');
-    });
-
-    it('rejects on WebSocket error before open', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const p = ws.connect();
-      last().onerror!(new Event('error'));
-      await expect(p).rejects.toThrow('WebSocket connection failed');
-    });
-
-    it('no-ops if already connected', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const count = mocks.length;
-      // Second connect should return immediately
-      await ws.connect();
-      expect(mocks.length).toBe(count); // No new WebSocket
-    });
+/** Build a service with the app's capability set and an auth handshake. */
+function makeService(): WebSocketService {
+  const service = new WebSocketService(TEST_URL, SERVER_CAPABILITIES, {
+    maxReconnectAttempts: 0,
+    handshake: (surface) =>
+      surface.request<AuthResponse>('client.auth', AUTH_PAYLOAD).then((res) => {
+        if (res.status !== 'success') {
+          throw new Error(res.message || 'Authentication failed');
+        }
+      }),
   });
+  activeServices.add(service);
+  return service;
+}
 
-  describe('disconnect', () => {
-    it('closes socket and resets state', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      ws.connect();
-      ws.disconnect();
-      expect(last().close).toHaveBeenCalled();
-      expect(ws.getConnectionStatus()).toBe('disconnected');
-    });
+/**
+ * Drive a full connect: open the socket, answer the client.auth handshake
+ * frame, and wait for the transport to reach its post-handshake 'connected'.
+ */
+async function connectAndAuth(service: WebSocketService): Promise<MockWebSocket> {
+  const connected = service.connect();
+  const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+  socket.open();
 
-    it('clears reconnect timer', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      last().onclose!(new CloseEvent('close'));
-      // Disconnect before reconnect fires
-      ws.disconnect();
-    });
-  });
+  const auth = frameAt(socket, 0);
+  expect(auth.msg_type).toBe('client.auth');
+  reply(socket, auth, { status: 'success' });
 
-  describe('listAgents / listSessions', () => {
-    it('listAgents returns parsed agents', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
+  await connected;
+  expect(service.connectionState).toBe('connected');
+  return socket;
+}
 
-      const p = ws.listAgents();
-      const listId = JSON.parse(findSendCall(last(), 'client.agents.list')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: listId, timestamp: Date.now(), payload: { agents: [{ agent_id: 'a1', hostname: 'h', ip_address: '1.2.3.4', port: 80, status: 'online', session_count: 0, last_heartbeat: new Date().toISOString() }] } }),
-      }));
-      const result = await p;
-      expect(result).toHaveLength(1);
-      expect(result[0].agent_id).toBe('a1');
-    });
+/** Test fixture, shape-matched to the shared Agent type. */
+function makeAgent(agentId: string): Agent {
+  return {
+    agent_id: agentId,
+    hostname: `host-${agentId}`,
+    ip_address: '127.0.0.1',
+    port: 19090,
+    status: 'online',
+    session_count: 0,
+    last_heartbeat: '2026-01-01T00:00:00Z',
+  };
+}
 
-    it('throws when not authenticated', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await expect(ws.listAgents()).rejects.toThrow('Not authenticated');
-    });
-  });
+/** Test fixture, shape-matched to the shared Session type. */
+function makeSession(agentId: string, sessionName: string): Session {
+  return {
+    session_id: `${agentId}:${sessionName}`,
+    agent_id: agentId,
+    session_name: sessionName,
+    status: 'active',
+    window_count: 1,
+    attached_clients: 0,
+    last_activity: '2026-01-01T00:00:00Z',
+  };
+}
 
-  describe('requestAttach', () => {
-    it('sends attach request', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      const p = ws.requestAttach('agent:x', 'p2p');
-      const attId = JSON.parse(findSendCall(last(), 'client.session.attach')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: attId, timestamp: Date.now(), payload: { mode: 'p2p', session_id: 'agent:x', agent_address: 'ws://a/ws', connection_token: 'tok' } }),
-      }));
-      const info = await p;
-      expect(info.mode).toBe('p2p');
-      expect(info.agent_address).toBe('ws://a/ws');
-    });
-  });
-
-  describe('createSession', () => {
-    it('sends create request', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      const p = ws.createSession('agent-1', 'my-session');
-      const cId = JSON.parse(findSendCall(last(), 'client.session.create')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: cId, timestamp: Date.now(), payload: { success: true, session_id: 'agent-1:my-session' } }),
-      }));
-      const result = await p;
-      expect(result.success).toBe(true);
-    });
-  });
-
-  describe('killSession', () => {
-    it('sends kill request', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      const p = ws.killSession('agent:x');
-      const kId = JSON.parse(findSendCall(last(), 'client.session.kill')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: kId, timestamp: Date.now(), payload: { success: true } }),
-      }));
-      const result = await p;
-      expect(result.success).toBe(true);
-    });
-  });
-
-  describe('getP2PConnectionInfo', () => {
-    it('returns null for relay mode', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(ws.getP2PConnectionInfo({ mode: 'relay', session_id: 'x' })).toBeNull();
-    });
-
-    it('returns url and token for p2p mode', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const info = ws.getP2PConnectionInfo({
-        mode: 'p2p', session_id: 'x', agent_address: 'ws://agent/ws', connection_token: 'tok',
-      });
-      expect(info).toEqual({ url: 'ws://agent/ws', token: 'tok' });
-    });
-
-    it('returns null when missing agent_address', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(ws.getP2PConnectionInfo({ mode: 'p2p', session_id: 'x', connection_token: 'tok' })).toBeNull();
-    });
-  });
-
-  describe('event subscriptions', () => {
-    it('agents.changed notifies subscribers', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cb = vi.fn();
-      ws.onAgentsChanged(cb);
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'agents.changed', id: '', timestamp: Date.now(), payload: { agents: [] } }),
-      }));
-      expect(cb).toHaveBeenCalledWith([]);
-    });
-
-    it('agents.changed without agents field does not crash', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cb = vi.fn();
-      ws.onAgentsChanged(cb);
-      // Send agents.changed without the agents field in payload
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'agents.changed', id: '', timestamp: Date.now(), payload: {} }),
-      }));
-      // Should not call the callback since agents field is missing
-      expect(cb).not.toHaveBeenCalled();
-    });
-
-    it('sessions.changed notifies subscribers', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cb = vi.fn();
-      ws.onSessionsChanged(cb);
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'sessions.changed', id: '', timestamp: Date.now(), payload: { sessions: [] } }),
-      }));
-      expect(cb).toHaveBeenCalledWith([]);
-    });
-
-    it('onConnectionChange fires on status transition', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const statuses: string[] = [];
-      ws.onConnectionChange((s) => statuses.push(s));
-      await connectAndAuth(ws);
-      expect(statuses).toContain('connecting');
-      expect(statuses).toContain('connected');
-      expect(statuses).toContain('authenticated');
-    });
-
-    it('terminal.output routes by sessionId', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cbA = vi.fn();
-      const cbB = vi.fn();
-      ws.onTerminalOutput('sess-A', cbA);
-      ws.onTerminalOutput('sess-B', cbB);
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'terminal.output', id: '', timestamp: Date.now(), payload: { session_id: 'sess-A', data: 'hi' } }),
-      }));
-      expect(cbA).toHaveBeenCalledTimes(1);
-      const arg = cbA.mock.calls[0][0] as Uint8Array;
-      expect(ArrayBuffer.isView(arg)).toBe(true);
-      expect([...arg]).toEqual([104, 105]);
-      expect(cbB).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('singleton', () => {
-    it('create/destroy cycle works', () => {
-      const s1 = createWebSocketService('ws://a', 't1');
-      expect(getWebSocketService()).toBe(s1);
-      createWebSocketService('ws://b', 't2');
-      expect(s1.getConnectionStatus()).toBe('disconnected');
-      destroyWebSocketService();
-      expect(getWebSocketService()).toBeNull();
-    });
-  });
-
-  describe('terminal I/O', () => {
-    it('sendTerminalInput sends correct format', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      last()._mockSendCalls.length = 0;
-
-      ws.sendTerminalInput('sess-1', 'ls\r');
-      const tInput = findSendCall(last(), 'terminal.input');
-      expect(tInput).toBeTruthy();
-      const msg = JSON.parse(tInput!);
-      expect(msg.msg_type).toBe('terminal.input');
-      expect(msg.payload.session_id).toBe('sess-1');
-    });
-
-    it('throws when not connected', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(() => ws.sendTerminalInput('s', 'd')).toThrow('WebSocket not connected');
-    });
-  });
-
-  describe('message handling', () => {
-    it('handles unhandled message type gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'unknown.type', id: 'xyz', timestamp: Date.now(), payload: {} }),
-      }));
-
-      expect(consoleSpy).toHaveBeenCalledWith('Unhandled message type:', 'unknown.type', expect.any(Object));
-      consoleSpy.mockRestore();
-    });
-
-    it('handles agents list response event directly', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cb = vi.fn();
-      ws.onAgentsChanged(cb);
-
-      // Simulate direct event (not routed through pending request)
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'client.agents.list.response', id: 'direct', timestamp: Date.now(), payload: { agents: [{ agent_id: 'a1', hostname: 'h', ip_address: '1.2.3.4', port: 80, status: 'online', session_count: 0, last_heartbeat: new Date().toISOString() }] } }),
-      }));
-
-      expect(cb).toHaveBeenCalled();
-    });
-
-    it('handles sessions list response event directly', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const cb = vi.fn();
-      ws.onSessionsChanged(cb);
-
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'client.sessions.list.response', id: 'direct', timestamp: Date.now(), payload: { sessions: [{ session_id: 'a:x', agent_id: 'a', session_name: 'x', status: 'active', window_count: 1, attached_clients: 0, last_activity: new Date().toISOString() }] } }),
-      }));
-
-      expect(cb).toHaveBeenCalled();
-    });
-
-    it('handles malformed JSON gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      last().onmessage!(new MessageEvent('message', { data: 'not valid json{' }));
-
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
-    });
-  });
-
-  describe('message ID generation', () => {
-    it('generates unique IDs', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      // Trigger two requests and check their message IDs
-      ws.listAgents();
-      ws.listSessions();
-
-      const calls = last()._mockSendCalls;
-      expect(calls.length).toBeGreaterThanOrEqual(2);
-      const id1 = JSON.parse(calls[calls.length - 2]).id;
-      const id2 = JSON.parse(calls[calls.length - 1]).id;
-      expect(id1).not.toBe(id2);
-      expect(id1).toMatch(/^msg_\d+_/);
-      expect(id2).toMatch(/^msg_\d+_/);
-    });
-  });
-
-  describe('request timeout', () => {
-    it('creates request with timeout configuration', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      // Verify request has a timeout by checking that the request
-      // can be resolved normally before timeout
-      const p = ws.listAgents();
-      const listId = JSON.parse(findSendCall(last(), 'client.agents.list')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: listId, timestamp: Date.now(), payload: { agents: [] } }),
-      }));
-      const result = await p;
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('reconnect', () => {
-    it('schedules reconnect on close', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      last().onclose!(new CloseEvent('close'));
-
-      // Should log scheduling reconnect
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Scheduling reconnect'));
-      consoleSpy.mockRestore();
-    });
-
-    it('stops reconnect after max attempts', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-
-      // Manually exhaust reconnect attempts
-      const svc = ws as unknown as {
-        reconnectAttempts: number;
-        reconnectTimer: ReturnType<typeof setTimeout> | null;
+/** Plugin whose install/teardown are recorded into a shared event log. */
+function makePlugin(name: string, events: string[]): CapabilityPlugin {
+  return {
+    name,
+    install: () => {
+      events.push(`install:${name}`);
+      return () => {
+        events.push(`teardown:${name}`);
       };
-      svc.reconnectAttempts = 5; // maxReconnectAttempts is 5
+    },
+  };
+}
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      last().onclose!(new CloseEvent('close'));
+describe('WebSocketService + feature singletons', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    activeServices.clear();
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
 
-      expect(consoleSpy).toHaveBeenCalledWith('Max reconnection attempts reached');
-      consoleSpy.mockRestore();
+  afterEach(() => {
+    for (const service of activeServices) {
+      service.dispose();
+    }
+    activeServices.clear();
+    vi.unstubAllGlobals();
+    globalThis.WebSocket = OriginalWebSocket;
+  });
+
+  describe('connect lifecycle', () => {
+    it('stays connecting through the auth handshake and only then reaches connected', async () => {
+      const service = makeService();
+      const states: string[] = [];
+      service.onConnectionStateChange((state) => states.push(state));
+
+      const connected = service.connect();
+      expect(service.connectionState).toBe('connecting');
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const socket = MockWebSocket.instances[0];
+      expect(socket.url).toBe(TEST_URL);
+      expect(socket.send).not.toHaveBeenCalled(); // nothing on the wire before open
+
+      socket.open();
+      const auth = frameAt(socket, 0);
+      expect(auth.msg_type).toBe('client.auth');
+      expect(auth.payload).toEqual(AUTH_PAYLOAD);
+
+      // Handshake not acknowledged yet: connect() stays pending, state frozen.
+      let resolved = false;
+      void connected.then(() => {
+        resolved = true;
+      });
+      await drainMicrotasks();
+      expect(resolved).toBe(false);
+      expect(service.connectionState).toBe('connecting');
+
+      reply(socket, auth, { status: 'success' });
+      await connected;
+      expect(service.connectionState).toBe('connected');
+      expect(states).toEqual(['connecting', 'connected']);
     });
 
-    it('does not schedule duplicate reconnect timers', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      // Connect without awaiting auth — we just need the ws setup
-      ws.connect().catch(() => {});
-      const mock = last();
-      mock._readyState = WebSocket.OPEN;
-      mock.onopen!(new Event('open'));
+    it('rejects the connection when the server refuses auth', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const service = makeService();
+        const connected = service.connect();
+        const socket = MockWebSocket.instances[0];
+        socket.open();
 
-      // Fire two close events rapidly — second should hit guard
-      mock.onclose!(new CloseEvent('close'));
-      mock.onclose!(new CloseEvent('close'));
+        const auth = frameAt(socket, 0);
+        reply(socket, auth, { status: 'failed', message: 'Bad token' });
 
-      // Clean up
-      ws.disconnect();
+        await expect(connected).rejects.toThrow('Bad token');
+        expect(service.connectionState).toBe('disconnected');
+        // The failed connection left the features bound but unusable — the
+        // transport rejects at the 'disconnected' state gate.
+        await expect(agentsApi.listAgents()).rejects.toThrow('Connection lost');
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
   });
 
-  describe('rejectAllPendingRequests', () => {
-    it('rejects pending requests on disconnect', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
+  describe('feature requests over the wire', () => {
+    it('listAgents sends client.agents.list and unwraps the response agents', async () => {
+      const service = makeService();
+      const socket = await connectAndAuth(service);
 
-      // Start a request that will be pending when close fires
-      const p = ws.listAgents();
-      // Immediately close before response arrives
-      const promiseResult = p.catch((e) => e.message);
-      last().onclose!(new CloseEvent('close'));
-      // Clean up reconnect timer to avoid unhandled errors
-      ws.disconnect();
+      const pending = agentsApi.listAgents();
+      const request = frameAt(socket, 1); // frame 0 is the auth handshake
+      expect(request.msg_type).toBe('client.agents.list');
+      expect(request.payload).toEqual({});
+      expect(typeof request.id).toBe('string');
 
-      const msg = await promiseResult;
-      expect(msg).toBe('Connection closed');
+      const agents = [makeAgent('agent-1'), makeAgent('agent-2')];
+      reply(socket, request, { agents });
+      await expect(pending).resolves.toEqual(agents);
+    });
+
+    it('fetchSessions wires agent_id/force onto the wire and surfaces stale_agents', async () => {
+      const service = makeService();
+      const socket = await connectAndAuth(service);
+
+      const first = sessionsApi.fetchSessions();
+      const request1 = frameAt(socket, 1);
+      expect(request1.msg_type).toBe('client.sessions.list');
+      expect(request1.payload).toEqual({});
+      const sessions = [makeSession('agent-a', 'main')];
+      reply(socket, request1, { sessions, stale_agents: ['agent-a'] });
+      await expect(first).resolves.toEqual({ sessions, stale_agents: ['agent-a'] });
+
+      const second = sessionsApi.fetchSessions({ agentId: 'agent-b', force: true });
+      const request2 = frameAt(socket, 2);
+      expect(request2.payload).toEqual({ agent_id: 'agent-b', force: true });
+      reply(socket, request2, { sessions: [] });
+      await expect(second).resolves.toEqual({ sessions: [], stale_agents: [] });
+    });
+
+    it('a wire-level error frame rejects the pending feature request with the remote message', async () => {
+      const service = makeService();
+      const socket = await connectAndAuth(service);
+
+      const pending = agentsApi.deleteAgent('agent-1');
+      const request = frameAt(socket, 1);
+      expect(request.msg_type).toBe('client.agent.delete');
+      expect(request.payload).toEqual({ agent_id: 'agent-1' });
+
+      socket.message(
+        encodeFrame('error', request.id, { message: 'Agent online' }),
+      );
+      await expect(pending).rejects.toThrow('Agent online');
     });
   });
 
-  describe('internal coverage — direct access', () => {
-    // These tests bypass the mock WebSocket to reach private methods
-    // that V8 coverage cannot trace through indirect callback dispatch
-    it('handles pending request resolution via onmessage', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
+  describe('push fan-out into feature subscribers', () => {
+    it('agents.changed reaches onAgentsChanged consumers; unsubscribing stops delivery', async () => {
+      const service = makeService();
+      const socket = await connectAndAuth(service);
 
-      const p = ws.listAgents();
-      const listId = JSON.parse(findSendCall(last(), 'client.agents.list')!).id;
-      // This triggers handleMessage → pending request resolution
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: listId, timestamp: Date.now(), payload: { agents: [] } }),
-      }));
-      const result = await p;
-      expect(result).toEqual([]);
+      const first = vi.fn();
+      const second = vi.fn();
+      agentsApi.onAgentsChanged(first);
+      const unsubscribe = agentsApi.onAgentsChanged(second);
+
+      const agents = [makeAgent('agent-1')];
+      socket.message(encodeFrame('agents.changed', 'push-1', { agents }));
+      expect(first).toHaveBeenCalledWith(agents);
+      expect(second).toHaveBeenCalledWith(agents);
+
+      unsubscribe();
+      socket.message(encodeFrame('agents.changed', 'push-2', { agents: [makeAgent('agent-2')] }));
+      expect(first).toHaveBeenCalledTimes(2); // still subscribed — push-2 delivered
+      expect(first).toHaveBeenLastCalledWith([makeAgent('agent-2')]);
+      expect(second).toHaveBeenCalledTimes(1); // unsubscribed — push-2 never delivered
     });
 
-    it('getConnectionStatus reports correct status after auth', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(ws.getConnectionStatus()).toBe('disconnected');
-      await connectAndAuth(ws);
-      expect(ws.getConnectionStatus()).toBe('authenticated');
-    });
+    it('sessions.changed and client.sessions.list.response both fan out to onSessionsChanged', async () => {
+      const service = makeService();
+      const socket = await connectAndAuth(service);
 
-    it('isConnected returns true when authenticated', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(ws.isConnected()).toBe(false);
-      await connectAndAuth(ws);
-      expect(ws.isConnected()).toBe(true);
-    });
+      const callback = vi.fn();
+      sessionsApi.onSessionsChanged(callback);
 
-    it('isauthenticated reflects auth state', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(ws.isauthenticated()).toBe(false);
-      await connectAndAuth(ws);
-      expect(ws.isauthenticated()).toBe(true);
-    });
+      const pushed = [makeSession('agent-a', 'main')];
+      socket.message(encodeFrame('sessions.changed', 'push-1', { sessions: pushed }));
+      expect(callback).toHaveBeenCalledWith(pushed);
 
-    it('onConnectionChange unsubscribe works', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const cb = vi.fn();
-      const unsub = ws.onConnectionChange(cb);
-      unsub();
-      // Verify idempotent — calling again doesn't throw
-      unsub();
-    });
-
-    it('onAgentsChanged unsubscribe works', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const cb = vi.fn();
-      const unsub = ws.onAgentsChanged(cb);
-      unsub();
-      unsub(); // idempotent
-    });
-
-    it('onSessionsChanged unsubscribe works', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const cb = vi.fn();
-      const unsub = ws.onSessionsChanged(cb);
-      unsub();
-      unsub(); // idempotent
-    });
-
-    it('onTerminalOutput unsubscribe works', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const cb = vi.fn();
-      const unsub = ws.onTerminalOutput('sess-1', cb);
-      unsub();
-      // Unsubscribe again (should be no-op since already removed)
-      unsub();
-      // Unsubscribe when no callbacks exist for session
-      const unsub2 = ws.onTerminalOutput('sess-2', vi.fn());
-      unsub2();
-    });
-
-    it('connect throws on WebSocket error after open', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      const p = ws.connect();
-      last().onerror!(new Event('error'));
-      await expect(p).rejects.toThrow('WebSocket connection failed');
+      const echoed = [makeSession('agent-a', 'work')];
+      socket.message(encodeFrame('client.sessions.list.response', 'push-2', { sessions: echoed }));
+      expect(callback).toHaveBeenCalledWith(echoed);
+      expect(callback).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe('sendTerminalResize', () => {
-    it('sends terminal.resize message', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      last()._mockSendCalls.length = 0;
+  describe('plugin registry', () => {
+    it('use() replaces a same-name plugin (old teardown first); unregister removes it', () => {
+      const service = makeService();
+      const events: string[] = [];
+      const first = makePlugin('dup', events);
+      const second = makePlugin('dup', events);
 
-      ws.sendTerminalResize('sess-1', 120, 40);
-      const tResize = findSendCall(last(), 'terminal.resize');
-      expect(tResize).toBeTruthy();
-      const msg = JSON.parse(tResize!);
-      expect(msg.msg_type).toBe('terminal.resize');
-      expect(msg.payload.cols).toBe(120);
-      expect(msg.payload.rows).toBe(40);
+      service.use(first);
+      expect(events).toEqual(['install:dup']);
+
+      service.use(second); // replace — no double registration, no throw
+      expect(events).toEqual(['install:dup', 'teardown:dup', 'install:dup']);
+
+      expect(service.unregister('dup')).toBe(true);
+      expect(events).toEqual(['install:dup', 'teardown:dup', 'install:dup', 'teardown:dup']);
+      expect(service.unregister('dup')).toBe(false); // nothing registered anymore
+      expect(events).toHaveLength(4);
     });
 
-    it('throws when not connected for resize', () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      expect(() => ws.sendTerminalResize('s', 80, 24)).toThrow('WebSocket not connected');
+    it('dispose tears down each plugin exactly once and the transport rejects further use', async () => {
+      const service = makeService();
+      const events: string[] = [];
+      service.use(makePlugin('lifecycle', events));
+      const socket = await connectAndAuth(service);
+
+      // A live conversation before the teardown.
+      const pending = agentsApi.listAgents();
+      const request = frameAt(socket, 1);
+      reply(socket, request, { agents: [makeAgent('agent-1')] });
+      await expect(pending).resolves.toEqual([makeAgent('agent-1')]);
+
+      service.dispose();
+      service.dispose(); // idempotent — no second teardown
+      expect(events.filter((event) => event === 'teardown:lifecycle')).toHaveLength(1);
+      expect(service.connectionState).toBe('disconnected');
+
+      await expect(service.connect()).rejects.toThrow('WebSocketService disposed');
+      await expect(service.request('anything', {})).rejects.toThrow('WebSocketService disposed');
+      await expect(service.waitForConnection()).rejects.toThrow('WebSocketService disposed');
+      expect(() => service.send('anything', {})).toThrow('WebSocketService disposed');
+      // Plugin teardown unbound the feature singletons from this service.
+      await expect(agentsApi.listAgents()).rejects.toThrow('agents feature is not connected');
     });
   });
 
-  describe('env file management', () => {
-    it('listEnvFiles returns files', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.listEnvFiles();
-      const id = JSON.parse(findSendCall(last(), 'client.env.list')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { files: [{ name: 'a.env', source: 'server', size: 3, modified: 0, var_count: 1 }] } }),
-      }));
-      const result = await p;
-      expect(result.files).toHaveLength(1);
-      expect(result.files[0].name).toBe('a.env');
-    });
+  describe('re-login remount', () => {
+    it('a stale service teardown leaves the newer service and its consumers serving', async () => {
+      // First login — service A owns the singletons and one consumer.
+      const serviceA = makeService();
+      const socketA = await connectAndAuth(serviceA);
+      const staleConsumer = vi.fn();
+      agentsApi.onAgentsChanged(staleConsumer);
 
-    it('getEnvFile sends name and source', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.getEnvFile({ name: 'a.env', source: 'agent', agent_id: 'h1' });
-      const raw = findSendCall(last(), 'client.env.get')!;
-      const sent = JSON.parse(raw);
-      expect(sent.payload).toMatchObject({ name: 'a.env', source: 'agent', agent_id: 'h1' });
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true, content: 'X=1', in_use_by: [] } }),
-      }));
-      const result = await p;
-      expect(result.content).toBe('X=1');
-    });
+      // Re-login: service B installs over A before A is torn down (the
+      // registration between install and stale-release window). B's install
+      // is a replace — A's teardown, when it runs, must only drop the
+      // consumers that registered under A's generation.
+      const serviceB = makeService();
+      const socketB = await connectAndAuth(serviceB);
+      const currentConsumer = vi.fn();
+      agentsApi.onAgentsChanged(currentConsumer);
 
-    it('writeEnvFile passes overwrite flag', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.writeEnvFile({ name: 'a.env', source: 'server' }, 'K=V', true);
-      const sent = JSON.parse(findSendCall(last(), 'client.env.write')!);
-      expect(sent.payload).toMatchObject({ name: 'a.env', content: 'K=V', overwrite: true });
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true } }),
-      }));
-      expect((await p).success).toBe(true);
-    });
+      serviceA.dispose(); // stale release from the old generation
 
-    it('deleteEnvFile resolves', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.deleteEnvFile({ name: 'a.env', source: 'server' });
-      const id = JSON.parse(findSendCall(last(), 'client.env.delete')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { success: true } }),
-      }));
-      expect((await p).success).toBe(true);
-    });
+      // Pushes over B's socket reach B's consumers only.
+      const agents = [makeAgent('agent-1')];
+      socketB.message(encodeFrame('agents.changed', 'push-1', { agents }));
+      expect(currentConsumer).toHaveBeenCalledWith(agents);
+      expect(staleConsumer).not.toHaveBeenCalled();
 
-    it('applySessionEnv sends session and files', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.applySessionEnv('agent:s', [{ name: 'a.env', source: 'server' }]);
-      const sent = JSON.parse(findSendCall(last(), 'client.session.env.apply')!);
-      expect(sent.payload.session_id).toBe('agent:s');
-      expect(sent.payload.env_files).toHaveLength(1);
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id: sent.id, timestamp: Date.now(), payload: { success: true, warnings: [] } }),
-      }));
-      expect((await p).success).toBe(true);
-    });
+      // Feature requests route over B's socket only.
+      const socketASendsBefore = socketA.send.mock.calls.length;
+      const pending = agentsApi.listAgents();
+      const request = lastFrame(socketB);
+      expect(request.msg_type).toBe('client.agents.list');
+      expect(request.payload).toEqual({});
+      expect(socketA.send.mock.calls.length).toBe(socketASendsBefore); // A's socket stays silent
+      reply(socketB, request, { agents: [makeAgent('agent-2')] });
+      await expect(pending).resolves.toEqual([makeAgent('agent-2')]);
 
-    it('unsetSessionEnv resolves', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await connectAndAuth(ws);
-      const p = ws.unsetSessionEnv('agent:s', [{ name: 'a.env', source: 'server' }]);
-      const id = JSON.parse(findSendCall(last(), 'client.session.env.unset')!).id;
-      last().onmessage!(new MessageEvent('message', {
-        data: JSON.stringify({ msg_type: 'ok', id, timestamp: Date.now(), payload: { success: true } }),
-      }));
-      expect((await p).success).toBe(true);
-    });
-
-    it('env methods throw when not authenticated', async () => {
-      const ws = new WebSocketService('ws://localhost/ws', 'token');
-      await expect(ws.listEnvFiles()).rejects.toThrow('Not authenticated');
+      // The final dispose detaches the singletons completely.
+      serviceB.dispose();
+      await expect(agentsApi.listAgents()).rejects.toThrow('agents feature is not connected');
     });
   });
 });

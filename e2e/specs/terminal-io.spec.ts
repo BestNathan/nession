@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForDashboard } from '../helpers/dashboard';
+import { waitForSessionFirst } from '../helpers/sessionFirst';
 
 /**
  * Read the xterm buffer text via the `xtermInstance` property exposed on the
@@ -37,9 +37,25 @@ async function waitForTerminal(page: import('@playwright/test').Page): Promise<v
   }).toPass({ timeout: 5_000 });
 }
 
+/**
+ * The session-first shell collapses its sessions list into the left drawer
+ * unless a wide two-pane list is showing. Open the drawer when the list is
+ * not visible so list actions (create / select) are reachable.
+ */
+async function ensureSessionsList(page: import('@playwright/test').Page): Promise<void> {
+  const create = page.getByTestId('session-first-create');
+  try {
+    await expect(create).toBeVisible({ timeout: 1_000 });
+  } catch {
+    await page.getByTestId('session-first-open-drawer').click();
+    await expect(create).toBeVisible({ timeout: 10_000 });
+  }
+}
+
 /** Create a session via the UI and return its name. */
 async function createSession(page: import('@playwright/test').Page, name: string): Promise<void> {
-  const createButton = page.getByRole('button', { name: 'Create' });
+  await ensureSessionsList(page);
+  const createButton = page.getByTestId('session-first-create');
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click();
 
@@ -49,8 +65,8 @@ async function createSession(page: import('@playwright/test').Page, name: string
   await dialog.getByRole('button', { name: 'Create' }).click();
   await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-  // Wait for session to appear in list
-  await expect(page.locator(`p.font-medium:has-text("${name}")`)).toBeVisible({ timeout: 10_000 });
+  // Wait for session to appear in the session-first list
+  await expect(page.locator('[data-testid="session-item-row"]', { hasText: name })).toBeVisible({ timeout: 10_000 });
 }
 
 /** Attach to a session via the UI, selecting the specified mode. */
@@ -59,11 +75,12 @@ async function attachToSession(
   sessionName: string,
   mode: 'Auto' | 'P2P' | 'Relay',
 ): Promise<void> {
-  // Find the session row by the hover class and the session name within it
-  const row = page.locator('div[class*="hover:bg-accent"]', {
-    has: page.locator(`p:has-text("${sessionName}")`),
-  });
-  await row.getByRole('button', { name: 'Attach', exact: true }).click();
+  // Find the session row and click it — the session-first list selects a
+  // session by opening AttachDialog pre-seeded with that session.
+  await ensureSessionsList(page);
+  const row = page.locator('[data-testid="session-item-row"]', { hasText: sessionName });
+  await expect(row).toBeVisible();
+  await row.getByRole('button').first().click();
 
   // AttachDialog opens
   const dialog = page.getByRole('dialog');
@@ -96,20 +113,23 @@ async function typeInTerminal(page: import('@playwright/test').Page, text: strin
   await page.keyboard.type(text, { delay: 20 });
 }
 
-// NOTE: terminal-io tests are skipped due to tmux terminal initialization
-// issues in CI environment ("terminal does not support clear").
-// The agent connection problem has been resolved, but tmux session creation
-// needs separate investigation for CI environments.
-// TODO: Re-enable once tmux CI environment issues are resolved.
+// NOTE: these tests are CI-gated per repo convention (the fixture specs use
+// the same `test.skip(!process.env.CI, ...)` pattern): they drive a real
+// tmux-backed agent, which the e2e webServer stack only provides in CI. The
+// historical blocker ("terminal does not support clear" at tmux session
+// creation) is stale — the agent forces TERM=xterm-256color when creating
+// sessions. A failure here in CI is a genuine regression: investigate it,
+// don't re-skip the test.
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
     await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForDashboard(page);
+    await waitForSessionFirst(page);
   });
 
-  test.skip('relay mode: echo command and verify output', async ({ page }) => {
-    const SESSION_NAME = 'e2e-terminal-relay';
+  test('relay mode: echo command and verify output', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-terminal-relay-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');
 
@@ -126,8 +146,9 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test.skip('P2P mode: echo command and verify output', async ({ page }) => {
-    const SESSION_NAME = 'e2e-terminal-p2p';
+  test('P2P mode: echo command and verify output', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-terminal-p2p-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'P2P');
 

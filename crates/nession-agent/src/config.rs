@@ -144,6 +144,22 @@ pub struct AgentConfig {
     #[serde(default)]
     pub file_root: Option<String>,
 
+    /// Absolute path of the tmux socket this agent addresses with `tmux -S`.
+    ///
+    /// When unset, resolution falls to `$NESSION_TMUX_SOCKET` and then to
+    /// `<temp dir>/nession-<uid>/tmux.sock`
+    /// (see [`nession_common::tmux_socket`]). There is no fallback to tmux's
+    /// default socket at any point: nession's sessions never share a server
+    /// with the user's own.
+    ///
+    /// Set this to run two agents on one host, or when the default temp
+    /// directory is unsuitable. The `nession` CLI applies the same resolution,
+    /// so a value set here must be readable by whatever runs the CLI or it will
+    /// list no sessions. Keep the path short — a unix socket path is capped at
+    /// 103 bytes.
+    #[serde(default)]
+    pub tmux_socket_path: Option<String>,
+
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
@@ -169,6 +185,7 @@ impl Default for AgentConfig {
             disable_address_autodetect: false,
             default_working_dir: default_working_dir(),
             file_root: None,
+            tmux_socket_path: None,
             logging: LoggingConfig::default(),
         }
     }
@@ -314,6 +331,54 @@ mod tests {
         )
         .unwrap();
         assert!(config.display_name.is_none());
+    }
+
+    #[test]
+    fn tmux_socket_path_absent_by_default() {
+        // Absent means "resolve it" (env var, then the documented default) —
+        // never "use tmux's default socket".
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            "#,
+        )
+        .unwrap();
+        assert!(config.tmux_socket_path.is_none());
+    }
+
+    #[test]
+    fn tmux_socket_path_parsed_from_config() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+            agent_id = "test"
+            server_url = "ws://localhost:8443"
+            auth_token = "tok"
+            tmux_socket_path = "/tmp/nession-agent-b/tmux.sock"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.tmux_socket_path.as_deref(),
+            Some("/tmp/nession-agent-b/tmux.sock")
+        );
+    }
+
+    #[test]
+    fn tmux_socket_path_round_trips_through_serde() {
+        // The agent serialises its config back out (e.g. `nession agent init`),
+        // so a value set by the operator has to survive the round trip.
+        let config = AgentConfig {
+            tmux_socket_path: Some("/tmp/nession-rt/tmux.sock".to_string()),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: AgentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(
+            parsed.tmux_socket_path.as_deref(),
+            Some("/tmp/nession-rt/tmux.sock")
+        );
     }
 
     // --- Inlined from tests/config_test.rs ---

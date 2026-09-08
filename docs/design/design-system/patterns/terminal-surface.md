@@ -21,12 +21,13 @@ Connection lifecycle presentation uses [ConnectionStatus](connection-status.md) 
 ```text
 ┌─ Terminal well (data-terminal-capsule-host on session-first path) ────────┐
 │  TerminalBanner          ← attach / reconnect / P2P / relay messaging     │
-│  ┌─ TerminalViewport (data-terminal-viewport) ──────────────────────────┐ │
+│  ┌─ TerminalViewport (data-terminal-viewport) — full well height ──────┐ │
 │  │  xterm.js grid (Catppuccin; independent of Zinc UI chrome)          │ │
-│  │  bottom padding ← --terminal-capsule-clearance (dynamic)            │ │
+│  │  scrollback may pass under capsule (ChatGPT-style overlay)          │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
+│  ::after fade ← --terminal-capsule-occlusion (visual only)               │
 │  [ App only: TerminalScrollOverlay — page up/down / jump to bottom ]    │
-│  ┌─ TerminalCapsule (absolute dock) ───────────────────────────────────┐ │
+│  ┌─ TerminalCapsule (absolute dock, z-10) ─────────────────────────────┐ │
 │  │  InputComposer  |  CommandsComposer (App)                           │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -34,11 +35,11 @@ Connection lifecycle presentation uses [ConnectionStatus](connection-status.md) 
 
 | Part | Role |
 |------|------|
-| **Well** | Relative container; hosts viewport + floating capsule; publishes clearance CSS var |
+| **Well** | Relative container; hosts viewport + floating capsule; publishes occlusion CSS var |
 | **TerminalBanner** | Non-blocking connection / attach / mode-switch messaging above viewport |
-| **TerminalViewport** | Mount point for xterm; `box-border` + dynamic bottom pad so last row clears capsule |
+| **TerminalViewport** | Mount point for xterm; **full well height** — no padding-bottom inset for capsule |
 | **xterm instance** | Stable for session attach lifetime; keep-alive when shell hides surface (CSS), not unmount |
-| **TerminalScrollOverlay** | App-only touch scroll accelerators; must not steal IME focus |
+| **TerminalScrollOverlay** | App-only touch scroll accelerators; positioned above capsule via occlusion var |
 | **TerminalCapsule** | Secondary input plane; see [terminal-capsule.md](terminal-capsule.md) |
 
 ## Input planes
@@ -52,7 +53,7 @@ Three planes, strict priority:
 ```
 
 | Plane | Sends via | Typical use |
-|-------|-----------|-------------|
+|-------|-----------|---------------|
 | **xterm direct** | `TerminalInputHandler` → transport | vim, shell, TUI, tmux prefix, paste into PTY |
 | **Capsule compose** | `sendText` → `controller.handleInput` | Long commands, history, paste buffer, phys keys (App) |
 | **Legacy toolbar** | Same as capsule | Agent-first dashboard until session-first migration completes |
@@ -83,7 +84,7 @@ Desktop shell does **not** install global key handlers that compete with xterm. 
 | Scroll overlay `pointerdown` | Keep IME focused (`preventDefault` on overlay chrome only) | — |
 | Commands mode | Phys key buttons | Immediate sequences via quickcmd source |
 
-**Rule:** Tap-to-focus opens IME even when capsule is visible. Capsule clearance padding ensures cursor row remains visible above dock + soft keyboard growth (resize observer on dock host).
+**Rule:** Tap-to-focus opens IME even when capsule is visible. Live output pins above the fake-terminal band; scroll up to read lines that pass under the capsule.
 
 **Rule:** Top-level spatial gestures ([app.md](../../interaction/app.md) — Sessions / Workspace) must not fire from normal terminal scroll regions. Edge activation zones belong in App shell spec, not here.
 
@@ -103,17 +104,21 @@ Desktop shell does **not** install global key handlers that compete with xterm. 
 
 **Frozen:** Scrolling the viewport must never dismiss an in-progress IME composition.
 
-## Viewport fit & capsule clearance
+## Viewport fit & capsule occlusion
 
-Terminal viewport height = well height − `--terminal-capsule-clearance`.
+**xterm uses the full well height.** The capsule is a floating overlay. The bottom occlusion band is a **fake terminal** (same background, no live text when pinned to bottom). Scroll margin keeps the live bottom above that band; scrolling up lets history pass under the capsule.
 
-Clearance is computed at runtime:
+Occlusion height is computed at runtime:
 
 ```text
-clearance = max(0, hostBottom − dockTop) + terminalClearanceGap
+occlusion = max(0, hostBottom − dockTop) + terminalClearanceGap
 ```
 
-Published on `[data-terminal-capsule-host]` by `useCapsuleDockClearance`; consumed by `[data-terminal-viewport]` padding-bottom.
+Published on `[data-terminal-capsule-host]` as `--terminal-capsule-occlusion` by `useCapsuleDockClearance`. Consumed by:
+
+- `[data-terminal-capsule-host]::after` — opaque fake-terminal band (visual cover when pinned)
+- `CapsuleOcclusionScroll` — scroll margin so live output stops above the band
+- `TerminalScrollOverlay` — `bottom` offset so controls sit above the dock
 
 | Trigger | Must recalculate |
 |---------|------------------|
@@ -123,14 +128,16 @@ Published on `[data-terminal-capsule-host]` by `useCapsuleDockClearance`; consum
 | Window resize / orientation | Yes |
 | Popover open (History / Commands) | No — popovers flip upward; dock geometry unchanged |
 
-When clearance is `0` (legacy paths without capsule host), viewport uses full well height.
+When occlusion is `0` (legacy paths without capsule host), viewport and scroll chrome use full well height.
+
+**Anti-pattern:** Padding-bottom on `[data-terminal-viewport]` to reserve capsule space — this shortens the xterm grid and is not the ChatGPT overlay model.
 
 ## Connection & attach lifecycle
 
 Independent of capsule layout. Driven by session state machine (`idle` → `connecting` → `connected` → `attached` | `reconnecting` | `failed`).
 
 | State | Terminal surface behavior |
-|-------|----------------------------|
+|-------|---------------------------|
 | Pre-attach | Banner shows progress; input planes disabled; outbound input/resize buffered |
 | `attached` | Input enabled; pending flush to transport |
 | Relay loss | Banner + reconnect; preserve xterm buffer when possible |
@@ -145,7 +152,7 @@ Relay vs P2P does **not** change interaction model — only latency, banner copy
 |-------|----------|
 | Container resize | Local xterm grid sync immediately; PTY resize debounced (~200ms), first fire immediate |
 | Surface hidden (Workspace active) | xterm stays mounted; **must** refit on reveal (`fit()` + pending PTY resize) |
-| Capsule dock height change | Clearance recalc only; xterm refit if well size unchanged |
+| Capsule dock height change | Occlusion recalc only; xterm refit when well size unchanged |
 | Font size change | `FontSizeManager` adjusts xterm; PTY resize follows |
 | Profile switch (Web ↔ App width) | Target: preserve scrollback where possible; today may remount — see migration |
 
@@ -168,7 +175,7 @@ Presentation differs by **`[data-experience]`** token remap, not by ad hoc break
 
 ## Relationship to TerminalCapsule
 
-- **Terminal Surface** = well + viewport + banners + scroll helpers + clearance contract.
+- **Terminal Surface** = well + viewport + banners + scroll helpers + occlusion contract.
 - **TerminalCapsule** = floating composer inside the well; defers compose semantics to [terminal-capsule.md](terminal-capsule.md).
 
 Do not document compose frozen semantics in two places — capsule spec owns Enter / Shift+Enter / ghost / Tab / IME rules.
@@ -180,80 +187,20 @@ Do not document compose frozen semantics in two places — capsule spec owns Ent
 - Use permanent Terminal \| Files split on Web session-first shell ([web.md](../../interaction/web.md)).
 - Encode clearance or control metrics as raw Tailwind numeric classes in terminal code paths.
 - Make capsule the only input path on desktop (xterm direct input remains primary).
-
-## Visual Contract
-
-Derived from [visual-language.md](../../visual-language.md) and canonical Terminal screens ([#563](https://github.com/BestNathan/nession/pull/563), [#568](https://github.com/BestNathan/nession/pull/568)).
-
-### Dominance
-
-- Terminal Surface is the **strongest visual weight in the app** when active (P1, R-S1).
-- xterm glyphs + Catppuccin own terminal typography — UI chrome around the well must recede (R-T5).
-
-### Information hierarchy
-
-- **Primary:** program output in xterm grid — highest contrast on screen.
-- **Secondary:** [TerminalCapsule](terminal-capsule.md) compose plane.
-- **Tertiary:** TerminalBanner attach/reconnect messages — informative, non-blocking.
-
-### Alignment
-
-- Well is **flush** edge-to-edge within the active surface region — no outer card padding shrinking the grid.
-- Banner spans well width above viewport; capsule docked to well bottom center (Web) or inset (App).
-
-### Density
-
-- **Densest context in the product** ([visual-language.md](../../visual-language.md) §4) — maximize rows visible; clearance is the only intentional vertical sacrifice for compose.
-
-### Whitespace
-
-- No margin box around the well — whitespace lives *inside* xterm scrollback, not as UI padding around the hero surface.
-- Dynamic bottom padding on viewport only — for capsule clearance, not decorative gutter.
-
-### Contrast
-
-- Well background: darkest surface (`domain.terminal.wellBackground` / `--sf-terminal-well` during migration — target: generated Domain token only).
-- Banner text: secondary — must not flash success green for healthy attach.
-
-### Surface treatment
-
-- **Flush, borderless, no radius** on the primary work surface (R-S1).
-- No shadow on the well — elevation belongs to capsule only.
-
-### State-driven emphasis
-
-| State | Emphasis |
-|-------|----------|
-| Attached, healthy | Banner absent or quiet; xterm full contrast |
-| Connecting / reconnecting | Banner `conditional-prominent`; input disabled until attached |
-| Workspace surface active | Terminal hidden (CSS), not unmounted — no chrome competing while hidden |
-| Capsule flat ↔ stacked | Clearance recalc — viewport emphasis unchanged |
-
-### Anti-patterns
-
-- Bordered/card terminal well on session-first path.
-- Terminal \| Files permanent split.
-- Chat-style message list replacing xterm.
-- Collapsed Agent+Session status in banner without labels.
-- Zero clearance so last line hides under capsule.
-- Desktop-only capsule input (xterm direct must remain primary on Web).
-
-### Canonical reference
-
-- Web: `/#/fixture` 1440×900 — flush `terminal-well`, fixture xterm, capsule clearance ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — spatial center terminal page + scroll overlay ([#568](https://github.com/BestNathan/nession/pull/568)).
+- Shrink the xterm grid with viewport padding to “make room” for the capsule — use overlay + scroll instead.
 
 ## Acceptance
 
-- [ ] Session-first Web path: capsule host + viewport clearance; last line visible above dock.
-- [ ] Session-first App path: same clearance; IME tap-to-focus; overlay scroll does not kill IME.
+- [ ] Session-first Web path: xterm full well height; capsule spans shell max width; live bottom above fake-terminal band.
+- [ ] Session-first App path: same overlay + scroll-margin model; IME tap-to-focus; scroll overlay above dock.
+- [ ] At live bottom, newest lines stay above the fake-terminal band; scroll up to read under the capsule.
 - [ ] `toolbarDisabled` disables capsule and quick keys; xterm scrollback still readable.
 - [ ] Workspace surface switch refits xterm on return (no zero-size or clipped grid).
 - [ ] Relay and P2P attach paths share the same input/focus rules.
 - [ ] Experience tokens drive font/scrollback/control sizes — no second magic scale in terminal/.
 - [ ] Playwright matrix: Web desktop + App viewport ([#547](https://github.com/BestNathan/nession/issues/547)) — attach, type in xterm, type in capsule, scroll, soft keyboard clearance.
 
-**Contract (future):** `design/contracts/patterns/terminal-surface.json` — clearance min gap, host/viewport data attributes, attached gating.
+**Contract (future):** `design/contracts/patterns/terminal-surface.json` — occlusion min gap, host/viewport data attributes, attached gating.
 
 ## References
 

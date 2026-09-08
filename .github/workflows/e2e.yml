@@ -2,6 +2,11 @@ name: E2E Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      update_visual_snapshots:
+        description: 'Regenerate canonical visual baselines (download artifact and commit PNGs)'
+        type: boolean
+        default: false
   push:
     branches: [staging]
   pull_request:
@@ -60,7 +65,23 @@ jobs:
       - run: cargo build -p nession-server -p nession-agent
 
       # ── Run E2E ───────────────────────────────────────────────────────
-      - run: cd e2e && npx playwright test
+      - name: Run E2E tests
+        env:
+          CI: true
+        run: |
+          cd e2e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
+            npx playwright test fixture-visual --update-snapshots
+          else
+            npx playwright test
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        with:
+          name: canonical-visual-baselines
+          path: e2e/specs/__snapshots__/
+          retention-days: 7
 
       # ── Report ────────────────────────────────────────────────────────
       - uses: actions/upload-artifact@v4
@@ -69,3 +90,12 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-snapshot-diffs
+          path: |
+            e2e/test-results/
+            e2e/specs/__snapshots__/
+          retention-days: 14

@@ -81,15 +81,6 @@ export interface AttachInfo {
  */
 export type AttachMode = 'auto' | 'p2p' | 'relay';
 
-export interface WebSocketMessage {
-  msg_type: string;
-  id: string;
-  timestamp: number;
-  payload: Record<string, unknown>;
-}
-
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
-
 export interface AuthResponse {
   status: 'success' | 'failed';
   message: string;
@@ -132,7 +123,7 @@ export type {
   SessionEnvActiveResponse,
   SessionEnvResponse,
   SessionEnvQueryResponse,
-} from './components/env/types';
+} from '@/features/env/types';
 
 export type {
   QuickCommandItem,
@@ -140,7 +131,7 @@ export type {
   CommandsAddResponse,
   CommandsRemoveResponse,
   CommandsUpdateResponse,
-} from './components/quickCommands/types';
+} from '@/features/commands/types';
 
 /** Server info returned by client.server.info. */
 export interface ServerInfo {

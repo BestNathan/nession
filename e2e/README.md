@@ -13,13 +13,17 @@ e2e/
 │   │   └── config.toml    # Server config with isolated paths
 │   └── agent-config.e2e.toml  # Agent config with isolated working dir
 ├── helpers/               # Test utilities
-│   ├── dashboard.ts       # waitForDashboard helper
-│   └── reset.ts           # resetAuth helper
+│   ├── sessionFirst.ts    # waitForSessionFirst helper (shell ready signal)
+│   ├── reset.ts           # resetAuth helper
+│   ├── fixtureVisual.ts   # Frozen-clock helpers for fixture visual baselines
+│   └── ui-assert/         # Reusable UI assertions (composer)
 ├── specs/                 # Test specifications
 │   ├── login.spec.ts      # Authentication tests
 │   ├── session-lifecycle.spec.ts  # Session create/kill tests
-│   └── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
-├── globalSetup.ts         # Pre-test cleanup and isolation
+│   ├── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
+│   └── fixture-*.spec.ts  # Deterministic /fixture routes (functional + visual)
+├── runtime.ts             # Per-run paths (unique tmux socket)
+├── globalSetup.ts         # Pre-test setup + teardown
 └── playwright.config.ts   # Playwright configuration
 ```
 
@@ -57,15 +61,40 @@ E2E tests use several isolation mechanisms to prevent interference with the host
 
 ### tmux Socket Isolation
 
-Tests use a dedicated tmux socket directory to avoid conflicts with the user's tmux sessions:
+Each run gets its own tmux socket, which the Rust processes address as an explicit
+`tmux -S <path>`. The run's sessions therefore live on a tmux server of their own:
+invisible to `tmux ls`, and impossible to kill together with the developer's real
+sessions.
 
 ```typescript
-// playwright.config.ts
+// e2e/runtime.ts generates this once per run and publishes it via process.env
 env: {
-  TMUX_TMPDIR: '/tmp/nession-e2e/tmux',
+  NESSION_TMUX_SOCKET: '/tmp/nession-e2e-tmux-<8 hex>/tmux.sock',
   NESSION_HOME: '/tmp/nession-e2e',
 }
 ```
+
+**`TMUX_TMPDIR` is not used, and must not be reintroduced.** tmux ignores it whenever
+`$TMUX` is set — i.e. whenever anything runs from inside a tmux session — and silently
+uses the default socket instead. An earlier version of `globalSetup.ts` ran
+`TMUX_TMPDIR=… tmux kill-server` before each run believing it was isolated; it was
+landing on the developer's real socket and destroyed a live session (#574). `-S` is
+immune to `$TMUX` (measured). `scripts/check-tmux-socket.sh` fails the commit if
+either pattern comes back.
+
+#### Orphans after a hard kill
+
+There is no pre-run sweep any more, by design. A run killed with Ctrl-C or SIGKILL
+never reaches its teardown, so its socket, tmux server and directory survive — and
+because every run picks a new path, those orphans accumulate rather than being
+overwritten. Clean up by hand:
+
+```bash
+for s in /tmp/nession-e2e-tmux-*/tmux.sock; do tmux -S "$s" kill-server; done
+rm -rf /tmp/nession-e2e-tmux-*
+```
+
+A recovery tool is tracked in #582.
 
 ### Database Isolation
 
@@ -132,13 +161,15 @@ Tests terminal input/output in both relay and P2P modes:
 
 **See:** PR #317 for implementation details.
 
-### Flaky Dashboard Load
+### Slow Shell Load
 
-**Symptom:** `waitForDashboard` times out waiting for filter-row.
+**Symptom:** `waitForSessionFirst` times out waiting for the session-first shell.
 
 **Root Cause:** Slow CI environment causes agent registration to take longer than expected.
 
-**Solution:** Increased timeout to 90 seconds in `helpers/dashboard.ts`.
+**Solution:** `helpers/sessionFirst.ts` waits 90 seconds for the
+`[data-testid="session-first-shell"]` element (the shell only renders after
+login, so its presence covers the handshake + initial fetch).
 
 ### WebSocket Proxy Issues
 
@@ -185,7 +216,7 @@ npx playwright test -g "session lifecycle"
 
 1. Create a new file in `e2e/specs/`
 2. Import helpers from `e2e/helpers/`
-3. Use `waitForDashboard()` before interacting with the dashboard
+3. Use `waitForSessionFirst()` before interacting with the shell
 4. Use direct WebSocket URL: `ws://localhost:19090/ws`
 5. Add unique session names to avoid conflicts
 6. Use Playwright's auto-retrying assertions (`expect().toBeVisible()`, etc.)
@@ -194,13 +225,13 @@ Example:
 
 ```typescript
 import { test, expect } from '@playwright/test';
-import { waitForDashboard } from '../helpers/dashboard';
+import { waitForSessionFirst } from '../helpers/sessionFirst';
 
 test.describe('My Feature', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/?token=e2e-test-token&server_url=' + 
       encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForDashboard(page);
+    await waitForSessionFirst(page);
   });
 
   test('does something', async ({ page }) => {
@@ -230,6 +261,36 @@ The E2E workflow (`.github/workflows/e2e.yml`):
 **Timeout:** 30 minutes per job.
 
 **Retry Policy:** Tests retry 2 times in CI (configured in `playwright.config.ts`).
+
+## Canonical visual regression (#561 / #548)
+
+Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `specs/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
+
+| Baseline | Viewport | Snapshot name |
+|----------|----------|---------------|
+| Web Active Terminal | 1440×900 | `web-active-terminal.png` |
+| Web Workspace | 1440×900 | `web-workspace.png` |
+| Web compact Terminal | 1024×768 | `web-compact-terminal.png` |
+| Web compact Workspace | 1024×768 | `web-compact-workspace.png` |
+| App Terminal | 390×844 | `app-terminal.png` |
+| App Sessions | 390×844 | `app-sessions.png` |
+| App Workspace | 390×844 | `app-workspace.png` |
+
+Snapshots live in `e2e/specs/__snapshots__/fixture-visual.spec.ts/` (committed to git).
+
+### Updating baselines
+
+After an **intentional** visual change to a canonical screen:
+
+```bash
+./scripts/update-canonical-snapshots.sh
+# or manually:
+cd e2e && CI=true npx playwright test fixture-visual --update-snapshots
+```
+
+Review the diff, commit updated PNGs, and note the visual change in the PR. CI uploads `visual-snapshot-diffs` artifacts on failure.
+
+Relative-time labels use a frozen clock (`e2e/helpers/fixtureVisual.ts`) during visual tests only.
 
 ## Maintenance
 

@@ -6,7 +6,6 @@
 use anyhow::{anyhow, Result};
 use nession_agent::tmux::control::ControlModeSession;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
@@ -14,7 +13,8 @@ use super::TestSession;
 
 /// Create a detached tmux session at 200x60 (matching production sizing).
 async fn create_session(name: &str) -> Result<()> {
-    let status = Command::new("tmux")
+    let status = nession_agent::tmux::cmd::global()
+        .tokio()
         .args(["new-session", "-d", "-s", name, "-x", "200", "-y", "60"])
         .status()
         .await?;

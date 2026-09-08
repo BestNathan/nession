@@ -3,9 +3,10 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
+import nession from './eslint-plugin-nession/index.js'
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage'] },
+  { ignores: ['dist', 'coverage', 'eslint-plugin-nession/**'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -16,10 +17,16 @@ export default tseslint.config(
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
+      nession,
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      'nession/no-primitive-tokens': 'error',
+      'nession/no-cross-experience-token': 'error',
+      'nession/no-capsule-magic-metrics': 'error',
+      'nession/no-sf-overlay-vars': 'error',
+      'nession/no-reverse-imports': 'error', // Enforce layered architecture import direction
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
@@ -83,20 +90,14 @@ export default tseslint.config(
     files: ['**/__tests__/**', '**/*.test.*', '**/*.spec.*'],
     rules: {
       'max-lines-per-function': 'off',
-    },
-  },
-
-  // ── Terminal xterm.js integration ────────────────────────────────────
-  {
-    files: ['src/components/Terminal.tsx'],
-    rules: {
-      'max-lines-per-function': ['error', { max: 450, skipBlankLines: true, skipComments: true }],
+      'nession/no-capsule-magic-metrics': 'off',
+      'nession/no-sf-overlay-vars': 'off',
     },
   },
 
   // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/components/FileBrowser.tsx', 'src/components/TerminalView.tsx', 'src/terminal/components/TerminalWorkspace.tsx'],
+    files: ['src/features/files/components/FileBrowser.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },
@@ -112,4 +113,5 @@ export default tseslint.config(
       'react-refresh/only-export-components': 'off',
     },
   },
+
 )

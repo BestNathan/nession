@@ -58,6 +58,34 @@ if [ -n "$STAGED_RUST" ]; then
   fi
 fi
 
+# ── tmux socket isolation (static, ~1s) ────────────────────────────────────
+# Every tmux spawn must carry an explicit -S <socket>. A call that forgets it
+# does not fail — it silently uses tmux's default socket, where the user's own
+# sessions live, and killing nession's last session there takes their whole tmux
+# server down with it (#574/#575). Scans Rust, scripts/, e2e/, deploy/, justfile.
+STAGED_TMUX_SURFACE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(\.rs$|^scripts/|^e2e/|^deploy/|^justfile$)' || true)
+if [ -n "$STAGED_TMUX_SURFACE" ]; then
+  echo -e "${YELLOW}→ check-tmux-socket${NC}"
+  if ./scripts/check-tmux-socket.sh; then
+    echo -e "${GREEN}✓ check-tmux-socket${NC}"
+  else
+    echo -e "${RED}✗ check-tmux-socket — route the call through crate::tmux::cmd or pass -S${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
+# A change to the checker itself must be proven still able to detect each form.
+STAGED_TMUX_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-tmux-socket' || true)
+if [ -n "$STAGED_TMUX_CHECK" ]; then
+  echo -e "${YELLOW}→ check-tmux-socket-selftest${NC}"
+  if ./scripts/check-tmux-socket-selftest.sh; then
+    echo -e "${GREEN}✓ check-tmux-socket-selftest${NC}"
+  else
+    echo -e "${RED}✗ check-tmux-socket-selftest — the gate no longer catches what it claims${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-lint${NC}"
@@ -65,6 +93,29 @@ if [ -n "$STAGED_TSX" ]; then
     echo -e "${GREEN}✓ just web-lint${NC}"
   else
     echo -e "${RED}✗ just web-lint${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
+# ── Capsule design-token gate (eslint rule + selftest on script change) ─────
+STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/features/terminal/capsule/.*\.(ts|tsx)$' || true)
+STAGED_TOKEN_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^design/tokens/' || true)
+STAGED_TOKEN_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-design-tokens' || true)
+if [ -n "$STAGED_CAPSULE$STAGED_TOKEN_SRC$STAGED_TOKEN_CHECK" ]; then
+  echo -e "${YELLOW}→ check-design-tokens${NC}"
+  if ./scripts/check-design-tokens.sh; then
+    echo -e "${GREEN}✓ check-design-tokens${NC}"
+  else
+    echo -e "${RED}✗ check-design-tokens — use capsuleStyles + design/tokens/${NC}"
+    HAS_ERROR=1
+  fi
+fi
+if echo "$STAGED_TOKEN_CHECK" | grep -q selftest; then
+  echo -e "${YELLOW}→ check-design-tokens-selftest${NC}"
+  if ./scripts/check-design-tokens-selftest.sh; then
+    echo -e "${GREEN}✓ check-design-tokens-selftest${NC}"
+  else
+    echo -e "${RED}✗ check-design-tokens-selftest${NC}"
     HAS_ERROR=1
   fi
 fi

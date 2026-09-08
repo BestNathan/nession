@@ -89,7 +89,7 @@ Defined in `web/src/index.css` on staging:
 - [x] `--sf-*` inventory and consumer list documented.
 - [x] Duplication called out with named token targets.
 - [x] Implementation PR sequence defined separately from token speculation.
-- [ ] Implementation PRs merged (future work on `staging`).
+- [x] Implementation PRs merged on `staging` (#578 `--sf-*` removal, #580 shell control tokens; step 7 exceptions in [composition.md](composition.md) §14).
 
 ## Related
 

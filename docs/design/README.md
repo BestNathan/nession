@@ -56,6 +56,19 @@ Implementation
 | [design-system/validation.md](design-system/validation.md) | Browser assertions, Web/App viewport matrix, focused visual regression ([#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548)) |
 | [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
 
+## #561 staging acceptance ([#561](https://github.com/BestNathan/nession/issues/561))
+
+Canonical reference PNGs (human review on **staging** before release):
+
+| Screenshot | Viewport / surface |
+|------------|-------------------|
+| [canonical-app-terminal.png](screenshots/canonical-app-terminal.png) | App Active Terminal 390×844 |
+| [canonical-app-sessions.png](screenshots/canonical-app-sessions.png) | App Sessions 390×844 |
+| [canonical-app-workspace.png](screenshots/canonical-app-workspace.png) | App Workspace 390×844 |
+| [canonical-app-files-push.png](screenshots/canonical-app-files-push.png) | App Files push sub-flow |
+
+Live fixtures (same data as CI golden baselines): `/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app` on the staging deployment. CI gate: `e2e/specs/fixture-visual.spec.ts` (7 Linux snapshots).
+
 ## Related issues
 
 | Phase | Issue | Scope |

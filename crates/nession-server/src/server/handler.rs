@@ -1268,6 +1268,10 @@ impl ConnectionHandler {
                         "payload": {
                             "status": "success",
                             "mode": "relay",
+                            // Echo the requested session id: the response
+                            // identifies which session it describes (the web
+                            // client's SessionRuntime gate keys on it).
+                            "session_id": session_id,
                             "session_name": session_name,
                             // Server TCP probe results — the browser shows these
                             // so the user can pick a specific relay endpoint.
@@ -1297,6 +1301,10 @@ impl ConnectionHandler {
                     "payload": {
                         "status": "success",
                         "mode": "p2p",
+                        // Echo the requested session id: the response
+                        // identifies which session it describes (the web
+                        // client's SessionRuntime gate keys on it).
+                        "session_id": session_id,
                         "agent_address": agent_address,
                         "addresses": addresses_json,
                         "connection_token": connection_token,
@@ -4280,6 +4288,9 @@ mod tests {
         let reply = parse_reply(action);
         assert_eq!(reply["payload"]["status"], "success");
         assert_eq!(reply["payload"]["mode"], "p2p");
+        // The response identifies the session it describes — the web client's
+        // SessionRuntime ownership gate keys on attachInfo.session_id.
+        assert_eq!(reply["payload"]["session_id"], "a1:dev");
         assert!(reply["payload"]["agent_address"]
             .as_str()
             .unwrap()
@@ -4320,6 +4331,8 @@ mod tests {
         .unwrap();
 
         // Phase 1: query relay — returns info but does NOT enter relay forwarding.
+        let (relay_sender, mut relay_rx) = WsMessageSender::new();
+        h.set_client_sender(relay_sender);
         let action = h
             .handle_message(proto_msg(
                 "client.session.attach",
@@ -4331,6 +4344,17 @@ mod tests {
             matches!(action, HandlerAction::Reply(None)),
             "Phase 1 should return Reply(None)"
         );
+
+        // The phase-1 response goes over the client sender channel and must
+        // identify the session (the web client keys on attachInfo.session_id).
+        let phase1 = relay_rx.try_recv().expect("phase 1 response not sent");
+        let Message::Text(phase1_text) = phase1 else {
+            panic!("expected Text message");
+        };
+        let phase1: serde_json::Value = serde_json::from_str(&phase1_text).unwrap();
+        assert_eq!(phase1["payload"]["status"], "success");
+        assert_eq!(phase1["payload"]["mode"], "relay");
+        assert_eq!(phase1["payload"]["session_id"], "a1:dev");
 
         // Phase 2: begin relay — actually enters relay forwarding.
         let action = h

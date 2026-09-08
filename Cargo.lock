@@ -1954,6 +1954,7 @@ dependencies = [
  "chrono",
  "dirs",
  "hostname",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

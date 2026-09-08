@@ -105,10 +105,10 @@ Never stack more than two separation cues on the same edge by default.
 | Surface | Role | Default separation |
 |---------|------|---------------------|
 | App canvas | Ground of the app | None — the base background |
-| Navigation surface | Sessions sidebar | Background shift vs canvas; hairline border only if shift alone is not legible |
+| Navigation surface | Sessions drawer | Same canvas; hairline separator (terminal-native) |
+| Workspace ground tier | Workspace tool content — one step darker than canvas (`--muted` tier, `bg-muted/40`); canvas → workspace → terminal darkening ladder | Background shift vs canvas |
 | Primary work surface | Terminal | **Flush**; the darkest surface; no border, no card, no radius |
-| Secondary work surface | Workspace tool region | Background shift vs canvas |
-| Floating control surface | Composer / capsule, floating actions | Elevation (shadow); no border |
+| Floating control surface | Terminal input capsule + workspace tool bar (same capsule family); floating actions | Elevation (shadow); no border |
 | Popover / overlay | Menu, sheet, dialog | Elevation over a dimmed canvas; contained radius |
 | Destructive / warning surface | Confirm dialog, error state | Background tint + text color; no glow, no border stack |
 
@@ -119,6 +119,7 @@ Rules:
 - **R-S3** Bordered cards group *content* where whitespace fails (e.g. editor pane separators in Files) — never rows, headers, or the terminal.
 - **R-S4** Overlays dim the canvas; they do not recolor the chrome behind them.
 - **R-S5** Healthy chrome never elevates: no shadows on headers, sidebars, or rows in the default state. Elevation is reserved for floating controls and overlays.
+- **R-S6** Approved canonical screen (2026-09-01, #561 Phase 2A): navigation separates by hairline on the same canvas, not by a background block. This overrides the separation ladder's background-shift preference for navigation surfaces. Background blocks remain reserved for the work surface and state-driven surfaces.
 
 ## 4. Density hierarchy
 

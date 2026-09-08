@@ -10,6 +10,11 @@ AGENT_ID="${AGENT_ID:-docker-agent}"
 AGENT_SERVER_URL="${AGENT_SERVER_URL:-}"
 AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
+# tmux socket. Left empty the agent uses /tmp/nession-<uid>/tmux.sock, which is
+# always writable in a container. Override only if /tmp is unsuitable — do NOT
+# point it at the PVC mount: /data is NFS in this deployment and binding a unix
+# socket there is not reliable.
+AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
 
 export LISTEN_PORT SERVER_BACKEND
 export LANG="${LANG:-C.UTF-8}"
@@ -36,6 +41,12 @@ TOML
 # Only add connect_url if explicitly set
 if [ -n "${AGENT_CONNECT_URL}" ]; then
     echo "connect_url = \"${AGENT_CONNECT_URL}\"" >> /etc/nession/agent-config.toml
+fi
+
+# Only pin the tmux socket if explicitly set; otherwise the agent resolves its
+# documented default.
+if [ -n "${AGENT_TMUX_SOCKET}" ]; then
+    echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> /etc/nession/agent-config.toml
 fi
 
 # Initialize Claude Code settings on first run only.
