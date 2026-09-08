@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { AttachDialog, type AttachChoice } from './env/AttachDialog';
-import { KillConfirmDialog } from './KillConfirmDialog';
+import { KillConfirmDialog } from '@/features/sessions/components/KillConfirmDialog';
 import type { Session } from '../types';
 import { sessionIdAtom, attachToSessionAtom, attachDialogSessionAtom } from '../atoms/session';
 

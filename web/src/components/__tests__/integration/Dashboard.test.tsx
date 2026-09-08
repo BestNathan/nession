@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { AgentSection } from '@/components/Dashboard';
+import { AgentSection } from '@/features/agents/components/AgentSection';
 import type { Agent } from '@/types';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {

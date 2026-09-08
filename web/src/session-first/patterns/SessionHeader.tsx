@@ -1,6 +1,6 @@
 import { ChevronLeft, Menu, PanelRight } from 'lucide-react';
-import { AgentContext } from '@/session-first/patterns/AgentContext';
-import { ConnectionStatus as SessionConnectionStatus } from '@/session-first/patterns/ConnectionStatus';
+import { AgentContext } from '@/features/agents/components/AgentContext';
+import { ConnectionStatus as SessionConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
 import {
   SurfaceSwitcher,
   type Surface,
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/session-first/shellStyles';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { ConnectionState } from '@/services/socket';
 
 export type { Surface };

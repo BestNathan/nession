@@ -63,18 +63,14 @@ nession/
 │       ├── features/terminal/      # Terminal feature: plugins, viewport, hooks, state, capsule
 │       ├── features/explorer/      # Extensible file-tree framework (Explorer, ExplorerStore, registry)
 │       ├── features/files/         # Files feature: RPC capability, browser/viewer UI, file hooks
+│       ├── features/sessions/      # Sessions feature: session list/details UI, CRUD dialogs, list hooks, domain-state model
+│       ├── features/agents/        # Agents feature: agent cards/detail/delete, workspace agent page, agent data hooks
 │       ├── runtime/           # SessionRuntime ownership + attach state machines (core candidate)
-│       └── components/
+│       └── components/          # Legacy shell chrome (Dashboard, SessionsSection, env/, …)
 │           ├── ui/           # shadcn/ui primitives (21 components + 2 custom wrappers, auto-generated)
 │           ├── LoginPage.tsx         # Connection form (Card + Input + Button + Badge)
-│           ├── Dashboard.tsx         # Main view: agent cards grid + session list
-│           ├── AgentCard.tsx         # Agent status card (Badge + relative time)
-│           ├── SessionList.tsx       # Session rows (ScrollArea + Attach/Kill buttons)
-│           ├── CreateSessionDialog.tsx  # Modal: create tmux session (Dialog + Select)
-│           ├── KillConfirmDialog.tsx    # Modal: confirm kill (Dialog destructive)
-│           ├── Terminal.tsx          # xterm.js 5.5 (P2P + relay, Catppuccin theme)
-│           ├── TerminalToolbar.tsx   # Collapsible quick-commands + text input
-│           └── quickCommands.ts      # Preset commands + localStorage persistence
+│           ├── Dashboard.tsx         # Dashboard shell (predecessor of session-first)
+│           └── env/                # Env manager UI (env feature — not yet converged)
 │
 ├── deploy/                   # Docker runtime scripts & configs
 │   ├── docker-compose.yml

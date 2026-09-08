@@ -1,0 +1,191 @@
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select';
+import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
+import { agentDisplayName } from '@/lib/format';
+import { EnvFileMultiSelect } from '@/components/env/EnvFileMultiSelect';
+import { envApi } from '@/features/env';
+import { sessionsApi } from '@/features/sessions';
+import { useDialogReset } from '@/hooks/useDialogReset';
+
+interface CreateSessionDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  agents: Agent[];
+  preselectedAgentId?: string | null;
+  onCreated: () => void;
+}
+
+function AgentSelect({
+  agents,
+  value,
+  onChange,
+  disabled,
+}: {
+  agents: Agent[];
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  const selectedAgent = agents.find((a) => a.agent_id === value);
+  const displayText = selectedAgent ? agentDisplayName(selectedAgent) : 'Select an agent';
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="agent">Agent</Label>
+      <Select value={value} onValueChange={(v) => v && onChange(v)} disabled={disabled}>
+        <SelectTrigger id="agent" className="w-full">
+          <span className={selectedAgent ? '' : 'text-muted-foreground'}>{displayText}</span>
+        </SelectTrigger>
+        <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
+          {agents.map((agent) => (
+            <SelectItem key={agent.agent_id} value={agent.agent_id}>
+              {agentDisplayName(agent)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+export function CreateSessionDialog({
+  isOpen,
+  onClose,
+  agents,
+  preselectedAgentId,
+  onCreated,
+}: CreateSessionDialogProps) {
+  const [agentId, setAgentId] = useState('');
+  const [sessionName, setSessionName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
+  const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
+
+  // Stable ref for onlineAgents — prevents resetState from depending on the
+  // agents array, which changes on every realtime push and would cascade into
+  // useDialogReset, clearing form state while the user is typing.
+  const onlineAgentsRef = useRef(onlineAgents);
+  onlineAgentsRef.current = onlineAgents;
+
+  const resetState = useCallback(() => {
+    const online = onlineAgentsRef.current;
+    setAgentId(preselectedAgentId ?? (online.length > 0 ? online[0].agent_id : ''));
+    setSessionName('');
+    setLoading(false);
+    setError(null);
+    setSelectedEnv([]);
+  }, [preselectedAgentId]);
+  useDialogReset(isOpen, resetState);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Load available env files (optional selection — failure is non-fatal).
+      envApi
+        .listEnvFiles()
+        .then((resp) => setEnvFiles(resp.files))
+        .catch(() => setEnvFiles([]));
+      setTimeout(() => nameInputRef.current?.focus(), 50);
+    }
+  }, [isOpen]);
+
+  const validateName = (name: string): string | null => {
+    if (!name.trim()) {return 'Session name is required';}
+    if (!/^[a-zA-Z0-9_\-.]+$/.test(name.trim())) {
+      return 'Only letters, digits, underscores, hyphens, and dots allowed';
+    }
+    return null;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nameError = validateName(sessionName);
+    if (nameError) {
+      setError(nameError);
+      return;
+    }
+    if (!agentId) {
+      setError('Please select an agent');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await sessionsApi.createSession(agentId, sessionName.trim(), selectedEnv);
+      if (result.success) {
+        onCreated();
+        onClose();
+      } else {
+        setError(result.error ?? 'Failed to create session');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create Session</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <AgentSelect agents={onlineAgents} value={agentId} onChange={setAgentId} disabled={loading} />
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="name">Session Name</Label>
+            <Input
+              ref={nameInputRef}
+              id="name"
+              type="text"
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+              placeholder="my-session"
+              disabled={loading}
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Env Files (optional)</Label>
+            <EnvFileMultiSelect
+              files={envFiles}
+              selected={selectedEnv}
+              onChange={setSelectedEnv}
+              disabled={loading}
+              emptyLabel="No env files — create one in Env Files"
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading || !agentId}>
+              {loading ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

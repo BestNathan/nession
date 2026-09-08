@@ -5,7 +5,7 @@ import { SessionDrawer } from '@/session-first/SessionDrawer';
 import { SessionFirstSpatialLayout } from '@/session-first/SessionFirstSpatialLayout';
 import { useAppSpatialIndex } from '@/session-first/app-spatial/useAppSpatialIndex';
 import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Surface } from '@/session-first/patterns/SessionHeader';
 import type { WorkspaceToolId } from '@/session-first/workspace/toolTypes';
 import type { FileOps } from '@/features/files';

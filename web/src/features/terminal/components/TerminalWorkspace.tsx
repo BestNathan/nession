@@ -8,10 +8,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AddressSelector } from '@/components/AddressSelector';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { relayServerHandle } from '@/runtime/relayServerConnection';
-import { useTerminalSessions } from '@/hooks/useTerminalSessions';
+import { useTerminalSessions } from '@/features/sessions/hooks/useTerminalSessions';
 import { SessionDropdown } from '@/components/SessionDropdown';
 import { TerminalLayout } from '@/components/TerminalLayout';
-import { SessionPreviewDialog } from '@/components/SessionPreviewDialog';
+import { SessionPreviewDialog } from '@/features/sessions/components/SessionPreviewDialog';
 import {
   sessionIdAtom,
   sessionNameAtom,

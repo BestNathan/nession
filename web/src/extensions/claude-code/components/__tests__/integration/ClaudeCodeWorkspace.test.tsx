@@ -9,7 +9,7 @@ import type {
 } from '@/features/claude-code/types';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 import type { Agent, Session } from '@/types';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 
 vi.mock('@/features/claude-code', () => ({
   claudeCodeApi: {

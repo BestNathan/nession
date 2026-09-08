@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionFirstMain } from '@/session-first/SessionFirstMain';
-import type { DomainState } from '@/session-first/domainState';
+import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Agent } from '@/types';
 import type { WorkspaceContext } from '@/session-first/workspace/toolTypes';
 

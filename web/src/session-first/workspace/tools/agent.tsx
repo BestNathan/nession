@@ -1,7 +1,7 @@
 import { UserRound } from 'lucide-react';
 import type { WorkspaceTool } from '../toolTypes';
 import { AppToolScroll } from '../AppToolScroll';
-import { AgentDetail } from '@/session-first/patterns/AgentDetail';
+import { AgentDetail } from '@/features/agents/components/AgentDetail';
 
 export const agentTool: WorkspaceTool = {
   id: 'agent',

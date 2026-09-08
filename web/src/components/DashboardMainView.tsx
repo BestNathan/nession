@@ -4,10 +4,10 @@ import type { Agent, Session } from '../types';
 import type { ConnectionState } from '@/services/socket';
 import type { useDashboard } from '../hooks/useDashboard';
 import { type AttachChoice } from './env/AttachDialog';
-import { AgentSection } from './AgentSection';
+import { AgentSection } from '@/features/agents/components/AgentSection';
 import { DashboardHeader } from './DashboardHeader';
 import { SessionsSection } from './SessionsSection';
-import { AgentDetailPanel } from './AgentDetailPanel';
+import { AgentDetailPanel } from '@/features/agents/components/AgentDetailPanel';
 import { DashboardDialogs } from './DashboardDialogs';
 
 type DashboardData = ReturnType<typeof useDashboard>;
