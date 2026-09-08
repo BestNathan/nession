@@ -35,7 +35,6 @@ export interface UseSessionRuntimeResult {
   connectionState: ConnectionState;
   fileOps: FileOps | null;
   activeUrl: string | null;
-  transportKey: string | null;
   waitingForAddressPlan: boolean;
   addressPlan: ReturnType<typeof useAddressPlan>;
 }
@@ -381,7 +380,6 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     connectionState,
     fileOps,
     activeUrl: runtime?.sessionId === sessionId && inP2PTransport ? runtime.activeUrl ?? null : null,
-    transportKey: runtime?.sessionId === sessionId ? runtime.transportKey : null,
     waitingForAddressPlan: inP2PTransport ? (runtime?.waitingForAddressPlan ?? !addressPlanReady) : false,
     addressPlan,
   };

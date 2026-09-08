@@ -84,6 +84,44 @@ describe('action atoms', () => {
     expect(store.get(attachDialogSessionAtom)).toBeNull();
   });
 
+  it('attachToSessionAtom bumps the route intent when re-attaching the session already attached', () => {
+    // Repro for #668: a second confirm on the SAME session carries a fresh
+    // connection token (server mints one per attach-info request). Without a
+    // route-intent bump the leased SessionRuntime silently rebuilds its agent
+    // socket under the stale 'attached' phase and never re-attaches — the
+    // terminal freezes (no output, no input, tmux client dropped).
+    const store = createStore();
+    const session = makeSession();
+    const first = makeChoice(session);
+    store.set(attachToSessionAtom, { session, choice: first, navigate });
+    const epochAfterFirst = store.get(routeIntentEpochAtom);
+    expect(epochAfterFirst).toBe(0);
+    store.set(terminalSessionStateAtom, 'attached');
+
+    const second = makeChoice(session);
+    second.attachInfo.connection_token = 'tok2'; // fresh token per dialog confirm
+    store.set(attachToSessionAtom, { session, choice: second, navigate });
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst + 1);
+    expect(store.get(attachInfoAtom)?.connection_token).toBe('tok2');
+  });
+
+  it('attachToSessionAtom does not bump the route intent when attaching a different session', () => {
+    // A different session changes sessionIdAtom, which releases the old
+    // runtime and creates a fresh one from phase 'idle' — no route-intent
+    // bump needed, and keeping the epoch stable keeps transport keys tidy.
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    const epochAfterFirst = store.get(routeIntentEpochAtom);
+
+    const other = makeSession();
+    other.session_id = 'agent:other';
+    other.session_name = 'other';
+    store.set(attachToSessionAtom, { session: other, choice: makeChoice(other), navigate });
+    expect(store.get(sessionIdAtom)).toBe('agent:other');
+    expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst);
+  });
+
   it('disconnectAtom clears all atoms', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');

@@ -21,7 +21,7 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
     inputDisabled,
     viewportReady,
     terminalState,
-    transportKey,
+    transportEpoch,
   } = useTerminalOrchestration({ onDisconnect, onError });
 
   return (
@@ -44,7 +44,7 @@ export function SessionFirstTerminal({ hidden, onDisconnect, onError }: SessionF
             controller={controller}
             terminalState={terminalState}
             viewportReady={viewportReady}
-            transportKey={transportKey}
+            transportEpoch={transportEpoch}
           />
         </TerminalSurface>
       )}

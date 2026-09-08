@@ -23,7 +23,7 @@ describe('SessionFirstTerminalPane', () => {
         controller={makeController()}
         terminalState="connecting"
         viewportReady={false}
-        transportKey="0:"
+        transportEpoch={0}
       />,
     );
 
@@ -38,7 +38,7 @@ describe('SessionFirstTerminalPane', () => {
         controller={makeController()}
         terminalState="attached"
         viewportReady
-        transportKey="0:wss://agent"
+        transportEpoch={0}
       />,
     );
 
