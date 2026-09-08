@@ -1,7 +1,7 @@
 // web/src/hooks/__tests__/useNewEntryForm.test.ts
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useNewEntryForm } from '@/hooks/useNewEntryForm';
+import { useNewEntryForm } from '@/features/files/hooks/useNewEntryForm';
 
 describe('useNewEntryForm', () => {
   it('resets the new-entry form state', () => {

@@ -7,7 +7,7 @@ import {
   parseExt,
   parseBasename,
   isMarkdownExt,
-} from '@/lib/viewerRegistry';
+} from '@/features/files/model/viewerRegistry';
 
 describe('getViewerType', () => {
   it.each(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'])('returns "image" for .%s', (ext) => {

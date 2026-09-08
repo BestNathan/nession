@@ -8,7 +8,7 @@ import {
   ensureLangsModule,
   scanLanguageIdsFromPaths,
   registerSeenLanguageIds,
-} from '@/lib/codeMirrorLangs';
+} from '@/features/files/model/codeMirrorLangs';
 
 describe('resolveLangKey', () => {
   it('maps .js to js', () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { FileBrowser } from '@/components/FileBrowser';
+import { FileBrowser } from '@/features/files/components/FileBrowser';
 import { resetExplorerRegistry } from '@/features/explorer/registry';
 import type { FileOps, FileEntry } from '@/features/files';
 

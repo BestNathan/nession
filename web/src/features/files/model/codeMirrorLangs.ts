@@ -2,8 +2,8 @@ import type { Extension } from '@codemirror/state';
 import { LanguageSupport, StreamLanguage } from '@codemirror/language';
 import type { LanguageName } from '@uiw/codemirror-extensions-langs';
 import { getLangKey, parseBasename, parseExt } from './viewerRegistry';
-import { detectLanguage, type LanguageId } from './languageId';
-import { languageIdToCodeMirrorKey } from './languageIdToCodeMirror';
+import { detectLanguage, type LanguageId } from '@/lib/languageId';
+import { languageIdToCodeMirrorKey } from '@/lib/languageIdToCodeMirror';
 
 type LangsModule = typeof import('@uiw/codemirror-extensions-langs');
 

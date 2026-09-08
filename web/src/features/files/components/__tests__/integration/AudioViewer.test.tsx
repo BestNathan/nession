@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { AudioViewer } from '@/components/AudioViewer';
+import { AudioViewer } from '@/features/files/components/AudioViewer';
 
 vi.stubGlobal('URL', {
   createObjectURL: vi.fn(() => 'blob:audio-url'),

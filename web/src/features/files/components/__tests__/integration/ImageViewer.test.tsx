@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ImageViewer } from '@/components/ImageViewer';
+import { ImageViewer } from '@/features/files/components/ImageViewer';
 
 const mockBlobUrl = 'blob:test-url';
 vi.stubGlobal('URL', {

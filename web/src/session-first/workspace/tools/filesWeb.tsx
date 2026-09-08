@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileBrowser } from '@/components/FileBrowser';
-import { FileViewer } from '@/components/FileViewer';
+import { FileBrowser } from '@/features/files/components/FileBrowser';
+import { FileViewer } from '@/features/files/components/FileViewer';
 import type { FileEntry } from '@/features/files';
 import type { WorkspaceContext } from '../toolTypes';
 

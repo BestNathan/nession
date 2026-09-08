@@ -6,9 +6,9 @@ import {
   FolderUp,
   FolderSync,
 } from 'lucide-react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -18,7 +18,7 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
-} from './ui/alert-dialog';
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/features/files';

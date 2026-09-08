@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { Extension } from '@codemirror/state';
 import CodeMirror from '@uiw/react-codemirror';
-import { useScheduledGithubTheme } from '../hooks/useScheduledGithubTheme';
+import { useScheduledGithubTheme } from '@/hooks/useScheduledGithubTheme';
 import {
   ensureLangsModule,
   loadLangExtensionForFile,
-} from '../lib/codeMirrorLangs';
+} from '../model/codeMirrorLangs';
 
 export interface CodeMirrorEditorProps {
   value: string;

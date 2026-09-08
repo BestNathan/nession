@@ -3,8 +3,8 @@ import { ChevronUp, ChevronDown, Square, Trash2, Search, CornerDownLeft, X } fro
 import { InputPanel } from './InputPanel';
 import { QuickCommandsPanel } from './QuickCommandsPanel';
 import { EnvPanel } from './env/EnvPanel';
-import { FileBrowser } from './FileBrowser';
-import { FileViewer } from './FileViewer';
+import { FileBrowser } from '@/features/files/components/FileBrowser';
+import { FileViewer } from '@/features/files/components/FileViewer';
 import { SwipeableViewport } from './SwipeableViewport';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';

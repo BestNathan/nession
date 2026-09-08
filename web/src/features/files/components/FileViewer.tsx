@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react';
 import { Edit3, Save, Eye, Code, Info, Lock } from 'lucide-react';
-import { Button } from './ui/button';
-import { Skeleton } from './ui/skeleton';
-import { Progress } from './ui/progress';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import { CodeMirrorEditor } from './CodeMirrorEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { ImageViewer } from './ImageViewer';
@@ -18,10 +18,10 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
-} from './ui/alert-dialog';
-import { type ViewerType } from '@/lib/viewerRegistry';
+} from '@/components/ui/alert-dialog';
+import { type ViewerType } from '../model/viewerRegistry';
 import { formatSize } from '@/lib/format';
-import { useFileViewer, type ViewMode } from '@/hooks/useFileViewer';
+import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/features/files';
 
 export interface FileViewerProps {

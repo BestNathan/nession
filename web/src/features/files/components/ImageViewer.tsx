@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Minimize } from 'lucide-react';
-import { Button } from './ui/button';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export interface ImageViewerProps {

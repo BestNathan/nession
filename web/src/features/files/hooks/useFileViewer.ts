@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/lib/errorHelpers';
-import { getViewerType, parseExt, type ViewerType } from '@/lib/viewerRegistry';
+import { getViewerType, parseExt, type ViewerType } from '../model/viewerRegistry';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,

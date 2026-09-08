@@ -1,4 +1,4 @@
-import { detectLanguage } from './languageId';
+import { detectLanguage } from '@/lib/languageId';
 
 export type ViewerType = 'image' | 'video' | 'audio' | 'pdf' | 'markdown';
 

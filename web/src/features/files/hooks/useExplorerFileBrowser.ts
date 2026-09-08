@@ -6,7 +6,7 @@ import { ExplorerStore, ROOT_ID } from '@/features/explorer/ExplorerStore';
 import { createNessionFileSystemProvider } from '@/features/files/adapters/NessionFileSystemProvider';
 import type { ExplorerDataProvider } from '@/features/explorer/providers/types';
 import type { ExplorerNode } from '@/features/explorer/types';
-import { registerSeenLangKeys, scanLangKeysFromPaths } from '@/lib/codeMirrorLangs';
+import { registerSeenLangKeys, scanLangKeysFromPaths } from '../model/codeMirrorLangs';
 import { toastError } from '@/lib/errorHelpers';
 
 import { useFileBrowserDialogs } from './useFileBrowserDialogs';
