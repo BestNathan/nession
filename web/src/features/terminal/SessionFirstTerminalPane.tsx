@@ -10,8 +10,11 @@ interface SessionFirstTerminalPaneProps {
   controller: TerminalController | null;
   terminalState: TerminalStatus;
   viewportReady: boolean;
-  /** Changes when the live P2P socket / route changes — rewires ConnectionManager. */
-  transportKey: string;
+  /**
+   * Bumped when the runtime swaps its live agent-terminal API (post-swap by
+   * construction) — rewires the ConnectionManager to the new socket (#668).
+   */
+  transportEpoch: number;
 }
 
 /**
@@ -23,7 +26,7 @@ export function SessionFirstTerminalPane({
   controller,
   terminalState,
   viewportReady,
-  transportKey,
+  transportEpoch,
 }: SessionFirstTerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
   const showBlockingLoader = !controller || !viewportReady;
@@ -32,7 +35,7 @@ export function SessionFirstTerminalPane({
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-first-terminal-pane">
       <div className="relative min-h-0 flex-1">
         {showViewport ? (
-          <TerminalViewport controller={controller} transportEpoch={transportKey} />
+          <TerminalViewport controller={controller} transportEpoch={transportEpoch} />
         ) : null}
         {showBlockingLoader ? (
           <div

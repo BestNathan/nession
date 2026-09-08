@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useAtom, useSetAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/features/terminal/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/features/env';
@@ -22,8 +22,6 @@ import {
 import {
   effectiveModeAtom,
   isSwitchingAtom,
-  routeIntentEpochAtom,
-  transportGenerationAtom,
 } from '@/atoms/connection';
 import { useTerminal } from '@/features/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/features/terminal/useSessionFirstTerminalAttach';
@@ -190,15 +188,13 @@ export function useTerminalOrchestration({
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [isSwitching] = useAtom(isSwitchingAtom);
   const [envRefs] = useAtom(envRefsAtom);
-  const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
-  const transportGeneration = useAtomValue(transportGenerationAtom);
 
   const wsService = useWebSocket();
   // One relay handle per service instance, shared by every relay consumer —
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
   // the banner, and disconnect cleanup. Rebuilt only when the service does.
   const relayServer = useMemo(() => relayServerHandle(wsService), [wsService]);
-  const { waitingForAddressPlan, agentTerminalApi, connectionState, activeUrl, runtime, snapshot, fileOps, transportKey: runtimeTransportKey } = useP2PAttachTransport({
+  const { waitingForAddressPlan, agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
     orderedUrls,
@@ -245,7 +241,24 @@ export function useTerminalOrchestration({
   const inputDisabled = banner !== 'none' || isSwitching;
   const modeGateOk = !(effectiveMode === 'p2p' && !agentTerminalApi);
   const viewportReady = modeGateOk && !waitingForAddressPlan;
-  const transportKey = runtimeTransportKey ?? `${routeIntentEpoch}:${transportGeneration}:${activeUrl ?? ''}`;
+  // Transport rewire epoch. TerminalViewport rebuilds the ConnectionManager
+  // whenever this changes, and the manager binds the agent-terminal API the
+  // transport factory captures at build time — so the rebuild must never run
+  // BEFORE the runtime has swapped its live API, or the fresh transport binds
+  // the pre-swap (soon-disposed) socket and the terminal freezes (#668).
+  // routeIntentEpoch / transportGeneration change in the same commit whose
+  // passive parent effects perform the swap, while (layout) viewport effects
+  // run first — keying on either races the swap. The mirrored agentTerminalApi
+  // commits only AFTER the swap, so its identity is the safe trigger.
+  const [transportEpoch, setTransportEpoch] = useState(0);
+  const previousApiRef = useRef(agentTerminalApi);
+  useLayoutEffect(() => {
+    if (previousApiRef.current === agentTerminalApi) {
+      return;
+    }
+    previousApiRef.current = agentTerminalApi;
+    setTransportEpoch((epoch) => epoch + 1);
+  }, [agentTerminalApi]);
 
   useEffect(() => {
     if (!controller) { return; }
@@ -269,7 +282,7 @@ export function useTerminalOrchestration({
     inputDisabled,
     terminalState,
     reconnectCount,
-    transportKey,
+    transportEpoch,
     fileOps,
   };
 }

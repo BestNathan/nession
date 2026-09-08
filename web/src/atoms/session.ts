@@ -41,8 +41,21 @@ export const sessionIdFromUrlAtom = atom<string | null>(null);
 
 export const attachToSessionAtom = atom(
   null,
-  (_get, set, payload: { session: Session; choice: AttachChoice; navigate: (path: string) => void }) => {
+  (get, set, payload: { session: Session; choice: AttachChoice; navigate: (path: string) => void }) => {
     const { session, choice, navigate } = payload;
+    // Re-attaching the session the client is ALREADY attached to keeps the
+    // leased SessionRuntime alive (sessionIdAtom does not change), but the
+    // dialog confirm carries a fresh connection token (the server mints one
+    // per attach-info request). Without a route-intent bump the runtime would
+    // silently rebuild its agent socket under the stale 'attached' phase and
+    // never re-issue client.attach — freezing the terminal (#668). Bumping
+    // the epoch routes the confirm through handleRouteIntentChange, the same
+    // disconnect → reconnect cycle a manual address switch uses. Attaching a
+    // DIFFERENT session needs no bump: the sessionId change releases the old
+    // runtime and leases a fresh one from phase 'idle'.
+    if (get(sessionIdAtom) === session.session_id) {
+      set(routeIntentEpochAtom, get(routeIntentEpochAtom) + 1);
+    }
     set(sessionIdAtom, session.session_id);
     set(sessionNameAtom, session.session_name);
     set(attachInfoAtom, choice.attachInfo);

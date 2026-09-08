@@ -185,11 +185,6 @@ export class SessionRuntime {
     return this.routeIntentEpoch;
   }
 
-  /** Stable key for terminal viewport remount on route / transport change. */
-  get transportKey(): string {
-    return `${this.routeIntentEpoch}:${this.transportGeneration}:${this.activeUrl ?? ''}`;
-  }
-
   getAgentTerminalApi(): TerminalAgentApi | null {
     return this.agentTerminalApi;
   }

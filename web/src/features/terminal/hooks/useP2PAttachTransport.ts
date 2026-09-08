@@ -23,7 +23,6 @@ interface UseP2PAttachTransportResult {
   waitingForAddressPlan: boolean;
   fileOps: import('@/features/files').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
-  transportKey: string | null;
   snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;
 }
 
@@ -35,7 +34,7 @@ export function useP2PAttachTransport({
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const {
     addressPlan, activeUrl, agentTerminalApi, connectionState,
-    waitingForAddressPlan, fileOps, runtime, snapshot, transportKey,
+    waitingForAddressPlan, fileOps, runtime, snapshot,
   } = useSessionRuntime({
     configOwner: true,
     serverConnection,
@@ -49,7 +48,6 @@ export function useP2PAttachTransport({
     waitingForAddressPlan,
     fileOps,
     runtime,
-    transportKey,
     snapshot,
   };
 }

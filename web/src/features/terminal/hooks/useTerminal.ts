@@ -43,9 +43,9 @@ function isCurrentControllerGeneration(
  *
  * Address switches never recreate the controller: the legacy pane passes no
  * transportEpoch to TerminalViewport, and the session-first pane gates its
- * viewport rebuild on `transportKey` (routeIntentEpoch:transportGeneration:
- * activeUrl), not on the controller. Recreating the controller here would
- * dispose xterm on every route rotation.
+ * viewport rebuild on `transportEpoch` (bumped when the runtime swaps its live
+ * agent-terminal API — see useTerminalOrchestration), not on the controller.
+ * Recreating the controller here would dispose xterm on every route rotation.
  */
 export function useTerminal(options: UseTerminalOptions): TerminalController | null {
   const {
