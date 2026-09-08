@@ -13,12 +13,15 @@ e2e/
 │   │   └── config.toml    # Server config with isolated paths
 │   └── agent-config.e2e.toml  # Agent config with isolated working dir
 ├── helpers/               # Test utilities
-│   ├── dashboard.ts       # waitForDashboard helper
-│   └── reset.ts           # resetAuth helper
+│   ├── sessionFirst.ts    # waitForSessionFirst helper (shell ready signal)
+│   ├── reset.ts           # resetAuth helper
+│   ├── fixtureVisual.ts   # Frozen-clock helpers for fixture visual baselines
+│   └── ui-assert/         # Reusable UI assertions (composer)
 ├── specs/                 # Test specifications
 │   ├── login.spec.ts      # Authentication tests
 │   ├── session-lifecycle.spec.ts  # Session create/kill tests
-│   └── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
+│   ├── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
+│   └── fixture-*.spec.ts  # Deterministic /fixture routes (functional + visual)
 ├── runtime.ts             # Per-run paths (unique tmux socket)
 ├── globalSetup.ts         # Pre-test setup + teardown
 └── playwright.config.ts   # Playwright configuration
@@ -158,13 +161,15 @@ Tests terminal input/output in both relay and P2P modes:
 
 **See:** PR #317 for implementation details.
 
-### Flaky Dashboard Load
+### Slow Shell Load
 
-**Symptom:** `waitForDashboard` times out waiting for filter-row.
+**Symptom:** `waitForSessionFirst` times out waiting for the session-first shell.
 
 **Root Cause:** Slow CI environment causes agent registration to take longer than expected.
 
-**Solution:** Increased timeout to 90 seconds in `helpers/dashboard.ts`.
+**Solution:** `helpers/sessionFirst.ts` waits 90 seconds for the
+`[data-testid="session-first-shell"]` element (the shell only renders after
+login, so its presence covers the handshake + initial fetch).
 
 ### WebSocket Proxy Issues
 
@@ -211,7 +216,7 @@ npx playwright test -g "session lifecycle"
 
 1. Create a new file in `e2e/specs/`
 2. Import helpers from `e2e/helpers/`
-3. Use `waitForDashboard()` before interacting with the dashboard
+3. Use `waitForSessionFirst()` before interacting with the shell
 4. Use direct WebSocket URL: `ws://localhost:19090/ws`
 5. Add unique session names to avoid conflicts
 6. Use Playwright's auto-retrying assertions (`expect().toBeVisible()`, etc.)
@@ -220,13 +225,13 @@ Example:
 
 ```typescript
 import { test, expect } from '@playwright/test';
-import { waitForDashboard } from '../helpers/dashboard';
+import { waitForSessionFirst } from '../helpers/sessionFirst';
 
 test.describe('My Feature', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/?token=e2e-test-token&server_url=' + 
       encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForDashboard(page);
+    await waitForSessionFirst(page);
   });
 
   test('does something', async ({ page }) => {
