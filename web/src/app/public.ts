@@ -1,17 +1,12 @@
 /**
  * App layer — public API
  *
- * This is the only entry point for the app layer. Other layers (features, core, shared)
- * should only import from this file, not from internal app modules.
+ * The app layer is the composition root: shell layout, routing and feature
+ * orchestration. It may import features, core and shared — never the reverse.
  *
- * The app layer contains:
- * - Application composition root (Workbench, App)
- * - Top-level routing and layout
- * - Feature orchestration (how features are combined)
- *
- * It does NOT contain:
- * - Feature-specific business logic (that's in features/)
- * - Shared infrastructure (that's in core/ or shared/)
+ * Composition happens in `App.tsx` (top-level), which renders the single
+ * session-first shell (`SessionFirstShell`) plus the `/fixture` routes used
+ * by visual regression tests. There is deliberately no barrel re-export here
+ * yet — app-internal modules import each other directly; revisit if a second
+ * consumer for a shell module appears.
  */
-
-export { Workbench } from './Workbench';

@@ -8,7 +8,7 @@ vi.mock('@/lib/sessionFirst', () => ({
   isSessionFirst: () => sessionFirst.on,
   setSessionFirst: vi.fn(),
 }));
-vi.mock('@/session-first/SessionFirstShell', () => ({
+vi.mock('@/app/SessionFirstShell', () => ({
   SessionFirstShell: () => <div data-testid="session-first-shell" />,
 }));
 vi.mock('@/components/Dashboard', () => ({

@@ -9,10 +9,10 @@ import { LoginPage } from './components/LoginPage';
 import { WebSocketContext } from '@/shared/hooks/useWebSocket';
 import { useAppConnection } from './hooks/useAppConnection';
 import { isSessionFirst, setSessionFirst } from './lib/sessionFirst';
-import { FixtureApp } from './session-first/fixture/FixtureApp';
-import { FixtureShell } from './session-first/fixture/FixtureShell';
-import { FixtureWorkspace } from './session-first/fixture/FixtureWorkspace';
-import { SessionFirstShell } from './session-first/SessionFirstShell';
+import { FixtureApp } from './app/fixture/FixtureApp';
+import { FixtureShell } from './app/fixture/FixtureShell';
+import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
+import { SessionFirstShell } from './app/SessionFirstShell';
 
 // Module-stable (static element, immutable) — safe to create once at module
 // scope and reuse in both routers without a useMemo dependency.
