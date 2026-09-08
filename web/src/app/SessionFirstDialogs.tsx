@@ -1,7 +1,7 @@
 import { CreateSessionDialog } from '@/features/sessions/components/CreateSessionDialog';
 import { KillConfirmDialog } from '@/features/sessions/components/KillConfirmDialog';
 import { AttachDialog, type AttachChoice } from '@/features/sessions/components/AttachDialog';
-import { useDashboard } from '@/hooks/useDashboard';
+import { useDashboard } from '@/app/useDashboard';
 import type { Session } from '@/types';
 
 export function SessionFirstDialogs({

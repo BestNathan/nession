@@ -6,7 +6,7 @@ import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
-import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
+import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
 export interface SessionListHeaderProps {
   searchQuery: string;

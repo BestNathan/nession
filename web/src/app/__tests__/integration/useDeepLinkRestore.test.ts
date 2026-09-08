@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
+import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
 import type { AttachedSession } from '@/features/terminal/types';
 

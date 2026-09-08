@@ -57,10 +57,10 @@ const attachChoice = vi.hoisted(() => ({
   envRefs: [],
 }));
 
-vi.mock('@/hooks/useDashboard', () => ({
+vi.mock('@/app/useDashboard', () => ({
   useDashboard: () => dashboard.current,
 }));
-vi.mock('@/hooks/useProbePolling', () => ({
+vi.mock('@/app/useProbePolling', () => ({
   useProbePolling: () => {},
 }));
 vi.mock('@/app/SessionFirstTerminal', () => ({
@@ -137,7 +137,7 @@ const deepLink = vi.hoisted(() => ({
 
 // Faithful to the real hook: a sessionIdFromUrl restores that session's
 // selection (guarded so the render-phase restore runs once per id).
-vi.mock('@/hooks/useSessionFirstDeepLink', () => ({
+vi.mock('@/app/useSessionFirstDeepLink', () => ({
   useSessionFirstDeepLink: (opts: {
     sessions: Session[];
     onRestoreSession: (session: Session) => void;
@@ -169,7 +169,7 @@ const mobileNav = vi.hoisted(() => ({
   isWide: true,
 }));
 
-vi.mock('@/hooks/useSessionFirstMobileNav', () => ({
+vi.mock('@/app/useSessionFirstMobileNav', () => ({
   useSessionFirstMobileNav: () => mobileNav,
 }));
 
@@ -178,7 +178,7 @@ function renderShell(initialEntry = '/') {
   const view = render(
     <Provider store={store}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SessionFirstShell connectionStatus="connected" onLegacy={vi.fn()} />
+        <SessionFirstShell connectionStatus="connected" />
       </MemoryRouter>
     </Provider>,
   );

@@ -55,7 +55,6 @@ export function FixtureShell() {
     onRefresh: () => {},
     onSelect: () => {},
     onKill: () => {},
-    onLegacy: () => {},
   };
 
   return (
@@ -102,7 +101,6 @@ export function FixtureShell() {
           showList
           showDetail
           onBackToSessions={() => {}}
-          onLegacy={() => {}}
           connectionStatus="connected"
           terminal={<FixtureTerminal />}
         />

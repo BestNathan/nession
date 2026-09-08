@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
+import { useSessionFirstMobileNav } from '@/app/useSessionFirstMobileNav';
 
 function mockMatchMedia(matches: boolean) {
   const listeners = new Set<(e: MediaQueryListEvent) => void>();

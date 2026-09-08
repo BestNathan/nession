@@ -3,13 +3,13 @@ import { StrictMode } from 'react';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { toast } from 'sonner';
-import { useAppConnection } from '@/hooks/useAppConnection';
+import { useAppConnection } from '@/app/useAppConnection';
 import * as auth from '@/lib/auth';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import type { SocketMessage } from '@/services/socket/types';
 
 vi.mock('@/lib/auth');
-vi.mock('@/hooks/useVisibilityReconnect', () => ({
+vi.mock('@/app/useVisibilityReconnect', () => ({
   useVisibilityReconnect: vi.fn(),
 }));
 vi.mock('sonner', () => ({

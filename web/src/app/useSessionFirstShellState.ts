@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { useDashboard } from '@/hooks/useDashboard';
-import { useSessionFirstAttach } from '@/hooks/useSessionFirstAttach';
-import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
-import { useSessionFirstMobileNav } from '@/hooks/useSessionFirstMobileNav';
+import { useDashboard } from '@/app/useDashboard';
+import { useSessionFirstAttach } from '@/app/useSessionFirstAttach';
+import { useSessionFirstDeepLink } from '@/app/useSessionFirstDeepLink';
+import { useSessionFirstMobileNav } from '@/app/useSessionFirstMobileNav';
 import { useSessionRuntime } from '@/features/terminal/hooks/useSessionRuntime';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/runtime/relayServerConnection';

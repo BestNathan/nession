@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Checkbox } from './ui/checkbox';
-import { ConnectionStatusBadge } from './ui/ConnectionStatusBadge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ConnectionStatusBadge } from '@/components/ui/ConnectionStatusBadge';
 import { getRememberPreference, setRememberPreference } from '../lib/auth';
 import type { ConnectionState } from '@/services/socket';
 

@@ -11,7 +11,7 @@ import {
   sessionNameAtom,
 } from '@/atoms/session';
 import { probeResultsAtom } from '@/atoms/probe';
-import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
+import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
 
 /** Deep-link restore for session-first: `#/terminal/:sessionId` auto-attaches and syncs selection. */

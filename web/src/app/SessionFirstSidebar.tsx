@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import { SessionList } from '@/features/sessions/components/SessionList';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
-import type { SortDirection, SortField, StatusFilter } from '@/hooks/useDashboard';
+import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 
 export interface SessionFirstSidebarProps {
@@ -25,7 +25,6 @@ export interface SessionFirstSidebarProps {
   onRefresh: () => void;
   onSelect: (session: Session) => void;
   onKill: (session: Session) => void;
-  onLegacy: () => void;
 }
 
 export function SessionFirstSidebar({
@@ -48,7 +47,6 @@ export function SessionFirstSidebar({
   onRefresh,
   onSelect,
   onKill,
-  onLegacy,
 }: SessionFirstSidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const offlineCount = agents.filter((agent) => agent.status !== 'online').length;
@@ -94,7 +92,7 @@ export function SessionFirstSidebar({
         data-testid="session-first-sidebar-footer"
         className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <SessionFirstSidebarFooter onLegacy={onLegacy} />
+        <SessionFirstSidebarFooter />
       </div>
     </aside>
   );

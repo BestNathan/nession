@@ -1,7 +1,7 @@
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useProbePolling } from '@/hooks/useProbePolling';
+import { useProbePolling } from '@/app/useProbePolling';
 import { SessionFirstDialogs } from '@/app/SessionFirstDialogs';
 import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
 import { useSessionFirstShellState } from '@/app/useSessionFirstShellState';
@@ -9,10 +9,9 @@ import type { ConnectionState } from '@/services/socket';
 
 export interface SessionFirstShellProps {
   connectionStatus: ConnectionState;
-  onLegacy: () => void;
 }
 
-export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstShellProps) {
+export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) {
   const state = useSessionFirstShellState();
   const { data } = state;
   useProbePolling(data.agents);
@@ -106,7 +105,6 @@ export function SessionFirstShell({ connectionStatus, onLegacy }: SessionFirstSh
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
-            onLegacy={onLegacy}
           />
         )}
       </div>

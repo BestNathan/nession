@@ -3,15 +3,15 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
-import { useSessionFirstDeepLink } from '@/hooks/useSessionFirstDeepLink';
+import { useSessionFirstDeepLink } from '@/app/useSessionFirstDeepLink';
 import { sessionIdAtom } from '@/atoms/session';
 import type { Session } from '@/types';
 
-vi.mock('@/hooks/useDeepLinkRestore', () => ({
+vi.mock('@/app/useDeepLinkRestore', () => ({
   useDeepLinkRestore: vi.fn(),
 }));
 
-import { useDeepLinkRestore } from '@/hooks/useDeepLinkRestore';
+import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 
 function makeSession(id = 'a1:s1'): Session {
   return {

@@ -69,7 +69,6 @@ export function FixtureApp() {
     onCreate: () => {},
     onRefresh: () => {},
     onKill: () => {},
-    onLegacy: () => {},
   };
 
   const mainShared = {
