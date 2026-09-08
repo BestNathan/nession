@@ -2,7 +2,7 @@ import { Loader2 } from 'lucide-react';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
 import { TerminalViewport } from '@/terminal/components/TerminalViewport';
 import { TerminalInputOverlay } from '@/terminal/components/input/TerminalInputOverlay';
-import { isTerminalLive } from '@/session-first/terminal/useSessionFirstTerminalAttach';
+import { isTerminalLive } from '@/features/terminal/useSessionFirstTerminalAttach';
 import type { TerminalStatus } from '@/terminal/state/session';
 
 interface SessionFirstTerminalPaneProps {

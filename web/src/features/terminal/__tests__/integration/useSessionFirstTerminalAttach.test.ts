@@ -6,7 +6,7 @@ import {
   useSessionFirstTerminalAttach,
   P2P_MAX_RECONNECT,
   ATTACH_TIMEOUT_MS,
-} from '@/session-first/terminal/useSessionFirstTerminalAttach';
+} from '@/features/terminal/useSessionFirstTerminalAttach';
 import {
   sessionIdAtom,
   sessionNameAtom,

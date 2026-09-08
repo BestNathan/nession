@@ -18,7 +18,7 @@ vi.mock('@/hooks/useP2PAttachTransport', () => ({
     activeUrl: null,
   }),
 }));
-vi.mock('@/session-first/terminal/useSessionFirstTerminalAttach', () => ({
+vi.mock('@/features/terminal/useSessionFirstTerminalAttach', () => ({
   useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
 vi.mock('@/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
@@ -46,12 +46,12 @@ vi.mock('@/hooks/useWebSocket', () => ({
     onRelayResize: vi.fn(() => () => {}),
   }),
 }));
-vi.mock('@/session-first/terminal/SessionFirstTerminalPane', () => ({
+vi.mock('@/features/terminal/SessionFirstTerminalPane', () => ({
   SessionFirstTerminalPane: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="session-first-terminal-pane">{sessionId}</div>
   ),
 }));
-vi.mock('@/session-first/terminal/TerminalSurface', () => ({
+vi.mock('@/features/terminal/TerminalSurface', () => ({
   TerminalSurface: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="session-first-terminal-surface">{children}</div>
   ),

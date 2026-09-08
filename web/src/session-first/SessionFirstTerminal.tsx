@@ -1,9 +1,7 @@
 import { cn } from '@/lib/utils';
-import {
-  SessionFirstTerminalPane,
-  TerminalSurface,
-  useTerminalOrchestration,
-} from '@/session-first/terminal';
+import { SessionFirstTerminalPane } from '@/features/terminal/SessionFirstTerminalPane';
+import { TerminalSurface } from '@/features/terminal/TerminalSurface';
+import { useTerminalOrchestration } from '@/features/terminal/useTerminalOrchestration';
 
 export interface SessionFirstTerminalProps {
   hidden: boolean;

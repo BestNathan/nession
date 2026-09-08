@@ -3,7 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { envApi } from '@/features/env';
-import type { TerminalAgentApi } from '@/features/terminal';
+import type { TerminalAgentApi } from '@/features/terminal/agent';
 import type { ConnectionState } from '@/services/socket/types';
 import {
   relayServerHandle,
@@ -26,7 +26,7 @@ import {
   transportGenerationAtom,
 } from '@/atoms/connection';
 import { useTerminal } from '@/terminal/hooks/useTerminal';
-import { useSessionFirstTerminalAttach } from '@/session-first/terminal/useSessionFirstTerminalAttach';
+import { useSessionFirstTerminalAttach } from '@/features/terminal/useSessionFirstTerminalAttach';
 import { ConnectionManager } from '@/terminal/ConnectionManager';
 import { createAttachGate } from '@/terminal/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/terminal/DeviceProfile';

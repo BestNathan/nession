@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { TerminalSurface } from '@/session-first/terminal/TerminalSurface';
+import { TerminalSurface } from '@/features/terminal/TerminalSurface';
 
 vi.mock('@/hooks/useMediaQuery', () => ({
   useMediaQuery: () => true,

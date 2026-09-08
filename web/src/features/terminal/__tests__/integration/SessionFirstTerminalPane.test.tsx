@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionFirstTerminalPane } from '@/session-first/terminal/SessionFirstTerminalPane';
+import { SessionFirstTerminalPane } from '@/features/terminal/SessionFirstTerminalPane';
 import type { TerminalController } from '@/terminal/controller/TerminalController';
 
 vi.mock('@/terminal/components/TerminalViewport', () => ({

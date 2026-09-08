@@ -24,7 +24,7 @@ import {
   effectiveModeAtom,
   isSwitchingAtom,
 } from '../../atoms/connection';
-import { useTerminalOrchestration } from '../../session-first/terminal/useTerminalOrchestration';
+import { useTerminalOrchestration } from '@/features/terminal/useTerminalOrchestration';
 import { TerminalPane } from './TerminalPane';
 
 interface TerminalHeaderProps {
