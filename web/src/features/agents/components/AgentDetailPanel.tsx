@@ -4,20 +4,20 @@ import {
 } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import type { Agent, Session } from '../types';
+import type { Agent, Session } from '@/types';
 import {
   formatRelativeTime, formatAbsoluteTime, getStatusVariant,
   agentDisplayName, computeUptime,
-} from '../lib/format';
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Separator } from './ui/separator';
-import { Sheet, SheetContent } from './ui/sheet';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { cn } from '../lib/utils';
-import { copyToClipboard } from '../lib/clipboard';
-import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+} from '@/lib/format';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { copyToClipboard } from '@/lib/clipboard';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /** Max heartbeat entries to display in timeline. */
 const MAX_HEARTBEATS = 5;

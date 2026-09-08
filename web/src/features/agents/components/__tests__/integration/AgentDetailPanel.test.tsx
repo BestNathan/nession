@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AgentDetailPanel } from '@/components/AgentDetailPanel';
+import { AgentDetailPanel } from '@/features/agents/components/AgentDetailPanel';
 import type { Agent, Session } from '@/types';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import type { Agent } from '../types';
-import { agentsApi } from '../features/agents';
+import type { Agent } from '@/types';
+import { agentsApi } from '@/features/agents';
 
 function trackHeartbeats(newAgents: Agent[], map: Map<string, string[]>) {
   for (const agent of newAgents) {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { renderSlot } from '@/extensions/registry';
-import { AgentDetail } from '@/session-first/patterns/AgentDetail';
+import { AgentDetail } from '@/features/agents/components/AgentDetail';
 import { SessionDetails } from '@/features/sessions/components/SessionDetails';
 import claudeCodeExtension from '@/extensions/claude-code';
 import type { Agent, Session } from '@/types';

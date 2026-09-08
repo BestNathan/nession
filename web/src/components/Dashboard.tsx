@@ -15,11 +15,9 @@ import {
 } from '../atoms/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { type AttachChoice } from './env/AttachDialog';
-import { AgentSection } from './AgentSection';
 import { RenderTerminal } from './RenderTerminal';
 import { EnvManager } from './env/EnvManager';
 import { DashboardMainView } from './DashboardMainView';
-export { AgentSection };
 
 interface DashboardProps {
   connectionStatus: ConnectionState;

@@ -1,12 +1,12 @@
 import { Pencil, Monitor, Box, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Card, CardContent } from './ui/card';
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import type { Agent } from '../types';
-import { formatUptime, getStatusVariant } from '../lib/format';
-import { useAgentRename } from '../hooks/useAgentRename';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import type { Agent } from '@/types';
+import { formatUptime, getStatusVariant } from '@/lib/format';
+import { useAgentRename } from '@/features/agents/hooks/useAgentRename';
 
 interface AgentCardProps {
   agent: Agent;

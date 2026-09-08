@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
-import type { Agent } from '../types';
-import { agentsApi } from '../features/agents';
-import { agentDisplayName } from '../lib/format';
+import type { Agent } from '@/types';
+import { agentsApi } from '@/features/agents';
+import { agentDisplayName } from '@/lib/format';
 
 /** Hook encapsulating the rename-in-place state machine for an agent card. */
 export function useAgentRename(

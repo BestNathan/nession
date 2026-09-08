@@ -28,9 +28,9 @@ vi.mock('@/components/ui/alert-dialog', () => ({
   ),
 }));
 
-let DeleteModule: typeof import('@/components/DeleteAgentConfirmDialog');
+let DeleteModule: typeof import('@/features/agents/components/DeleteAgentConfirmDialog');
 beforeEach(async () => {
-  DeleteModule = await import('@/components/DeleteAgentConfirmDialog');
+  DeleteModule = await import('@/features/agents/components/DeleteAgentConfirmDialog');
   deleteAgentMock.mockReset();
   deleteAgentMock.mockResolvedValue(undefined);
 });

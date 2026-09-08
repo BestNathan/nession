@@ -1,5 +1,5 @@
 import { ChevronLeft, Menu, PanelRight } from 'lucide-react';
-import { AgentContext } from '@/session-first/patterns/AgentContext';
+import { AgentContext } from '@/features/agents/components/AgentContext';
 import { ConnectionStatus as SessionConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
 import {
   SurfaceSwitcher,

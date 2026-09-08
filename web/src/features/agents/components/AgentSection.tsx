@@ -1,6 +1,6 @@
-import type { Agent } from '../types';
-import { AgentCard } from './AgentCard';
-import { Skeleton } from './ui/skeleton';
+import type { Agent } from '@/types';
+import { AgentCard } from '@/features/agents/components/AgentCard';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function AgentSection({
   loadingAgents,

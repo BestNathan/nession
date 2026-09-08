@@ -2,7 +2,7 @@ import { useEffect, useCallback } from 'react';
 import type { WebSocketService } from '../services/socket';
 import { agentsApi } from '../features/agents';
 import { sessionsApi } from '../features/sessions';
-import type { useAgentData } from './useAgentData';
+import type { useAgentData } from '@/features/agents/hooks/useAgentData';
 import type { useSessionData } from '@/features/sessions/hooks/useSessionData';
 
 type AgentDataReturn = ReturnType<typeof useAgentData>;
