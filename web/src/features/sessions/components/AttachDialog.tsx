@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -15,6 +24,11 @@ import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvF
 import { envApi } from '@/features/env';
 import { sessionsApi } from '@/features/sessions';
 import { loadAttachPrefs } from '@/services/attachPrefs';
+import {
+  candidateUrlsOf,
+  loadSessionProfile,
+  type SessionAttachProfile,
+} from '@/services/sessionAttachProfile';
 import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
 import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
 import { EnvFileMultiSelect } from '@/features/env/components/EnvFileMultiSelect';
@@ -42,6 +56,9 @@ interface AttachDialogProps {
   isOpen: boolean;
   onClose: () => void;
   session: Session | null;
+  /** Which flow opened the dialog: attach (confirm → attach) or configure
+   *  (Save → persist the profile only). Defaults to 'attach'. */
+  intent?: 'attach' | 'configure';
   /** Called with the resolved attach choice; the flow shows the terminal. */
   onConfirm: (session: Session, choice: AttachChoice) => void;
 }
@@ -60,7 +77,7 @@ const AUTO_URL = '__auto__';
  * not measured live here — so the dialog never blocks on probing. A "Re-test"
  * control requests a fresh probe via probeRefreshRequestAtom.
  */
-export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDialogProps) {
+export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onConfirm }: AttachDialogProps) {
   const [mode, setMode] = useState<AttachMode>('auto');
   // Attach info fetched for P2P so we get the connection token + candidate list.
   // Local state (not attachInfoAtom): this is dialog scratch space for the
@@ -81,23 +98,33 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
   const agentId = session?.agent_id ?? session?.session_id.split(':')[0] ?? null;
   const webglSupported = detectWebGLSupport();
 
-  // Reset per open, pre-filling the last-used mode + renderer.
+  // Profile captured at open time, used to prefill mode/renderer/env/URL.
+  // Both the env-list and the attach-info continuations consume it, in either
+  // resolution order, so it is NOT cleared between them; the reset effect
+  // re-assigns it on every open and attach-info fetches are cancelled-guarded,
+  // so a stale profile can never prefill a later open.
+  const prefillProfileRef = useRef<SessionAttachProfile | null>(null);
+
+  // Reset per open, prefilling from the session profile when one exists (else
+  // legacy global prefs). Only explicit confirms create profiles, so a missing
+  // profile keeps the classic first-attach experience.
   useEffect(() => {
     if (!isOpen) {
       return;
     }
-    const prefs = loadAttachPrefs();
-    setMode(prefs.mode === 'relay' ? 'auto' : prefs.mode);
-    setRenderer(webglSupported ? prefs.renderer : 'canvas');
-    setAttachInfo(null);
-    setSelectedUrl(AUTO_URL);
-    setError(null);
-    // Load available env files and clear the previous selection on each open.
-    envApi.listEnvFiles()
-      .then((resp) => setEnvFiles(resp.files))
-      .catch(() => {});
-    setSelectedEnv([]);
-  }, [isOpen, webglSupported, setAttachInfo]);
+    prefillOnOpen({
+      session,
+      webglSupported,
+      prefillProfileRef,
+      setMode,
+      setRenderer,
+      setAttachInfo,
+      setSelectedUrl,
+      setSelectedEnv,
+      setError,
+      setEnvFiles,
+    });
+  }, [isOpen, webglSupported, session, setAttachInfo]);
 
   // Manual relay URL override — only relevant in relay mode.
   const relayUrl = useMemo(
@@ -109,35 +136,22 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
   // modes (e.g. Auto → Relay), not when re-selecting an address in the list.
   const prevRequestedMode = useRef<string | null>(null);
 
-  // Fetch attach info for the connection token + candidate list.
+  // Fetch attach info for the connection token + candidate list. Cancels the
+  // previous in-flight fetch on mode/session change.
   useEffect(() => {
     if (!isOpen || !session) {
       return;
     }
-    let cancelled = false;
-    setError(null);
-    const requestedMode = mode === 'auto' ? 'p2p' : mode;
-    // Only clear attachInfo on mode/session change, not on address re-select.
-    // Otherwise PathList disappears while the re-fetch is in flight.
-    if (prevRequestedMode.current !== null && prevRequestedMode.current !== requestedMode) {
-      setAttachInfo(null);
-    }
-    prevRequestedMode.current = requestedMode;
-    void (async () => {
-      try {
-        const info = await sessionsApi.requestAttach(session.session_id, requestedMode, relayUrl);
-        if (!cancelled) {
-          setAttachInfo(info);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to query agent addresses');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    return fetchAttachInfo({
+      session,
+      mode,
+      relayUrl,
+      prefillProfileRef,
+      prevRequestedMode,
+      setAttachInfo,
+      setSelectedUrl,
+      setError,
+    });
   }, [isOpen, session, mode, relayUrl, setAttachInfo]);
 
   const cached = agentId ? probeResults.get(agentId) : undefined;
@@ -200,12 +214,151 @@ export function AttachDialog({ isOpen, onClose, session, onConfirm }: AttachDial
             Cancel
           </Button>
           <Button type="button" onClick={handleConfirm} disabled={!attachInfo}>
-            Attach
+            {intent === 'configure' ? 'Save' : 'Attach'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+/** State setters written by the open-prefill and attach-info routines. */
+interface DialogStateSetters {
+  setMode: Dispatch<SetStateAction<AttachMode>>;
+  setRenderer: Dispatch<SetStateAction<'webgl' | 'canvas'>>;
+  setAttachInfo: Dispatch<SetStateAction<AttachInfo | null>>;
+  setSelectedUrl: Dispatch<SetStateAction<string>>;
+  setSelectedEnv: Dispatch<SetStateAction<EnvFileRef[]>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setEnvFiles: Dispatch<SetStateAction<EnvFileInfo[]>>;
+}
+
+interface OpenPrefillOptions extends DialogStateSetters {
+  session: Session | null;
+  webglSupported: boolean;
+  /** Profile captured at open time; re-assigned by every open. */
+  prefillProfileRef: MutableRefObject<SessionAttachProfile | null>;
+}
+
+/**
+ * Reset dialog state for a fresh open: prefill mode (relay kept as-is) and
+ * renderer (webgl → canvas fallback) from the session profile when one
+ * exists, else from the legacy global prefs (relay prefs still map to Auto —
+ * the classic first-attach experience). The env file list loads async, so the
+ * profile's env selection is restored once it arrives, filtered to files that
+ * still exist.
+ */
+function prefillOnOpen(options: OpenPrefillOptions): void {
+  const {
+    session,
+    webglSupported,
+    prefillProfileRef,
+    setMode,
+    setRenderer,
+    setAttachInfo,
+    setSelectedUrl,
+    setSelectedEnv,
+    setError,
+    setEnvFiles,
+  } = options;
+  prefillProfileRef.current = session ? loadSessionProfile(session) : null;
+  const source = prefillProfileRef.current?.choice;
+  const prefs = loadAttachPrefs();
+  setMode(source ? source.mode : prefs.mode === 'relay' ? 'auto' : prefs.mode);
+  setRenderer(
+    source
+      ? source.renderer === 'webgl' && !webglSupported
+        ? 'canvas'
+        : source.renderer
+      : webglSupported
+        ? prefs.renderer
+        : 'canvas',
+  );
+  setAttachInfo(null);
+  setSelectedUrl(AUTO_URL);
+  setSelectedEnv([]);
+  setError(null);
+  envApi.listEnvFiles()
+    .then((resp) => {
+      setEnvFiles(resp.files);
+      const prof = prefillProfileRef.current;
+      if (prof) {
+        setSelectedEnv(
+          prof.choice.envRefs.filter((ref) =>
+            resp.files.some(
+              (f) =>
+                f.name === ref.name &&
+                f.source === ref.source &&
+                (!ref.agent_id || f.agent_id === ref.agent_id),
+            ),
+          ),
+        );
+      }
+    })
+    .catch(() => {});
+}
+
+interface AttachFetchOptions {
+  session: Session;
+  mode: AttachMode;
+  /** Manual relay endpoint override, or undefined for auto. */
+  relayUrl: string | undefined;
+  prefillProfileRef: MutableRefObject<SessionAttachProfile | null>;
+  prevRequestedMode: MutableRefObject<string | null>;
+  setAttachInfo: Dispatch<SetStateAction<AttachInfo | null>>;
+  setSelectedUrl: Dispatch<SetStateAction<string>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+}
+
+/**
+ * Fetch fresh attach info for the requested mode (connection token + candidate
+ * list) and, once it lands, preselect the profile's saved manual path when
+ * this open still offers it (functional updater keeps any path the user
+ * already picked). Returns a cleanup that voids the in-flight fetch.
+ */
+function fetchAttachInfo(options: AttachFetchOptions): () => void {
+  const {
+    session,
+    mode,
+    relayUrl,
+    prefillProfileRef,
+    prevRequestedMode,
+    setAttachInfo,
+    setSelectedUrl,
+    setError,
+  } = options;
+  let cancelled = false;
+  setError(null);
+  const requestedMode = mode === 'auto' ? 'p2p' : mode;
+  // Only clear attachInfo on mode/session change, not on address re-select.
+  // Otherwise PathList disappears while the re-fetch is in flight.
+  if (prevRequestedMode.current !== null && prevRequestedMode.current !== requestedMode) {
+    setAttachInfo(null);
+  }
+  prevRequestedMode.current = requestedMode;
+  void (async () => {
+    try {
+      const info = await sessionsApi.requestAttach(session.session_id, requestedMode, relayUrl);
+      if (!cancelled) {
+        setAttachInfo(info);
+        const savedUrl = prefillProfileRef.current?.choice.selectedUrl;
+        if (
+          savedUrl !== undefined &&
+          savedUrl !== null &&
+          candidateUrlsOf(info).includes(savedUrl)
+        ) {
+          setSelectedUrl((current) => (current === AUTO_URL ? savedUrl : current));
+        }
+      }
+    } catch (err) {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : 'Failed to query agent addresses');
+      }
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
 }
 
 /** The two connection-mode buttons (Auto / P2P). */

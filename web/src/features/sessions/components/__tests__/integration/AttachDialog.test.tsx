@@ -8,6 +8,7 @@ import { sessionsApi } from '@/features/sessions';
 import type { Session, AttachInfo } from '@/types';
 import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/atoms/probe';
 import { attachInfoAtom } from '@/atoms/session';
+import { saveSessionProfile, type PersistedAttachChoice } from '@/services/sessionAttachProfile';
 
 vi.mock('@/features/env', () => ({
   envApi: { listEnvFiles: vi.fn() },
@@ -266,5 +267,117 @@ describe('AttachDialog', () => {
 
     // The live session's descriptor must be untouched.
     expect(store.get(attachInfoAtom)).toEqual(activeInfo);
+  });
+});
+
+describe('AttachDialog profile prefill + configure intent', () => {
+  const choice: PersistedAttachChoice = {
+    mode: 'p2p',
+    renderer: 'webgl',
+    envRefs: [],
+    selectedUrl: null,
+  };
+
+  function seedProfile(overrides: Partial<PersistedAttachChoice> = {}) {
+    saveSessionProfile(
+      { session_id: 'agent-1:dev', agent_id: 'agent-1' },
+      { ...choice, ...overrides },
+      'any-fp',
+    );
+  }
+
+  function seedRequest(addresses: AttachInfo['addresses'] = []) {
+    mockedSessionsApi.requestAttach.mockResolvedValue(attachInfo(addresses));
+  }
+
+  it('prefills mode and renderer from the session profile', async () => {
+    const onConfirm = vi.fn();
+    seedProfile({ mode: 'relay', renderer: 'canvas' });
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    // Relay mode selected → requestAttach asks for relay info.
+    expect(mockedSessionsApi.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'relay', undefined);
+  });
+
+  it('prefills the manual url when it is still a candidate', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    seedProfile({ mode: 'p2p', selectedUrl: 'ws://a/ws' });
+    seedRequest([
+      { url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+    ]);
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    await user.click(attachBtn);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ session_id: 'agent-1:dev' }),
+      expect.objectContaining({ mode: 'p2p', selectedUrl: 'ws://a/ws' }),
+    );
+  });
+
+  it('falls back to auto url when the saved manual url is gone', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    seedProfile({ mode: 'p2p', selectedUrl: 'ws://gone/ws' });
+    seedRequest([
+      { url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+    ]);
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    await user.click(attachBtn);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ selectedUrl: null }),
+    );
+  });
+
+  it('shows Save and still calls onConfirm once in configure mode', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AttachDialog
+        isOpen
+        intent="configure"
+        onClose={vi.fn()}
+        session={session()}
+        onConfirm={onConfirm}
+      />,
+    );
+    const saveBtn = await screen.findByRole('button', { name: /^Save$/ });
+    await waitFor(() => expect(saveBtn).toBeEnabled());
+    await user.click(saveBtn);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Attach (not Save) in attach mode', async () => {
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />);
+    await screen.findByRole('button', { name: /^Attach$/ });
+    expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
+  });
+
+  it('prefills env file selection from the profile, filtering missing files', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    mockedEnvApi.listEnvFiles.mockResolvedValue({
+      files: [{ name: 'prod.env', source: 'server', size: 10, modified: 0, var_count: 3 }],
+    });
+    seedProfile({
+      envRefs: [
+        { name: 'prod.env', source: 'server' },
+        { name: 'gone.env', source: 'server' },
+      ],
+    });
+    seedRequest();
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    await user.click(attachBtn);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ envRefs: [{ name: 'prod.env', source: 'server' }] }),
+    );
   });
 });
