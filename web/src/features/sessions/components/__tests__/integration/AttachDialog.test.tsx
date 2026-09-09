@@ -292,12 +292,19 @@ describe('AttachDialog profile prefill + configure intent', () => {
 
   it('prefills mode and renderer from the session profile', async () => {
     const onConfirm = vi.fn();
+    const user = userEvent.setup();
     seedProfile({ mode: 'relay', renderer: 'canvas' });
     render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
     await waitFor(() => expect(attachBtn).toBeEnabled());
     // Relay mode selected → requestAttach asks for relay info.
     expect(mockedSessionsApi.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'relay', undefined);
+    await user.click(attachBtn);
+    // The seeded profile values flow through to the confirm choice.
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mode: 'relay', renderer: 'canvas' }),
+    );
   });
 
   it('prefills the manual url when it is still a candidate', async () => {
@@ -331,6 +338,91 @@ describe('AttachDialog profile prefill + configure intent', () => {
     expect(onConfirm).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ selectedUrl: null }),
+    );
+  });
+
+  it('keeps an explicit Auto row pick across the relay refetch', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    // Relay profile whose saved manual path is still offered by the agent.
+    seedProfile({ mode: 'relay', selectedUrl: 'ws://relay/ws' });
+    seedRequest([
+      { url: 'ws://relay/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+    ]);
+    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    // The saved manual url is preselected, which flips relayUrl and refires
+    // the attach-info fetch for that endpoint — wait for that cycle to land.
+    await waitFor(() =>
+      expect(mockedSessionsApi.requestAttach).toHaveBeenLastCalledWith(
+        'agent-1:dev',
+        'relay',
+        'ws://relay/ws',
+      ),
+    );
+    // Explicitly pick the Auto path row (relay sublabel disambiguates it from
+    // the Auto MODE toggle). relayUrl drops back to undefined and a refetch
+    // fires; the re-landing info must NOT re-preselect the saved manual url.
+    await user.click(screen.getByRole('button', { name: /^Auto server auto-selects/ }));
+    await waitFor(() =>
+      expect(mockedSessionsApi.requestAttach).toHaveBeenLastCalledWith(
+        'agent-1:dev',
+        'relay',
+        undefined,
+      ),
+    );
+    await user.click(attachBtn);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mode: 'relay', selectedUrl: null }),
+    );
+  });
+
+  it('keeps profiles separate when reopening for another session', async () => {
+    const onConfirmA = vi.fn();
+    const onConfirmB = vi.fn();
+    const user = userEvent.setup();
+    // Session A: p2p with a manual url; session B: relay, server-auto only.
+    saveSessionProfile(
+      { session_id: 'agent-1:dev', agent_id: 'agent-1' },
+      { mode: 'p2p', renderer: 'webgl', envRefs: [], selectedUrl: 'ws://a/ws' },
+      'any-fp',
+    );
+    saveSessionProfile(
+      { session_id: 'agent-1:other', agent_id: 'agent-1' },
+      { mode: 'relay', renderer: 'canvas', envRefs: [], selectedUrl: null },
+      'any-fp',
+    );
+    seedRequest([
+      { url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+    ]);
+    const first = render(
+      <AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirmA} />,
+    );
+    const attachBtnA = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtnA).toBeEnabled());
+    await user.click(attachBtnA);
+    expect(onConfirmA).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mode: 'p2p', selectedUrl: 'ws://a/ws' }),
+    );
+    first.unmount();
+    render(
+      <AttachDialog
+        isOpen
+        onClose={vi.fn()}
+        session={{ ...session(), session_id: 'agent-1:other', session_name: 'other' }}
+        onConfirm={onConfirmB}
+      />,
+    );
+    const attachBtnB = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtnB).toBeEnabled());
+    await user.click(attachBtnB);
+    // B's own profile applies — nothing of A's manual url leaks in.
+    expect(onConfirmB).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mode: 'relay', selectedUrl: null }),
     );
   });
 

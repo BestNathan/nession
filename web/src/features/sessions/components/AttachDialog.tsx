@@ -104,6 +104,10 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
   // re-assigns it on every open and attach-info fetches are cancelled-guarded,
   // so a stale profile can never prefill a later open.
   const prefillProfileRef = useRef<SessionAttachProfile | null>(null);
+  // True once the user picked ANY path row this open (including the explicit
+  // Auto row, which also stores AUTO_URL) — the manual-url preselect must
+  // never override that pick. Reset by the reset-per-open effect.
+  const userPickedRef = useRef(false);
 
   // Reset per open, prefilling from the session profile when one exists (else
   // legacy global prefs). Only explicit confirms create profiles, so a missing
@@ -116,6 +120,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
       session,
       webglSupported,
       prefillProfileRef,
+      userPickedRef,
       setMode,
       setRenderer,
       setAttachInfo,
@@ -147,6 +152,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
       mode,
       relayUrl,
       prefillProfileRef,
+      userPickedRef,
       prevRequestedMode,
       setAttachInfo,
       setSelectedUrl,
@@ -197,7 +203,12 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
                 : latencyByUrl}
               bestUrl={bestUrl}
               selectedUrl={selectedUrl}
-              onSelect={setSelectedUrl}
+              onSelect={(url) => {
+                // Any row click — including the explicit Auto row — is a user
+                // pick that the profile preselect must never override.
+                userPickedRef.current = true;
+                setSelectedUrl(url);
+              }}
               onRetest={mode !== 'relay' && agentId
                 ? () => setRefreshRequest({ agentId, nonce: Date.now() })
                 : undefined}
@@ -238,6 +249,8 @@ interface OpenPrefillOptions extends DialogStateSetters {
   webglSupported: boolean;
   /** Profile captured at open time; re-assigned by every open. */
   prefillProfileRef: MutableRefObject<SessionAttachProfile | null>;
+  /** Cleared on every open so a pick in a previous open never counts. */
+  userPickedRef: MutableRefObject<boolean>;
 }
 
 /**
@@ -253,6 +266,7 @@ function prefillOnOpen(options: OpenPrefillOptions): void {
     session,
     webglSupported,
     prefillProfileRef,
+    userPickedRef,
     setMode,
     setRenderer,
     setAttachInfo,
@@ -262,6 +276,7 @@ function prefillOnOpen(options: OpenPrefillOptions): void {
     setEnvFiles,
   } = options;
   prefillProfileRef.current = session ? loadSessionProfile(session) : null;
+  userPickedRef.current = false;
   const source = prefillProfileRef.current?.choice;
   const prefs = loadAttachPrefs();
   setMode(source ? source.mode : prefs.mode === 'relay' ? 'auto' : prefs.mode);
@@ -304,6 +319,8 @@ interface AttachFetchOptions {
   /** Manual relay endpoint override, or undefined for auto. */
   relayUrl: string | undefined;
   prefillProfileRef: MutableRefObject<SessionAttachProfile | null>;
+  /** Set once the user clicked ANY path row this open (incl. the Auto row). */
+  userPickedRef: MutableRefObject<boolean>;
   prevRequestedMode: MutableRefObject<string | null>;
   setAttachInfo: Dispatch<SetStateAction<AttachInfo | null>>;
   setSelectedUrl: Dispatch<SetStateAction<string>>;
@@ -312,9 +329,12 @@ interface AttachFetchOptions {
 
 /**
  * Fetch fresh attach info for the requested mode (connection token + candidate
- * list) and, once it lands, preselect the profile's saved manual path when
- * this open still offers it (functional updater keeps any path the user
- * already picked). Returns a cleanup that voids the in-flight fetch.
+ * list) and, once it lands, preselect the profile's saved manual path — but
+ * only while the user has NOT picked any path row this open. An explicit Auto
+ * row click also stores AUTO_URL, so selectedUrl alone cannot distinguish
+ * "no pick" from "picked Auto"; the ref is the source of truth. Every arrival
+ * re-checks it, so a pick made while a fetch was in flight is never
+ * overridden. Returns a cleanup that voids the in-flight fetch.
  */
 function fetchAttachInfo(options: AttachFetchOptions): () => void {
   const {
@@ -322,6 +342,7 @@ function fetchAttachInfo(options: AttachFetchOptions): () => void {
     mode,
     relayUrl,
     prefillProfileRef,
+    userPickedRef,
     prevRequestedMode,
     setAttachInfo,
     setSelectedUrl,
@@ -341,13 +362,16 @@ function fetchAttachInfo(options: AttachFetchOptions): () => void {
       const info = await sessionsApi.requestAttach(session.session_id, requestedMode, relayUrl);
       if (!cancelled) {
         setAttachInfo(info);
+        // Without a user pick, the current value is either AUTO_URL or a value
+        // this same code auto-set — a direct set cannot override a choice.
         const savedUrl = prefillProfileRef.current?.choice.selectedUrl;
         if (
+          !userPickedRef.current &&
           savedUrl !== undefined &&
           savedUrl !== null &&
           candidateUrlsOf(info).includes(savedUrl)
         ) {
-          setSelectedUrl((current) => (current === AUTO_URL ? savedUrl : current));
+          setSelectedUrl(savedUrl);
         }
       }
     } catch (err) {
