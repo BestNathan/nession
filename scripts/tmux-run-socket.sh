@@ -29,6 +29,13 @@
 if [ -z "${NESSION_TMUX_SOCKET:-}" ]; then
     NESSION_TMUX_RUN_DIR_OWNED=$(mktemp -d "${TMPDIR:-/tmp}/nession-test-tmux.XXXXXX")
     NESSION_TMUX_SOCKET="${NESSION_TMUX_RUN_DIR_OWNED}/tmux.sock"
+    # Owner marker for scripts/sweep-test-sessions.sh: the PID of the shell
+    # running this run. Written at creation time — before any tmux server can
+    # exist on this socket — so "owner.pid present and the PID alive" means a
+    # live run, and its absence means an orphan (a run killed before it could
+    # write the lock cannot have started a server yet). The lock dies with the
+    # directory: normal cleanup removes the whole dir.
+    printf '%s\n' "$$" > "${NESSION_TMUX_RUN_DIR_OWNED}/owner.pid"
     export NESSION_TMUX_SOCKET
 else
     NESSION_TMUX_RUN_DIR_OWNED=""

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 import { E2E_RUN_DIR, E2E_TMUX_DIR, E2E_TMUX_SOCKET } from './runtime';
@@ -18,15 +18,13 @@ import { E2E_RUN_DIR, E2E_TMUX_DIR, E2E_TMUX_SOCKET } from './runtime';
  * killed their real tmux server, sessions and all (#574). The socket path is now
  * unique per run, so there is no prior server of *this* run's to clean up.
  *
- * The cost is that a run killed hard (Ctrl-C / SIGKILL) never reaches the
- * teardown below, and its socket, tmux server and directory survive — and
- * because each run picks a new path, those orphans accumulate without bound
- * instead of being overwritten. Clean them up by hand with:
- *
- *   for s in /tmp/nession-e2e-tmux-*\/tmux.sock; do tmux -S "$s" kill-server; done
- *   rm -rf /tmp/nession-e2e-tmux-*
- *
- * A recovery tool for this is tracked in #582.
+ * The cost is that a run killed hard (Ctrl-C / SIGKILL — the teardown below
+ * is skipped, leaving no owner for the tmux server) never cleans up: its
+ * socket, tmux server and directory survive — and because each run picks a
+ * new path, those orphans accumulate without bound instead of being
+ * overwritten. Reclaim them with scripts/sweep-test-sessions.sh (list /
+ * --kill), which recognizes this directory pattern as an owned run
+ * directory and verifies the socket before killing it.
  *
  * ── Why not override HOME too? ─────────────────────────────────────────
  * `cargo run` invokes rustup, which reads `$HOME/.rustup` and `$HOME/.cargo`.
@@ -46,6 +44,12 @@ export default async function setup(): Promise<() => Promise<void>> {
   // tmux does not create the socket's parent directory (measured: it fails with
   // "error creating <path> (No such file or directory)"), so create it here.
   mkdirSync(E2E_TMUX_DIR, { recursive: true, mode: 0o700 });
+  // Owner marker for scripts/sweep-test-sessions.sh — this runner's PID.
+  // Written before any webServer (and therefore any tmux server on this
+  // socket) exists, so a surviving directory whose owner PID is dead is
+  // unambiguously an orphan. The lock dies with the directory: teardown
+  // removes the whole dir, and so does the sweep when it reclaims.
+  writeFileSync(`${E2E_TMUX_DIR}/owner.pid`, String(process.pid));
 
   return async () => {
     // ── Kill this run's tmux server ────────────────────────────────────
