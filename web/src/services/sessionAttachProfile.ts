@@ -60,16 +60,15 @@ function parseProfile(entry: unknown): SessionAttachProfile | null {
     return null;
   }
   const choice = c as Record<string, unknown>;
-  const envRefs = Array.isArray(choice.envRefs)
-    ? choice.envRefs.filter(isEnvFileRef)
-    : [];
   if (
+    !Array.isArray(choice.envRefs) ||
     !isAttachMode(choice.mode) ||
     !isRenderer(choice.renderer) ||
     (choice.selectedUrl !== null && typeof choice.selectedUrl !== 'string')
   ) {
     return null;
   }
+  const envRefs = choice.envRefs.filter(isEnvFileRef);
   return {
     schemaVersion: ATTACH_PROFILE_SCHEMA_VERSION,
     sessionId: p.sessionId,
@@ -127,7 +126,11 @@ export function saveSessionProfile(
     if (raw) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (typeof parsed === 'object' && parsed !== null) {
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          !Array.isArray(parsed)
+        ) {
           map = parsed as Record<string, unknown>;
         }
       } catch {

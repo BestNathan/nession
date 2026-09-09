@@ -18,6 +18,24 @@ const choice: PersistedAttachChoice = {
   selectedUrl: null,
 };
 
+/** A structurally valid stored entry for the test session. */
+const validEntry = {
+  schemaVersion: 1,
+  sessionId: session.session_id,
+  agentId: session.agent_id,
+  optionsFingerprint: 'fp-1',
+  updatedAt: 1,
+  choice,
+};
+
+/** Seed the storage blob with one entry for the test session. */
+function seedEntry(entry: unknown): void {
+  localStorage.setItem(
+    'nession_session_attach_profiles',
+    JSON.stringify({ 'agent-1:dev': entry }),
+  );
+}
+
 describe('sessionAttachProfile storage', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -76,5 +94,63 @@ describe('sessionAttachProfile storage', () => {
     saveSessionProfile(session, choice, 'fp-1');
     const renamed = { session_id: 'agent-1:dev', agent_id: 'agent-2' };
     expect(loadSessionProfile(renamed)).toBeNull();
+  });
+
+  it('returns null when a profile entry has non-array envRefs', () => {
+    seedEntry({
+      ...validEntry,
+      choice: { ...validEntry.choice, envRefs: 'nope' },
+    });
+    expect(loadSessionProfile(session)).toBeNull();
+  });
+
+  it('drops malformed envRef members but keeps valid ones', () => {
+    seedEntry({
+      ...validEntry,
+      choice: {
+        ...validEntry.choice,
+        envRefs: [
+          { name: 'prod.env', source: 'server' },
+          { name: 5, source: 'server' },
+          { name: 'x.env', source: 'bogus' },
+        ],
+      },
+    });
+    expect(loadSessionProfile(session)?.choice.envRefs).toEqual([
+      { name: 'prod.env', source: 'server' },
+    ]);
+  });
+
+  it('drops an envRef member with a non-string agent_id', () => {
+    seedEntry({
+      ...validEntry,
+      choice: {
+        ...validEntry.choice,
+        envRefs: [{ name: 'prod.env', source: 'server', agent_id: 7 }],
+      },
+    });
+    expect(loadSessionProfile(session)?.choice.envRefs).toEqual([]);
+  });
+
+  it('recovers when the stored blob is a JSON array', () => {
+    localStorage.setItem('nession_session_attach_profiles', '["stale","blob"]');
+    saveSessionProfile(session, choice, 'fp-9');
+    const loaded = loadSessionProfile(session);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.optionsFingerprint).toBe('fp-9');
+  });
+
+  it('returns null when the stored blob is JSON but not an object', () => {
+    localStorage.setItem('nession_session_attach_profiles', JSON.stringify('not-an-object'));
+    expect(loadSessionProfile(session)).toBeNull();
+  });
+
+  it('returns null when a choice field is malformed', () => {
+    seedEntry({ ...validEntry, choice: { ...validEntry.choice, mode: 'bogus' } });
+    expect(loadSessionProfile(session)).toBeNull();
+    seedEntry({ ...validEntry, choice: { ...validEntry.choice, renderer: 'bogus' } });
+    expect(loadSessionProfile(session)).toBeNull();
+    seedEntry({ ...validEntry, choice: { ...validEntry.choice, selectedUrl: 42 } });
+    expect(loadSessionProfile(session)).toBeNull();
   });
 });
