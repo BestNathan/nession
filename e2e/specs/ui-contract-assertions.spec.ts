@@ -172,6 +172,10 @@ test.describe('app fixtures at 390×844', () => {
 
   test('sessions page rows and header hold their contracts', async ({ page }) => {
     await page.goto('/#/fixture/app');
+    // The spatial app opens on the Terminal page — navigate to Sessions
+    // first (same as fixture-matrix.spec.ts).
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-spatial-page-sessions')).toBeInViewport();
     const rows = page.getByTestId('session-item-row');
     await expect(rows.first()).toBeInViewport();
     for (let i = 0; i < 6; i += 1) {
