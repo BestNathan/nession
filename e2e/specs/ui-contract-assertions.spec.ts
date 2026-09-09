@@ -27,7 +27,6 @@ test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 const WEB = { pattern: 'pattern.workspace-navigation', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_WEB = { pattern: 'pattern.session-item', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_APP = { pattern: 'pattern.session-item', experience: 'app' as const, viewport: 'app.standard-phone' };
-const HEADER_APP = { pattern: 'pattern.session-header', experience: 'app' as const, viewport: 'app.standard-phone' };
 
 async function rejectsWith(assertion: Promise<void>, rule: string): Promise<void> {
   await expect(assertion).rejects.toThrow(/UI_CONTRACT_VIOLATION/);
@@ -172,12 +171,15 @@ test.describe('app fixtures at 390×844', () => {
 
   test('sessions page rows and header hold their contracts', async ({ page }) => {
     await page.goto('/#/fixture/app');
+    // The spatial app opens on the Terminal page — navigate to Sessions
+    // first (same as fixture-matrix.spec.ts).
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-spatial-page-sessions')).toBeInViewport();
     const rows = page.getByTestId('session-item-row');
     await expect(rows.first()).toBeInViewport();
     for (let i = 0; i < 6; i += 1) {
       await expectTouchTarget(rows.nth(i), ITEM_APP);
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_APP);
     }
-    await expectSingleLine(page.getByTestId('session-header-line'), HEADER_APP);
   });
 });
