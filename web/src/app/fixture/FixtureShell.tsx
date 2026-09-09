@@ -54,6 +54,7 @@ export function FixtureShell() {
     onCreate: () => {},
     onRefresh: () => {},
     onSelect: () => {},
+    onConfigure: () => {},
     onKill: () => {},
   };
 
@@ -93,6 +94,7 @@ export function FixtureShell() {
           onCreate={() => {}}
           onRefresh={() => {}}
           onSelect={() => {}}
+          onConfigure={() => {}}
           onKill={() => {}}
           onSurfaceChange={() => {}}
           onToolChange={() => {}}

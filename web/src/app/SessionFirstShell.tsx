@@ -94,6 +94,7 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
             onCreate={() => data.setShowCreateModal(true)}
             onRefresh={() => { void data.fetchSessions({ force: true }); }}
             onSelect={state.handleSelect}
+            onConfigure={() => {}}
             onKill={(s) => data.setSessionToKill(s)}
             onSurfaceChange={state.setSurface}
             onToolChange={state.setTool}

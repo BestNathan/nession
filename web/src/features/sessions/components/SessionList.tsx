@@ -17,6 +17,7 @@ export interface SessionListProps {
   loading?: boolean;
   isSearchActive?: boolean;
   onSelect: (session: Session) => void;
+  onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
 }
 
@@ -31,6 +32,7 @@ export function SessionList({
   loading = false,
   isSearchActive = false,
   onSelect,
+  onConfigure,
   onKill,
 }: SessionListProps) {
   if (loading) {
@@ -84,6 +86,7 @@ export function SessionList({
               agentLabel={agent ? agentDisplayName(agent) : session.agent_id}
               selected={selectedId === session.session_id}
               onSelect={onSelect}
+              onConfigure={onConfigure}
               onKill={onKill}
             />
           );

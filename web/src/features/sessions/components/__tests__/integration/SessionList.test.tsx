@@ -55,4 +55,16 @@ describe('SessionList', () => {
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(onSelect).toHaveBeenCalledWith(sess);
   });
+
+  it('forwards onConfigure to the row', async () => {
+    const onConfigure = vi.fn();
+    render(
+      <SessionList
+        sessions={[sess]} agents={[agent]} staleAgentIds={[]} selectedId={null}
+        clientSessionId="" onSelect={vi.fn()} onConfigure={onConfigure}
+      />,
+    );
+    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    expect(onConfigure).toHaveBeenCalledWith(sess);
+  });
 });
