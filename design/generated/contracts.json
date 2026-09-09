@@ -22,6 +22,21 @@
         "touchTargetTokenPx": 44
       }
     },
+    "pattern.session-item": {
+      "id": "pattern.session-item",
+      "patternRef": "docs/design/design-system/patterns/session-item.md",
+      "extends": [],
+      "web": {
+        "overflow": "clip",
+        "wrap": true
+      },
+      "app": {
+        "overflow": "clip",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
     "pattern.session-list": {
       "id": "pattern.session-list",
       "patternRef": "docs/design/design-system/patterns/session-list.md",
@@ -33,27 +48,6 @@
       "app": {
         "overflow": "scroll",
         "scrollOwner": "self"
-      }
-    },
-    "pattern.session-item": {
-      "id": "pattern.session-item",
-      "patternRef": "docs/design/design-system/patterns/session-item.md",
-      "extends": [
-        "category.list-row"
-      ],
-      "web": {
-        "overflow": "clip",
-        "wrap": false,
-        "heightToken": "experience.web.row.md",
-        "heightTokenPx": 36
-      },
-      "app": {
-        "overflow": "clip",
-        "wrap": false,
-        "heightToken": "experience.app.row.md",
-        "touchTargetToken": "experience.app.touchTarget.min",
-        "heightTokenPx": 48,
-        "touchTargetTokenPx": 44
       }
     },
     "pattern.terminal-toolbar": {
@@ -100,8 +94,6 @@
         "alignY": "middle",
         "touchTargetToken": "experience.app.touchTarget.min",
         "justify": "start",
-        "heightToken": "experience.app.row.md",
-        "heightTokenPx": 48,
         "touchTargetTokenPx": 44
       }
     }

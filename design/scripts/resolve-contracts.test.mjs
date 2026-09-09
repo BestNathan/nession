@@ -41,18 +41,13 @@ test('token index exposes experience, domain, primitive and semantic aliases', (
 
 // ── inheritance merge (real sources) ────────────────────────────────────────
 
-test('session-item: pure list-row inheritance, web without touch target', () => {
+test('session-item: shipped two-line summary row — wrap allowed, clip, app touch target', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.session-item'];
-  assert.deepEqual(merged.extends, ['category.list-row']);
-  assert.deepEqual(merged.web, {
-    wrap: false,
-    overflow: 'clip',
-    heightToken: 'experience.web.row.md',
-    heightTokenPx: 36,
-  });
-  assert.equal(merged.app.wrap, false);
-  assert.equal(merged.app.heightToken, 'experience.app.row.md');
-  assert.equal(merged.app.heightTokenPx, 48);
+  assert.deepEqual(merged.extends, []);
+  assert.deepEqual(merged.web, { wrap: true, overflow: 'clip' });
+  assert.equal(merged.app.wrap, true);
+  assert.equal(merged.app.overflow, 'clip');
+  assert.equal(merged.app.heightToken, undefined, 'row height is layout-derived, not token-pinned');
   assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.min');
   assert.equal(merged.app.touchTargetTokenPx, 44);
   assert.equal(merged.web.touchTargetToken, undefined);
@@ -89,14 +84,16 @@ test('session-header inherits chrome band rules and distributes title/actions', 
   assert.equal(merged.app.touchTargetTokenPx, 44);
 });
 
-test('workspace-navigation: menu overflow, app rows at touch density', () => {
+test('workspace-navigation: menu overflow both experiences, no pinned strip height', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.workspace-navigation'];
   assert.equal(merged.web.overflow, 'menu');
   assert.equal(merged.web.justify, 'start');
-  assert.equal(merged.web.heightToken, undefined, 'web strip height not pinned to a row token');
+  assert.equal(merged.web.heightToken, undefined, 'strip height is layout-derived, not token-pinned');
+  assert.equal(merged.web.wrap, false, 'single-line entries via category.chrome');
   assert.equal(merged.app.overflow, 'menu');
-  assert.equal(merged.app.heightToken, 'experience.app.row.md');
-  assert.equal(merged.app.heightTokenPx, 48);
+  assert.equal(merged.app.justify, 'start');
+  assert.equal(merged.app.heightToken, undefined);
+  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.min');
 });
 
 test('every merged pattern keeps provenance and experience blocks', () => {

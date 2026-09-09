@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -375,11 +375,11 @@ export function mergeContracts(tree, tokens) {
 export function loadContractSources(dir = CONTRACTS_DIR) {
   const tree = { global: {}, categories: {}, patterns: {} };
   tree.global = readJson(join(dir, 'global.json'), 'global.json');
-  for (const name of ['chrome', 'list-row', 'control']) {
-    tree.categories[`${name}.json`] = readJson(join(dir, 'categories', `${name}.json`), `categories/${name}.json`);
+  for (const name of readdirSync(join(dir, 'categories')).filter((f) => f.endsWith('.json')).sort()) {
+    tree.categories[name] = readJson(join(dir, 'categories', name), `categories/${name}`);
   }
-  for (const name of ['session-header', 'session-list', 'session-item', 'terminal-toolbar', 'workspace-navigation']) {
-    tree.patterns[`${name}.json`] = readJson(join(dir, 'patterns', `${name}.json`), `patterns/${name}.json`);
+  for (const name of readdirSync(join(dir, 'patterns')).filter((f) => f.endsWith('.json')).sort()) {
+    tree.patterns[name] = readJson(join(dir, 'patterns', name), `patterns/${name}`);
   }
   return tree;
 }
