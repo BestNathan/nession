@@ -187,6 +187,9 @@ function renderShell(initialEntry = '/') {
 
 describe('SessionFirstShell', () => {
   beforeEach(() => {
+    // confirmAttach persists per-Session attach profiles on confirm; clear
+    // them so a confirm in one test cannot seed the next test's dialog-vs-fast-path.
+    localStorage.clear();
     deepLink.isRestoringDeepLink = false;
     deepLink.sessionIdFromUrl = null;
     deepLink.restored.clear();

@@ -151,6 +151,31 @@ export function saveSessionProfile(
   }
 }
 
+/** Persist (or refresh) the profile a confirmed choice produced. The choice's
+ *  FRESH attachInfo supplies the fingerprint, so the stored fingerprint always
+ *  matches what validation will compare against next time. */
+export function persistConfirmedChoice(
+  session: Pick<Session, 'session_id' | 'agent_id'>,
+  choice: {
+    mode: AttachMode;
+    renderer: 'webgl' | 'canvas';
+    envRefs?: EnvFileRef[];
+    selectedUrl?: string | null;
+  },
+  info: AttachInfo,
+): void {
+  saveSessionProfile(
+    session,
+    {
+      mode: choice.mode,
+      renderer: choice.renderer,
+      envRefs: choice.envRefs ?? [],
+      selectedUrl: choice.selectedUrl ?? null,
+    },
+    buildOptionsFingerprint(info),
+  );
+}
+
 /** Candidate urls the dialog would offer, legacy agent_address included. */
 export function candidateUrlsOf(info: AttachInfo): string[] {
   const urls = (info.addresses ?? []).map((a) => a.url);
