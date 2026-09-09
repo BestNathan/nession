@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react';
+import { Settings, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -17,12 +17,28 @@ function agentCopyClass(channel: AgentChannel): string {
   }
 }
 
+// Row action buttons are always visible below lg (touch-safe drawer rows) and
+// hidden behind the group hover/focus/selected reveal at lg+. The hidden state
+// is lg:-prefixed so the unprefixed default is visible; the selected override
+// must carry the same lg: prefix so tailwind-merge can drop the lg: hidden
+// rules (an unprefixed override would keep both classes and lose to the later
+// media-query rule in the real cascade, hiding icons on selected rows at lg+).
+// jsdom cannot apply group-hover, so tests assert this class composition.
+const iconReveal = cn(
+  'mt-0.5 size-8 shrink-0 text-muted-foreground',
+  'lg:opacity-0 lg:pointer-events-none',
+  'lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto',
+  'lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto',
+);
+
 export interface SessionItemProps {
   session: Session;
   domain: DomainState;
   agentLabel: string;
   selected: boolean;
   onSelect: (session: Session) => void;
+  /** Open the attach-settings (configure) dialog for this session. */
+  onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
 }
 
@@ -32,6 +48,7 @@ export function SessionItem({
   agentLabel,
   selected,
   onSelect,
+  onConfigure,
   onKill,
 }: SessionItemProps) {
   return (
@@ -66,6 +83,33 @@ export function SessionItem({
           </span>
         )}
       </button>
+      {onConfigure ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                data-testid={`session-settings-${session.session_id}`}
+                aria-label={`Configure attach settings for ${session.session_name}`}
+                className={cn(
+                  iconReveal,
+                  'hover:text-foreground',
+                  selected && 'lg:opacity-100 lg:pointer-events-auto',
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onConfigure(session);
+                }}
+              >
+                <Settings className="size-4" />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">Configure attach settings</TooltipContent>
+        </Tooltip>
+      ) : null}
       {onKill ? (
         <Tooltip>
           <TooltipTrigger
@@ -77,10 +121,9 @@ export function SessionItem({
                 data-testid={`session-kill-${session.session_id}`}
                 aria-label="Kill session"
                 className={cn(
-                  'mt-0.5 size-8 shrink-0 text-muted-foreground hover:text-destructive',
-                  'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
-                  'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
-                  selected && 'opacity-100 pointer-events-auto',
+                  iconReveal,
+                  'hover:text-destructive',
+                  selected && 'lg:opacity-100 lg:pointer-events-auto',
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
