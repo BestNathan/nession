@@ -157,10 +157,16 @@ profile default path never writes one. `confirmAttach` gains an option
 `{ persistProfile?: boolean }` (default `true`).
 
 **Row-click decision** (`useSessionFirstAttach.requestAttach` becomes
-asynchronous when a profile exists):
+asynchronous when a profile exists). One carve-out added at review time: a
+click on the session the client is **already attached to** is a no-op while
+the terminal is healthy (a fast-path re-attach would tear down the live
+runtime via the route-epoch bump); if the terminal has FAILED, the row click
+opens the dialog so recovery stays an explicit user action.
 
 ```text
 Row click
+ ├─ already-attached session, terminal healthy ──► no-op
+ ├─ already-attached session, terminal failed ───► open AttachDialog (recovery)
  ├─ no profile ────────────────► open AttachDialog (unchanged)
  └─ profile exists ── validate (fresh requestAttach)
      ├─ valid ──► build choice from profile → confirmAttach (attach immediately)
