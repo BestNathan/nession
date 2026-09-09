@@ -2,6 +2,8 @@
 
 One row in [SessionList](session-list.md): a Session, with Agent as **secondary metadata**.
 
+> **Contract:** `design/contracts/patterns/session-item.json` — measurable layout rules ([contracts.md](../contracts.md)).
+
 ## Purpose
 
 Identify a Session at a glance (name, workload hint, which Agent, recency) and show whether the user can reach it **without** claiming the Session itself is “offline” when only the Agent is unreachable.

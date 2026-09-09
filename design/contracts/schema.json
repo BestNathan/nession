@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "design/contracts/schema.json",
+  "title": "Nession UI contract",
+  "description": "Machine-readable layout/pattern constraints. Source files live under design/contracts/ and are merged by design/scripts/resolve-contracts.mjs into design/generated/contracts.json. Values reference design/tokens ids — never raw px/colors (see docs/design/design-system/contracts.md).",
+  "$defs": {
+    "tokenRef": {
+      "type": "string",
+      "pattern": "^(experience|domain|semantic|primitive)\\.[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$",
+      "description": "Dotted id into design/tokens/ (e.g. experience.web.control.md). Unknown or non-resolvable ids fail resolve-contracts."
+    },
+    "overflow": {
+      "type": "string",
+      "enum": ["clip", "menu", "sheet", "scroll", "wrap"],
+      "description": "Strategy when content exceeds the pattern bounds. clip = truncate/hide; menu/sheet = collapse into a popover/sheet; scroll = the region scrolls; wrap = wrapping is the overflow strategy."
+    },
+    "visibility": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["always", "collapse-to-menu", "collapse-to-drawer", "hidden"]
+        },
+        "breakpoint": {
+          "type": "string",
+          "enum": ["sm", "md", "lg", "xl", "2xl"],
+          "description": "Optional Tailwind-scale breakpoint below which the mode applies. Per-experience differences belong in the web/app block itself."
+        }
+      },
+      "additionalProperties": false
+    },
+    "experienceBlock": {
+      "type": "object",
+      "description": "Constraints for one experience. web and app blocks merge independently — neither inherits the other.",
+      "properties": {
+        "wrap": {
+          "type": "boolean",
+          "description": "false = forced single line (an unintended wrap is a violation); true = wrapping allowed."
+        },
+        "heightToken": { "$ref": "#/$defs/tokenRef", "description": "Resolved value must be px-measurable (px/rem/number)." },
+        "minHeightToken": { "$ref": "#/$defs/tokenRef" },
+        "overflow": { "$ref": "#/$defs/overflow" },
+        "alignY": {
+          "type": "string",
+          "enum": ["top", "middle", "bottom"],
+          "description": "Cross-axis alignment intent for assertions."
+        },
+        "justify": {
+          "type": "string",
+          "enum": ["start", "center", "end", "space-between", "space-around"],
+          "description": "Row-axis distribution intent for assertions."
+        },
+        "minWidthToken": { "$ref": "#/$defs/tokenRef" },
+        "maxWidthToken": { "$ref": "#/$defs/tokenRef" },
+        "scrollOwner": {
+          "oneOf": [
+            { "type": "boolean", "description": "true = the pattern element itself scrolls." },
+            { "type": "string", "minLength": 1, "description": "Name of a descendant region that owns scrolling (e.g. \"nav-list\")." }
+          ]
+        },
+        "touchTargetToken": { "$ref": "#/$defs/tokenRef", "description": "Minimum hit area, App density (e.g. experience.app.touchTarget.min)." },
+        "visibility": { "$ref": "#/$defs/visibility" }
+      },
+      "additionalProperties": false
+    },
+    "sharedHeader": {
+      "type": "object",
+      "properties": {
+        "$description": { "type": "string" },
+        "web": { "$ref": "#/$defs/experienceBlock" },
+        "app": { "$ref": "#/$defs/experienceBlock" }
+      },
+      "additionalProperties": false
+    },
+    "viewportEntry": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^(web|app)\\.[a-z][a-z0-9-]*$" },
+        "experience": { "type": "string", "enum": ["web", "app"] },
+        "role": { "type": "string" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 }
+      },
+      "required": ["id", "experience", "role", "width", "height"],
+      "additionalProperties": false
+    }
+  },
+  "anyOf": [
+    {
+      "title": "global rules (design/contracts/global.json)",
+      "allOf": [{ "$ref": "#/$defs/sharedHeader" }]
+    },
+    {
+      "title": "category rules (design/contracts/categories/*.json)",
+      "allOf": [{ "$ref": "#/$defs/sharedHeader" }],
+      "properties": {
+        "id": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" },
+        "extends": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" }
+        }
+      },
+      "required": ["id"]
+    },
+    {
+      "title": "viewport matrix (design/contracts/viewports.json)",
+      "type": "object",
+      "properties": {
+        "$description": { "type": "string" },
+        "viewports": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/viewportEntry" }
+        }
+      },
+      "required": ["viewports"],
+      "additionalProperties": false
+    },
+    {
+      "title": "pattern rules (design/contracts/patterns/*.json)",
+      "allOf": [{ "$ref": "#/$defs/sharedHeader" }],
+      "properties": {
+        "id": { "type": "string", "pattern": "^pattern\\.[a-z][a-z0-9-]*$" },
+        "extends": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" },
+          "description": "Categories merge in listed order (ancestors first); pattern fields override same-named category fields."
+        },
+        "patternRef": {
+          "type": "string",
+          "pattern": "^docs/design/design-system/patterns/.*\\.md$",
+          "description": "Path to the human-readable #470 pattern prose that owns semantics."
+        }
+      },
+      "required": ["id", "patternRef"]
+    }
+  ]
+}

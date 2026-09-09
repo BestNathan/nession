@@ -17,6 +17,7 @@ NC='\033[0m'
 # ── Determine what changed ──────────────────────────────────────────────────
 HAS_RUST=0
 HAS_WEB=0
+HAS_DESIGN=0
 
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
@@ -53,15 +54,20 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
   if echo "$changed" | grep -qE '^web/.*\.(ts|tsx|js|css)$'; then
     HAS_WEB=1
   fi
+
+  # Design tokens/contracts: JSON sources + generators under design/
+  if echo "$changed" | grep -qE '^design/'; then
+    HAS_DESIGN=1
+  fi
 done
 
 # ── Skip if nothing relevant changed ────────────────────────────────────────
-if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ]; then
-  echo -e "${GREEN}→ pre-push: no Rust/Web changes, skipping tests${NC}"
+if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ] && [ $HAS_DESIGN -eq 0 ]; then
+  echo -e "${GREEN}→ pre-push: no Rust/Web/design changes, skipping tests${NC}"
   exit 0
 fi
 
-echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB)${NC}"
+echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB Design=$HAS_DESIGN)${NC}"
 echo ""
 
 HAS_ERROR=0
@@ -115,6 +121,20 @@ if [ $HAS_WEB -eq 1 ]; then
   fi
 fi
 
+# ── Design tokens/contracts ─────────────────────────────────────────────────
+if [ $HAS_DESIGN -eq 1 ]; then
+  echo ""
+
+  echo -e "${YELLOW}→ just design-test${NC}"
+  if just design-test; then
+    echo -e "${GREEN}✓ just design-test${NC}"
+  else
+    echo -e "${RED}✗ just design-test${NC}"
+    HAS_ERROR=1
+    FAILED_CHECKS+=("design-test (node --test)")
+  fi
+fi
+
 echo ""
 
 if [ $HAS_ERROR -eq 1 ]; then
@@ -130,6 +150,7 @@ if [ $HAS_ERROR -eq 1 ]; then
   echo -e "    Rust tests fail  → cargo test -p <crate> -- <test_name> --nocapture"
   echo -e "    Coverage too low → cargo llvm-cov -p <crate> --html  (see uncovered lines)"
   echo -e "    Web tests fail   → cd web && npx vitest run -t '<test-name>'"
+  echo -e "    Design tests fail → node --test design/scripts/*.test.mjs"
   echo -e "    Missing deps     → cd web && npm install"
   echo -e "    Missing tools    → cargo install cargo-llvm-cov; rustup component add llvm-tools-preview"
   echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

@@ -35,13 +35,23 @@ quick: fmt lint
 # Full CI checks (fmt + lint + tmux-socket gate + coverage — coverage runs all tests)
 check: fmt lint check-tmux-socket coverage
 
-# ── Design tokens ───────────────────────────────────────────────────────────
+# ── Design tokens + UI contracts ────────────────────────────────────────────
 
 tokens-gen:
     node design/scripts/generate-tokens.mjs
 
 tokens-check:
     node design/scripts/generate-tokens.mjs --check
+
+# UI contract unit tests (node --test; tokens + contracts)
+design-test:
+    node --test design/scripts/*.test.mjs
+
+contracts-gen:
+    node design/scripts/resolve-contracts.mjs
+
+contracts-check:
+    node design/scripts/resolve-contracts.mjs --check
 
 check-design-tokens:
     ./scripts/check-design-tokens.sh
@@ -52,7 +62,7 @@ check-design-tokens-selftest:
 # ── Web ─────────────────────────────────────────────────────────────────────
 
 # Lint + type-check (fast, pre-commit)
-web-lint: tokens-check
+web-lint: tokens-check contracts-check
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 

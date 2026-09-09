@@ -2,6 +2,8 @@
 
 Floating Input / Commands composer inside the **Terminal** surface (session-first path only).
 
+> **Contract:** `design/contracts/patterns/terminal-toolbar.json` (id `pattern.terminal-toolbar`) — measurable layout rules ([contracts.md](../contracts.md)).
+
 ## Purpose
 
 Send keyboard input and quick physical keys to the attached tmux session without turning Nession into a chat client.

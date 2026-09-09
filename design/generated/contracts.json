@@ -1,0 +1,145 @@
+{
+  "$note": "generated — do not edit; run: node design/scripts/resolve-contracts.mjs",
+  "viewports": [
+    {
+      "id": "web.compact-laptop",
+      "experience": "web",
+      "role": "Compact laptop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "id": "web.standard-desktop",
+      "experience": "web",
+      "role": "Default desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "id": "web.wide-desktop",
+      "experience": "web",
+      "role": "Wide desktop",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "app.narrow-phone",
+      "experience": "app",
+      "role": "Narrow phone",
+      "width": 375,
+      "height": 812
+    },
+    {
+      "id": "app.standard-phone",
+      "experience": "app",
+      "role": "Standard phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "id": "app.large-phone",
+      "experience": "app",
+      "role": "Large phone",
+      "width": 430,
+      "height": 932
+    }
+  ],
+  "patterns": {
+    "pattern.session-header": {
+      "id": "pattern.session-header",
+      "patternRef": "docs/design/design-system/patterns/session-header.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "clip",
+        "wrap": false,
+        "alignY": "middle",
+        "justify": "space-between"
+      },
+      "app": {
+        "overflow": "clip",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "space-between",
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.session-item": {
+      "id": "pattern.session-item",
+      "patternRef": "docs/design/design-system/patterns/session-item.md",
+      "extends": [],
+      "web": {
+        "overflow": "clip",
+        "wrap": true
+      },
+      "app": {
+        "overflow": "clip",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.session-list": {
+      "id": "pattern.session-list",
+      "patternRef": "docs/design/design-system/patterns/session-list.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "scrollOwner": "self"
+      },
+      "app": {
+        "overflow": "scroll",
+        "scrollOwner": "self"
+      }
+    },
+    "pattern.terminal-toolbar": {
+      "id": "pattern.terminal-toolbar",
+      "patternRef": "docs/design/design-system/patterns/terminal-capsule.md",
+      "extends": [
+        "category.chrome",
+        "category.control"
+      ],
+      "web": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "heightToken": "experience.web.control.md",
+        "justify": "space-between",
+        "heightTokenPx": 32
+      },
+      "app": {
+        "overflow": "sheet",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "heightToken": "experience.app.control.md",
+        "justify": "space-between",
+        "heightTokenPx": 44,
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.workspace-navigation": {
+      "id": "pattern.workspace-navigation",
+      "patternRef": "docs/design/design-system/patterns/workspace-navigation.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "justify": "start"
+      },
+      "app": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "start",
+        "touchTargetTokenPx": 44
+      }
+    }
+  }
+}

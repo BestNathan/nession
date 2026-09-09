@@ -1,0 +1,9 @@
+{
+  "$description": "Global UI contract defaults. Everything inherits these unless a deeper layer overrides a same-named field. clip = content may not overflow its own bounds unless an explicit overflow strategy says otherwise.",
+  "web": {
+    "overflow": "clip"
+  },
+  "app": {
+    "overflow": "clip"
+  }
+}

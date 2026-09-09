@@ -2,6 +2,8 @@
 
 Primary navigation: a **flat** list of Sessions. Not an Agent directory.
 
+> **Contract:** `design/contracts/patterns/session-list.json` — measurable layout rules ([contracts.md](../contracts.md)).
+
 ## Purpose
 
 Let the user find and switch Sessions the way an IM client finds conversations — without importing an IM data model and without requiring Agent → Sessions drill-down.
