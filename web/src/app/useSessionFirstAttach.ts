@@ -8,6 +8,7 @@ import {
   attachToSessionAtom,
   sessionIdAtom,
 } from '../atoms/session';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { probeResultsAtom } from '../atoms/probe';
 import { resolveProfileAttach } from '../services/deepLinkAttach';
@@ -21,13 +22,18 @@ export function useSessionFirstAttach() {
   const attachToSession = useSetAtom(attachToSessionAtom);
   const probeResults = useAtomValue(probeResultsAtom);
   const clientSessionId = useAtomValue(sessionIdAtom);
+  const terminalState = useAtomValue(terminalSessionStateAtom);
   const navigate = useNavigate();
   const location = useLocation();
 
-  /** Session whose fast-path validation is running. A second requestAttach for
-   *  the same session is ignored (double-click guard, #668 epoch hazard); a
-   *  different session may start and takes over the slot (last-started wins). */
-  const inFlightSessionIdRef = useRef<string | null>(null);
+  /** Session + flight owning the in-flight fast-path validation slot. A second
+   *  requestAttach for the SAME session whose validation is running is ignored
+   *  (double-click guard, #668 epoch hazard); a different session may start
+   *  and overwrite the slot (last-started wins). The per-flight token keeps an
+   *  overtaken flight's finally from clearing a slot a NEWER flight for the
+   *  same session owns (A → B → A: flight 1 must not clear flight 3's guard). */
+  const inFlightRef = useRef<{ sessionId: string; token: number } | null>(null);
+  const nextTokenRef = useRef(0);
 
   const openAttachDialog = useCallback((session: Session, intent: 'attach' | 'configure') => {
     setAttachDialogSession(session);
@@ -52,15 +58,28 @@ export function useSessionFirstAttach() {
 
   /** Row click entry: no profile → dialog; profile → validate, attach or dialog. */
   const requestAttach = useCallback((session: Session) => {
+    // Clicking the row of the session we are already attached to: while the
+    // terminal is healthy there is nothing to do — a fast-path re-attach
+    // would tear down the live runtime (route-epoch bump, #668 class). When
+    // the terminal FAILED, fall through to the dialog so recovery stays an
+    // explicit user action.
+    if (clientSessionId === session.session_id) {
+      if (terminalState !== 'failed') {
+        return;
+      }
+      openAttachDialog(session, 'attach');
+      return;
+    }
     const profile = loadSessionProfile(session);
     if (!profile) {
       openAttachDialog(session, 'attach');
       return;
     }
-    if (inFlightSessionIdRef.current === session.session_id) {
+    if (inFlightRef.current !== null && inFlightRef.current.sessionId === session.session_id) {
       return;
     }
-    inFlightSessionIdRef.current = session.session_id;
+    const token = ++nextTokenRef.current;
+    inFlightRef.current = { sessionId: session.session_id, token };
     void (async () => {
       try {
         const resolution = await resolveProfileAttach(session, profile, probeResults);
@@ -70,14 +89,15 @@ export function useSessionFirstAttach() {
           openAttachDialog(session, 'attach');
         }
       } finally {
-        // Only the owner clears the slot: a later different-session start
-        // overwrote the ref and owns it now.
-        if (inFlightSessionIdRef.current === session.session_id) {
-          inFlightSessionIdRef.current = null;
+        // Only the owning flight clears the slot: a later start for the same
+        // session holds a HIGHER token and a different-session start replaced
+        // the entry entirely — this flight's end clears neither.
+        if (inFlightRef.current?.token === token) {
+          inFlightRef.current = null;
         }
       }
     })();
-  }, [probeResults, confirmAttach, openAttachDialog]);
+  }, [probeResults, confirmAttach, openAttachDialog, clientSessionId, terminalState]);
 
   /** Session-row Settings entry: dialog in configure mode (persist only). */
   const openAttachSettings = useCallback((session: Session) => {

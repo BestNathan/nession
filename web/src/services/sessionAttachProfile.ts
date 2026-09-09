@@ -212,19 +212,3 @@ export function validateProfile(
   }
   return { ok: true };
 }
-
-/** Closest-valid form of a saved choice for dialog prefill. */
-export function sanitizeChoiceForPrefill(
-  choice: PersistedAttachChoice,
-  info: AttachInfo,
-  webglSupported: boolean,
-): PersistedAttachChoice {
-  return {
-    ...choice,
-    renderer: choice.renderer === 'webgl' && !webglSupported ? 'canvas' : choice.renderer,
-    selectedUrl:
-      choice.selectedUrl !== null && candidateUrlsOf(info).includes(choice.selectedUrl)
-        ? choice.selectedUrl
-        : null,
-  };
-}

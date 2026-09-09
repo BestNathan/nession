@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
+import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
 import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
 import { envApi } from '@/features/env';
@@ -389,5 +390,45 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     expect(mockedSessionsApi.requestAttach).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByText(/Restoring terminal session/i)).not.toBeInTheDocument();
+  });
+
+  it('is a no-op when clicking the row of the already-attached healthy session', async () => {
+    seedProfile();
+    const { store } = renderShell('/', { seedProbeCache: true });
+    store.set(sessionIdAtom, sess.session_id);
+    store.set(terminalSessionStateAtom, 'attached');
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+    // Healthy attached terminal: the row click must NOT re-enter the profile
+    // fast path (a re-attach would bump the route epoch and tear down the live
+    // runtime, #668 class) and must not open the dialog either — a fast-path
+    // regression would show up as one resolver-style requestAttach call.
+    expect(mockedSessionsApi.requestAttach).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(store.get(sessionIdAtom)).toBe(sess.session_id);
+  });
+
+  it('opens the dialog when clicking the row of the already-attached failed session', async () => {
+    seedProfile();
+    const { store } = renderShell('/', { seedProbeCache: true });
+    store.set(sessionIdAtom, sess.session_id);
+    store.set(terminalSessionStateAtom, 'failed');
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+    // A failed terminal: recovery stays an explicit user action — the dialog
+    // opens for re-confirmation instead of a silent auto-attach.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
+    await waitFor(() => expect(attachBtn).toBeEnabled());
+    // Nothing auto-attached: the only attach-info fetch is the dialog's own
+    // (3-arg signature, pinned in the first test) — the fast-path resolver's
+    // 2-arg call never ran — and sessionIdAtom still names the session.
+    expect(mockedSessionsApi.requestAttach).toHaveBeenCalledTimes(1);
+    expect(mockedSessionsApi.requestAttach).toHaveBeenCalledWith(
+      sess.session_id,
+      'p2p',
+      undefined,
+    );
+    expect(store.get(sessionIdAtom)).toBe(sess.session_id);
   });
 });

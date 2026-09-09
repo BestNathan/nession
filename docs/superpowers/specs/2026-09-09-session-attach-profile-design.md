@@ -140,8 +140,11 @@ Pure functions in `sessionAttachProfile.ts`:
   `manual-url-missing` (saved `selectedUrl` no longer in the fresh candidate
   set), `renderer` (webgl saved but unsupported now). Env files and latency
   are deliberately **not** part of the fingerprint.
-- `sanitizePrefill(profile, info, webglSupported)` — used by the dialog for
-  "closest valid" prefill (renderer/webgl, manual URL membership).
+- The closest-valid helper staged in this module (`sanitizeChoiceForPrefill`)
+  was **removed as unused** — the dialog performs the equivalent sanitization
+  as staged inline logic: the renderer fallback (webgl → canvas) in the open
+  prefill (`prefillOnOpen`), and saved manual-URL membership against the
+  fresh candidate set at attach-info arrival (`fetchAttachInfo`).
 
 Validation always runs against a **fresh** `requestAttach`
 (`requestedMode = mode === 'auto' ? 'p2p' : mode`, mirroring
@@ -189,15 +192,20 @@ racing on the same session and re-triggering the route-epoch disconnect of
   `attach`), cleared wherever `attachDialogSessionAtom` is cleared
   (`attachToSessionAtom`, `disconnectAtom`, `cancelAttach`).
 - Prefill on open: `loadProfile(session.session_id)` hit → prefill
-  mode/renderer/envRefs from the profile (sanitized per section 2), with
-  `relay` kept as-is; miss → today's global-prefs prefill.
+  mode/renderer/envRefs from the profile, with `relay` kept as-is (the
+  closest-valid sanitization runs inline in the dialog itself, per the
+  note in section 2); miss → today's global-prefs prefill.
 - After fresh `attachInfo` arrives, preselect the profile's manual
   `selectedUrl` when it is still a member of the candidates; otherwise Auto.
 - Footer: `attach` intent → Cancel / **Attach** (persist profile +
   `attachToSessionAtom`, unchanged); `configure` intent → Cancel / **Save**
   (persist profile only, close, toast "applies to the next attach"; **never**
   attaches or navigates — editing an active Session cannot silently
-  reconnect it). Confirm handler passed from the shell differs by intent.
+  reconnect it). An exception exists only in the deep-link-restore corner:
+  when a config dialog is dismissed while nothing is attached on a
+  `/terminal/:sid` route, the shared cancel handler navigates home
+  (`replace`) to stop the restore effect from re-firing — unreachable from
+  the normal flow. Confirm handler passed from the shell differs by intent.
 
 ### 4. Session-row Settings entry
 

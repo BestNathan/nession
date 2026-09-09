@@ -3,7 +3,6 @@ import type { AttachInfo } from '@/types';
 import {
   buildOptionsFingerprint,
   candidateUrlsOf,
-  sanitizeChoiceForPrefill,
   validateProfile,
   type PersistedAttachChoice,
   type SessionAttachProfile,
@@ -162,53 +161,5 @@ describe('validateProfile', () => {
       choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
     });
     expect(validateProfile(gone, info(), false)).toEqual({ ok: false, reason: 'manual-url' });
-  });
-});
-
-describe('sanitizeChoiceForPrefill', () => {
-  it('keeps an unchanged choice as-is', () => {
-    expect(sanitizeChoiceForPrefill(choice, info(), true)).toEqual(choice);
-  });
-
-  it('falls back to canvas when webgl is unsupported', () => {
-    const out = sanitizeChoiceForPrefill({ ...choice, renderer: 'webgl' }, info(), false);
-    expect(out.renderer).toBe('canvas');
-  });
-
-  it('clears a manual url that is no longer a candidate', () => {
-    const out = sanitizeChoiceForPrefill(
-      { ...choice, selectedUrl: 'ws://gone/ws' },
-      info(),
-      true,
-    );
-    expect(out.selectedUrl).toBeNull();
-  });
-
-  it('keeps a manual url that is still a candidate', () => {
-    const out = sanitizeChoiceForPrefill(
-      { ...choice, selectedUrl: 'ws://a/ws' },
-      info(),
-      true,
-    );
-    expect(out.selectedUrl).toBe('ws://a/ws');
-  });
-
-  it('preserves envRefs and mode untouched', () => {
-    const out = sanitizeChoiceForPrefill(
-      { ...choice, mode: 'relay', envRefs: [{ name: 'x.env', source: 'server' }] },
-      info(),
-      false,
-    );
-    expect(out.mode).toBe('relay');
-    expect(out.envRefs).toEqual([{ name: 'x.env', source: 'server' }]);
-  });
-
-  it('round-trips a relay choice when no addresses are listed', () => {
-    const out = sanitizeChoiceForPrefill(
-      { ...choice, mode: 'relay', renderer: 'canvas' },
-      info({ mode: 'relay', addresses: [] }),
-      true,
-    );
-    expect(out).toEqual({ mode: 'relay', renderer: 'canvas', envRefs: [], selectedUrl: null });
   });
 });
