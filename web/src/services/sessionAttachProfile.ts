@@ -153,27 +153,15 @@ export function saveSessionProfile(
 
 /** Persist (or refresh) the profile a confirmed choice produced. The choice's
  *  FRESH attachInfo supplies the fingerprint, so the stored fingerprint always
- *  matches what validation will compare against next time. */
+ *  matches what validation will compare against next time. The choice param
+ *  stays coupled to the write-side interface via Pick: any value carrying the
+ *  four persistable fields (e.g. the dialog's AttachChoice) is accepted. */
 export function persistConfirmedChoice(
   session: Pick<Session, 'session_id' | 'agent_id'>,
-  choice: {
-    mode: AttachMode;
-    renderer: 'webgl' | 'canvas';
-    envRefs?: EnvFileRef[];
-    selectedUrl?: string | null;
-  },
+  choice: Pick<PersistedAttachChoice, 'mode' | 'renderer' | 'envRefs' | 'selectedUrl'>,
   info: AttachInfo,
 ): void {
-  saveSessionProfile(
-    session,
-    {
-      mode: choice.mode,
-      renderer: choice.renderer,
-      envRefs: choice.envRefs ?? [],
-      selectedUrl: choice.selectedUrl ?? null,
-    },
-    buildOptionsFingerprint(info),
-  );
+  saveSessionProfile(session, choice, buildOptionsFingerprint(info));
 }
 
 /** Candidate urls the dialog would offer, legacy agent_address included. */

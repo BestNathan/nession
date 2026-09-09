@@ -18,7 +18,11 @@ export function useDeepLinkRestore(opts: {
   loadingSessions: boolean;
   sessions: Session[];
   probeResults: Map<string, AgentProbe>;
-  confirmAttach: (session: Session, choice: AttachChoice) => void;
+  confirmAttach: (
+    session: Session,
+    choice: AttachChoice,
+    attachOpts?: { persistProfile?: boolean },
+  ) => void;
   navigate: NavigateFunction;
 }) {
   const {
@@ -52,7 +56,9 @@ export function useDeepLinkRestore(opts: {
     void resolveDeepLinkAttachChoice(session, probeResultsRef.current)
       .then((choice) => {
         if (cancelled) { return; }
-        confirmAttach(session, choice);
+        // Restore is never an explicit user confirmation: a profile is only
+        // created by the user confirming in the dialog / on a row.
+        confirmAttach(session, choice, { persistProfile: false });
         confirmedRef.current = pendingSessionId;
       })
       .catch(() => {

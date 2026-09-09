@@ -19,7 +19,11 @@ export function useSessionFirstDeepLink(opts: {
   sessions: Session[];
   sessionsLoaded: boolean;
   loadingSessions: boolean;
-  confirmAttach: (session: Session, choice: AttachChoice) => void;
+  confirmAttach: (
+    session: Session,
+    choice: AttachChoice,
+    attachOpts?: { persistProfile?: boolean },
+  ) => void;
   onRestoreSession: (session: Session) => void;
 }) {
   const {
@@ -44,9 +48,13 @@ export function useSessionFirstDeepLink(opts: {
     setSessionIdFromUrl(raw ? decodeURIComponent(raw) : null);
   }, [terminalMatch?.params?.sessionId, setSessionIdFromUrl]);
 
-  const deepLinkConfirmAttach = useCallback((session: Session, choice: AttachChoice) => {
+  const deepLinkConfirmAttach = useCallback((
+    session: Session,
+    choice: AttachChoice,
+    attachOpts?: { persistProfile?: boolean },
+  ) => {
     onRestoreSession(session);
-    confirmAttach(session, choice);
+    confirmAttach(session, choice, attachOpts);
   }, [confirmAttach, onRestoreSession]);
 
   const attachedSession: AttachedSession | null =

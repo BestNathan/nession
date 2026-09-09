@@ -24,15 +24,18 @@ export function useSessionFirstAttach() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /** Guards a running fast-path validation against double clicks. */
-  const inFlightRef = useRef(false);
+  /** Session whose fast-path validation is running. A second requestAttach for
+   *  the same session is ignored (double-click guard, #668 epoch hazard); a
+   *  different session may start and takes over the slot (last-started wins). */
+  const inFlightSessionIdRef = useRef<string | null>(null);
 
   const openAttachDialog = useCallback((session: Session, intent: 'attach' | 'configure') => {
     setAttachDialogSession(session);
     setAttachDialogIntent(intent);
   }, [setAttachDialogSession, setAttachDialogIntent]);
 
-  /** Every explicit confirmation persists (or refreshes) the Session profile. */
+  /** Every explicit confirmation persists (or refreshes) the Session profile;
+   *  non-explicit paths (deep-link restore) opt out via `{ persistProfile: false }`. */
   const confirmAttach = useCallback((
     session: Session,
     choice: AttachChoice,
@@ -54,10 +57,10 @@ export function useSessionFirstAttach() {
       openAttachDialog(session, 'attach');
       return;
     }
-    if (inFlightRef.current) {
+    if (inFlightSessionIdRef.current === session.session_id) {
       return;
     }
-    inFlightRef.current = true;
+    inFlightSessionIdRef.current = session.session_id;
     void (async () => {
       try {
         const resolution = await resolveProfileAttach(session, profile, probeResults);
@@ -67,7 +70,11 @@ export function useSessionFirstAttach() {
           openAttachDialog(session, 'attach');
         }
       } finally {
-        inFlightRef.current = false;
+        // Only the owner clears the slot: a later different-session start
+        // overwrote the ref and owns it now.
+        if (inFlightSessionIdRef.current === session.session_id) {
+          inFlightSessionIdRef.current = null;
+        }
       }
     })();
   }, [probeResults, confirmAttach, openAttachDialog]);
@@ -84,7 +91,9 @@ export function useSessionFirstAttach() {
     // whose dialog was cancelled must leave: nothing would re-drive the
     // attach, and the restore effect would otherwise re-fire on every poll.
     if (clientSessionId === '' && location.pathname.startsWith('/terminal/')) {
-      navigate('/');
+      // Replace, not push: a push would let Back return to /terminal/:sid and
+      // re-fire the restore effect the heuristic exists to break.
+      navigate('/', { replace: true });
     }
   }, [setAttachDialogSession, setAttachDialogIntent, clientSessionId, location.pathname, navigate]);
 

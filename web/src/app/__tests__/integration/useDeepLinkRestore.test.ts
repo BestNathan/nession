@@ -73,7 +73,8 @@ describe('useDeepLinkRestore', () => {
 
     await waitFor(() => {
       expect(resolveDeepLinkAttachChoice).toHaveBeenCalledWith(session, new Map());
-      expect(confirmAttach).toHaveBeenCalledWith(session, choice);
+      // Restore opts out of profile persistence: no explicit user confirmation.
+      expect(confirmAttach).toHaveBeenCalledWith(session, choice, { persistProfile: false });
     });
     expect(navigate).not.toHaveBeenCalled();
   });
