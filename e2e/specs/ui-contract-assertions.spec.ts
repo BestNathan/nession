@@ -182,9 +182,10 @@ test.describe('app fixtures at 390×844', () => {
       await expectTouchTarget(rows.nth(i), ITEM_APP);
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_APP);
     }
-    // Every spatial page carries its own session-header-line — scope to the
-    // visible Sessions page.
-    const header = page.getByTestId('app-spatial-page-sessions').getByTestId('session-header-line');
+    // Every spatial page renders a session-header-line (off-pane pages stay
+    // in the DOM); assert the one actually visible on the Sessions page.
+    const header = page.locator('[data-testid="session-header-line"]:visible');
+    await expect(header).toHaveCount(1);
     await expectSingleLine(header, HEADER_APP);
   });
 });
