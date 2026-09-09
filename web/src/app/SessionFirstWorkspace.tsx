@@ -37,6 +37,7 @@ export interface SessionFirstWorkspaceProps {
   onCreate: () => void;
   onRefresh: () => void;
   onSelect: (session: Session) => void;
+  onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: WorkspaceToolId) => void;
@@ -59,8 +60,8 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide, showList,
-    onBackToSessions, terminal,
+    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide,
+    showList, onBackToSessions, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
@@ -77,7 +78,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
-    onKill,
+    onConfigure, onKill,
   };
 
   const mainShared = {
@@ -108,6 +109,10 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
             onSelect={(session) => {
               setShowDrawer(false);
               onSelect(session);
+            }}
+            onConfigure={(session) => {
+              setShowDrawer(false);
+              onConfigure(session);
             }}
           />
         }

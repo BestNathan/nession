@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
+import { toast } from 'sonner';
 import type { Agent, Session } from '@/types';
 
 const agent: Agent = {
@@ -98,13 +99,16 @@ vi.mock('@/features/sessions/components/AttachDialog', () => ({
     isOpen,
     onConfirm,
     session,
+    intent = 'attach',
   }: {
     isOpen: boolean;
     onConfirm: (s: Session, c: typeof attachChoice) => void;
     session: Session | null;
+    intent?: string;
   }) =>
     isOpen && session ? (
       <div data-testid="attach-dialog">
+        <span data-testid="attach-dialog-intent">{intent}</span>
         <button
           type="button"
           data-testid="attach-confirm"
@@ -112,6 +116,9 @@ vi.mock('@/features/sessions/components/AttachDialog', () => ({
         />
       </div>
     ) : null,
+}));
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn() },
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
@@ -187,6 +194,9 @@ function renderShell(initialEntry = '/') {
 
 describe('SessionFirstShell', () => {
   beforeEach(() => {
+    // confirmAttach persists per-Session attach profiles on confirm; clear
+    // them so a confirm in one test cannot seed the next test's dialog-vs-fast-path.
+    localStorage.clear();
     deepLink.isRestoringDeepLink = false;
     deepLink.sessionIdFromUrl = null;
     deepLink.restored.clear();
@@ -347,6 +357,25 @@ describe('SessionFirstShell', () => {
     await userEvent.click(screen.getByTestId('attach-confirm'));
     await waitFor(() => {
       expect(store.get(sessionIdAtom)).toBe('a1:fix');
+    });
+  });
+
+  it('routes the configure action to a configure-intent dialog whose Save persists without attaching', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('attach-dialog-intent')).toHaveTextContent('configure');
+    // The Save-equivalent confirm must route to the configure handler (persist
+    // the profile, close the dialog) — never to attach.
+    await userEvent.click(screen.getByTestId('attach-confirm'));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith('Attach settings saved — applies to the next attach');
+    expect(store.get(sessionIdAtom)).toBe('');
+    expect(screen.queryByTestId('attach-dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(localStorage.getItem('nession_session_attach_profiles')).toContain(sess.session_id);
     });
   });
 

@@ -79,6 +79,7 @@ function baseProps(
     onCreate: vi.fn(),
     onRefresh: vi.fn(),
     onSelect: vi.fn(),
+    onConfigure: vi.fn(),
     onKill: vi.fn(),
     onSurfaceChange: vi.fn(),
     onToolChange: vi.fn(),

@@ -68,6 +68,7 @@ export function FixtureApp() {
     isSearchActive: false,
     onCreate: () => {},
     onRefresh: () => {},
+    onConfigure: () => {},
     onKill: () => {},
   };
 
