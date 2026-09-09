@@ -1,5 +1,49 @@
 {
   "$note": "generated — do not edit; run: node design/scripts/resolve-contracts.mjs",
+  "viewports": [
+    {
+      "id": "web.compact-laptop",
+      "experience": "web",
+      "role": "Compact laptop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "id": "web.standard-desktop",
+      "experience": "web",
+      "role": "Default desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "id": "web.wide-desktop",
+      "experience": "web",
+      "role": "Wide desktop",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "app.narrow-phone",
+      "experience": "app",
+      "role": "Narrow phone",
+      "width": 375,
+      "height": 812
+    },
+    {
+      "id": "app.standard-phone",
+      "experience": "app",
+      "role": "Standard phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "id": "app.large-phone",
+      "experience": "app",
+      "role": "Large phone",
+      "width": 430,
+      "height": 932
+    }
+  ],
   "patterns": {
     "pattern.session-header": {
       "id": "pattern.session-header",

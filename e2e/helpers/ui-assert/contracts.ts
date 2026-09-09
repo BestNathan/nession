@@ -42,8 +42,18 @@ export interface MergedPattern {
   app: ContractBlock;
 }
 
-interface ContractsFile {
+/** One row of the canonical validation matrix (design/contracts/viewports.json). */
+export interface ViewportEntry {
+  id: string;
+  experience: Experience;
+  role: string;
+  width: number;
+  height: number;
+}
+
+export interface ContractsFile {
   $note: string;
+  viewports: ViewportEntry[];
   patterns: Record<string, MergedPattern>;
 }
 

@@ -228,6 +228,7 @@ export function validateTree(tree, tokens) {
   const { global = {}, categories = {}, patterns = {} } = tree;
 
   validateNode(global, 'global', 'global.json', index, tokens, errors);
+  if (tree.viewports !== undefined) validateViewports(tree.viewports, errors);
 
   const categoryEntries = Object.entries(categories);
   const patternEntries = Object.entries(patterns);
@@ -373,8 +374,9 @@ export function mergeContracts(tree, tokens) {
 // ── Sources + CLI ───────────────────────────────────────────────────────────
 
 export function loadContractSources(dir = CONTRACTS_DIR) {
-  const tree = { global: {}, categories: {}, patterns: {} };
+  const tree = { global: {}, categories: {}, patterns: {}, viewports: {} };
   tree.global = readJson(join(dir, 'global.json'), 'global.json');
+  tree.viewports = readJson(join(dir, 'viewports.json'), 'viewports.json');
   for (const name of readdirSync(join(dir, 'categories')).filter((f) => f.endsWith('.json')).sort()) {
     tree.categories[name] = readJson(join(dir, 'categories', name), `categories/${name}`);
   }
@@ -382,6 +384,44 @@ export function loadContractSources(dir = CONTRACTS_DIR) {
     tree.patterns[name] = readJson(join(dir, 'patterns', name), `patterns/${name}`);
   }
   return tree;
+}
+
+function validateViewports(viewportsFile, errors) {
+  if (!viewportsFile || typeof viewportsFile !== 'object') {
+    errors.push('✗ viewports.json must be an object\n  Fix: restore design/contracts/viewports.json');
+    return;
+  }
+  const file = 'viewports.json';
+  errors.push(...checkKeys(viewportsFile, ['$description', 'viewports'], file));
+  const rows = viewportsFile.viewports;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    errors.push(`✗ viewports.json "viewports" must be a non-empty array\n  Fix: list at least one viewport entry`);
+    return;
+  }
+  const ids = new Set();
+  for (const [index, row] of rows.entries()) {
+    const where = `${file}.viewports[${index}]`;
+    if (!row || typeof row !== 'object') {
+      errors.push(`✗ ${where} must be an object\n  Fix: use { id, experience, role, width, height }`);
+      continue;
+    }
+    errors.push(...checkKeys(row, ['id', 'experience', 'role', 'width', 'height'], where));
+    if (typeof row.id !== 'string' || !/^(web|app)\.[a-z][a-z0-9-]*$/.test(row.id)) {
+      errors.push(`✗ ${where} id "${row.id}" must be "<experience>.<slug>" (web.* or app.*)\n  Fix: e.g. "web.standard-desktop"`);
+    } else if (ids.has(row.id)) {
+      errors.push(`✗ ${where} duplicates viewport id "${row.id}"\n  Fix: ids must be unique`);
+    } else {
+      ids.add(row.id);
+    }
+    if (row.experience !== 'web' && row.experience !== 'app') {
+      errors.push(`✗ ${where} experience "${row.experience}" must be web or app\n  Fix: tag each viewport with its experience`);
+    }
+    for (const dim of ['width', 'height']) {
+      if (!Number.isInteger(row[dim]) || row[dim] <= 0) {
+        errors.push(`✗ ${where} ${dim} must be a positive integer (got ${JSON.stringify(row[dim])})\n  Fix: use device pixels`);
+      }
+    }
+  }
 }
 
 function reportErrors(errors) {
@@ -398,7 +438,11 @@ function reportErrors(errors) {
 function artifactFrom(tree, tokens) {
   const patterns = mergeContracts(tree, tokens);
   return `${JSON.stringify(
-    { $note: 'generated — do not edit; run: node design/scripts/resolve-contracts.mjs', patterns },
+    {
+      $note: 'generated — do not edit; run: node design/scripts/resolve-contracts.mjs',
+      viewports: tree.viewports?.viewports ?? [],
+      patterns,
+    },
     null,
     2,
   )}\n`;

@@ -242,3 +242,57 @@ test('committed sources validate clean and merge to 5 patterns', () => {
   assert.ok(index.has('experience.app.touchTarget.min'));
   assert.equal(Object.keys(mergeContracts(REAL, TOKENS)).length, 5);
 });
+
+test('real viewport matrix carries the canonical web/app rows', () => {
+  const rows = REAL.viewports.viewports;
+  assert.equal(rows.length, 6);
+  assert.deepEqual(rows.map((row) => row.id), [
+    'web.compact-laptop',
+    'web.standard-desktop',
+    'web.wide-desktop',
+    'app.narrow-phone',
+    'app.standard-phone',
+    'app.large-phone',
+  ]);
+  assert.ok(rows.every((row) => Number.isInteger(row.width) && Number.isInteger(row.height)));
+});
+
+test('duplicate viewport id fails', () => {
+  const tree = baseTree();
+  tree.viewports = {
+    viewports: [
+      { id: 'web.standard-desktop', experience: 'web', role: 'a', width: 1440, height: 900 },
+      { id: 'web.standard-desktop', experience: 'web', role: 'b', width: 1280, height: 800 },
+    ],
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /duplicates viewport id "web\.standard-desktop"/);
+});
+
+test('viewport with wrong experience or non-integer size fails', () => {
+  const tree = baseTree();
+  tree.viewports = {
+    viewports: [
+      { id: 'app.narrow-phone', experience: 'ios', role: 'a', width: 375, height: 812 },
+      { id: 'web.wide-desktop', experience: 'web', role: 'b', width: 1920, height: 1080.5 },
+    ],
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some((error) => /experience "ios" must be web or app/.test(error)));
+  assert.ok(errors.some((error) => /height must be a positive integer/.test(error)));
+});
+
+test('viewport entry with unknown key or malformed id fails', () => {
+  const tree = baseTree();
+  tree.viewports = {
+    viewports: [
+      { id: 'app/standard', experience: 'app', role: 'a', width: 390, height: 844, density: '2x' },
+    ],
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some((error) => /unknown key "density"/.test(error)));
+  assert.ok(errors.some((error) => /must be "<experience>\.<slug>"/.test(error)));
+});

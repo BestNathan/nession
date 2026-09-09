@@ -71,6 +71,18 @@
         "app": { "$ref": "#/$defs/experienceBlock" }
       },
       "additionalProperties": false
+    },
+    "viewportEntry": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^(web|app)\\.[a-z][a-z0-9-]*$" },
+        "experience": { "type": "string", "enum": ["web", "app"] },
+        "role": { "type": "string" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 }
+      },
+      "required": ["id", "experience", "role", "width", "height"],
+      "additionalProperties": false
     }
   },
   "anyOf": [
@@ -89,6 +101,20 @@
         }
       },
       "required": ["id"]
+    },
+    {
+      "title": "viewport matrix (design/contracts/viewports.json)",
+      "type": "object",
+      "properties": {
+        "$description": { "type": "string" },
+        "viewports": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/viewportEntry" }
+        }
+      },
+      "required": ["viewports"],
+      "additionalProperties": false
     },
     {
       "title": "pattern rules (design/contracts/patterns/*.json)",
