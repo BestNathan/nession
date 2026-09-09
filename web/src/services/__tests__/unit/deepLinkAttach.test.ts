@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveDeepLinkAttachChoice } from '@/services/deepLinkAttach';
+import {
+  resolveDeepLinkAttachChoice,
+  resolveProfileAttach,
+  resolveTargetChoice,
+} from '@/services/deepLinkAttach';
+import {
+  buildOptionsFingerprint,
+  type PersistedAttachChoice,
+  type SessionAttachProfile,
+} from '@/services/sessionAttachProfile';
 import type { Session } from '@/types';
 
 vi.mock('@/services/attachPrefs', () => ({
@@ -76,5 +85,113 @@ describe('resolveDeepLinkAttachChoice', () => {
 
     expect(choice.orderedUrls).toEqual(['ws://fast/ws', 'ws://slow/ws']);
     expect(choice.latencies).toHaveLength(2);
+  });
+});
+
+const p2pSession: Session = {
+  session_id: 'agent-1:dev',
+  agent_id: 'agent-1',
+  session_name: 'dev',
+  status: 'active',
+  window_count: 1,
+  attached_clients: 0,
+  last_activity: '2025-01-01T00:00:00Z',
+};
+
+const p2pChoice: PersistedAttachChoice = {
+  mode: 'p2p',
+  renderer: 'webgl',
+  envRefs: [{ name: 'prod.env', source: 'server' }],
+  selectedUrl: null,
+};
+
+function p2pProfile(): SessionAttachProfile {
+  return {
+    schemaVersion: 1,
+    sessionId: 'agent-1:dev',
+    agentId: 'agent-1',
+    choice: p2pChoice,
+    optionsFingerprint: buildOptionsFingerprint({
+      mode: 'p2p',
+      session_id: 'agent-1:dev',
+      connection_token: 'tok',
+      addresses: [{
+        url: 'ws://a/ws', label: 'lan', network_type: 'lan',
+        priority: 0, status: 'reachable',
+      }],
+    }),
+    updatedAt: 1,
+  };
+}
+
+describe('resolveTargetChoice', () => {
+  it('builds a choice honouring a p2p target', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [{
+        url: 'ws://a/ws', label: 'lan', network_type: 'lan',
+        priority: 0, status: 'reachable',
+      }],
+    });
+    const choice = await resolveTargetChoice(p2pSession, p2pChoice, new Map(), undefined);
+    // No relay override for a p2p target: requestAttach is called without a
+    // third argument (Vitest matches exact call arity, no trailing undefined).
+    expect(sessionsApiMock.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p');
+    expect(choice).toMatchObject({
+      mode: 'p2p', selectedUrl: null, renderer: 'webgl',
+      envRefs: [{ name: 'prod.env', source: 'server' }],
+    });
+    expect(choice.attachInfo.connection_token).toBe('tok');
+  });
+
+  it('requests relay info for a relay target and maps manual url to relayUrl', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'relay', session_id: 'agent-1:dev', agent_address: '', connection_token: '',
+      addresses: [{
+        url: 'ws://relay/ws', label: 'lan', network_type: 'lan',
+        priority: 0, status: 'reachable',
+      }],
+    });
+    const choice = await resolveTargetChoice(
+      p2pSession,
+      { ...p2pChoice, mode: 'relay', selectedUrl: 'ws://relay/ws' },
+      new Map(),
+      undefined,
+    );
+    expect(sessionsApiMock.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'relay', 'ws://relay/ws');
+    expect(choice.relayUrl).toBe('ws://relay/ws');
+  });
+});
+
+describe('resolveProfileAttach', () => {
+  it('returns a choice when the profile is still valid', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [{
+        url: 'ws://a/ws', label: 'lan', network_type: 'lan',
+        priority: 0, status: 'reachable',
+      }],
+    });
+    const probe = new Map([['agent-1', { latencies: [], orderedUrls: ['ws://a/ws'], probedAt: 1 }]]);
+    const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), probe);
+    expect(resolution).toMatchObject({ kind: 'choice' });
+  });
+
+  it('returns dialog when the options changed', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [
+        { url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+        { url: 'ws://new/ws', label: 'vpn', network_type: 'vpn', priority: 0, status: 'reachable' },
+      ],
+    });
+    const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), new Map());
+    expect(resolution).toEqual({ kind: 'dialog' });
+  });
+
+  it('returns dialog when the attach request fails', async () => {
+    sessionsApiMock.requestAttach.mockRejectedValue(new Error('boom'));
+    const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), new Map());
+    expect(resolution).toEqual({ kind: 'dialog' });
   });
 });
