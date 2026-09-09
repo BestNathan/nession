@@ -257,5 +257,6 @@ describe('attachDialogIntentAtom', () => {
     store.set(attachDialogIntentAtom, 'configure');
     store.set(disconnectAtom, navigate);
     expect(store.get(attachDialogIntentAtom)).toBe('attach');
+    expect(store.get(attachDialogSessionAtom)).toBeNull();
   });
 });
