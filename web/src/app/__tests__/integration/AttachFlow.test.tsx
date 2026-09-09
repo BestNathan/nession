@@ -224,7 +224,20 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
       sessionToKill: null,
     };
     mockedSessionsApi.requestAttach.mockReset();
-    mockedSessionsApi.requestAttach.mockResolvedValue(attachInfoResponse);
+    // Production echoes the requested mode back, and the persisted fingerprint
+    // encodes [mode, candidates] — a mock that always answered 'p2p' would let
+    // a requested-mode regression (the dialog or resolver always asking 'p2p')
+    // pass here while production reopened the dialog on the next attach. Auto
+    // flows request 'p2p' (requestedModeOf / dialog auto→p2p) so tests 1–3 and
+    // 5–7 keep resolving p2p-shaped info; only test 4's relay Save stores a
+    // relay-shaped fingerprint (nothing asserts it — it stops at mode 'relay').
+    mockedSessionsApi.requestAttach.mockImplementation(
+      // Signature mirrors the real requestAttach (mode defaults to 'p2p').
+      async (_sessionId: string, mode?: 'p2p' | 'relay') => ({
+        ...attachInfoResponse,
+        mode: mode ?? 'p2p',
+      }),
+    );
     mockedEnvApi.listEnvFiles.mockReset();
     mockedEnvApi.listEnvFiles.mockResolvedValue({ files: [] });
   });
@@ -293,8 +306,13 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     // Configure mode never offers Attach.
     expect(screen.queryByRole('button', { name: /^Attach$/ })).not.toBeInTheDocument();
     // Switch to Relay: the mode change refetches attach info (Save disables
-    // until the mocked response lands).
+    // until the mocked response lands). The requested mode must echo back as
+    // 'relay' — a requested-mode derivation that always asked 'p2p' would save
+    // a relay profile under a p2p fingerprint and reopen the dialog next time.
     await userEvent.click(screen.getByRole('button', { name: /^Relay/ }));
+    await waitFor(() =>
+      expect(mockedSessionsApi.requestAttach).toHaveBeenCalledWith(sess.session_id, 'relay', undefined),
+    );
     await waitFor(() => expect(saveBtn).toBeEnabled());
     await userEvent.click(saveBtn);
     // Saved, not attached. The dialog exit animation keeps the content mounted
@@ -318,6 +336,26 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
     expect(storedProfile()).toEqual(before);
+    expect(store.get(sessionIdAtom)).toBe('');
+  });
+
+  it('Cancel from configure leaves a saved manual URL untouched', async () => {
+    // Manual path is a real candidate in attachInfoResponse, so the dialog
+    // prefill would offer it — but opening the dialog must never persist
+    // anything, and Cancel must leave the stored manual URL bit-for-bit
+    // intact (the persistable field no end-to-end flow otherwise writes).
+    seedProfile({ mode: 'p2p', selectedUrl: 'ws://a/ws' });
+    const before = storedProfile();
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(storedProfile()).toEqual(before);
+    expect(before.choice.selectedUrl).toBe('ws://a/ws');
     expect(store.get(sessionIdAtom)).toBe('');
   });
 
