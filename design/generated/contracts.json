@@ -1,0 +1,109 @@
+{
+  "$note": "generated — do not edit; run: node design/scripts/resolve-contracts.mjs",
+  "patterns": {
+    "pattern.session-header": {
+      "id": "pattern.session-header",
+      "patternRef": "docs/design/design-system/patterns/session-header.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "clip",
+        "wrap": false,
+        "alignY": "middle",
+        "justify": "space-between"
+      },
+      "app": {
+        "overflow": "clip",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "space-between",
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.session-list": {
+      "id": "pattern.session-list",
+      "patternRef": "docs/design/design-system/patterns/session-list.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "scrollOwner": "self"
+      },
+      "app": {
+        "overflow": "scroll",
+        "scrollOwner": "self"
+      }
+    },
+    "pattern.session-item": {
+      "id": "pattern.session-item",
+      "patternRef": "docs/design/design-system/patterns/session-item.md",
+      "extends": [
+        "category.list-row"
+      ],
+      "web": {
+        "overflow": "clip",
+        "wrap": false,
+        "heightToken": "experience.web.row.md",
+        "heightTokenPx": 36
+      },
+      "app": {
+        "overflow": "clip",
+        "wrap": false,
+        "heightToken": "experience.app.row.md",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "heightTokenPx": 48,
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.terminal-toolbar": {
+      "id": "pattern.terminal-toolbar",
+      "patternRef": "docs/design/design-system/patterns/terminal-capsule.md",
+      "extends": [
+        "category.chrome",
+        "category.control"
+      ],
+      "web": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "heightToken": "experience.web.control.md",
+        "justify": "space-between",
+        "heightTokenPx": 32
+      },
+      "app": {
+        "overflow": "sheet",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "heightToken": "experience.app.control.md",
+        "justify": "space-between",
+        "heightTokenPx": 44,
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.workspace-navigation": {
+      "id": "pattern.workspace-navigation",
+      "patternRef": "docs/design/design-system/patterns/workspace-navigation.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "justify": "start"
+      },
+      "app": {
+        "overflow": "menu",
+        "wrap": false,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "start",
+        "heightToken": "experience.app.row.md",
+        "heightTokenPx": 48,
+        "touchTargetTokenPx": 44
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "category.control",
+  "$description": "Interactive controls/icon buttons at experience control density. When content cannot fit the control it collapses into a menu (web) or sheet (app) instead of wrapping or growing the control.",
+  "web": {
+    "wrap": false,
+    "heightToken": "experience.web.control.md",
+    "overflow": "menu"
+  },
+  "app": {
+    "wrap": false,
+    "heightToken": "experience.app.control.md",
+    "overflow": "sheet",
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

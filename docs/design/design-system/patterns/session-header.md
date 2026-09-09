@@ -2,6 +2,8 @@
 
 Chrome for the **active Session**: identity plus always-available connection context.
 
+> **Contract:** `design/contracts/patterns/session-header.json` — measurable layout rules ([contracts.md](../contracts.md)).
+
 ## Purpose
 
 Tell the user which Session they are in, and keep Agent/connection context at disclosure level 2 ([information-architecture.md](../../information-architecture.md)) — more explicit than the list row, less than [AgentDetail](agent-detail.md).

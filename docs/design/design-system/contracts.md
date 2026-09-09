@@ -84,7 +84,7 @@ override.<rare local>    // discouraged; requires rationale
 
 Merge: deeper layers override same-named fields. `web` and `app` blocks merge **independently** — neither silently inherits the other's interaction strategy.
 
-## Storage (executable, when #545 lands)
+## Storage (executable)
 
 Platform-neutral contracts live next to tokens:
 
@@ -104,6 +104,8 @@ design/contracts/
     workspace-navigation.json
   viewports.json              # sole viewport matrix source (#547)
 ```
+
+Implemented by #545: `design/contracts/schema.json` documents every file shape; `design/scripts/resolve-contracts.mjs` enforces those rules (mirrored in code: unknown/invalid token refs, broken `extends`, orphan categories, filename↔id mismatch, missing `patternRef`) and merges inheritance into **`design/generated/contracts.json`** (generated — never hand-edit). Px-measurable token fields gain a resolved `<field>Px` sibling so consumers never re-derive design values. `just contracts-gen` / `contracts-check`; the drift gate runs in `web-lint` (CI web-check); unit tests via `just design-test` (`node --test design/scripts/*.test.mjs`).
 
 `docs/design/` describes and indexes; it is not the machine-readable contract tree.
 

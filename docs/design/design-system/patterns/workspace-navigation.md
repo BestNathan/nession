@@ -2,6 +2,8 @@
 
 Tool-level switching **inside** Workspace: Files \| Session \| Agent \| registered others. Not a second app sidebar.
 
+> **Contract:** `design/contracts/patterns/workspace-navigation.json` — measurable layout rules ([contracts.md](../contracts.md)).
+
 ## Purpose
 
 Move between session-scoped tools without rewriting the Workspace shell and without a default permanent full-width inner sidebar ([workspace.md](../../workspace.md), [interaction/web.md](../../interaction/web.md)).

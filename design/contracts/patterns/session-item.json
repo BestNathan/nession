@@ -1,0 +1,6 @@
+{
+  "id": "pattern.session-item",
+  "$description": "One session row in the list. Pure category.list-row inheritance (single line, row.md density, App touch target) — an end-to-end demonstration that shared category rules prevent per-component repetition.",
+  "extends": ["category.list-row"],
+  "patternRef": "docs/design/design-system/patterns/session-item.md"
+}
