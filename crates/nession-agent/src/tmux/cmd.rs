@@ -101,6 +101,13 @@ impl TmuxCmd {
         for var in INHERITED_TMUX_VARS {
             cmd.env_remove(var);
         }
+        // A PTY attach child inherits the agent's environment, which carries
+        // no usable $TERM on CI runners and in docker/systemd — tmux then
+        // fails with "terminal does not support clear" and the client sees a
+        // dead session (#633). Pin the same terminal manager.rs forces on
+        // session creation, so attach renders regardless of what the agent
+        // process inherited.
+        cmd.env("TERM", "xterm-256color");
         cmd
     }
 }
@@ -195,6 +202,34 @@ mod tests {
         assert!(
             rendered.contains("/tmp/nession-probe/tmux.sock"),
             "missing socket path: {rendered}"
+        );
+    }
+
+    #[test]
+    fn pty_command_pins_term_for_the_client() {
+        // A PTY attach child that inherits no usable $TERM (CI runners,
+        // docker/systemd agents) makes tmux fail with "terminal does not
+        // support clear" (#633). The pty builder pins TERM=xterm-256color —
+        // the same value manager.rs forces when creating a session — so
+        // attach works regardless of what the agent process inherited.
+        //
+        // The third assertion checks `is_from_base_env: false`: portable-pty
+        // copies the whole process environment into the builder, so a plain
+        // `contains("TERM")` would pass on developer shells that happen to
+        // export TERM=xterm-256color already. Only an explicit override
+        // (the fix) survives on a TERM-less agent.
+        let rendered = format!("{:?}", probe("/tmp/nession-probe/tmux.sock").pty());
+        assert!(
+            rendered.contains("TERM"),
+            "TERM should be pinned on the pty builder: {rendered}"
+        );
+        assert!(
+            rendered.contains("xterm-256color"),
+            "TERM should be pinned to xterm-256color: {rendered}"
+        );
+        assert!(
+            rendered.contains("is_from_base_env: false"),
+            "the TERM pin must be an explicit override, not an inherited value: {rendered}"
         );
     }
 
