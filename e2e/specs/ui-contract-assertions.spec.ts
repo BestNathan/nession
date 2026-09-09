@@ -182,6 +182,9 @@ test.describe('app fixtures at 390×844', () => {
       await expectTouchTarget(rows.nth(i), ITEM_APP);
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_APP);
     }
-    await expectSingleLine(page.getByTestId('session-header-line'), HEADER_APP);
+    // Every spatial page carries its own session-header-line — scope to the
+    // visible Sessions page.
+    const header = page.getByTestId('app-spatial-page-sessions').getByTestId('session-header-line');
+    await expectSingleLine(header, HEADER_APP);
   });
 });
