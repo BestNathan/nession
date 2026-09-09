@@ -47,14 +47,12 @@ CHOKEPOINT="crates/nession-agent/src/tmux/cmd.rs"
 
 # Shell/TS files exempt from rule 2, each for a stated reason.
 #
-#   sweep-test-sessions.sh — sweeps stray test sessions on the *default* socket
-#     by design. Now that tests use nession's own socket it has nothing left to
-#     find; converting it is #582's job (#575 Open Question 1 put it out of
-#     scope), so it stays listed here rather than being silently ignored.
 #   this script + its selftest — they contain the offending patterns as data.
+#   sweep-test-sessions.sh used to be exempt while it deliberately scanned the
+#   default socket; since #582 it reclaims whole owned run directories with
+#   explicit -S only, so it is scanned like every other script.
 is_shell_exempt() {
     case "$1" in
-        scripts/sweep-test-sessions.sh) return 0 ;;
         scripts/check-tmux-socket.sh) return 0 ;;
         scripts/check-tmux-socket-selftest.sh) return 0 ;;
         *) return 1 ;;

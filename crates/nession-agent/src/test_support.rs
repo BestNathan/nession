@@ -7,9 +7,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Prefix shared by every tmux session the tests create, so that strays left
-/// behind by a crashed run are identifiable and can be swept in bulk.
-/// `scripts/sweep-test-sessions.sh` matches on it.
+/// Prefix shared by every tmux session the tests create, so the contents of a
+/// run directory left behind by a crashed run are recognizable at a glance.
+/// Since #582, `scripts/sweep-test-sessions.sh` reclaims whole owned run
+/// directories by pattern (`nession-test-tmux.*`) rather than by session name.
 pub(crate) const TEST_SESSION_PREFIX: &str = "nession-test-";
 
 pub(crate) fn unique_session_name(prefix: &str) -> String {
