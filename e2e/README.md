@@ -84,17 +84,17 @@ either pattern comes back.
 
 #### Orphans after a hard kill
 
-There is no pre-run sweep any more, by design. A run killed with Ctrl-C or SIGKILL
-never reaches its teardown, so its socket, tmux server and directory survive — and
-because every run picks a new path, those orphans accumulate rather than being
-overwritten. Clean up by hand:
+There is no pre-run sweep any more, by design. A run killed hard (Ctrl-C / SIGKILL —
+the teardown below never runs, so nothing releases the socket) leaves its socket,
+tmux server and directory behind — and because every run picks a new path, those
+orphans accumulate rather than being overwritten. Reclaim them with the shared
+tool, which recognizes `/tmp/nession-e2e-tmux-*` as an owned run directory and
+verifies the socket before killing it:
 
 ```bash
-for s in /tmp/nession-e2e-tmux-*/tmux.sock; do tmux -S "$s" kill-server; done
-rm -rf /tmp/nession-e2e-tmux-*
+./scripts/sweep-test-sessions.sh            # list orphans, kill nothing
+./scripts/sweep-test-sessions.sh --kill     # reclaim them
 ```
-
-A recovery tool is tracked in #582.
 
 ### Database Isolation
 

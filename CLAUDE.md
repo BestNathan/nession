@@ -274,13 +274,8 @@ agent 启动时会把实际路径和这条命令打进日志(`tmux socket: …`)
 - **⛔ 禁止在 `cmd.rs` 之外派生 tmux 进程。** 门禁 `just check-tmux-socket`(`scripts/check-tmux-socket.sh`)会拦住三种形态:字面量 `Command::new("tmux")`、**变量形态 `Command::new(<expr>)`**(`&self.tmux_bin` 就是这种,只匹配字面量的门禁会对它报「零风险」)、以及 `CommandBuilder::new("tmux")`;另外扫 `scripts/**`、`e2e/**`、`deploy/**`、`justfile` 里不带 `-S` 的 shell 调用,和任何 `TMUX_TMPDIR` 赋值。已接入 `pre-commit` 与 `just check`(CI)。
   - 确实不是 tmux 的变量派生,在该行或其上三行内写 `// not-tmux: <理由>` 放行 —— 逐行、且必须写清理由,不给整文件开口子。
   - `just check-tmux-socket-selftest` 逐形态注入违规,证明门禁还真的抓得到。
-- **测试与 e2e 每轮一个唯一 socket**:`scripts/tmux-run-socket.sh`(被 `filtered-test.sh`、`check-coverage.sh` source)用 `mktemp -d` 生成,并在退出时确认 `#{socket_path}` 后才 kill;e2e 由 `e2e/runtime.ts` 生成 `/tmp/nession-e2e-tmux-<8hex>/tmux.sock`。**e2e 已移除开跑前的 `kill-server` 自愈**(那条命令正是打在真实 socket 上的那条),代价是被 Ctrl-C / SIGKILL 打断的轮次会留下孤儿 socket 且**跨轮累积**,手工清理:
-
-  ```bash
-  for s in /tmp/nession-e2e-tmux-*/tmux.sock; do tmux -S "$s" kill-server; done; rm -rf /tmp/nession-e2e-tmux-*
-  ```
-
-  回收工具见 #582。`scripts/sweep-test-sessions.sh` 仍然扫**默认** socket,所以现在正常情况下应当一无所获 —— 它的改造也归 #582(#575 OQ1 明确排除),门禁按名字放行了它。
+- **测试与 e2e 每轮一个唯一 socket**:`scripts/tmux-run-socket.sh`(被 `filtered-test.sh`、`check-coverage.sh` source)用 `mktemp -d` 生成,并在退出时确认 `#{socket_path}` 后才 kill;e2e 由 `e2e/runtime.ts` 生成 `/tmp/nession-e2e-tmux-<8hex>/tmux.sock`。两者建目录时都写入 `owner.pid`(见下条孤儿回收)。**e2e 已移除开跑前的 `kill-server` 自愈**(那条命令正是打在真实 socket 上的那条),代价是被打断的轮次会留下孤儿 socket 且**跨轮累积**。
+- **孤儿回收**:`scripts/sweep-test-sessions.sh`(列出 / `--kill`)只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`(建/清规则分别在 `scripts/tmux-run-socket.sh` 与 `e2e/runtime.ts`)—— **目录模式即归属**,绝不碰默认 socket 或开发者的 session。每个运行目录在创建时写入 `owner.pid`(运行进程的 PID;此时 socket 上还不可能有 server),sweep 逐目录处理:`owner.pid` 中的 PID 存活(`kill -0`)→ **活轮次**,列出但不动;否则即孤儿,先做 `#{socket_path}` 断言再 kill-server,再删目录。无锁目录 = 旧遗留或锁未写入即被杀 —— 都不可能活着。正常退出时该轮的 trap/teardown 自己清理(Ctrl-C 走 trap),孤儿只来自 SIGKILL / kill -9 / 崩溃。实现 #582。
 
 **Linux-only code:** `#[cfg(target_os = "linux")]` blocks (including test assertions) are NOT compiled or linted on macOS. Lint violations there (e.g. `u64 >= 0`) only surface in CI. Manually review these blocks for platform-independent lint issues before pushing.
 
@@ -631,12 +626,12 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **tmux socket 门禁**:`just check-tmux-socket`(`scripts/check-tmux-socket.sh`),已接入 `pre-commit` 和 `just check`(CI)。拦住任何在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 的写法(含 `Command::new(<变量>)` 这种无字面量形态)、`scripts/**` `e2e/**` `deploy/**` `justfile` 里不带 `-S` 的 shell 调用,以及任何 `TMUX_TMPDIR` 赋值。`just check-tmux-socket-selftest` 逐形态注入违规自检。理由与解析规则见「tmux socket 隔离」。
 
   `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
-- **清理测试遗留的 tmux 会话**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（删除）。测试创建的会话一律以 `nession-test-` 开头,脚本只匹配这个前缀,不会碰开发者自己的会话。**⚠ 自 #575 起它扫的默认 socket 已不是测试落脚处**(测试每轮用自己的 socket,由该轮自己清理),所以它现在正常应当一无所获;新形态的孤儿回收见 #582。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常情况下不该有残留 —— 真出现了说明测试进程被强杀(Ctrl-C / SIGKILL)。
+- **清理测试遗留的 tmux 孤儿**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（整目录回收）。它只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`（目录模式即归属,绝不碰默认 socket 或开发者自己的会话）;目录 `owner.pid` 里的 PID 仍存活（`kill -0`）视为活轮次,列出但不动;对孤儿先 `#{socket_path}` 断言再 kill-server,再删目录。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常退出不该有残留 —— 孤儿只出现在测试进程被 SIGKILL / kill -9 / 崩溃(不走 trap)之后;Ctrl-C 会走 trap,正常清理。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check` = fmt + lint + check-tmux-socket + coverage,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **⛔ 禁止 `TMUX_TMPDIR`,禁止在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 进程。** 寻址一律显式 `-S <绝对路径>`;`TMUX_TMPDIR` 在 `$TMUX` 存在时被 tmux 完全无视并静默落回默认 socket(实测 #574)。有静态门禁,详见「tmux socket 隔离」。
 - **⛔ 禁止擅自改动 lint 规则**:`[workspace.lints.*]`、`clippy.toml`、命令行 `-A`、`#[allow]` 一律需仓库所有者明确同意后才能改,收紧和放宽都算。报错修代码,不准改规则消错。测试代码同样必须受门禁覆盖,不靠"测试是特例"豁免。详见「Rust linting」。
-- **⛔ 禁止 `tmux kill-server`,禁止不带 `-t <name>` 的 `kill-session`。** `kill-session -t <name>` 只允许针对本次自己创建的会话。需要临时 tmux 一律 `tmux -S /tmp/<唯一名>/sock`,清理前先用 `#{socket_path}` 断言路径。**`TMUX_TMPDIR=` 前缀不是隔离,不准拿它当保险。**
+- **⛔ 禁止 `tmux kill-server`,禁止不带 `-t <name>` 的 `kill-session`。** `kill-session -t <name>` 只允许针对本次自己创建的会话。`kill-server` 唯一例外:脚本对**自有** socket 的清理 —— `-S` 指向自己创建/持有的路径(sweep-test-sessions.sh、tmux-run-socket.sh、e2e teardown),且清理前先做 `#{socket_path}` 断言。需要临时 tmux 一律 `tmux -S /tmp/<唯一名>/sock`,清理前先用 `#{socket_path}` 断言路径。**`TMUX_TMPDIR=` 前缀不是隔离,不准拿它当保险。**
 - **⛔ 禁止本地跑 e2e**(`npx playwright test`、为 e2e 跑 `cargo run`)。本地验 UI 只用 `cd web && npm run dev`;查 spec 语法用 `npx playwright test --list`。e2e spec 一律带 `test.skip(!process.env.CI, 'local only — runs in CI workflow only')`。与 §「Screenshots with Playwright」的 Playwright MCP 工具无关,那个照常用。
 
   以上两条的实测依据与修复进度见 #574、#575。
