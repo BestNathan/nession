@@ -9,7 +9,7 @@ import {
   manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
   agentIdAtom, addressesAtom, hasActiveSessionAtom, sessionIdFromUrlAtom,
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
-  attachDialogSessionAtom,
+  attachDialogSessionAtom, attachDialogIntentAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 
@@ -231,5 +231,31 @@ describe('action atoms', () => {
     store.set(switchAddressAtom, null);
     expect(store.get(manualOverrideAtom)).toBeNull();
     expect(store.get(routeIntentEpochAtom)).toBe(epochAfterExplicit + 1);
+  });
+});
+
+describe('attachDialogIntentAtom', () => {
+  it('defaults to attach', () => {
+    const store = createStore();
+    expect(store.get(attachDialogIntentAtom)).toBe('attach');
+  });
+
+  it('resets to attach when attachToSessionAtom confirms', () => {
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachDialogSessionAtom, session);
+    store.set(attachDialogIntentAtom, 'configure');
+    store.set(attachToSessionAtom, { session, choice: makeChoice(session), navigate });
+    expect(store.get(attachDialogIntentAtom)).toBe('attach');
+    expect(store.get(attachDialogSessionAtom)).toBeNull();
+  });
+
+  it('resets to attach on disconnect', () => {
+    const store = createStore();
+    const session = makeSession();
+    store.set(attachDialogSessionAtom, session);
+    store.set(attachDialogIntentAtom, 'configure');
+    store.set(disconnectAtom, navigate);
+    expect(store.get(attachDialogIntentAtom)).toBe('attach');
   });
 });

@@ -21,6 +21,12 @@ export const envRefsAtom = atom<EnvFileRef[]>([]);
 /** Currently open attach dialog session (shared between Dashboard & SessionDropdown). */
 export const attachDialogSessionAtom = atom<Session | null>(null);
 
+/** Why the attach dialog is open: 'attach' (confirm → attach) or 'configure'
+ *  (Save → persist the profile only, never attach/reconnect). */
+export type AttachDialogIntent = 'attach' | 'configure';
+
+export const attachDialogIntentAtom = atom<AttachDialogIntent>('attach');
+
 // ── Derived atoms (read-only) ───────────────────────────────────
 
 export const agentIdAtom = atom<string | null>((get) => {
@@ -65,6 +71,7 @@ export const attachToSessionAtom = atom(
     set(manualOverrideAtom, choice.selectedUrl ?? null);
     set(forcedRelayAtom, false);
     set(attachDialogSessionAtom, null);
+    set(attachDialogIntentAtom, 'attach');
     set(terminalSessionStateAtom, 'connecting');
     navigate(`/terminal/${encodeURIComponent(session.session_id)}`);
   },
@@ -81,6 +88,7 @@ export const disconnectAtom = atom(
     set(forcedRelayAtom, false);
     set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
+    set(attachDialogIntentAtom, 'attach');
     set(p2pStateAtom, 'disconnected');
     set(terminalSessionStateAtom, 'idle');
     navigate('/');
