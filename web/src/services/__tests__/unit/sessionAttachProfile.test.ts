@@ -95,6 +95,24 @@ describe('buildOptionsFingerprint', () => {
     const b = info({ connection_token: 'tok-2' });
     expect(buildOptionsFingerprint(a)).toBe(buildOptionsFingerprint(b));
   });
+
+  it('treats empty and absent addresses the same via the agent fallback', () => {
+    expect(buildOptionsFingerprint(info({ addresses: [] }))).toBe(
+      buildOptionsFingerprint(info({ addresses: undefined })),
+    );
+  });
+
+  it('ignores agent_address while addresses are present', () => {
+    expect(buildOptionsFingerprint(info())).toBe(
+      buildOptionsFingerprint(info({ agent_address: 'ws://other/ws' })),
+    );
+  });
+
+  it('encodes the legacy agent fallback differently from listed addresses', () => {
+    expect(buildOptionsFingerprint(info({ addresses: [] }))).not.toBe(
+      buildOptionsFingerprint(info()),
+    );
+  });
 });
 
 describe('validateProfile', () => {
@@ -128,6 +146,22 @@ describe('validateProfile', () => {
 
   it('rejects webgl when the browser does not support it', () => {
     expect(validateProfile(profile(), info(), false)).toEqual({ ok: false, reason: 'renderer' });
+  });
+
+  it('reports fingerprint before manual-url, manual-url before renderer', () => {
+    // Options changed AND the saved url left the set → 'fingerprint' wins.
+    const changed = profile({
+      choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
+      optionsFingerprint: buildOptionsFingerprint(info({ addresses: [addr('ws://gone/ws')] })),
+    });
+    expect(validateProfile(changed, info(), true)).toEqual({ ok: false, reason: 'fingerprint' });
+    // Options stable, url gone AND webgl unsupported → 'manual-url' wins.
+    // (The last link — fingerprint + url fine, webgl unsupported → 'renderer' —
+    // is pinned by the renderer test above.)
+    const gone = profile({
+      choice: { ...choice, mode: 'p2p', selectedUrl: 'ws://gone/ws' },
+    });
+    expect(validateProfile(gone, info(), false)).toEqual({ ok: false, reason: 'manual-url' });
   });
 });
 
@@ -167,5 +201,14 @@ describe('sanitizeChoiceForPrefill', () => {
     );
     expect(out.mode).toBe('relay');
     expect(out.envRefs).toEqual([{ name: 'x.env', source: 'server' }]);
+  });
+
+  it('round-trips a relay choice when no addresses are listed', () => {
+    const out = sanitizeChoiceForPrefill(
+      { ...choice, mode: 'relay', renderer: 'canvas' },
+      info({ mode: 'relay', addresses: [] }),
+      true,
+    );
+    expect(out).toEqual({ mode: 'relay', renderer: 'canvas', envRefs: [], selectedUrl: null });
   });
 });
