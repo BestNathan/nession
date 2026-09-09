@@ -94,8 +94,9 @@ design/contracts/
   global.json
   categories/
     chrome.json
-    list-row.json
     control.json
+    # list-row.json is reserved for future fixed-height row patterns;
+    # shipped SessionItem rows are layout-derived two-line stacks (#546)
   patterns/
     session-header.json
     session-list.json
