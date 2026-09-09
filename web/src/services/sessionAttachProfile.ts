@@ -1,4 +1,4 @@
-import type { AttachMode, EnvFileRef, Session } from '../types';
+import type { AttachInfo, AttachMode, EnvFileRef, Session } from '../types';
 
 const STORAGE_KEY = 'nession_session_attach_profiles';
 export const ATTACH_PROFILE_SCHEMA_VERSION = 1 as const;
@@ -149,4 +149,69 @@ export function saveSessionProfile(
   } catch {
     // Ignore quota / disabled-storage errors.
   }
+}
+
+/** Candidate urls the dialog would offer, legacy agent_address included. */
+export function candidateUrlsOf(info: AttachInfo): string[] {
+  const urls = (info.addresses ?? []).map((a) => a.url);
+  if (urls.length === 0 && info.agent_address) {
+    urls.push(info.agent_address);
+  }
+  return urls;
+}
+
+/**
+ * Fingerprint of the STABLE attach options of a fresh requestAttach response.
+ * Excludes probe-volatile fields (status/rtt_ms), the connection token, and
+ * ordering. Any change here means the saved choice must be re-confirmed.
+ */
+export function buildOptionsFingerprint(info: AttachInfo): string {
+  const candidates = (info.addresses ?? [])
+    .map((a) => `${a.url}|${a.network_type}`)
+    .sort();
+  if (candidates.length === 0 && info.agent_address) {
+    candidates.push(`agent|${info.agent_address}`);
+  }
+  return JSON.stringify([info.mode, candidates]);
+}
+
+export type ProfileInvalidReason = 'fingerprint' | 'manual-url' | 'renderer';
+
+export type ProfileVerdict = { ok: true } | { ok: false; reason: ProfileInvalidReason };
+
+/** Validate a saved profile against a FRESH attach-info response. */
+export function validateProfile(
+  profile: SessionAttachProfile,
+  info: AttachInfo,
+  webglSupported: boolean,
+): ProfileVerdict {
+  if (buildOptionsFingerprint(info) !== profile.optionsFingerprint) {
+    return { ok: false, reason: 'fingerprint' };
+  }
+  if (
+    profile.choice.selectedUrl !== null &&
+    !candidateUrlsOf(info).includes(profile.choice.selectedUrl)
+  ) {
+    return { ok: false, reason: 'manual-url' };
+  }
+  if (profile.choice.renderer === 'webgl' && !webglSupported) {
+    return { ok: false, reason: 'renderer' };
+  }
+  return { ok: true };
+}
+
+/** Closest-valid form of a saved choice for dialog prefill. */
+export function sanitizeChoiceForPrefill(
+  choice: PersistedAttachChoice,
+  info: AttachInfo,
+  webglSupported: boolean,
+): PersistedAttachChoice {
+  return {
+    ...choice,
+    renderer: choice.renderer === 'webgl' && !webglSupported ? 'canvas' : choice.renderer,
+    selectedUrl:
+      choice.selectedUrl !== null && candidateUrlsOf(info).includes(choice.selectedUrl)
+        ? choice.selectedUrl
+        : null,
+  };
 }
