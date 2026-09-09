@@ -212,6 +212,122 @@ impl super::session::TmuxSession for PtySession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Harness socket env var — set by `scripts/tmux-run-socket.sh` (via
+    /// `just test` / `filtered-test.sh`). The regression test below only runs
+    /// under it: without it, `cmd::global()` would fall back to the default
+    /// `/tmp/nession-<uid>/tmux.sock`, which a dev agent may be serving.
+    const HARNESS_SOCKET_ENV: &str = "NESSION_TMUX_SOCKET";
+
+    fn harness_socket() -> Option<String> {
+        std::env::var(HARNESS_SOCKET_ENV).ok()
+    }
+
+    fn tmux_available() -> bool {
+        // Through cmd::global() like every other tmux call — the
+        // check-tmux-socket gate rejects raw `Command::new("tmux")` even in
+        // tests, and -V needs no server so this is harmless on any socket.
+        cmd::global()
+            .std()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    }
+
+    #[test]
+    fn attach_survives_when_the_agent_env_has_no_term() {
+        // Regression for #633: `PtySession::attach` spawns the tmux client as
+        // a child of the agent, and an agent started with an unusable $TERM
+        // (CI runners export TERM=dumb or nothing; docker/systemd usually
+        // have none) used to make tmux fail with "terminal does not support
+        // clear" — the client died instantly and the session showed no
+        // output. The pty command pins TERM=xterm-256color (cmd.rs), so
+        // attach must survive even when this test process itself carries a
+        // broken TERM. Locally, run it with `TERM=dumb` to exercise the CI
+        // shape; CI itself runs without a usable TERM.
+        let Some(_socket) = harness_socket() else {
+            eprintln!("skipped: {HARNESS_SOCKET_ENV} not set (test-harness run only)");
+            return;
+        };
+        if !tmux_available() {
+            eprintln!("skipped: tmux not on PATH");
+            return;
+        }
+
+        // Unique session on the harness socket — never the default one.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let name = format!("nession_pty_noterm_{nanos:016x}");
+
+        let created = cmd::global()
+            .std()
+            .args(["new-session", "-d", "-s", &name, "-x", "80", "-y", "24"])
+            .status();
+        assert!(
+            created.is_ok_and(|s| s.success()),
+            "failed to create tmux session {name} on the harness socket"
+        );
+
+        let (session, mut rx) = match PtySession::attach(&name, 80, 24) {
+            Ok(pair) => pair,
+            Err(e) => {
+                let _ = cmd::global()
+                    .std()
+                    .args(["kill-session", "-t", &name])
+                    .status();
+                panic!("attach failed for session {name}: {e:#}");
+            }
+        };
+
+        // A usable tmux client stays attached and error-free: with a broken
+        // TERM (CI runners export TERM=dumb or nothing) the client dies right
+        // after printing "terminal does not support clear", the PTY read
+        // hits EOF and the channel disconnects. Collect for a grace period,
+        // then require the client to still be connected.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut error_signature = false;
+        let mut alive = true;
+        while Instant::now() < deadline {
+            match rx.try_recv() {
+                Ok(chunk) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    error_signature |= text.contains("terminal does not support clear")
+                        || text.contains("open terminal failed");
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    alive = false;
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            alive,
+            "tmux attach client disconnected within 1s — the child likely died \
+             from an unusable TERM (see #633)"
+        );
+        assert!(
+            !error_signature,
+            "tmux attach reported a terminal error — TERM must be pinned \
+             to xterm-256color (see #633)"
+        );
+
+        drop(session); // detaches the client and reaps the child
+        let killed = cmd::global()
+            .std()
+            .args(["kill-session", "-t", &name])
+            .status();
+        assert!(
+            killed.is_ok_and(|s| s.success()),
+            "failed to clean up session {name}"
+        );
+    }
 
     #[test]
     fn test_pty_session_attach_spawns_tmux_subprocess() {

@@ -97,7 +97,10 @@ export default defineConfig({
       cwd: `${__dirname}/..`,
       env: {
         ...E2E_ISOLATION_ENV,
-        TERM: 'xterm-256color',
+        // No TERM here on purpose: the agent must pin TERM=xterm-256color on
+        // its own PTY attach clients (#633). CI runners export TERM=dumb or
+        // nothing, so this env is the regression gate — a plain-mode attach
+        // that forgets the pin dies with "terminal does not support clear".
         LANG: 'C.UTF-8',
         RUST_LOG: 'info',  // Force logging to stdout
         RUST_BACKTRACE: '1',  // Enable backtraces for debugging
