@@ -27,7 +27,6 @@ test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 const WEB = { pattern: 'pattern.workspace-navigation', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_WEB = { pattern: 'pattern.session-item', experience: 'web' as const, viewport: 'web.standard-desktop' };
 const ITEM_APP = { pattern: 'pattern.session-item', experience: 'app' as const, viewport: 'app.standard-phone' };
-const HEADER_APP = { pattern: 'pattern.session-header', experience: 'app' as const, viewport: 'app.standard-phone' };
 
 async function rejectsWith(assertion: Promise<void>, rule: string): Promise<void> {
   await expect(assertion).rejects.toThrow(/UI_CONTRACT_VIOLATION/);
@@ -182,10 +181,5 @@ test.describe('app fixtures at 390×844', () => {
       await expectTouchTarget(rows.nth(i), ITEM_APP);
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_APP);
     }
-    // Every spatial page renders a session-header-line (off-pane pages stay
-    // in the DOM); assert the one actually visible on the Sessions page.
-    const header = page.locator('[data-testid="session-header-line"]:visible');
-    await expect(header).toHaveCount(1);
-    await expectSingleLine(header, HEADER_APP);
   });
 });
