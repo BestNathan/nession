@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { testAddresses } from '@/services/addressSelection';
 import {
   resolveDeepLinkAttachChoice,
   resolveProfileAttach,
@@ -125,6 +126,10 @@ function p2pProfile(): SessionAttachProfile {
 }
 
 describe('resolveTargetChoice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('builds a choice honouring a p2p target', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
       mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
@@ -161,9 +166,57 @@ describe('resolveTargetChoice', () => {
     expect(sessionsApiMock.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'relay', 'ws://relay/ws');
     expect(choice.relayUrl).toBe('ws://relay/ws');
   });
+
+  it('live-tests candidate addresses when the probe cache is cold', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [
+        { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+        { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
+      ],
+    });
+
+    const choice = await resolveTargetChoice(p2pSession, p2pChoice, new Map());
+
+    expect(testAddresses).toHaveBeenCalled();
+    expect(choice.orderedUrls[0]).toBe('ws://fast/ws');
+  });
+
+  it('reuses the probe cache without live-testing addresses when warm', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      addresses: [
+        { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
+        { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
+      ],
+    });
+    const probe = new Map([['agent-1', { latencies: [], orderedUrls: ['ws://a/ws'], probedAt: 1 }]]);
+
+    const choice = await resolveTargetChoice(p2pSession, p2pChoice, probe);
+
+    expect(testAddresses).not.toHaveBeenCalled();
+    expect(choice.orderedUrls).toEqual(['ws://a/ws']);
+  });
+
+  it('falls back to agent_address when no candidate addresses are advertised', async () => {
+    sessionsApiMock.requestAttach.mockResolvedValue({
+      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      agent_address: 'ws://legacy/ws',
+      addresses: [],
+    });
+
+    const choice = await resolveTargetChoice(p2pSession, p2pChoice, new Map());
+
+    expect(testAddresses).not.toHaveBeenCalled();
+    expect(choice.orderedUrls).toEqual(['ws://legacy/ws']);
+  });
 });
 
 describe('resolveProfileAttach', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('returns a choice when the profile is still valid', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
       mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
@@ -174,6 +227,8 @@ describe('resolveProfileAttach', () => {
     });
     const probe = new Map([['agent-1', { latencies: [], orderedUrls: ['ws://a/ws'], probedAt: 1 }]]);
     const resolution = await resolveProfileAttach(p2pSession, p2pProfile(), probe);
+    // The replay reuses the attachInfo fetched for validation — no second request.
+    expect(sessionsApiMock.requestAttach).toHaveBeenCalledTimes(1);
     expect(resolution).toMatchObject({ kind: 'choice' });
   });
 

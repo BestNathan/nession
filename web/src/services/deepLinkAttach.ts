@@ -1,4 +1,4 @@
-import type { AttachInfo, Session } from '../types';
+import type { AddressLatency, AttachInfo, Session } from '../types';
 import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { sessionsApi } from '../features/sessions';
 import type { AgentProbe } from '../atoms/probe';
@@ -40,7 +40,7 @@ async function fetchAttachInfo(
 async function resolveOrdering(
   info: AttachInfo,
   probe: AgentProbe | undefined,
-): Promise<{ orderedUrls: string[]; latencies: { url: string; latencyMs: number | null }[] }> {
+): Promise<{ orderedUrls: string[]; latencies: AddressLatency[] }> {
   const cachedUrls = probe?.orderedUrls ?? [];
   const cachedLatencies = probe?.latencies ?? [];
   if (cachedUrls.length > 0 || info.mode !== 'p2p') {
@@ -54,11 +54,11 @@ async function resolveOrdering(
   return { orderedUrls: orderByLatency(measured), latencies: measured };
 }
 
-function finalChoice(
+function buildChoice(
   choice: PersistedAttachChoice,
   info: AttachInfo,
   orderedUrls: string[],
-  latencies: { url: string; latencyMs: number | null }[],
+  latencies: AddressLatency[],
 ): AttachChoice {
   return {
     mode: choice.mode,
@@ -86,7 +86,7 @@ export async function resolveTargetChoice(
   const info = attachInfo ?? (await fetchAttachInfo(session, choice));
   const probe = probeResults.get(session.agent_id);
   const { orderedUrls, latencies } = await resolveOrdering(info, probe);
-  return finalChoice(choice, info, orderedUrls, latencies);
+  return buildChoice(choice, info, orderedUrls, latencies);
 }
 
 /** Attach resolution for a saved profile: valid → immediate attach choice, else dialog. */
