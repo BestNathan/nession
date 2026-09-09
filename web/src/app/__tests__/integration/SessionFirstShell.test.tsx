@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
+import { toast } from 'sonner';
 import type { Agent, Session } from '@/types';
 
 const agent: Agent = {
@@ -117,7 +118,7 @@ vi.mock('@/features/sessions/components/AttachDialog', () => ({
     ) : null,
 }));
 vi.mock('sonner', () => ({
-  toast: vi.fn(),
+  toast: { success: vi.fn() },
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
@@ -369,6 +370,8 @@ describe('SessionFirstShell', () => {
     // The Save-equivalent confirm must route to the configure handler (persist
     // the profile, close the dialog) — never to attach.
     await userEvent.click(screen.getByTestId('attach-confirm'));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith('Attach settings saved — applies to the next attach');
     expect(store.get(sessionIdAtom)).toBe('');
     expect(screen.queryByTestId('attach-dialog')).not.toBeInTheDocument();
     await waitFor(() => {

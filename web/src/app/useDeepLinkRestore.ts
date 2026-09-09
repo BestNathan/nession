@@ -90,12 +90,16 @@ export function useDeepLinkRestore(opts: {
             return;
           }
           // Mark the session so the effect does not re-fire on every poll
-          // while the dialog is open; cancel and confirm both leave the
-          // pending state (navigation / attach) that clears the mark.
+          // while the dialog is open. Confirm does not clear the mark — the
+          // attachedSession guard makes it moot; the mark clears when
+          // pendingSessionId becomes null (cancel navigates home) or in the
+          // !pendingSessionId reset effect.
           configRequestedRef.current = pendingSessionId;
           requestConfigForRestore(session);
         })
         .catch(() => {
+          // resolveProfileAttach never rejects — failures surface as the
+          // dialog verdict; this catch is defensive.
           if (!cancelled) {
             navigate('/', { replace: true });
           }

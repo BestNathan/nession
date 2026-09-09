@@ -88,7 +88,7 @@ export function useSessionFirstShellState() {
   const saveAttachSettings = useCallback((session: Session, choice: AttachChoice) => {
     persistConfirmedChoice(session, choice, choice.attachInfo);
     cancelAttach();
-    toast('Attach settings saved — applies to the next attach');
+    toast.success('Attach settings saved — applies to the next attach');
   }, [cancelAttach]);
 
   const { isRestoringDeepLink } = useSessionFirstDeepLink({
