@@ -98,13 +98,16 @@ vi.mock('@/features/sessions/components/AttachDialog', () => ({
     isOpen,
     onConfirm,
     session,
+    intent = 'attach',
   }: {
     isOpen: boolean;
     onConfirm: (s: Session, c: typeof attachChoice) => void;
     session: Session | null;
+    intent?: string;
   }) =>
     isOpen && session ? (
       <div data-testid="attach-dialog">
+        <span data-testid="attach-dialog-intent">{intent}</span>
         <button
           type="button"
           data-testid="attach-confirm"
@@ -112,6 +115,9 @@ vi.mock('@/features/sessions/components/AttachDialog', () => ({
         />
       </div>
     ) : null,
+}));
+vi.mock('sonner', () => ({
+  toast: vi.fn(),
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
@@ -350,6 +356,23 @@ describe('SessionFirstShell', () => {
     await userEvent.click(screen.getByTestId('attach-confirm'));
     await waitFor(() => {
       expect(store.get(sessionIdAtom)).toBe('a1:fix');
+    });
+  });
+
+  it('routes the configure action to a configure-intent dialog whose Save persists without attaching', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
+    const { store } = renderShell();
+    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('attach-dialog-intent')).toHaveTextContent('configure');
+    // The Save-equivalent confirm must route to the configure handler (persist
+    // the profile, close the dialog) — never to attach.
+    await userEvent.click(screen.getByTestId('attach-confirm'));
+    expect(store.get(sessionIdAtom)).toBe('');
+    expect(screen.queryByTestId('attach-dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(localStorage.getItem('nession_session_attach_profiles')).toContain(sess.session_id);
     });
   });
 

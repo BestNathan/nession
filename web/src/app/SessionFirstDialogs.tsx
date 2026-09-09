@@ -13,7 +13,9 @@ export function SessionFirstDialogs({
   setSessionToKill,
   onKilled,
   attachDialogSession,
+  attachDialogIntent,
   onAttachConfirm,
+  onConfigureConfirm,
   onAttachClose,
 }: {
   showCreateModal: boolean;
@@ -24,7 +26,9 @@ export function SessionFirstDialogs({
   setSessionToKill: (session: Session | null) => void;
   onKilled: () => void;
   attachDialogSession: Session | null;
+  attachDialogIntent: 'attach' | 'configure';
   onAttachConfirm: (session: Session, choice: AttachChoice) => void;
+  onConfigureConfirm: (session: Session, choice: AttachChoice) => void;
   onAttachClose: () => void;
 }) {
   return (
@@ -44,9 +48,10 @@ export function SessionFirstDialogs({
       />
       <AttachDialog
         isOpen={attachDialogSession !== null}
+        intent={attachDialogIntent}
         onClose={onAttachClose}
         session={attachDialogSession}
-        onConfirm={onAttachConfirm}
+        onConfirm={attachDialogIntent === 'configure' ? onConfigureConfirm : onAttachConfirm}
       />
     </>
   );

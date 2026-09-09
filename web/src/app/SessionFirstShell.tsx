@@ -26,7 +26,9 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
       setSessionToKill={data.setSessionToKill}
       onKilled={state.onKilled}
       attachDialogSession={state.attachDialogSession}
+      attachDialogIntent={state.attachDialogIntent}
       onAttachConfirm={state.confirmAttach}
+      onConfigureConfirm={state.saveAttachSettings}
       onAttachClose={state.cancelAttach}
     />
   );
@@ -94,7 +96,7 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
             onCreate={() => data.setShowCreateModal(true)}
             onRefresh={() => { void data.fetchSessions({ force: true }); }}
             onSelect={state.handleSelect}
-            onConfigure={() => {}}
+            onConfigure={state.openAttachSettings}
             onKill={(s) => data.setSessionToKill(s)}
             onSurfaceChange={state.setSurface}
             onToolChange={state.setTool}

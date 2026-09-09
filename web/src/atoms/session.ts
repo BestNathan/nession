@@ -23,10 +23,11 @@ export const attachDialogSessionAtom = atom<Session | null>(null);
 
 /** Why the attach dialog is open: 'attach' (confirm → attach) or 'configure'
  *  (Save → persist the profile only, never attach/reconnect).
- *  Invariant: reset to 'attach' wherever `attachDialogSessionAtom` is cleared.
- *  Currently that is `attachToSessionAtom` and `disconnectAtom`; the configure
- *  task must also cover `useSessionFirstAttach.cancelAttach` (it clears the
- *  session atom via its hook-local setter — reset the intent there too). */
+ *  Invariant: reset to 'attach' wherever `attachDialogSessionAtom` is cleared —
+ *  `attachToSessionAtom`, `disconnectAtom`, and `useSessionFirstAttach.cancelAttach`.
+ *  Every dialog opener sets the intent explicitly when opening: requestAttach /
+ *  openAttachSettings (useSessionFirstAttach) and useSessionFirstDeepLink's
+ *  restore opener (requestConfigForRestore). */
 export type AttachDialogIntent = 'attach' | 'configure';
 
 export const attachDialogIntentAtom = atom<AttachDialogIntent>('attach');
