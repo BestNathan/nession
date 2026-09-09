@@ -1,0 +1,12 @@
+{
+  "id": "pattern.session-header",
+  "$description": "Session page header band. Title/metadata share one row; actions trail right. Chrome band rules (single line, middle align, App touch band) come from category.chrome.",
+  "extends": ["category.chrome"],
+  "patternRef": "docs/design/design-system/patterns/session-header.md",
+  "web": {
+    "justify": "space-between"
+  },
+  "app": {
+    "justify": "space-between"
+  }
+}

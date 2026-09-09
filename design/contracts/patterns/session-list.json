@@ -1,0 +1,13 @@
+{
+  "id": "pattern.session-list",
+  "$description": "Session list region. A flat vertical scroll region; row-level metrics (density, single-line) live on pattern.session-item via category.list-row — do not repeat them here.",
+  "patternRef": "docs/design/design-system/patterns/session-list.md",
+  "web": {
+    "overflow": "scroll",
+    "scrollOwner": "self"
+  },
+  "app": {
+    "overflow": "scroll",
+    "scrollOwner": "self"
+  }
+}

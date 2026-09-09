@@ -1,0 +1,13 @@
+{
+  "id": "category.chrome",
+  "$description": "Single-row chrome bands (headers, strips, shell chrome). Content stays on one line and is vertically centered; App chrome bands must meet the touch target. Patterns may override overflow/justify per tool semantics.",
+  "web": {
+    "wrap": false,
+    "alignY": "middle"
+  },
+  "app": {
+    "wrap": false,
+    "alignY": "middle",
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

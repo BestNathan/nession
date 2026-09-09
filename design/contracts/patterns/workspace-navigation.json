@@ -1,0 +1,15 @@
+{
+  "id": "pattern.workspace-navigation",
+  "$description": "Workspace tool navigation. Web: compact left-aligned horizontal strip; App: rows at touch density when at the stack root. Tools that do not fit collapse into a menu — never a full-height sidebar (global clip overridden to menu).",
+  "extends": ["category.chrome"],
+  "patternRef": "docs/design/design-system/patterns/workspace-navigation.md",
+  "web": {
+    "overflow": "menu",
+    "justify": "start"
+  },
+  "app": {
+    "overflow": "menu",
+    "justify": "start",
+    "heightToken": "experience.app.row.md"
+  }
+}
