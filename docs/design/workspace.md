@@ -1,74 +1,164 @@
 # Workspace
 
-Workspace is a container for **session-scoped auxiliary capabilities**, not a synonym for File Browser.
+> Upstream: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md) → [product-model.md](product-model.md)
 
-It exists because the terminal is sometimes insufficient: browsing the remote tree, inspecting Session metadata, or reading Agent/connection detail. Those capabilities belong to the Active Session, not to a global app chrome.
+Workspace is the logical context around a piece of work. It is not a synonym for File Browser, not a permanent feature menu, and not limited to one Agent or one Session.
 
-## Initial tools
+A Workspace may initially be represented by one directory on one Agent, but the product model must allow the same logical work to span multiple physical locations and execution environments.
+
+## Logical Workspace and physical locations
 
 ```text
 Workspace
-├── Files
-├── Session
-└── Agent
+├── Location: local Mac / Agent
+│   └── /Users/nathan/code/nession
+├── Location: remote dev host / Agent
+│   └── /workspace/nession
+└── Location: cloud / sandbox provider
+    └── /workspace
 ```
 
-| Tool | Role | Typical layout |
-|------|------|----------------|
-| Files | Remote file browser and editor | Master/detail (browser + editor) **inside this tool** |
-| Session | Session details (identity, lifecycle, attach/kill affordances as appropriate) | Single detail surface |
-| Agent | Agent details and connection | Single detail surface |
+A **Workspace Location** describes where part of the work physically exists or executes. Local and remote are properties of a location rather than separate kinds of Workspace.
 
-Git, Preview, Processes, and similar tools are **not** required for the first migration. The architecture must allow them later without rewriting the Workspace shell.
+A Session normally executes in one location and carries its current directory/context. Moving between Sessions or devices should not force the user to rebuild the meaning of the Workspace.
 
-## Tool registry
+The current implementation may infer this relationship from Agent + Session + cwd until logical Workspace identity becomes explicitly persisted.
 
-Prefer a Workspace tool registry over hard-coded tab conditionals. A tool is a **plugin**: it owns its label, icon, order, availability, and its own layouts per experience. Adding a tool = one file + one registry line; the framework (shell, tool bar, container) does not change. Conceptual shape (matches the shipped contract):
+## What Workspace should answer
+
+Workspace is the deeper contextual view the user opens when the active Session alone is insufficient.
+
+It should help answer questions such as:
+
+- What resources belong to this work?
+- Which locations/environments participate in it?
+- What capabilities are available or relevant here?
+- What state exists outside the currently visible Terminal?
+- What configuration or history is useful for the current work?
+
+It should **not** primarily answer "what features does Nession have?"
+
+## Capabilities, not a feature lobby
+
+Files, Git, Claude Code, environment management, preview, processes, Kubernetes, databases, and future extensions are capabilities that may contribute to a Workspace.
+
+They must not automatically become permanent navigation entries merely because they are registered.
+
+The generic lifecycle is:
+
+```text
+unavailable -> available -> relevant -> active
+```
+
+Workspace presentation follows that state:
+
+| State | Workspace behavior |
+|-------|--------------------|
+| `unavailable` | Hidden. Do not reserve empty or disabled chrome merely to advertise the feature. |
+| `available` | May be discoverable when useful, without demanding attention. |
+| `relevant` | May gain a visible section, shortcut, summary, or contextual action. |
+| `active` | May show live state and stronger presence; Session-level presence may also appear. |
+
+This replaces the older assumption that every registered Workspace tool should always occupy a bottom toolbar, including disabled pills.
+
+A capability can be discoverable without being permanently visible.
+
+## Contribution model
+
+Prefer a capability registry over hard-coded feature conditionals, but keep the registry below the product experience.
+
+An extension should contribute semantic information rather than dictate global layout. Conceptually:
 
 ```ts
-interface WorkspaceTool {
-  id: WorkspaceToolId
-  label: string
-  icon: Icon
-  order: number
-  availability: (ctx: WorkspaceContext) => boolean
-  layout: {
-    web: ComponentType<{ ctx: WorkspaceContext }>   // per-experience layout
-    app: ComponentType<{ ctx: WorkspaceContext }>   // per-experience layout
-  }
+interface WorkspaceCapability {
+  id: CapabilityId
+  availability(ctx: WorkspaceContext): CapabilityState
+  summary?(ctx: WorkspaceContext): CapabilitySummary
+  actions?(ctx: WorkspaceContext): CapabilityAction[]
+  view?(ctx: WorkspaceContext): CapabilityView
 }
 ```
 
-Workspace navigation is extensible by registering tools, not by growing a switch of special cases in the shell.
+The exact TypeScript/Rust API is an implementation concern. The product contract is more important:
 
-- **Per-experience layouts.** Web/App differences live in `layout.web` / `layout.app` — never scattered `if (mobile)` metrics inside a shared component. Files is exactly this: web = tree ‖ editor, app = tree full-screen → push editor; the pushed editor carries a tool-internal sub-header (`←` + file path, dirty-confirm back); session/agent tools provide app containers (full-screen scroll + bottom safe-area clearing the home indicator and the floating tool bar) rather than shared web fallbacks.
-- **No fixed pixels for structure.** Tool-internal layouts use grids and proportions (Files web = CSS grid, tree `1fr` ‖ editor `2fr`); spacing comes from `--sf-space-*` / Experience tokens, widths from proportion or content.
-- **Availability is per-Session** (e.g. Files when the Agent exposes no file API). A tool may also choose not to register at all — hidden tools leave no empty chrome. Registered-but-unavailable tools render as **disabled pills** (inert) in the tool bar — visible, not clickable — never as empty slots.
-- The framework renders a registry-driven **bottom floating tool bar** (label / icon / order / availability → disabled state) plus the active tool's layout for the current experience. It is the workspace's **only floating element**, same capsule family (radius / elevation / tokens) as the terminal input capsule.
+- extensions provide capability, state, actions, and optional deeper views;
+- Nession decides where and how they appear;
+- placement depends on context and capability state;
+- Web and App may render the same capability differently while preserving meaning;
+- adding an extension must not require redesigning the global shell.
 
-## Master/detail is local to Files
+## Session-level versus Workspace-level presence
 
-Files may use a browser/editor split:
+Session and Workspace expose different depths of the same capability.
+
+### Session
+
+The Session layer is about **what is happening now**.
+
+An active capability may gain lightweight presence near the interaction surface. For example, if Claude Code becomes active in the current terminal, Nession may expose its identity, state, and contextual actions without opening a permanent panel.
+
+### Workspace
+
+The Workspace layer is about **what belongs to or is relevant to this work**.
+
+It may expose broader capability state, configuration, resources, history, or location-specific information even when that capability is not the foreground application at this exact moment.
+
+This distinction allows Workspace to be rich without making the Session noisy.
+
+## Example: Claude Code
+
+Claude Code is a reference integration for the generic model, not a special-case Workspace architecture.
+
+```text
+Claude Code not installed
+    -> no Claude Code surface
+
+Claude Code installed for a Workspace Location
+    -> capability may be discoverable in Workspace
+
+Claude Code becomes relevant to the current work
+    -> Workspace may surface related state/actions
+
+Claude Code is running in the active Session
+    -> lightweight Session presence + contextual actions
+    -> deeper capability view only when explicitly opened
+```
+
+The same pattern should be reusable for Codex, OpenCode, Git, Docker, Kubernetes, databases, and other capabilities.
+
+## Files is one capability
+
+Files may use a browser/editor master-detail layout internally:
 
 ```text
 Files
-
 ┌──────────────────────┬────────────────────────────────────┐
 │ File Browser         │ Editor                             │
-│                      │                                    │
 │ src/                 │ AgentCard.tsx                      │
-│ ├ components/        │                                    │
-│ ├ hooks/             │ export function ...               │
+│ ├ components/        │ export function ...               │
+│ ├ hooks/             │                                    │
 │ └ lib/               │                                    │
-└──────────────────────┬────────────────────────────────────┘
+└──────────────────────┴────────────────────────────────────┘
 ```
 
-This layout belongs to the **Files tool**, not to Workspace globally. Agent and Session tools can use a single detail surface. Future tools choose their own internal layout.
+That layout belongs to Files. It is not the global Workspace layout and should not cause Workspace itself to grow a permanent inner sidebar.
 
-Do not introduce a permanent full-width inner sidebar at the Workspace level in order to mimic Files. Platform chrome for switching tools is documented in [interaction/web.md](interaction/web.md) and [interaction/app.md](interaction/app.md).
+## Multi-location behavior
 
-## Relationship to Terminal
+As logical Workspace support grows, capabilities may have location-specific state.
 
-Terminal and Workspace are peer surfaces of the Active Session (same slot; Terminal is the default). Only one is visible. Switching surfaces does not change which Session is active, and does not nest Workspace inside the terminal (or the reverse).
+Examples:
 
-See [information-architecture.md](information-architecture.md) for the IA tree.
+- Git may exist in two cloned locations with different branches or working-tree state.
+- Claude Code may be installed on one Agent but not another.
+- a local location may expose filesystem access while a cloud sandbox exposes additional runtime controls.
+
+The product should preserve a single logical Workspace while making the active or affected location clear only when that distinction matters.
+
+Do not force users to understand the infrastructure graph before they can work.
+
+## Migration note
+
+The current Web implementation contains Workspace tool registries, tool bars, Agent/Session detail tools, and other structures created during the Session-first migration. They remain useful implementation assets, but they are not automatically the long-term information architecture.
+
+When those structures conflict with [`PRINCIPLE.md`](../../PRINCIPLE.md), converge them toward contextual presence rather than preserving them because they already ship.
