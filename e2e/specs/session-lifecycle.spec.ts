@@ -15,7 +15,7 @@ test.describe('Session lifecycle', () => {
 
   test('create a session, verify it appears, then kill it', async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
-    const SESSION_NAME = `e2e-lifecycle-${testInfo.retry}`;
+    const SESSION_NAME = `e2e-lifecycle-${testInfo.retry}-${Date.now()}`;
 
     // ── Wait for the agent to register ──
     // The sidebar "Create session" button is enabled only when at least one
@@ -38,27 +38,31 @@ test.describe('Session lifecycle', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Create Session')).toBeVisible();
 
-    // Fill in session name (agent is preselected since there's only one)
+    // Agent is preselected — capture the UI label (display_name || hostname),
+    // not agent_id (e2e-test-node is never shown when the agent is online).
+    const agentLabel = (await dialog.locator('#agent').textContent())?.trim() ?? '';
+    expect(agentLabel).not.toBe('');
+    expect(agentLabel).not.toBe('Select an agent');
+
     const nameInput = page.locator('#name');
     await nameInput.fill(SESSION_NAME);
+
+    const sessionRow = page.locator('[data-testid="session-item-row"]', {
+      hasText: SESSION_NAME,
+    });
 
     // Submit the form
     await dialog.getByRole('button', { name: 'Create' }).click();
 
-    // Dialog should close after successful creation
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    // Wait for the row first — create can succeed server-side while the dialog
+    // close animation lags; the row is the authoritative success signal.
+    await expect(sessionRow).toBeVisible({ timeout: 15_000 });
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
-    // ── Verify session appears in the list ──
-    // Session-first rows show the session name in a span.font-medium
-    const sessionRow = page.locator('[data-testid="session-item-row"]', {
-      hasText: SESSION_NAME,
-    });
-    await expect(sessionRow).toBeVisible({ timeout: 10_000 });
-
-    // The meta line should contain the agent label
+    // Meta line format: "shell · {agentLabel} · {relative time}"
     await expect(
       sessionRow.locator('span.text-xs.text-muted-foreground'),
-    ).toContainText('e2e-test-node', { timeout: 5_000 });
+    ).toContainText(`shell · ${agentLabel} ·`, { timeout: 5_000 });
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the
