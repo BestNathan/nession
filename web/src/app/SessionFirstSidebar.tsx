@@ -24,6 +24,7 @@ export interface SessionFirstSidebarProps {
   onCreate: () => void;
   onRefresh: () => void;
   onSelect: (session: Session) => void;
+  onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
 }
 
@@ -46,6 +47,7 @@ export function SessionFirstSidebar({
   onCreate,
   onRefresh,
   onSelect,
+  onConfigure,
   onKill,
 }: SessionFirstSidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
@@ -85,6 +87,7 @@ export function SessionFirstSidebar({
           loading={loadingSessions}
           isSearchActive={isSearchActive}
           onSelect={onSelect}
+          onConfigure={onConfigure}
           onKill={onKill}
         />
       </div>
