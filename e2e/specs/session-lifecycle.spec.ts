@@ -38,10 +38,10 @@ test.describe('Session lifecycle', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Create Session')).toBeVisible();
 
-    // Agent is preselected — capture the UI label (display_name || hostname),
-    // not agent_id (e2e-test-node is never shown when the agent is online).
-    const agentLabel = (await dialog.locator('#agent').textContent())?.trim() ?? '';
-    expect(agentLabel).not.toBe('');
+    // Agent is preselected — read the label span inside SelectTrigger (#agent),
+    // not the trigger's full textContent (radix appends a ▼ chevron).
+    const agentLabel = (await dialog.locator('#agent > span').textContent())?.trim() ?? '';
+    expect(agentLabel.length).toBeGreaterThan(0);
     expect(agentLabel).not.toBe('Select an agent');
 
     const nameInput = page.locator('#name');
