@@ -1,8 +1,17 @@
 # Nession
 
-> Distributed tmux session management — attach to any node's terminal from your browser or CLI.
+> An intelligent workspace for continuous work across devices, environments, and compute nodes.
 
-Nession lets you run and control `tmux` sessions across many machines from one place. A central **server** tracks every **agent** (one per node), and you attach to a live session either from a **web dashboard** or the **CLI** — over a relay through the server, or peer-to-peer straight to the agent for lower latency.
+Nession connects local machines, remote servers, cloud environments, terminals, coding agents, and other execution contexts into one continuous working experience. The infrastructure may be distributed and complex; the product should remain coherent, quiet, and extensible.
+
+Product direction and design decisions are governed by two repository-level documents:
+
+- [`VISION.md`](VISION.md) — what problem Nession exists to solve and where the product is going.
+- [`PRINCIPLE.md`](PRINCIPLE.md) — the durable design principles used to decide how Nession should grow.
+
+In short: Nession should absorb infrastructure complexity instead of exposing it, organize the experience around the work rather than a feature catalog, let relevant capabilities emerge from context, and reveal deeper complexity progressively. The two documents above are the canonical source when this summary and lower-level design documents diverge.
+
+Today, Nession provides distributed `tmux` session management across many machines. A central **server** tracks every **agent** (one per node), and clients attach to live sessions from the **Web UI** or **CLI** — over a relay through the server, or peer-to-peer directly to an agent for lower latency.
 
 ```
 Browser / CLI
