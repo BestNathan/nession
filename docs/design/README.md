@@ -62,13 +62,13 @@ The key downstream interpretation of the Principles is:
 | [interaction/app.md](interaction/app.md) | Canonical | App spatial model, gestures, capsule, contextual capability surfaces |
 | [visual-language.md](visual-language.md) | Canonical | What dominates and recedes; typography, surfaces, density, emphasis |
 | [composition.md](composition.md) | Canonical / evolving | Page-level layout relationships and responsive composition; must stay subordinate to contextual-presence rules |
-| [design-system/tokens.md](design-system/tokens.md) | Canonical implementation contract | Token layers and semantic vocabulary |
-| [design-system/components.md](design-system/components.md) | Canonical implementation contract | Generic primitives |
-| [design-system/patterns.md](design-system/patterns.md) | Canonical implementation contract | Reusable product/UI patterns |
-| [design-system/contracts.md](design-system/contracts.md) | Canonical executable contract | Measurable UI constraints |
-| [design-system/validation.md](design-system/validation.md) | Canonical validation | Browser assertions, viewport matrix, focused visual regression |
+| [design-system/tokens.md](design-system/tokens.md) | Canonical implementation contract | Token layers and semantic vocabulary; never decides product presence |
+| [design-system/components.md](design-system/components.md) | Canonical implementation contract | Generic primitives and product/pattern boundary |
+| [design-system/patterns.md](design-system/patterns.md) | Canonical implementation contract | Reusable product/UI patterns and contextual capability composition |
+| [design-system/contracts.md](design-system/contracts.md) | Canonical executable-contract architecture | Measurable consequences of approved pattern decisions; downstream from product semantics |
+| [design-system/validation.md](design-system/validation.md) | Canonical validation | Context/viewport assertions and focused visual regression for current approved contracts |
 | [migration.md](migration.md) | Migration | Transitional implementation plan; never overrides the canonical product model |
-| [styling-convergence.md](styling-convergence.md) | Migration | Styling/token convergence work; never defines product behavior |
+| [styling-convergence.md](styling-convergence.md) | Historical migration record | Completed styling/token convergence rationale and ownership lessons; not current product structure |
 
 ## Reading order for product-facing work
 
@@ -81,7 +81,7 @@ VISION.md
   -> product-model.md
   -> information-architecture.md
   -> relevant interaction/workspace/visual docs
-  -> design-system contracts
+  -> design-system patterns/contracts
   -> implementation
 ```
 
@@ -107,6 +107,20 @@ The exact detection mechanism is an implementation concern. Product presence fol
 
 Claude Code is the first reference integration for validating this model, not a special-case product direction.
 
+## Multi-location design rule
+
+Workspace is logical context, while Agent/provider/directory/environment are physical realization details through Workspace Locations.
+
+Lower-level patterns should therefore avoid assumptions such as:
+
+- one Workspace equals one Agent;
+- Files always means the active Session's remote directory;
+- Agent must be permanently visible as a navigation parent;
+- one Location failure invalidates the whole Workspace;
+- Session/attachment/infrastructure status can be represented by one fused state.
+
+Current Agent/tmux-backed implementation remains valid, but design vocabulary should leave room for additional Locations/providers without changing the user's core mental model.
+
 ## Design review check
 
 Before accepting a product-facing design, verify:
@@ -118,6 +132,8 @@ Before accepting a product-facing design, verify:
 - Can contextual capability replace permanent navigation?
 - Is deeper complexity progressively disclosed?
 - Does an extension integrate into Nession's product language instead of creating a parallel one?
+- Does the design preserve logical Workspace semantics instead of leaking unnecessary infrastructure topology?
+- Are executable contracts/screenshots treated as downstream enforcement rather than upstream product truth?
 - Are existing downstream documents updated when their meaning changes?
 
 ## Existing implementation and migration references

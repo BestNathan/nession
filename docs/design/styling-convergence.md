@@ -1,98 +1,95 @@
 # Styling Source Convergence
 
-Migration plan for reconciling overlapping styling paths after canonical screens and Visual Contracts are approved ([#561](https://github.com/BestNathan/nession/issues/561) Phase 5).
+> **Status: historical migration record.** The original `--sf-*` styling convergence work described here has been implemented. This document preserves rationale and ownership lessons; it does not define current product structure.
 
-**Status:** Audit + plan only — implementation PRs follow separately on `staging`.
-**Upstream:** [visual-language.md](visual-language.md), [composition.md](composition.md), [design-system/tokens.md](design-system/tokens.md)
-**Target ownership:**
+> Upstream for current work: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md) → [visual-language.md](visual-language.md) → [composition.md](composition.md) → [design-system/tokens.md](design-system/tokens.md)
+
+## Why this document exists
+
+Nession previously had overlapping styling vocabularies across generated design tokens, Session-first shell CSS variables, raw Tailwind metrics, shadcn primitives, and capability-specific UI.
+
+The convergence effort established a durable ownership direction:
 
 ```text
 design/tokens
     ↓
-design/generated (CSS + lint metadata)
+design/generated
     ↓
-shadcn generic primitives
+generic primitives
     ↓
-product pattern recipes (session-first/)
+product patterns / contextual composition
     ↓
-screens / fixtures
+shipping UI
 ```
 
-This is a **convergence task**, not a mandate to tokenize every Tailwind metric. Layout/composition rules stay readable in [composition.md](composition.md); only **repeated, approved** values graduate to tokens ([#561](https://github.com/BestNathan/nession/issues/561) Phase 8).
+The important lesson remains valid: **one owner per reusable visual concept, without turning every layout choice into a token.**
 
-## Current sources (as of staging @ Phase 2C)
+## Completed historical work
 
-| Source | Location | Role today | Issue |
-|--------|----------|------------|-------|
-| Executable tokens | `design/tokens/*.json` → `design/generated/web.css` | Semantic / Domain / Experience values ([#467](https://github.com/BestNathan/nession/issues/467)) | Incomplete coverage; capsule/terminal paths ahead of shell chrome |
-| Session-first overlay | `web/src/index.css` `--sf-*` | Spacing, type scale, motion, focus, terminal well color for session-first shell | Parallel vocabulary to generated tokens; used directly in TSX via `var(--sf-*)` |
-| Raw Tailwind in session-first | `web/src/session-first/**/*.tsx` | Ad-hoc `size-9`, `size-11`, `max-lg:*`, `gap-1.5` | Some map to Experience tokens; some are one-off layout |
-| shadcn defaults | `web/src/components/ui/*` | Generic primitives | Correct layer — do not fork for product identity |
-| Capsule token bridge | Generated vars + `[data-experience]` | Composer/capsule metrics | **Target state** for shell chrome migration |
-| Legacy dashboard | `web/src/components/*` | Agent-first UI | Out of scope until migration ([#472](https://github.com/BestNathan/nession/issues/472)) |
+The original migration covered:
 
-### `--sf-*` inventory (session-first shell)
+- replacing duplicate `--sf-*` shell variables with generated Semantic / Domain / Experience tokens where appropriate;
+- keeping one-off layout/composition decisions in readable design prose instead of manufacturing tokens for them;
+- moving Terminal well, spacing, type, focus, and motion concerns toward shared token ownership;
+- extending lint/enforcement only after the old styling path was removed;
+- auditing raw control/touch metrics against Experience tokens;
+- keeping shadcn primitives generic rather than forking them for product identity.
 
-Defined in `web/src/index.css` on staging:
+Implementation PRs such as #578 and #580 completed the main `--sf-*` removal/convergence work tracked from #561/#467.
 
-| Variable | Approximate role | Convergence target |
-|----------|------------------|-------------------|
-| `--sf-space-1` … `--sf-space-5` | Shell padding/gaps | `experience.web.spacing.*` / composition prose for one-off gutters |
-| `--sf-text-title`, `--sf-text-body`, `--sf-text-muted` | Chrome typography | Semantic type roles in [visual-language.md](visual-language.md) → Experience tokens |
-| `--sf-leading` | Line height | Experience token or inherit from semantic type |
-| `--sf-terminal-well` | Well background | **`domain.terminal.wellBackground`** (already in token spec; replace `--sf-terminal-well` usage) |
-| `--sf-focus-ring`, `--sf-focus-offset` | Focus ring | Semantic `focus.*` or shadcn `--ring` — single source |
-| `--sf-motion`, `--sf-ease` | Transitions | `experience.*.motion.*` |
+## Durable styling principles
 
-**Consumers (staging):** `SessionFirstMain`, `SessionFirstSidebar`, `SessionHeader`, `SessionItem`, `SessionListHeader`, `AppToolHeader`, `AppBackButton`, `TerminalWell`, workspace shell/tools — 17 files reference `--sf-*` or assert on it in tests.
+These rules remain useful for current and future product work:
 
-**ESLint:** `web/eslint-plugin-nession/rules/no-capsule-magic-metrics.js` guards capsule paths; shell `--sf-*` is not yet lint-gated.
+1. **Product meaning comes before tokenization.** A token should implement an approved semantic/visual relationship, not create one.
+2. **Explore → approve → abstract → tokenize → enforce.** Do not freeze exploratory layout too early.
+3. **One owner per reusable concept.** If generated tokens own a value, avoid a feature-local duplicate vocabulary.
+4. **Composition stays composition.** Page gutters, contextual placement, and one-off geometry remain in composition/pattern docs until repetition justifies abstraction.
+5. **Do not tokenize one-offs merely to remove literal values.** A named token is not automatically better if it has no reusable semantic meaning.
+6. **Lint follows maturity.** Enforcement should prevent regression after a design path is established, not block intentional exploration.
+7. **Extensions use Nession's visual language.** Capability-specific UI may introduce domain semantics, but not a parallel global palette, spacing scale, or navigation chrome.
 
-## Duplication and gaps
+## Product-direction correction after the original migration
 
-1. **Same concept, two names:** `--sf-terminal-well` vs `domain.terminal.wellBackground` generated var — TerminalWell uses overlay; capsule spec says generated only.
-2. **Typography:** Visual language defines roles; shell uses `--sf-text-*` while tokens define Experience control/row heights separately.
-3. **Spacing:** `--sf-space-*` duplicates Tailwind spacing scale semantically but bypasses lint metadata from #467.
-4. **Intentional raw layout:** `max-lg:gap-1.5`, `size-11` for App 44px targets — some align with `touchTarget.min`, some are breakpoint-specific composition (keep in composition.md, not tokens).
-5. **Capsule path is cleaner:** TerminalCapsule spec already forbids `--sf-*`; convergence should **extend capsule rules upward** to shell chrome, not add more `--sf-*`.
+The original styling work was built around a more fixed Session-first shell. Since `VISION.md` and `PRINCIPLE.md` became the upstream product contract, some old composition assumptions are no longer product invariants.
 
-## Migration principles
+In particular, styling infrastructure must not encode assumptions such as:
 
-1. **Explore → approve → abstract → tokenize → enforce** ([#561](https://github.com/BestNathan/nession/issues/561)) — no new token batches until a Visual Contract repeats the value.
-2. **One owner per concept** — if generated CSS exposes a var, delete the `--sf-*` twin.
-3. **Composition stays prose** — sidebar width strategy, page gutters, and "when edge-to-edge" remain in [composition.md](composition.md) until a third screen needs the same number.
-4. **Do not tokenize one-offs** — e.g. a single `max-lg:gap-1.5` in SessionHeader is composition, not `experience.web.gap.headerCompact`.
-5. **Lint follows maturity** — extend ESLint only after migration PR removes the old path (avoid blocking exploratory fixes).
+- every Session always has the same permanent header chrome;
+- a `Terminal | Workspace` switcher must always exist;
+- every Workspace capability has a permanent tab/button;
+- Agent metadata must always reserve space;
+- adding a capability should add proportional visible chrome.
 
-## Proposed PR sequence (implementation, post-this-doc)
+Tokens and style rules should make approved contextual composition consistent; they should not force the composition to exist.
 
-| Step | Scope | Base | Notes |
-|------|-------|------|-------|
-| 1 | Replace `--sf-terminal-well` → generated `domain.terminal.wellBackground` | `staging` | TerminalWell + tests only |
-| 2 | Map `--sf-space-*` shell usages → generated Experience spacing (or composition constants documented once) | `staging` | SessionHeader, SessionItem, sidebar — file-by-file |
-| 3 | Map `--sf-text-*` → semantic type tokens when #467 extends type generation | `staging` | Blocked partially on #467 type output |
-| 4 | Map `--sf-motion` / `--sf-ease` → `experience.*.motion.*` | `staging` | Small, mechanical |
-| 5 | Remove empty `--sf-*` block from `index.css` | `staging` | After zero references |
-| 6 | Extend `no-capsule-magic-metrics` or add `no-sf-overlay-vars` for session-first TSX | `staging` | After removal |
-| 7 | Audit raw `size-*` in session-first against `touchTarget.min` / control tokens | `staging` | Document exceptions in composition |
+## Current source ownership
 
-## Explicit non-goals (this phase)
+| Concern | Canonical owner |
+|---------|-----------------|
+| Product direction | `VISION.md` |
+| Product design decisions | `PRINCIPLE.md` |
+| Visual hierarchy / emphasis | `docs/design/visual-language.md` |
+| Page/surface relationships | `docs/design/composition.md` |
+| Product pattern semantics | `docs/design/design-system/patterns/*` |
+| Token vocabulary | `docs/design/design-system/tokens.md` + `design/tokens/` |
+| Generated values | `design/generated/` |
+| Measurable layout constraints | `design/contracts/` + contracts docs |
+| Generic Web primitives | `web/src/components/ui/` |
 
-- Tokenizing every Tailwind class in session-first TSX.
-- Migrating legacy `web/src/components/*` dashboard paths.
-- Changing shadcn primitive internals.
-- Resolving #467 entirely — convergence consumes #467 output, does not replace it.
+When these disagree, resolve from the top of the hierarchy downward rather than creating another styling bridge.
 
-## Acceptance (Phase 5 doc complete)
+## Historical anti-patterns worth preventing
 
-- [x] All styling sources listed with ownership target.
-- [x] `--sf-*` inventory and consumer list documented.
-- [x] Duplication called out with named token targets.
-- [x] Implementation PR sequence defined separately from token speculation.
-- [x] Implementation PRs merged on `staging` (#578 `--sf-*` removal, #580 shell control tokens; step 7 exceptions in [composition.md](composition.md) §14).
+- Parallel CSS variable vocabularies for the same semantic value.
+- Product components consuming Primitive palette values directly.
+- Feature-local spacing/radius systems that bypass shared visual language.
+- Token names that encode obsolete shell structure.
+- Golden screenshots treated as stronger than upstream design decisions.
+- A styling refactor that accidentally becomes an IA/product redesign without updating canonical docs.
 
-## Related
+## Maintenance
 
-- [#561](https://github.com/BestNathan/nession/issues/561) Phase 5 acceptance criteria
-- [#467](https://github.com/BestNathan/nession/issues/467) executable tokens
-- [terminal-capsule.md](design-system/patterns/terminal-capsule.md) — reference implementation for token-only capsule path
+Do not extend this file as the plan for new product styling work. New design changes belong in the relevant canonical visual/composition/pattern/token docs, with implementation tracked by focused issues/PRs.
+
+Keep this document as a record of why the styling source tree was converged and which mistakes should not be reintroduced.
