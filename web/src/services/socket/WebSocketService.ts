@@ -53,6 +53,13 @@ type ConnectionWaiter = {
  * The handshake runs again for every physical socket (each reconnect), and is
  * given a {@link HandshakeSurface} whose `request()` bypasses the readiness
  * gate — the socket is already OPEN at that point.
+ *
+ * A handshake that *rejects* is a refusal, not a loss: the socket opened and
+ * the peer answered it. The service settles at 'disconnected' and schedules no
+ * reconnect, because replaying the same handshake would be refused again
+ * (#692). The reconnect budget therefore covers only sockets lost from a live
+ * connection, and is reset by each connection that actually gets established —
+ * not by a socket that merely opened.
  */
 export class WebSocketService implements PluginSurface {
   private ws: WebSocket | null = null;
@@ -298,9 +305,11 @@ export class WebSocketService implements PluginSurface {
         ws.close();
         return;
       }
-      this.reconnectAttempt = 0;
       const handshake = this.options.handshake;
       if (!handshake) {
+        // Nothing gates readiness, so the socket *is* the connection: open is
+        // established, and only here may the reconnect budget reset.
+        this.reconnectAttempt = 0;
         this.setState('connected');
         this.connectPromise = null;
         this.rejectConnect = null;
@@ -334,6 +343,11 @@ export class WebSocketService implements PluginSurface {
         ) {
           return;
         }
+        // Established — the handshake is what proves it, so this is the only
+        // place a reconnect budget may reset. Resetting in ws.onopen instead
+        // let a socket that opened but never authenticated re-arm itself on
+        // every retry, so the budget never ran out (#692).
+        this.reconnectAttempt = 0;
         this.connectPromise = null;
         this.rejectConnect = null;
         this.setState('connected');
@@ -345,8 +359,14 @@ export class WebSocketService implements PluginSurface {
         this.connectPromise = null;
         this.rejectConnect = null;
         reject(error instanceof Error ? error : new Error(String(error)));
-        this.teardownSocket();
-        this.handleSocketLoss();
+        // Only a refusal from a socket that is still live settles here. If the
+        // socket died while the handshake was in flight, its onclose already
+        // ran the loss path — retrying there is legitimate, and overriding it
+        // would strand the retry timer behind a 'disconnected' state.
+        if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+          this.teardownSocket();
+          this.failConnection();
+        }
       });
     };
 
@@ -395,6 +415,19 @@ export class WebSocketService implements PluginSurface {
       }
       this.handleSocketLoss();
     };
+  }
+
+  /**
+   * Settle a definitively failed connection: everything in flight fails the
+   * way it would on a lost socket, but no reconnect is scheduled. Used when
+   * the peer refused this client (a rejected handshake), where retrying the
+   * same handshake can only be refused again.
+   */
+  private failConnection(): void {
+    const error = new Error('Connection lost');
+    this.router.failPending(error);
+    this.setState('disconnected');
+    this.rejectWaiters(error);
   }
 
   private handleSocketLoss(): void {
