@@ -19,6 +19,27 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: nession
+  # The staging data claim is bound to the out-of-band PV
+  # `nession-nfs-staging-server` — never declared in any overlay, see the
+  # "Storage leftovers" note in this branch's README. The binding controller
+  # writes that name into the live PVC's `spec.volumeName`, which the API
+  # treats as immutable on a bound claim, so a Replace carrying an absent
+  # `volumeName` is rejected and *every* sync fails on this object (#693).
+  #
+  # Copy the live value into the payload at sync time rather than declaring it:
+  # `volumeName` is set by the binding controller, not by operations.
+  # `RespectIgnoreDifferences=true` is what performs that copy — on its own
+  # `ignoreDifferences` only affects diffing, the app reports Synced, and the
+  # next sync still dies on the replace. (Sync option since Argo CD 2.3.)
+  #
+  # Scoped to this one claim so that a manifest/live storage mismatch on any
+  # other PVC still fails loudly instead of being silently papered over.
+  ignoreDifferences:
+    - group: ""
+      kind: PersistentVolumeClaim
+      name: nession-server-data-staging
+      jsonPointers:
+        - /spec/volumeName
   syncPolicy:
     automated:
       prune: true
@@ -26,3 +47,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - Replace=true
+      - RespectIgnoreDifferences=true
