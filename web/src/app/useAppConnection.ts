@@ -56,7 +56,6 @@ export function useAppConnection() {
   // before the effect cleanup of the superseded instance runs (StrictMode
   // and token/status updates both re-run the effects).
   const serviceRef = useRef<WebSocketService | null>(null);
-  const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     return () => {
@@ -69,12 +68,6 @@ export function useAppConnection() {
       }
     };
   }, [wsService]);
-
-  useEffect(() => {
-    return () => {
-      unsubRef.current?.();
-    };
-  }, []);
 
   const connectInternal = useCallback(async (remember: boolean, auto: boolean) => {
     setToken(authToken, remember);
@@ -99,8 +92,11 @@ export function useAppConnection() {
       serviceRef.current = service;
       setWsService(service);
 
-      unsubRef.current?.();
-      unsubRef.current = service.onConnectionStateChange((status) => {
+      // Unsubscribed by dispose() (it clears the listener set) rather than by
+      // an effect cleanup. An effect that unsubscribed on StrictMode's
+      // simulated unmount would leave the live service silent — nothing would
+      // ever drive this hook to 'connected' again (#697).
+      service.onConnectionStateChange((status) => {
         if (status === 'connected') {
           setWasEverAuthed(true);
         }
@@ -119,7 +115,14 @@ export function useAppConnection() {
       // toasts and drops back to the disconnected (login) state.
       if (service === null || serviceRef.current === service) {
         if (auto) {
+          // Restoring a stored session: the credentials are what failed, so
+          // drop them and fall back to the login page. This sits here, not in
+          // the auto-connect effect's rejection handler, so it fires on
+          // ownership — an effect cleanup StrictMode also runs mid-life would
+          // otherwise leave the restore flag set for the rest of the session.
           clearToken();
+          setWasEverAuthed(false);
+          setConnectionStatus('disconnected');
         } else {
           toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
           setConnectionStatus('disconnected');
@@ -141,24 +144,23 @@ export function useAppConnection() {
   // is what stops a token or URL edit from re-arming a connect that would
   // supersede whatever is already live.
   const connectInternalRef = useRef(connectInternal);
+  // "Once" needs a ref, not just the frozen deps array: StrictMode runs every
+  // effect body twice (mount→cleanup→mount) on the same instance, and the
+  // second pass would start a second transport, disposing the first while its
+  // socket was still CONNECTING (#697). A real remount gets a fresh ref, so
+  // the restore still runs again when the page is actually reloaded.
+  const autoConnectStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!autoConnect) {
+    if (!autoConnect || autoConnectStartedRef.current) {
       return;
     }
+    autoConnectStartedRef.current = true;
 
-    let cancelled = false;
     connectInternalRef.current(getRememberPreference(), true).catch(() => {
-      if (!cancelled) {
-        clearToken();
-        setWasEverAuthed(false);
-        setConnectionStatus('disconnected');
-      }
+      // Failure is surfaced inside connectInternal, on ownership — a rejection
+      // from a transport a newer connect replaced stays silent.
     });
-
-    return () => {
-      cancelled = true;
-    };
   }, [autoConnect]);
 
   useVisibilityReconnect(wasEverAuthed, wsService);
