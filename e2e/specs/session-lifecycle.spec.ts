@@ -1,14 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { waitForSessionFirst } from '../helpers/sessionFirst';
 
-// NOTE: session-lifecycle test is skipped due to tmux terminal initialization
-// issues in CI environment ("terminal does not support clear").
-// The agent connection problem has been resolved, but tmux session creation
-// needs separate investigation for CI environments.
-// TODO: Re-enable once tmux CI environment issues are resolved.
+// CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
+// e2e webServer stack only provides in CI. The historical blocker ("terminal
+// does not support clear") was fixed in #633 — agent pins TERM=xterm-256color.
 test.describe('Session lifecycle', () => {
-  const SESSION_NAME = 'e2e-lifecycle';
-
   test.beforeEach(async ({ page }) => {
     // Use URL token to skip login. Server runs in no-auth mode (empty auth_token),
     // so any non-empty token is accepted.
@@ -17,7 +13,10 @@ test.describe('Session lifecycle', () => {
     await waitForSessionFirst(page);
   });
 
-  test.skip('create a session, verify it appears, then kill it', async ({ page }) => {
+  test('create a session, verify it appears, then kill it', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-lifecycle-${testInfo.retry}`;
+
     // ── Wait for the agent to register ──
     // The sidebar "Create session" button is enabled only when at least one
     // agent is online. In CI, cargo build + agent startup + heartbeat can
