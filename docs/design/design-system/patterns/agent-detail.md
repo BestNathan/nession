@@ -1,141 +1,203 @@
 # AgentDetail
 
-Workspace **Agent** tool: full Agent and connection details. Single detail layout — not master/detail.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [product model](../../product-model.md) → [workspace](../../workspace.md)
+
+AgentDetail is a **contextual infrastructure detail view** for one execution endpoint that participates in the current work. Today that endpoint is usually a Nession Agent; in the long-term product model it may be the provider behind a Workspace Location.
+
+It is not a permanent Workspace tab and it is not the navigation parent for Sessions.
 
 ## Purpose
 
-Disclosure level 3: everything the user needs about the tmux proxy behind the active Session ([information-architecture.md](../../information-architecture.md)).
+Help the user inspect or recover the execution context behind current work when infrastructure detail is actually useful.
 
-Must not:
+Typical reasons to open it include:
 
-- Become primary navigation (no Agent-grouped session browser as the point of this tool).
-- Collapse the three domain dimensions into one badge.
-- Treat Agent as an AI runtime (no thinking/stream chrome).
+- a Session cannot currently be reached;
+- the user wants to know where the work is running;
+- a Workspace Location needs diagnostics or configuration;
+- a capability depends on provider-specific information;
+- the user explicitly asks for connection/network/runtime detail.
+
+The view should absorb infrastructure complexity instead of forcing every user through it before they can work.
+
+## Entry context
+
+AgentDetail may be reached from different places:
+
+```text
+Session context
+    -> affected Agent / Workspace Location detail
+
+Workspace Location
+    -> provider / Agent detail
+
+failure or recovery affordance
+    -> focused detail directly
+```
+
+Do not require `Workspace -> Agent tab` as the only route. That would turn an implementation layout into product structure.
+
+## Scope
+
+The detail view describes **one infrastructure endpoint / Workspace Location realization**.
+
+It may include:
+
+```text
+identity
+provider / Agent
+location relationship
+connectivity + last evidence
+addresses / versions / runtime facts
+capabilities exposed by this endpoint
+actions / recovery
+optional current-Session context
+```
+
+A Workspace may contain multiple Locations. AgentDetail must not imply that one Agent is the Workspace itself.
+
+## Session context is optional
+
+When opened from an active Session, the view may include the Session lifecycle and this-client attachment as contextual facts.
+
+When opened from Workspace-level location inspection with no active Session relationship, those channels may be omitted.
+
+```text
+Agent / location connectivity   required for this view
+Session lifecycle               contextual, when applicable
+client attachment               contextual, when applicable
+```
+
+Never invent Session state simply to fill a three-channel layout.
+
+## Progressive disclosure
+
+At rest, Agent/location information should normally be quiet or absent elsewhere in the product. AgentDetail is the explicit deeper layer where technical detail can become dense.
+
+Recommended depth:
+
+1. current-work surface: only continuity-critical state;
+2. compact context: location/provider identity when useful;
+3. AgentDetail: full diagnostics/configuration/facts.
+
+The existence of AgentDetail is a reason **not** to keep all Agent facts permanently visible in Session chrome.
 
 ## Anatomy
 
-Single detail surface:
+A single detail surface is the default:
 
 ```text
-Agent
+Execution context
 
-  identity          display name, id
-  ConnectionStatus  three channels (Agent emphasized)
-  connection        host, addresses, versions as available
-  health            heartbeat / last seen (Agent connection evidence)
-  actions           refresh, rename, copy — not “open dashboard of this Agent’s sessions”
+  identity          Workspace Location / Agent / provider
+  connectivity      online / reconnecting / offline / error
+  evidence          heartbeat, last seen, last error
+  network           host, addresses, relay/P2P facts when useful
+  runtime           version / platform / provider facts
+  capabilities      contextual availability summary, not a feature launcher
+  session context   optional current Session + attachment facts
+  actions           retry, refresh, copy, configure, recover
 ```
 
-A short **session count** on this Agent is acceptable as facts. A nested SessionList that **replaces** app-wide flat navigation is not. To open a Session, the user uses [SessionList](session-list.md).
+Use stacked sections or compact key/value groups. Do not inherit Files master/detail merely because the view lives under Workspace.
 
-### Open question (deferred)
+## Multi-location behavior
 
-[#470](https://github.com/BestNathan/nession/issues/470): whether AgentDetail **reuses** shipping `AgentDetailPanel` anatomy or **replaces** it is decided in the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)).
+For a logical Workspace with several Locations:
 
-This spec constrains the **target**:
-
-- Required: identity, ConnectionStatus (three channels), connection/network facts, Agent health evidence.
-- Shipping extras (heartbeat timeline, copy-all, Claude Code extension slot, create-session) may be kept if they still make sense **session-scoped**. Create-session from AgentDetail is allowed as an action on this Agent; it must not require viewing an Agent-first dashboard first.
-- Shipping `AgentDetailPanel` lists that Agent’s sessions as a block — acceptable as a **fact list**, not as the primary Session switcher.
+- this view stays scoped to the selected Location/provider;
+- an outage in one Location does not imply the whole Workspace is offline;
+- capability availability should be described at the appropriate Location scope;
+- switching Locations belongs to Workspace context/navigation when relevant, not to a global Agent dashboard embedded here.
 
 ## States
 
-AgentDetail **foregrounds the Agent channel** and still shows Session + attachment for the **active** Session (the one whose Workspace this is).
+| Condition | Presentation |
+|-----------|--------------|
+| Healthy and explicitly opened | Full facts are readable but success state remains visually restrained |
+| Connecting / reconnecting | Show current transition and useful recovery evidence |
+| Offline / error | Connectivity becomes prominent; preserve last-known facts where useful |
+| Session context available | Show Session/attachment facts as a separate contextual section |
+| No Session context | Omit Session/attachment section rather than manufacturing empty status chrome |
 
-| Channel | In this tool |
-|---------|----------------|
-| Agent | Full: all `agent.*` values, plus evidence (heartbeat, last error) |
-| Session | The active Session’s `session.*` — context, not a list of statuses for every session on the host |
-| Attachment | This client’s `attachment.*` to the active Session |
+Copy should name the affected infrastructure dimension. Prefer `Agent offline`, `Location unreachable`, or provider-specific language over a fused `Session failed` label when the Session lifecycle is unknown.
 
-When Agent is `offline`, the page remains an Agent connectivity explanation. Do not retitle it as Session failure.
+## Capability relationship
+
+AgentDetail may summarize capabilities exposed by this endpoint, but it is not a capability marketplace.
+
+A capability listed here does not automatically earn permanent Workspace navigation. Presence elsewhere still follows the contextual capability lifecycle:
+
+```text
+unavailable -> available -> relevant -> active
+```
+
+Extensions may contribute diagnostic data or actions for this detail view; Nession owns composition and visual hierarchy.
 
 ## Tokens
 
 | Part | Tokens |
 |------|--------|
-| Page | Domain `workspace.surface` |
-| Agent channel | Domain `agent.*` |
-| Other channels | Domain `session.*` `attachment.*` via ConnectionStatus |
-| Body text | Semantic `text.primary` / `text.secondary` |
+| Surface | Domain `workspace.surface` / Semantic surfaces |
+| Agent connectivity | current Domain `agent.*` tokens |
+| Session context | Domain `session.*` when applicable |
+| Attachment context | Domain `attachment.*` when applicable |
+| Body / labels | Semantic `text.primary` / `text.secondary` |
 | Actions | Experience `control.*` |
 
-No Primitive `text-green-400` health pills (shipping predecessor `getHealthStatus`).
+Current `agent.*` tokens reflect today's Agent-backed infrastructure. Future provider/location semantics should extend the Domain vocabulary deliberately rather than overloading one generic status token.
 
 ## Web vs App
 
 | | Web | App |
 |--|-----|-----|
-| Layout | Single column / stacked sections in the Agent tool body | Same content; native stack page under Workspace |
-| Close | Switch tool or SurfaceSwitcher back to Terminal | Pop to Workspace tool list, then dismiss Workspace to Terminal. Visible back control required |
-| Density | Compact | App Experience spacing / safe area ([#473](https://github.com/BestNathan/nession/issues/473)) |
+| Presentation | Focused Workspace view, panel, sheet, or contextual route | Push view / sheet in the Workspace stack |
+| Entry | From affected Session, Workspace Location, search/palette, or recovery affordance | Same semantic entries adapted to native navigation |
+| Close | Return to the invoking work context | Pop to previous contextual layer |
+| Density | Compact diagnostic information | Touch-safe spacing without marketing-page whitespace |
 
-## Visual Contract
+Neither experience requires a permanent `Agent` navigation item.
 
-Derived from [visual-language.md](../../visual-language.md) and Workspace Agent tool layouts on canonical screens ([#566](https://github.com/BestNathan/nession/pull/566), [#568](https://github.com/BestNathan/nession/pull/568)).
+## Visual contract
 
 ### Dominance
 
-- AgentDetail is **disclosure level 3** — more explicit than [AgentContext](agent-context.md), still inside auxiliary Workspace, never primary navigation.
-- The Agent **identity block** and ConnectionStatus detail form may be primary **within this tool page** — not primary in the full app shell.
-
-### Information hierarchy
-
-- **Primary on page:** Agent identity + ConnectionStatus detail (three labeled channels).
-- **Secondary:** connection facts (host, addresses, versions), health evidence.
-- **Tertiary:** session count as fact; optional session fact list — not a Session switcher.
-
-### Alignment
-
-- Single-column stacked sections — no Files-style master/detail split.
-- Labels left or top; values follow ConnectionStatus detail rhythm.
-
-### Density
-
-- **Forms/dialogs relaxed density** within sections — readable for diagnostic content.
-- Compact on Web; App adds safe-area and touch spacing without inflating to marketing-page whitespace.
-
-### Whitespace
-
-- Section gaps group identity, status, connection, actions — whitespace before borders.
-- No nested cards per field group unless whitespace fails for dense key-value grids.
-
-### Contrast
-
-- Agent channel foregrounded relative to Session/attachment on **this page** — still Domain tokens, not Primitive green pills.
-- Healthy Agent: identity at `secondary`–`primary`; channels at readable secondary.
-- Unhealthy Agent: Agent channel `conditional-prominent`; Session/attachment channels stay labeled and neutral.
+- AgentDetail may be information-dense because the user explicitly opened it.
+- Within the full product it remains contextual depth, not the dominant default surface.
+- Healthy infrastructure does not need celebratory success chrome.
+- Failure emphasis stays local to the affected endpoint/state.
 
 ### Surface treatment
 
-- Flat `workspace.surface` page — no elevation, no hero banner.
-- Actions row uses Experience `control.*` — ghost/secondary, not a wall of primary buttons.
+- Prefer one flat detail surface with whitespace/section rhythm.
+- Avoid nested cards for every field group.
+- Use elevation only when the view itself is presented as an overlay/sheet for interaction reasons, not to decorate healthy state.
 
-### State-driven emphasis
+### Information hierarchy
 
-| Condition | Emphasis |
-|-----------|----------|
-| Agent `online` | Agent channel quiet in detail form; full facts readable |
-| Agent `offline` / `error` | Agent channel + health evidence `conditional-prominent`; page title remains Agent identity — not retitled "Session failed" |
-| Session fact list | Tertiary — opening another Session routes to [SessionList](session-list.md), not this list as primary nav |
+1. endpoint/location identity;
+2. affected connectivity or recovery state when present;
+3. useful diagnostic facts;
+4. optional Session context;
+5. secondary actions/history.
 
-### Anti-patterns
+## Anti-patterns
 
-- Agent-grouped session browser replacing flat SessionList.
-- Single fused health badge for Agent + Session + attachment.
-- Files-style browser+editor split on this tool.
-- Primitive `text-green-400` health pills (shipping predecessor).
-- "Open dashboard of this Agent's sessions" as the primary action.
+- Agent grid or Agent-grouped Session browser as the primary purpose of this view.
+- Assuming one Agent equals one Workspace.
+- Requiring a permanent Workspace Agent tab.
+- Showing every Agent capability as a launcher card.
+- Fusing Agent connectivity, Session lifecycle, and attachment into one badge.
+- Showing Session status when no Session is in context.
+- Treating Agent as an AI assistant merely because coding agents may run inside Sessions.
+- Files-style master/detail applied to infrastructure facts without need.
 
-### Canonical reference
+## Acceptance for future implementation work
 
-- Web: `/#/fixture/workspace` — Agent tool body in Workspace ([#566](https://github.com/BestNathan/nession/pull/566)).
-- App: `/#/fixture/app` — Agent tool in spatial Workspace stack ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Single detail layout (no Files-style browser+editor split).
-- [ ] ConnectionStatus three channels are visible (detail form).
-- [ ] Copy/health refers to Agent connection, not a fused Session status.
-- [ ] Not the primary way to switch Sessions.
-- [ ] #471 records reuse-vs-replace of `AgentDetailPanel` explicitly when implementing.
+- [ ] Detail can be opened contextually without depending on a permanent Agent tab.
+- [ ] One view describes one Agent/provider/Workspace Location realization.
+- [ ] Multi-location Workspace semantics are not collapsed into one Agent.
+- [ ] Session and attachment context are optional and independently represented.
+- [ ] Infrastructure failure does not falsely redefine Session lifecycle.
+- [ ] Capability summaries do not become a permanent feature launcher.
+- [ ] Healthy detail remains precise and quiet; degraded state gains only the emphasis needed for recovery.
