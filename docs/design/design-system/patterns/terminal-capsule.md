@@ -1,178 +1,196 @@
 # TerminalCapsule
 
-Floating Input / Commands composer inside the **Terminal** surface (session-first path only).
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [product model](../../product-model.md) → [interaction](../../interaction/)
 
-> **Contract:** `design/contracts/patterns/terminal-toolbar.json` (id `pattern.terminal-toolbar`) — measurable layout rules ([contracts.md](../contracts.md)).
+The TerminalCapsule is Nession's lightweight contextual interaction surface over the active Session's Terminal.
+
+It is designed to let the user express intent without turning the Terminal into a dashboard. The capsule is conversational first, extensible second, and always subordinate to the work happening in the Terminal.
+
+> **Contract:** `design/contracts/patterns/terminal-capsule.json` — measurable layout rules ([contracts.md](../contracts.md)).
 
 ## Purpose
 
-Send keyboard input and quick physical keys to the attached tmux session without turning Nession into a chat client.
+The capsule provides one quiet place for high-level interaction with the current Session:
 
-Must not host Env, Files, session list, or Workspace tools. Must not replace legacy BottomBar on the Agent-first Dashboard path.
+- conversational / natural-language intent;
+- direct terminal input where appropriate;
+- commands and shortcuts;
+- explicit `+` expansion for secondary actions;
+- lightweight presence and actions from capabilities that are relevant or active now.
 
-**Parent issues:** [#492](https://github.com/BestNathan/nession/issues/492) (visual shell), [#561](https://github.com/BestNathan/nession/issues/561) (visual language).
+The capsule is **not** a permanent toolbar or a feature catalog. A registered capability does not receive a button simply because it exists.
+
+## Product rule
+
+The capsule implements three root Principles directly:
+
+1. **Show only what matters now.** The resting state stays minimal.
+2. **Let capabilities emerge from context.** Relevant/active capabilities may gain presence.
+3. **Prefer progressive disclosure.** The first layer shows intent and presence; deeper controls open explicitly.
 
 ## Anatomy
 
 ```text
-┌─ Terminal well ─────────────────────────────────────────┐
-│  xterm (keep-alive)                                     │
-│  ┌─ CapsuleShell (absolute, token-positioned) ────────┐ │
-│  │  InputComposer  OR  CommandsComposer (App mode)    │ │
-│  └────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌─ Terminal well ─────────────────────────────────────────────┐
+│  xterm / current workload                                   │
+│                                                            │
+│        ┌─ TerminalCapsule ───────────────────────────┐      │
+│        │ [+] [capability presence?] [ input ... ] [send] │      │
+│        └─────────────────────────────────────────────┘      │
+└────────────────────────────────────────────────────────────┘
 ```
 
-### InputComposer — `flat`
-
-```text
-[ leading tools … ] [ ghost textarea ] [ trailing tools … Send ]
-```
-
-### InputComposer — `stacked`
-
-```text
-[ ghost textarea — full shell content width ]
-[ leading tools …              trailing tools … Send ]
-```
-
-### CommandsComposer (primarily App)
-
-```text
-[ mode toggle ] [ phys key row … ] [ overflow popover ]
-```
+The exact ordering is experience-specific. The semantic regions are:
 
 | Part | Role |
 |------|------|
-| CapsuleShell | Float inside well; safe-area + experience shell tokens |
-| Ghost textarea | Command compose; history ghost + Tab accept |
-| Leading / trailing tool clusters | History, Commands (Web Input), Paste, Copy, Send; App adds mode toggle on leading |
-| CommandsComposer | Quick keys when `mode === commands`; no flat/stacked layout machine |
+| Capsule shell | Quiet floating surface anchored to the current Session |
+| Primary input | Conversational / intent input; the main interaction |
+| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions |
+| Capability presence | Optional identity/state for a capability that has earned relevance or is active |
+| Primary action | Send / execute current intent |
+| Secondary actions | Contextual commands, paste/copy, physical keys, history, and extension-provided actions |
 
-## States
+## Contextual capability presence
 
-Capsule UI reflects **client input mode**, not Agent/Session/attachment lifecycle. ConnectionStatus lives in [SessionHeader](session-header.md).
+Capabilities follow the lifecycle defined in [product-model.md](../../product-model.md):
 
-| State | Behavior |
-|-------|----------|
-| `disabled` | No input; tools inert; layout frozen |
-| `mode: input` | InputComposer; flat ↔ stacked from content line count |
-| `mode: commands` | CommandsComposer (App); Input layout machine inactive |
-| `composerLayout: flat` | Single-row strip |
-| `composerLayout: stacked` | Full-width field row + toolbar row |
-| Popover open | History or Commands (mutually exclusive) |
-| Empty after send | flat; close open popovers |
+```text
+unavailable -> available -> relevant -> active
+```
 
-**Frozen input semantics (implementation must preserve):** Enter send; Shift+Enter newline; ghost + Tab; IME suppresses ghost; send clears value and closes History/Commands popovers.
+Capsule behavior:
 
-## Tokens
+| Capability state | Capsule behavior |
+|------------------|------------------|
+| `unavailable` | No presence |
+| `available` | Normally no resting presence; may be discoverable after explicit `+` expansion when useful |
+| `relevant` | May appear as a contextual action or lightweight hint |
+| `active` | May gain lightweight identity/state directly on or next to the capsule |
 
-| Part | Token ids |
-|------|-----------|
-| Capsule surface | `domain.terminal.capsuleSurface` |
-| Well behind xterm | `domain.terminal.wellBackground` (xterm Catppuccin — independent of Zinc chrome) |
-| Control height Web | `experience.web.control.md` |
-| Control height App | `experience.app.control.md` |
-| Touch target App | `experience.app.touchTarget.min` |
-| Composer line height | `experience.*.composer.lineHeight` |
-| Max input lines | `experience.*.composer.maxLines` |
-| Shell max width Web | `experience.web.composer.shellMaxWidth` |
-| Shell inset App | `experience.app.composer.shellInset` |
-| Shell safe area App | `experience.app.composer.shellSafeArea` |
-| Shell radius | `semantic.radius.capsule` |
-| Composer motion | `experience.*.motion.composer` |
-| Borders / popover chrome | Semantic `border`, `popover`, `foreground`, `muted` |
+The capsule should not render a row of installed extensions.
 
-Components consume generated CSS vars only. No `--sf-*` metrics, no TS `*_PX` constants, no Tailwind numeric size scale for control metrics.
+### Example: Claude Code
+
+```text
+Shell only
+  -> neutral capsule
+
+Claude Code becomes active in this Session
+  -> Claude Code presence appears subtly
+  -> `+` exposes Claude Code actions relevant to this Session
+  -> tapping presence/action may open a deeper Session-scoped capability surface
+  -> closing the surface returns to the same Terminal
+```
+
+Claude Code is a reference integration. The pattern must remain generic enough for Codex, OpenCode, Git, debugging, databases, Kubernetes, and other contextual capabilities.
+
+## Progressive disclosure
+
+The capsule should reveal complexity in layers:
+
+```text
+resting capsule
+    ↓ user types / capability becomes relevant
+intent + lightweight presence
+    ↓ explicit + / capability action
+contextual action surface
+    ↓ explicit deeper request
+capability-specific panel / overlay / pushed view
+```
+
+Deeper configuration, long history, complex forms, and full capability UIs do not belong permanently inside the capsule.
+
+## Input modes
+
+The current implementation may support terminal-oriented modes such as direct input, command/physical-key controls, history, paste, copy, and send.
+
+Those modes are implementation tools beneath the product interaction model. They must not prevent the capsule from evolving into the shared conversational/contextual entry surface described here.
+
+Preserve established terminal semantics where the user is explicitly sending terminal input:
+
+- Enter sends/executes according to the active input mode;
+- Shift+Enter may insert a newline where supported;
+- IME composition must not trigger accidental sends;
+- history/command popovers close predictably after execution;
+- disabled attachment state makes terminal execution controls inert without turning the capsule into an alarm banner.
 
 ## Web vs App
 
+Web and App share the same semantic capsule model while presentation may differ.
+
 | | Web | App |
 |--|-----|-----|
-| Experience attr | `[data-experience="web"]` | `[data-experience="app"]` |
-| State | **Same** `useCapsuleState` | **Same** |
-| Shell | Centered; `experience.web.composer.shellMaxWidth` | Inset; `shellInset` + `shellSafeArea` |
-| Input controls | History, Commands, Paste, Copy, Send | Mode toggle, History, Paste, Copy, Send (Commands via mode) |
-| Commands mode | Not default path | PhysKey row + overflow |
-| flat / stacked | Yes | Yes (same line-count rules) |
-| Control tokens | `experience.web.control.*` | `experience.app.control.*` (remapped under App scope) |
+| Placement | Floating over/inside Terminal well, usually centered with a bounded max width | Floating inset surface respecting safe area and thumb reach |
+| Primary interaction | Conversational / intent input | Conversational / intent input |
+| Secondary expansion | `+`, keyboard/command entry, contextual actions | `+`, touch actions, command/physical-key mode as needed |
+| Capability presence | Same semantic state | Same semantic state |
+| Deeper capability UI | Overlay, panel, popover, or contextual surface chosen by Nession | Overlay, sheet, or pushed surface chosen by Nession |
 
-Presentation differs by **experience config** (token ids + control visibility). Do not fork state. Do not use viewport breakpoints + a second hardcoded size scale.
+Do not fork capability semantics by viewport. Experience-specific presentation is allowed; product meaning is shared.
 
-## Visual Contract
+## Visual contract
 
-Derived from [visual-language.md](../../visual-language.md) and canonical Terminal screens ([#563](https://github.com/BestNathan/nession/pull/563), [#568](https://github.com/BestNathan/nession/pull/568)).
+Derived from [`PRINCIPLE.md`](../../../../PRINCIPLE.md) and [visual-language.md](../../visual-language.md).
 
 ### Dominance
 
-- Capsule is a **floating control surface** — reachable and legible, but **must not outshine xterm output** (P1: Terminal dominates).
-- Send is the one **primary action** in the capsule region (P4); tool buttons are secondary/ghost.
+- The current work remains visually dominant.
+- The capsule is refined and clearly interactive, but it must not outshine Terminal output in the resting state.
+- Active capability presence is intentionally lightweight until the user asks for more.
+
+### Quality through precision
+
+The capsule should feel high-quality through:
+
+- exact spacing and alignment;
+- stable geometry during state changes;
+- careful typography and icon sizing;
+- subtle elevation rather than stacked borders;
+- predictable motion and focus behavior;
+- clear hierarchy between primary input and secondary actions.
+
+Minimal does not mean bare or unfinished.
 
 ### Information hierarchy
 
-- **Primary:** ghost textarea compose buffer (when focused) or phys-key intent (Commands mode).
-- **Secondary:** Send, mode toggle (App).
-- **Tertiary:** History, Paste, Copy, overflow — progressively disclosed via icons/menus.
-
-### Alignment
-
-- Web: centered pill with max width — docked to bottom of well, not shell viewport.
-- App: full-width inset respecting safe-area; stacked layout puts field row above toolbar row.
-
-### Density
-
-- **Floating controls / compact** — single-line capsule when empty (`flat`); grows to `stacked` only when content requires ([visual-language.md](../../visual-language.md) §4).
-- Does not expand vertically with terminal scrollback.
-
-### Whitespace
-
-- Clearance gap between xterm last row and capsule top — dynamic `--terminal-capsule-clearance` owned by [TerminalSurface](terminal-surface.md).
-- Internal tool clusters separated by whitespace, not nested cards.
-
-### Contrast
-
-- Capsule surface: elevation over terminal well — **only** floating-control elevation in the Terminal region (R-S5 exception).
-- Compose field: readable against `domain.terminal.capsuleSurface`; not full `text.primary` chrome scale.
+- **Primary:** user's current intent/input.
+- **Secondary:** send/execute and an active capability's lightweight presence.
+- **Tertiary:** history, copy/paste, commands, shortcuts, and other actions revealed contextually.
 
 ### Surface treatment
 
-- Elevation (shadow) without border stack — floating control surface per visual-language §3.
-- `semantic.radius.capsule` — contained radius; not a full-width header bar.
+- Floating-control elevation without decorative border stacks.
+- Capsule radius from semantic design tokens.
+- Avoid nested cards inside the capsule.
+- Motion communicates state changes; it does not celebrate routine actions.
 
-### State-driven emphasis
+## Anti-patterns
 
-| State | Emphasis |
-|-------|----------|
-| Empty, attached | `flat` — minimal vertical footprint |
-| Multi-line compose | `stacked` — field row primary; tools secondary row |
-| `disabled` / not attached | Inert, frozen layout — no fake "send" prominence |
-| Popover open | Popover elevated; dock geometry unchanged |
+- One permanent button per installed extension.
+- A toolbar that keeps growing as Nession gains features.
+- Automatically opening a full capability panel because a tool was merely detected.
+- Treating `+` as a static feature menu unrelated to the current context.
+- Multiple competing primary actions in the resting capsule.
+- Capability-specific colors/layouts that fragment Nession's visual language.
+- Large persistent chrome that reduces the Terminal viewport.
+- Hard-coding Claude Code semantics into the generic capsule.
 
-Connection lifecycle is **not** encoded in capsule color — banner/header own that.
+## Relationship to Workspace
 
-### Anti-patterns
+The capsule and Workspace are complementary:
 
-- Chat-bubble transcript UI or streaming markdown in the capsule.
-- Capsule taller than necessary when content is empty (permanent stacked chrome).
-- Raw Tailwind numeric sizes or `--sf-*` in capsule path.
-- Multiple primary-colored buttons (Send + another CTA).
-- Workspace/Session navigation controls inside the capsule.
+- **Capsule / Session layer:** what is relevant or happening now.
+- **Workspace layer:** broader resources, available/relevant capabilities, locations, configuration, and state for the logical work.
 
-### Canonical reference
+A capability may therefore be discoverable in Workspace before it earns Session-level presence.
 
-- Web: `/#/fixture` 1440×900 — capsule docked in terminal well ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — inset capsule + Commands mode ([#568](https://github.com/BestNathan/nession/pull/568)).
+See [workspace.md](../../workspace.md).
 
-## Acceptance
+## Implementation migration
 
-- [ ] Pattern lives on session-first Terminal path only; legacy BottomBar unchanged.
-- [ ] § Frozen input semantics preserved (see States).
-- [ ] stacked: input row spans full shell content width (`Contract: pattern.terminal-capsule`).
-- [ ] flat: single-row strip; empty content → flat.
-- [ ] Token ids only in TS/CSS; capsule path free of overlay metrics and numeric TS layout constants.
-- [ ] Web and App share one state machine; `[data-experience]` drives token remap.
-- [ ] Playwright: Web desktop + App viewport matrix entry ([#547](https://github.com/BestNathan/nession/issues/547)).
+Existing `InputComposer`, `CommandsComposer`, terminal quick keys, and related contracts should be treated as implementation assets to converge rather than as the permanent product boundary.
 
-**Contract:** `design/contracts/patterns/terminal-capsule.json` ([#545](https://github.com/BestNathan/nession/issues/545))
+Migration should preserve terminal reliability while changing the semantic ownership of the capsule from "terminal quick-input toolbar" to **contextual interaction surface**.
 
-**Parent surface:** Input clearance and viewport padding are owned by [TerminalSurface](terminal-surface.md), not duplicated here.
+Where existing executable contracts encode assumptions that conflict with this document, update those contracts in a follow-up implementation change rather than weakening the product model.
