@@ -1,5 +1,28 @@
 # Nession — Distributed tmux Agent
 
+## Product Direction — mandatory upstream constraints
+
+Before proposing or implementing any user-facing or product-facing change, read these two repository-level sources of truth first:
+
+1. [`VISION.md`](VISION.md) — what problem Nession exists to solve and where the product is going.
+2. [`PRINCIPLE.md`](PRINCIPLE.md) — the durable rules used to make product and UX decisions.
+
+They are upstream constraints for product behavior, UI, information architecture, interactions, Session, Workspace, extensions, contextual capabilities, and other user-facing work.
+
+```text
+VISION.md
+    ↓
+PRINCIPLE.md
+    ↓
+docs/design/*
+    ↓
+feature design
+    ↓
+implementation
+```
+
+Existing code, historical design documents, fixtures, screenshots, and executable UI contracts do not override the Vision or Principles. If a lower-level artifact conflicts, treat it as convergence debt: update it in the same change when appropriate, or link an explicit follow-up.
+
 > **多 agent 兼容**:本文件通过 `AGENTS.md` 软链暴露给 Codex/Cursor/Copilot
 > (AGENTS.md 是跨工具指令标准)。如果你不是 Claude Code:
 > - 遇到 `EnterWorktree` / Skill 调用等 Claude Code 专属指令时,改用对应的
@@ -478,7 +501,7 @@ git fetch origin && git checkout main && git pull --ff-only origin/main
 EnterWorktree name: "fix/<new-slug>"
 # normal case — bases on origin/main (EnterWorktree default)
 # unreleased staging dependency:
-git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/staging
+git worktree add -b fix/<new-slug> .claude/worktrees/fix-<slug> origin/staging
 ```
 
 ### Branch base and merge method
@@ -496,7 +519,7 @@ Every branch comes off `main` (via worktree — never `git checkout -b` in proje
 | `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--merge` |
 
 - **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`. Required status checks (`rust-check`, `web-check`) are configured on `staging`, not on `main`.
-- **One method everywhere, so ancestry is never rewritten.** Every landed branch stays reachable from the target with its original SHAs. That is what keeps `staging` an ancestor of `main` — making the step 9 sync a fast-forward forever — and it is why none of the orphan-and-patch-id reasoning that a rebase flow needs applies here.
+- **One method everywhere, so ancestry is never rewritten.** Every landed branch stays reachable from the target with their original SHAs. That is what keeps `staging` an ancestor of `main` — making the step 9 sync a fast-forward forever — and it is why none of the orphan-and-patch-id reasoning that a rebase flow needs applies here.
 - **The PR body never enters git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body, and each commit keeps its own message. Only squash ever used the body, and nothing squashes. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
@@ -621,7 +644,7 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
   - 每个测试用的数据库/临时文件走 `tempfile::tempdir()`,**不准用 `temp_dir()` 拼固定名**,也不准用"时间戳 + 进程内计数"(两个进程同一秒启动、计数都从 0 开始,拼出同一个路径)。
   - 碰 `paths::nession_home()` 的测试**必须先把 `NESSION_HOME` 指到临时目录** —— 否则它解析成 `$HOME/.nession`,直接改开发者的真实配置。
 
-  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明它还真的能抓到 —— 门禁静默失效比没门禁更糟。
+  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明门禁还真的能抓到 —— 门禁静默失效比没门禁更糟。
 
 - **tmux socket 门禁**:`just check-tmux-socket`(`scripts/check-tmux-socket.sh`),已接入 `pre-commit` 和 `just check`(CI)。拦住任何在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 的写法(含 `Command::new(<变量>)` 这种无字面量形态)、`scripts/**` `e2e/**` `deploy/**` `justfile` 里不带 `-S` 的 shell 调用,以及任何 `TMUX_TMPDIR` 赋值。`just check-tmux-socket-selftest` 逐形态注入违规自检。理由与解析规则见「tmux socket 隔离」。
 
