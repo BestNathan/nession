@@ -162,7 +162,7 @@ describe('WebSocketService', () => {
     await expect(request).resolves.toEqual({ ok: true });
   });
 
-  it('rejects the connection when the handshake fails with the budget exhausted; waiters and pending requests fail', async () => {
+  it('rejects the connection when the handshake is refused; in-flight work fails and no reconnect is scheduled', async () => {
     const captured: { rejection: Error | null } = { rejection: null };
     const handshake = vi.fn(async (surface: HandshakeSurface) => {
       // In-flight correlated request on the surface: must be failed on loss.
@@ -173,8 +173,12 @@ describe('WebSocketService', () => {
     });
     const service = new WebSocketService('ws://server/ws', [], {
       handshake,
-      maxReconnectAttempts: 0,
+      maxReconnectAttempts: 5,
+      reconnectBaseDelay: 5,
     });
+
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
 
     const connected = service.connect();
     const waiting = service.waitForConnection(5_000);
@@ -187,6 +191,15 @@ describe('WebSocketService', () => {
     await drainMicrotasks();
     expect(captured.rejection?.message).toBe('Connection lost');
     expect(service.connectionState).toBe('disconnected');
+    // No 'reconnecting' in between: a refusal settles, it does not retry.
+    expect(states).toEqual(['connecting', 'disconnected']);
+
+    // A refused handshake is an answer, not a loss: the same credentials would
+    // be refused again, so the budget is not spent on it (#692).
+    await flushTimers(60_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(handshake).toHaveBeenCalledTimes(1);
+    expect(service.reconnectAttempts).toBe(0);
   });
 
   it('re-runs the handshake per physical socket and recovers within the reconnect budget', async () => {
@@ -195,7 +208,9 @@ describe('WebSocketService', () => {
     const handshake = vi.fn(() => {
       handshakeCount += 1;
       if (handshakeCount === 1) {
-        return Promise.reject(new Error('auth failed'));
+        // Never settles: the first socket is dropped mid-handshake. That is
+        // the loss a reconnect is for — a *refusal* is terminal instead (#692).
+        return new Promise<void>(() => {});
       }
       return new Promise<void>((resolve) => {
         resolveSecondHandshake = resolve;
@@ -210,7 +225,10 @@ describe('WebSocketService', () => {
     const connected = service.connect();
     const firstSocket = MockWebSocket.instances[0];
     firstSocket.open();
-    await expect(connected).rejects.toThrow('auth failed');
+    expect(handshakeCount).toBe(1);
+
+    firstSocket.serverClose();
+    await expect(connected).rejects.toThrow('Connection lost');
 
     expect(service.connectionState).toBe('reconnecting');
     expect(service.reconnectAttempts).toBe(1);
@@ -229,6 +247,50 @@ describe('WebSocketService', () => {
     resolveSecondHandshake();
     await recovered;
     expect(service.connectionState).toBe('connected');
+    // Only an established connection resets the budget, and this one did.
+    expect(service.reconnectAttempts).toBe(0);
+  });
+
+  it('stops at maxReconnectAttempts when sockets keep opening but never establish (regression #692)', async () => {
+    // The reported loop: every retry opened a socket, and the open reset the
+    // counter before the handshake ran, so the budget never ran out.
+    const handshake = vi.fn(() => new Promise<void>(() => {}));
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    void connected.catch(() => {});
+
+    /** Open the newest socket, then drop it while its handshake is pending. */
+    const connectAndLose = (): void => {
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      socket.open();
+      socket.serverClose();
+    };
+
+    connectAndLose();
+    expect(service.reconnectAttempts).toBe(1);
+
+    await flushTimers(50);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    connectAndLose();
+    expect(service.reconnectAttempts).toBe(2);
+
+    await flushTimers(50);
+    expect(MockWebSocket.instances).toHaveLength(3);
+    connectAndLose();
+
+    // Exhausted: the counter holds at the budget instead of resetting to 1,
+    // and the transport settles rather than scheduling another attempt.
+    expect(service.reconnectAttempts).toBe(2);
+    expect(service.connectionState).toBe('disconnected');
+
+    await flushTimers(60_000);
+    expect(MockWebSocket.instances).toHaveLength(3);
+    expect(handshake).toHaveBeenCalledTimes(3);
   });
 
   it('correlates handshake requests via HandshakeSurface and still dispatches pushes during the handshake', async () => {

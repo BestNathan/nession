@@ -184,6 +184,64 @@ describe('useAppConnection', () => {
     expect(toast.error).toHaveBeenCalledWith('Connection failed: invalid token');
     // Clearing stored credentials is auto-connect semantics only.
     expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
+    // #692: the refusal is terminal, so nothing is retrying behind the login
+    // page — the Connect button is usable again on the next render instead of
+    // being disabled for the length of a reconnect budget.
+    expect(result.current.wsService?.connectionState).toBe('disconnected');
+    expect(result.current.wsService?.reconnectAttempts).toBe(0);
+  });
+
+  it('manual connect opens exactly one socket — no auto-connect supersede', async () => {
+    // Real storage semantics: the token connectInternal writes is visible to
+    // getToken() on the next render. That flip is what armed the auto-connect
+    // effect and superseded the manual connection's CONNECTING socket (#688).
+    let storedToken: string | null = null;
+    vi.mocked(auth.setToken).mockImplementation((token: string) => {
+      storedToken = token;
+    });
+    vi.mocked(auth.getToken).mockImplementation(() => storedToken);
+
+    const { result } = renderHook(() => useAppConnection());
+    expect(MockWebSocket.instances).toHaveLength(0);
+
+    act(() => {
+      result.current.setAuthToken('manual-token');
+    });
+    act(() => {
+      result.current.handleConnect(false);
+    });
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+    await completeHandshake(socket);
+
+    await waitFor(() => expect(result.current.connectionStatus).toBe('connected'));
+    // One click, one transport: the second service would have disposed the
+    // first one's socket while it was still CONNECTING.
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(socket.close).not.toHaveBeenCalled();
+  });
+
+  it('editing the token after a disconnect does not auto-connect', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('stored-token');
+
+    const { result } = renderHook(() => useAppConnection());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await completeHandshake(MockWebSocket.instances[0]);
+    await waitFor(() => expect(result.current.connectionStatus).toBe('connected'));
+
+    act(() => {
+      result.current.handleDisconnect();
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    act(() => {
+      result.current.setAuthToken('a-different-token');
+    });
+
+    // Auto-connect is a load-time action. Editing the form is not a connect
+    // trigger — only the manual button (or a wire that already exists) is.
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it('handleDisconnect disposes the live transport and exits restore state', async () => {
