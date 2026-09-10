@@ -1,93 +1,133 @@
-# Nession UI Architecture v2
+# Nession Product & UI Design
 
-Version-controlled product and UI architecture for the next Nession Web and App experience.
+This directory translates Nession's repository-level product contract into concrete product models, information architecture, interactions, visual language, and executable UI constraints.
 
-This index is the entry point. Downstream work — design tokens ([#467](https://github.com/BestNathan/nession/issues/467)), pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)), executable UI contracts and validation ([#544](https://github.com/BestNathan/nession/issues/544)–[#548](https://github.com/BestNathan/nession/issues/548)), the vertical slice ([#471](https://github.com/BestNathan/nession/issues/471)), and platform migration ([#472](https://github.com/BestNathan/nession/issues/472), [#473](https://github.com/BestNathan/nession/issues/473)) — should reference these paths instead of a single GitHub issue.
+The two upstream sources of truth live at the repository root:
 
-**Umbrella:** [#468](https://github.com/BestNathan/nession/issues/468)
-**This doc set:** [#469](https://github.com/BestNathan/nession/issues/469)
+1. [`../../VISION.md`](../../VISION.md) — product direction: the problem Nession solves and where the product is going.
+2. [`../../PRINCIPLE.md`](../../PRINCIPLE.md) — durable product design decision rules.
 
-## Principle
+Everything in `docs/design/` is downstream from those two files. Existing design documents and shipping code must converge toward them when a conflict is found.
 
-> Session is the primary navigation object. Terminal is the primary work surface. Workspace augments the Session. Agent is persistent infrastructure context and the tmux proxy behind the Session.
-
-Short form: **Session-first, Agent-aware, Terminal-first.**
-
-## Layers
-
-Keep these layers related but separate. Do not collapse IA into tokens, or interaction patterns into primitives.
+## Precedence
 
 ```text
+VISION.md
+    ↓
+PRINCIPLE.md
+    ↓
 Product Model
-      ↓
+    ↓
 Information Architecture
-      ↓
+    ↓
 Interaction Model (Web / App)
-      ↓
-Visual Language                       ← #561
-      ↓
-Layout / Composition                  ← #561
-      ↓
-Design System (tokens + patterns)
-      ↓
-UI Contracts + Validation          ← #544–#548
-      ↓
+    ↓
+Workspace / Capability Semantics
+    ↓
+Visual Language
+    ↓
+Layout / Composition
+    ↓
+Design System (tokens + patterns + contracts)
+    ↓
+Feature Design
+    ↓
 Implementation
 ```
 
-## Documents
+This hierarchy is intentional. Lower-level implementation detail must not silently redefine product direction.
 
-| Document | Responsibility |
-|----------|----------------|
-| [product-model.md](product-model.md) | Remote session workspace; Agent / Session / Terminal / Workspace; independent domain state dimensions |
-| [information-architecture.md](information-architecture.md) | Session-first IA; flat Session list; Agent as progressive disclosure; no AI-chat IA concepts |
-| [workspace.md](workspace.md) | Workspace as session-scoped tool container; initial tools; registry; Files master/detail is local to Files |
-| [interaction/web.md](interaction/web.md) | Sessions sidebar + Active Session; Terminal \| Workspace as peer surfaces (one visible at a time) |
-| [interaction/app.md](interaction/app.md) | Spatial model `Sessions ← Terminal → Workspace`; gestures as accelerators; not a shrunk Web layout |
-| [design-system/patterns/terminal-surface.md](design-system/patterns/terminal-surface.md) | Terminal xterm interaction: input planes, focus, scroll, clearance, Web vs App |
-| [design-system/patterns/terminal-capsule.md](design-system/patterns/terminal-capsule.md) | Floating Terminal composer: flat/stacked, tokens, Web vs App |
-| [visual-language.md](visual-language.md) | What dominates and recedes; typography / surface / density hierarchy; visual emphasis levels ([#561](https://github.com/BestNathan/nession/issues/561)) |
-| [composition.md](composition.md) | Page-level layout relationships: shell geometry, chrome width/height strategies, insets, rhythm, responsive transitions ([#561](https://github.com/BestNathan/nession/issues/561)) |
-| [styling-convergence.md](styling-convergence.md) | `--sf-*` / generated tokens / raw Tailwind ownership audit and migration plan ([#561](https://github.com/BestNathan/nession/issues/561) Phase 5) |
-| [design-system/tokens.md](design-system/tokens.md) | Token layers and Domain vocabulary aligned with this product model (executable tokens: [#467](https://github.com/BestNathan/nession/issues/467)) |
-| [design-system/components.md](design-system/components.md) | Generic primitives (Button, Tabs, Sheet, …) |
-| [design-system/patterns.md](design-system/patterns.md) | Pattern catalog + [eleven specs](design-system/patterns.md#catalog); Visual Contracts ([#470](https://github.com/BestNathan/nession/issues/470), [#561](https://github.com/BestNathan/nession/issues/561)) |
-| [design-system/contracts.md](design-system/contracts.md) | Executable layout/pattern contracts; `design/contracts/` ownership ([#545](https://github.com/BestNathan/nession/issues/545), tracking [#544](https://github.com/BestNathan/nession/issues/544)) |
-| [design-system/validation.md](design-system/validation.md) | Browser assertions, Web/App viewport matrix, focused visual regression ([#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548)) |
-| [migration.md](migration.md) | Phases 2–4 child issues, validation slice, relationship to current UI |
+## Current product direction
 
-## #561 staging acceptance ([#561](https://github.com/BestNathan/nession/issues/561))
+The current implementation is **Session-first and Terminal-first**, but those are implementation/product-model choices under the broader Vision, not the Vision itself.
 
-Canonical reference PNGs (human review on **staging** before release):
+The key downstream interpretation of the Principles is:
 
-| Screenshot | Viewport / surface |
-|------------|-------------------|
-| [canonical-app-terminal.png](screenshots/canonical-app-terminal.png) | App Active Terminal 390×844 |
-| [canonical-app-sessions.png](screenshots/canonical-app-sessions.png) | App Sessions 390×844 |
-| [canonical-app-workspace.png](screenshots/canonical-app-workspace.png) | App Workspace 390×844 |
-| [canonical-app-files-push.png](screenshots/canonical-app-files-push.png) | App Files push sub-flow |
+- the current work dominates the interface;
+- chrome and infrastructure context recede;
+- capabilities earn presence from context instead of occupying permanent navigation;
+- deeper state and configuration are progressively disclosed;
+- extensions contribute capability while Nession owns placement, interaction, and visual language;
+- Workspace is contextual depth around the work, not a feature lobby;
+- local and remote execution contexts should converge into one continuous workspace model.
 
-Live fixtures (same data as CI golden baselines): `/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app` on the staging deployment. CI gate: `e2e/specs/fixture-visual.spec.ts` (7 Linux snapshots).
+## Canonical documents
 
-## Related issues
+| Document | Status | Responsibility |
+|----------|--------|----------------|
+| [product-model.md](product-model.md) | Canonical | Product concepts and relationships: Workspace, Workspace Location, Session, Terminal, Agent, contextual capabilities |
+| [information-architecture.md](information-architecture.md) | Canonical | Session-first IA, progressive disclosure, contextual capability presence, Workspace depth |
+| [workspace.md](workspace.md) | Canonical | Logical Workspace semantics, locations, capability contribution and visibility rules |
+| [interaction/web.md](interaction/web.md) | Canonical | Web realization of the product model |
+| [interaction/app.md](interaction/app.md) | Canonical | App spatial model, gestures, capsule, contextual capability surfaces |
+| [visual-language.md](visual-language.md) | Canonical | What dominates and recedes; typography, surfaces, density, emphasis |
+| [composition.md](composition.md) | Canonical / evolving | Page-level layout relationships and responsive composition; must stay subordinate to contextual-presence rules |
+| [design-system/tokens.md](design-system/tokens.md) | Canonical implementation contract | Token layers and semantic vocabulary |
+| [design-system/components.md](design-system/components.md) | Canonical implementation contract | Generic primitives |
+| [design-system/patterns.md](design-system/patterns.md) | Canonical implementation contract | Reusable product/UI patterns |
+| [design-system/contracts.md](design-system/contracts.md) | Canonical executable contract | Measurable UI constraints |
+| [design-system/validation.md](design-system/validation.md) | Canonical validation | Browser assertions, viewport matrix, focused visual regression |
+| [migration.md](migration.md) | Migration | Transitional implementation plan; never overrides the canonical product model |
+| [styling-convergence.md](styling-convergence.md) | Migration | Styling/token convergence work; never defines product behavior |
 
-| Phase | Issue | Scope |
-|-------|-------|-------|
-| 1 — Architecture docs | [#469](https://github.com/BestNathan/nession/issues/469) | This directory |
-| 2 — Design tokens | [#467](https://github.com/BestNathan/nession/issues/467) | Executable token architecture + lint |
-| 2 — UI patterns | [#470](https://github.com/BestNathan/nession/issues/470) | Pattern specifications |
-| 2 — Executable UI constraints | [#544](https://github.com/BestNathan/nession/issues/544) | Contracts + assertions + viewport matrix + focused visual ([#545](https://github.com/BestNathan/nession/issues/545)–[#548](https://github.com/BestNathan/nession/issues/548)); architecture: [contracts.md](design-system/contracts.md), [validation.md](design-system/validation.md) |
-| 3 — Vertical slice | [#471](https://github.com/BestNathan/nession/issues/471) | Session list → Terminal → Workspace validation path |
-| 4 — Web migration | [#472](https://github.com/BestNathan/nession/issues/472) | Migrate full Web UI to session-first shell |
-| 4 — App navigation | [#473](https://github.com/BestNathan/nession/issues/473) | App spatial model |
-| 5 — Visual language | [#561](https://github.com/BestNathan/nession/issues/561) | visual-language.md + composition.md; canonical screens; pattern Visual Contracts; baselines + visual regression gate |
+## Reading order for product-facing work
 
-Related open issues that may overlap during migration: [#343](https://github.com/BestNathan/nession/issues/343), [#207](https://github.com/BestNathan/nession/issues/207), [#193](https://github.com/BestNathan/nession/issues/193), [#400](https://github.com/BestNathan/nession/issues/400).
+For any change involving Session, Workspace, navigation, UI, interactions, extensions, capabilities, or other user-facing behavior:
 
-## Predecessor
+```text
+VISION.md
+  -> PRINCIPLE.md
+  -> this index
+  -> product-model.md
+  -> information-architecture.md
+  -> relevant interaction/workspace/visual docs
+  -> design-system contracts
+  -> implementation
+```
 
-The 2026-08-08 [UI Design Protocol](../superpowers/specs/2026-08-08-ui-design-protocol.md) described the then-shipping Agent-first dashboard and Terminal+Files shell. **Product model, IA, and interaction in this directory supersede that protocol.** Visual-direction notes in the protocol remain useful until [#467](https://github.com/BestNathan/nession/issues/467) lands executable tokens; where they conflict, this architecture and #467 win.
+Do not begin from the shipping component tree and infer the intended product from it. Current code may represent a migration state.
+
+## Capability design rule
+
+A capability is not entitled to permanent UI simply because it exists.
+
+The generic lifecycle used by downstream design is:
+
+```text
+unavailable -> available -> relevant -> active
+```
+
+The exact detection mechanism is an implementation concern. Product presence follows context:
+
+- unavailable capabilities stay hidden;
+- available capabilities may be discoverable where they are useful, especially in Workspace;
+- relevant capabilities gain contextual prominence;
+- active capabilities may surface in the current Session and interaction capsule;
+- deeper views and configuration are explicitly opened rather than permanently occupying the work surface.
+
+Claude Code is the first reference integration for validating this model, not a special-case product direction.
+
+## Design review check
+
+Before accepting a product-facing design, verify:
+
+- Does it move Nession toward [`VISION.md`](../../VISION.md)?
+- Does it obey [`PRINCIPLE.md`](../../PRINCIPLE.md)?
+- Is the current work still the visual and interaction focus?
+- Is every persistent control justified by what matters now?
+- Can contextual capability replace permanent navigation?
+- Is deeper complexity progressively disclosed?
+- Does an extension integrate into Nession's product language instead of creating a parallel one?
+- Are existing downstream documents updated when their meaning changes?
+
+## Existing implementation and migration references
+
+This design tree originated from the Session-first UI architecture work tracked in [#468](https://github.com/BestNathan/nession/issues/468), [#469](https://github.com/BestNathan/nession/issues/469), [#561](https://github.com/BestNathan/nession/issues/561), and the executable design-system work in [#544](https://github.com/BestNathan/nession/issues/544)–[#548](https://github.com/BestNathan/nession/issues/548).
+
+Those issues remain useful implementation history, but they are not upstream of `VISION.md` or `PRINCIPLE.md`.
+
+The 2026-08-08 [UI Design Protocol](../superpowers/specs/2026-08-08-ui-design-protocol.md) is a predecessor. Where historical assumptions conflict with the current hierarchy, the current hierarchy wins.
 
 ## Maintenance
 
-One requirement = one issue. When [#468](https://github.com/BestNathan/nession/issues/468) changes, update these files in place via PRs that reference [#469](https://github.com/BestNathan/nession/issues/469). Do not fork a second architecture tree.
+Keep one canonical owner for each concept. Prefer links over copying the same rule into multiple documents. When Vision or Principles change, explicitly audit this directory rather than allowing parallel sources of truth to drift.
