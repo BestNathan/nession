@@ -1,140 +1,140 @@
 # AgentContext
 
-Always-available Agent infrastructure chrome at disclosure level 2. Visually **quiet when healthy**; **prominent when not**.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [product model](../../product-model.md) → [information architecture](../../information-architecture.md)
+
+AgentContext presents infrastructure/location identity and health **when that context is useful to the current work**.
+
+It is quiet when healthy, prominent when continuity is threatened, and absent when the information would be redundant.
 
 ## Purpose
 
-Show which Agent this Session is reached through, and whether that proxy is healthy — without making Agent the navigation object.
+Help the user understand where a Session is running or why it cannot currently be reached without making Agent the navigation parent or permanently advertising infrastructure.
 
-Progressive disclosure ([information-architecture.md](../../information-architecture.md)):
+Progressive disclosure can include:
 
-1. [SessionItem](session-item.md) — compact metadata  
-2. **AgentContext (this pattern)** — explicit, still compact  
-3. [AgentDetail](agent-detail.md) — full details  
+1. compact location/Agent metadata in a Session row when it helps distinguish work;
+2. contextual Agent/location identity around the active Session when relevant;
+3. deeper Agent/Workspace Location detail when explicitly requested.
 
-Click/tap on AgentContext (when healthy enough to navigate) should open Workspace → Agent tool, not an Agent-first dashboard.
+These are possible disclosure levels, not a requirement that every level always render.
+
+## Presence rules
+
+```text
+healthy + redundant
+    -> may be hidden
+
+healthy + useful for disambiguation
+    -> quiet identity
+
+connecting / reconnecting
+    -> contextual medium emphasis
+
+offline / error affecting current work
+    -> prominent local state + recovery/detail affordance
+```
+
+Do not show a green success badge merely because the Agent is online.
 
 ## Anatomy
 
 ```text
-Healthy (quiet):
+Healthy when useful:
+  devbox-01
 
-  [·]  devbox-01
-
-Unhealthy (prominent):
-
-  [!]  devbox-01  Agent offline
+Degraded:
+  [!] devbox-01 · Agent offline
 ```
 
 | Part | Role |
 |------|------|
-| Indicator | Domain-colored mark for Agent connection only |
-| Agent identity | Display name / host |
-| Status phrase | Present when not `online`; omitted or de-emphasized when `online` |
-| Afford to AgentDetail | Opens Workspace Agent tool (Web) or pushes AgentDetail (App stack) |
+| Agent / location identity | Which execution context is relevant |
+| Indicator | Optional state mark for Agent/location connectivity only |
+| Status phrase | Present when degraded; usually omitted when healthy |
+| Detail affordance | Opens deeper infrastructure/location information when requested |
 
-Do not list this Agent’s other Sessions here. That would recreate Agent-grouped navigation.
+Do not list all Sessions belonging to the Agent here. That would recreate Agent-first navigation.
 
-## States
+## State semantics
 
-**This pattern renders Agent connection only.** Session lifecycle and attachment belong on [ConnectionStatus](connection-status.md). AgentContext may sit next to ConnectionStatus in the header but must not absorb those channels into its indicator.
+This pattern represents **Agent / Workspace Location connectivity only**.
 
-| Agent | Visual weight | Phrase (examples) |
-|-------|---------------|-------------------|
-| `online` | Quiet: low-contrast indicator or none beyond identity | Identity only |
-| `connecting` | Medium | “Connecting to Agent” |
-| `reconnecting` | Medium–high | “Agent reconnecting” |
-| `offline` | High | “Agent offline” / “Agent unreachable” |
-| `error` | High | “Agent error” |
+Session lifecycle and client attachment remain separate dimensions and may be composed through [ConnectionStatus](connection-status.md).
 
-Forbidden phrases as the sole explanation: “Session offline”, “Session failed”, “Disconnected” with no Agent/attachment distinction.
+| Agent/location state | Typical visual weight | Example copy |
+|----------------------|-----------------------|--------------|
+| `online` | hidden or quiet | identity only, if useful |
+| `connecting` | medium | “Connecting to Agent” |
+| `reconnecting` | medium–high | “Agent reconnecting” |
+| `offline` | high when it affects current work | “Agent offline” / “Agent unreachable” |
+| `error` | high when actionable | “Agent error” |
 
-## Tokens
+Avoid ambiguous copy such as “Session offline” when the actual problem is Agent connectivity.
 
-| Part | Tokens |
-|------|--------|
-| Identity | Semantic `text.secondary` when healthy; `text.primary` when prominent |
-| Indicator | Domain `agent.online` \| `agent.connecting` \| `agent.reconnecting` \| `agent.offline` \| `agent.error` |
-| Unhealthy container | Optional Domain `agent.offline` / `agent.error` border or surface tint — still header-scale, not a full-screen modal |
+## Relationship to Workspace Locations
 
-Never Primitive `border-green-500/30` on the healthy state (shipping `AgentCard` predecessor).
+The long-term product model treats local/remote execution as properties of **Workspace Locations**.
 
-## Web vs App
+AgentContext may therefore evolve into location/provider context rather than exposing Agent as the only execution identity. UI should avoid assumptions that every Workspace Location is permanently represented by one visible Agent object.
 
-Same quiet/prominent rule on both.
+Current Agent-backed state remains a valid implementation source.
 
-| | Web | App |
-|--|-----|-----|
-| Placement | Inside [SessionHeader](session-header.md) | Same |
-| Open details | SurfaceSwitcher → Workspace if needed, then Agent tool — or jump to Agent tool | Push AgentDetail on the Workspace navigation stack; must not steal top-level `Sessions ← Terminal → Workspace` gestures |
-| Touch | Compact | `touchTarget.min` on the tappable identity |
+## Opening details
 
-## Visual Contract
+Deeper infrastructure information belongs in contextual depth:
 
-Derived from [visual-language.md](../../visual-language.md) and the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+- Web may open Agent/Location detail from Workspace or a focused contextual surface;
+- App may push Agent/Location detail on the Workspace navigation stack;
+- a failure affordance may link directly to relevant detail/recovery without first navigating a feature lobby.
+
+Do not require `SurfaceSwitcher → Workspace → Agent tab` as the only route; that encodes current shell mechanics as product truth.
+
+## Visual contract
+
+Derived from [visual-language.md](../../visual-language.md).
 
 ### Dominance
 
-- Agent identity is **secondary metadata** in every context this pattern appears — never the row's hero.
-- When `agent.online`, this pattern must not be the loudest element in [SessionHeader](session-header.md) or [SessionItem](session-item.md).
-
-### Information hierarchy
-
-- **Primary:** Agent display name / host when the user needs to know *where* the Session runs.
-- **Secondary:** Status phrase when Agent is not `online`.
-- **Tertiary:** Healthy indicator (dot or none) — present only if it adds disambiguation; often omitted entirely when `online`.
-
-### Alignment
-
-- Inline with Session title row in the header; left-aligned with other header metadata.
-- On App, vertically centered in the single-row header band ([composition.md](../../composition.md) §9).
-
-### Density
-
-- **Compact / metadata density** — one line, no wrapping in the header compact form.
-- App: tappable hit area meets `touchTarget.min` without inflating header height.
-
-### Whitespace
-
-- No padded card around healthy AgentContext. Identity sits in the header's natural rhythm.
-- Unhealthy states may add a local tint or compact badge — still header-scale, not a banner.
-
-### Contrast
-
-- Healthy: `quiet` / `tertiary` — identity at secondary text contrast ([visual-language.md](../../visual-language.md) R-E1).
-- Unhealthy: `conditional-prominent` — phrase and indicator jump one or two emphasis levels; Session title stays `primary`.
+- Infrastructure identity is secondary to the current work.
+- Healthy state is quiet enough to disappear when redundant.
+- Degraded state gains emphasis only in proportion to its effect on continuity.
 
 ### Surface treatment
 
-- No bordered card, no elevation, no full-width danger bar in the header.
-- Optional Domain tint on the identity cluster only when `offline` / `error` — background shift preferred over border.
+- No bordered card or elevation for healthy context.
+- Optional local Domain tint for `offline` / `error`; prefer the weakest sufficient cue.
+- Do not turn the entire SessionHeader into an error surface when only Agent connectivity is degraded.
 
-### State-driven emphasis
+### Density
 
-| Agent | Emphasis | Treatment |
-|-------|----------|-----------|
-| `online` | `quiet` | Identity only; no status phrase; no green badge |
-| `connecting` / `reconnecting` | `conditional-prominent`, medium | Short phrase; subtle indicator |
-| `offline` / `error` | `conditional-prominent`, high | Phrase + Domain tint; names **Agent** |
+- Compact metadata form should remain one line.
+- App touch affordances meet target size without forcing always-visible large chrome.
 
-Session lifecycle and attachment **never** change AgentContext's indicator — those channels stay on [ConnectionStatus](connection-status.md).
+## Web vs App
 
-### Anti-patterns
+Same semantics on both experiences; placement may differ.
 
-- Green border or glow on healthy Agent (`border-green-500/30` — shipping `AgentCard` predecessor).
-- "Session offline" / "Disconnected" as the sole phrase with no Agent distinction.
-- Listing other Sessions for this Agent (recreates Agent-first navigation).
-- Full-header red bar when only Agent connectivity is degraded.
-- Equal contrast for identity and alarm phrase when `online`.
+| | Web | App |
+|--|-----|-----|
+| Healthy presence | Optional quiet metadata | Optional quiet metadata |
+| Degraded presence | Near affected Session/work context | Near affected Session/work context |
+| Open details | Workspace/focused contextual surface | Workspace stack / sheet / pushed detail |
+| Touch | pointer-sized controls where appropriate | touch-target minimum when tappable |
 
-### Canonical reference
+## Anti-patterns
 
-- Web: Active Terminal fixture `/#/fixture` at 1440×900 — header AgentContext on selected Session ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` at 390×844 — compressed identity in single-row header ([#568](https://github.com/BestNathan/nession/pull/568)).
+- Green border/glow for a healthy Agent.
+- Always reserving AgentContext space because Agent data exists.
+- “Session offline” / “Disconnected” with no affected-dimension distinction.
+- Listing other Sessions for this Agent as primary navigation.
+- Requiring a fixed Workspace Agent tab to reach detail.
+- Giving Agent equal visual weight to the current work.
 
 ## Acceptance
 
-- [ ] Healthy Agent is visually quiet (identity without alarm chrome).
-- [ ] Offline/reconnecting/error is prominent and names **Agent**.
-- [ ] Does not display Session lifecycle or attachment as its own indicator.
-- [ ] Affordance leads to Agent details, not to an Agent session list as primary nav.
+- [ ] Healthy Agent/location context can be omitted when redundant.
+- [ ] Healthy context is quiet when shown.
+- [ ] Offline/reconnecting/error becomes prominent only where it matters and names the affected infrastructure dimension.
+- [ ] Session lifecycle and attachment are not absorbed into the Agent indicator.
+- [ ] Detail access does not recreate Agent-first navigation or require a permanent tool tab.
+- [ ] The pattern can evolve from Agent identity toward broader Workspace Location/provider identity without changing its product role.

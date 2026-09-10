@@ -1,5 +1,28 @@
 # Nession — Distributed tmux Agent
 
+## Product Direction — mandatory upstream constraints
+
+Before proposing or implementing any user-facing or product-facing change, read these two repository-level sources of truth first:
+
+1. [`VISION.md`](VISION.md) — what problem Nession exists to solve and where the product is going.
+2. [`PRINCIPLE.md`](PRINCIPLE.md) — the durable rules used to make product and UX decisions.
+
+They are upstream constraints for product behavior, UI, information architecture, interactions, Session, Workspace, extensions, contextual capabilities, and other user-facing work.
+
+```text
+VISION.md
+    ↓
+PRINCIPLE.md
+    ↓
+docs/design/*
+    ↓
+feature design
+    ↓
+implementation
+```
+
+Existing code, historical design documents, fixtures, screenshots, and executable UI contracts do not override the Vision or Principles. If a lower-level artifact conflicts, treat it as convergence debt: update it in the same change when appropriate, or link an explicit follow-up.
+
 > **多 agent 兼容**:本文件通过 `AGENTS.md` 软链暴露给 Codex/Cursor/Copilot
 > (AGENTS.md 是跨工具指令标准)。如果你不是 Claude Code:
 > - 遇到 `EnterWorktree` / Skill 调用等 Claude Code 专属指令时,改用对应的
@@ -626,7 +649,7 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
 - **tmux socket 门禁**:`just check-tmux-socket`(`scripts/check-tmux-socket.sh`),已接入 `pre-commit` 和 `just check`(CI)。拦住任何在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 的写法(含 `Command::new(<变量>)` 这种无字面量形态)、`scripts/**` `e2e/**` `deploy/**` `justfile` 里不带 `-S` 的 shell 调用,以及任何 `TMUX_TMPDIR` 赋值。`just check-tmux-socket-selftest` 逐形态注入违规自检。理由与解析规则见「tmux socket 隔离」。
 
   `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
-- **清理测试遗留的 tmux 孤儿**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（整目录回收）。它只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`（目录模式即归属,绝不碰默认 socket 或开发者自己的会话）;目录 `owner.pid` 里的 PID 仍存活（`kill -0`）视为活轮次,列出但不动;对孤儿先 `#{socket_path}` 断言再 kill-server,再删目录。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常退出不该有残留 —— 孤儿只出现在测试进程被 SIGKILL / kill -9 / 崩溃(不走 trap)之后;Ctrl-C 会走 trap,正常清理。
+- **清理测试遗留的 tmux 孤儿**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（整目录回收）。它只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`（目录模式即归属,绝不碰默认 socket 或开发者自己的会话）;目录 `owner.pid` 里的 PID 仍存活（`kill -0`)视为活轮次,列出但不动;对孤儿先做 `#{socket_path}` 断言再 kill-server,再删目录。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常退出不该有残留 —— 孤儿只出现在测试进程被 SIGKILL / kill -9 / 崩溃(不走 trap)之后;Ctrl-C 会走 trap,正常清理。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check` = fmt + lint + check-tmux-socket + coverage,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **⛔ 禁止 `TMUX_TMPDIR`,禁止在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 进程。** 寻址一律显式 `-S <绝对路径>`;`TMUX_TMPDIR` 在 `$TMUX` 存在时被 tmux 完全无视并静默落回默认 socket(实测 #574)。有静态门禁,详见「tmux socket 隔离」。

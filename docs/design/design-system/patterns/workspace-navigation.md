@@ -1,153 +1,162 @@
 # WorkspaceNavigation
 
-Tool-level switching **inside** Workspace: Files \| Session \| Agent \| registered others. Not a second app sidebar.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [workspace.md](../../workspace.md)
 
-> **Contract:** `design/contracts/patterns/workspace-navigation.json` — measurable layout rules ([contracts.md](../contracts.md)).
+WorkspaceNavigation is the interaction pattern for moving through **contextually relevant Workspace capabilities and resources**.
+
+It is not a permanent tab bar containing every registered tool, and it is not a second application shell.
+
+> Existing contract: `design/contracts/patterns/workspace-navigation.json` ([contracts.md](../contracts.md)). Any executable assumptions that require a permanently visible tool strip should be treated as migration debt and updated separately.
 
 ## Purpose
 
-Move between session-scoped tools without rewriting the Workspace shell and without a default permanent full-width inner sidebar ([workspace.md](../../workspace.md), [interaction/web.md](../../interaction/web.md)).
+Help users reach the part of the Workspace that is useful to the current work without turning Workspace into a feature lobby.
+
+Navigation should be generated from Workspace context and capability state rather than extension registration alone.
 
 Must not:
 
-- Duplicate [SurfaceSwitcher](surface-switcher.md) (that is Terminal vs Workspace).
-- Force Files master/detail chrome onto Session or Agent tools.
-- Hard-code a closed `switch (tab)` of tools as the only extension path.
+- render one permanent slot for every installed extension;
+- expose unavailable capabilities as dead/disabled chrome simply to advertise them;
+- force Files master/detail chrome onto unrelated capabilities;
+- allow an extension to define global Workspace navigation independently of Nession;
+- become a second full-height app sidebar by default.
 
-## Anatomy
+## Product model
+
+Workspace content can include resources, locations, infrastructure context, and extension capabilities.
+
+The capability lifecycle is:
 
 ```text
-Workspace
-┌─ WorkspaceNavigation ─────────────────────────┐
-│  Files    Session    Agent    [ + registered ]│  compact top (Web)
-└───────────────────────────────────────────────┘
-┌─ Tool body ───────────────────────────────────┐
-│  FileWorkspace  XOR  Session details XOR      │
-│  AgentDetail  XOR  future tool                │
-└───────────────────────────────────────────────┘
+unavailable -> available -> relevant -> active
 ```
 
-| Part | Role |
-|------|------|
-| Tool list | Registered tools in `order`, filtered by `availability` |
-| Active tool body | One tool at a time |
-| Overflow | If tools do not fit, collapse into a compact menu — still not a full-height sidebar by default |
+Navigation consequences:
 
-### Registry
+| State | Navigation behavior |
+|-------|---------------------|
+| `unavailable` | Hidden; no reserved slot |
+| `available` | May be discoverable through explicit expansion/search/palette or a quiet Workspace section |
+| `relevant` | May gain direct Workspace presence or a promoted entry |
+| `active` | May show live state and a stronger entry; may also have Session-level presence |
 
-Conceptual contract from the architecture (API is implementation-specific in #471):
+A capability does not become primary navigation merely because it is active. Current work remains primary.
+
+## Presentation model
+
+Nession owns how the currently useful Workspace set is presented. Acceptable patterns include:
+
+- contextual sections;
+- compact switching among a small relevant set;
+- an explicit `+` / capability picker;
+- search / command palette;
+- native navigation stack on App;
+- focused entry from an active Session capability;
+- location/resource-driven navigation when the Workspace contains multiple physical contexts.
+
+The implementation may combine these patterns. No one widget is the product model.
+
+## Capability contribution
+
+Conceptually, a capability contributes semantic data:
 
 ```ts
-interface WorkspaceTool {
+interface WorkspaceCapability {
   id: string
-  label: string
-  icon: unknown
-  order: number
-  availability: (context: SessionContext) => boolean
-  component: unknown
+  state: (context: WorkspaceContext) => CapabilityState
+  summary?: (context: WorkspaceContext) => CapabilitySummary
+  actions?: (context: WorkspaceContext) => CapabilityAction[]
+  view?: unknown
 }
 ```
 
-**Extensibility:** a future tool (Git, Preview, Processes) **registers**. The shell renders whatever the registry returns. Do not add a new top-level pattern unless the tool needs a new composition (as Files needs [FileWorkspace](file-workspace.md)).
+The exact API is implementation-specific.
 
-`availability === false`: omit the tool. Do not leave a disabled tab that implies the capability exists when the Agent has no file API (for example).
+Important boundary:
 
-Hidden tools must not reserve empty chrome.
+> Extensions contribute capability. Nession decides whether, where, and how that capability is navigated.
 
-## States
+Do not let a plugin select its own permanent tab position, accent color, or global navigation structure as part of the extension contract.
 
-| Nav state | Meaning |
-|-----------|---------|
-| Tool `id` selected | That tool’s body is shown |
-| Tool unavailable | Absent from the nav |
-| Zero tools | Should not happen for the initial set if Session+Agent always exist; if it does, show Workspace empty — not Terminal |
+## Workspace root
 
-WorkspaceNavigation does not present Agent connection as a tab state. Unhealthy Agent may hide Files via `availability` while Session and Agent tools remain.
+The Workspace root should communicate the work context before it communicates the tool catalog.
 
-## Tokens
+Depending on context it may surface:
 
-| Part | Tokens |
-|------|--------|
-| Nav strip | Domain `workspace.navigation`, Semantic `surface.*` |
-| Selected tool | Semantic `accent` / `text.primary` |
-| Unselected | Semantic `text.secondary` |
-| Tool body | Domain `workspace.background` / `workspace.surface` |
-| Size | Experience `control.*` — compact on Web |
+```text
+Workspace
+├── resources / files
+├── repository state
+├── active or relevant capabilities
+├── Workspace Locations
+└── infrastructure/context details on demand
+```
 
-## Web vs App
+A Workspace with only Files should not look like a five-tool product with four missing buttons. A Workspace with Git and an active coding agent may surface those because the work context justifies them.
 
-| | Web | App ([#473](https://github.com/BestNathan/nession/issues/473)) |
-|--|-----|-----|
-| Tool switching | Compact top tabs or equivalent horizontal control | **Native navigation stack** inside Workspace: list of tools → push tool. System back pops within Workspace, not out to Terminal, until the user uses the top-level Workspace dismiss |
-| Inner sidebar | Not default | Not default. Files may split *inside* FileWorkspace after push |
-| Gestures | N/A | Nested tool swipe must not fight `Sessions ← Terminal → Workspace`. Prefer vertical scroll and explicit back |
+## Web
 
-## Visual Contract
+Web may use compact tabs/segments when the relevant set is small and stable **for the current context**, but the control should not imply a global closed tool enum.
 
-Derived from [visual-language.md](../../visual-language.md) and Web Workspace canonical screen ([#566](https://github.com/BestNathan/nession/pull/566)).
+For larger or more dynamic sets, prefer contextual sections, search, overflow/palette, or explicit drill-down.
 
-### Dominance
+A persistent full-width inner sidebar remains a non-default pattern because it competes with the work surface.
 
-- WorkspaceNavigation is **tool chrome inside an auxiliary surface** — quieter than Terminal, quieter than [FileWorkspace](file-workspace.md) editor content when Files is active.
-- Must not read as a second application shell or permanent full-height sidebar.
+## App
 
-### Information hierarchy
+App should prefer native spatial and push/pop interaction:
 
-- **Primary within Workspace:** the active tool's body (Files tree, Agent detail, Session facts).
-- **Navigation strip:** `secondary` — tool labels at section-title scale, not page-title scale.
-- Selected tool label is the loudest element in the strip — still below Workspace body hero content.
+- Workspace opens as contextual depth from the active Session;
+- the Workspace root presents what is relevant now;
+- tapping an item/capability pushes or overlays deeper detail;
+- system/back navigation returns through capability detail before leaving Workspace;
+- nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
-### Alignment
+## Files and other capability-specific layouts
 
-- Web: compact horizontal strip above tool body; left-aligned tool list.
-- App: tool list at Workspace root of navigation stack — not duplicated as a Web tab strip on every pushed page.
+Files may use master/detail on Web and push navigation on App. That composition belongs to Files.
 
-### Density
+Claude Code may use state/history/configuration views. Git may use repository status and change navigation. Agent/location detail may use an information surface.
 
-- **Workspace tools density** — compact horizontal nav on Web ([visual-language.md](../../visual-language.md) §4).
-- App: list rows at touch density when at stack root; pushed tool pages use [AppToolHeader](session-header.md) push chrome instead of persistent tabs.
+WorkspaceNavigation coordinates access; it does not force these capabilities into the same content layout.
 
-### Whitespace
+## Visual contract
 
-- Strip separated from tool body by whitespace or hairline — not a bordered card wrapping both.
-- Unavailable tools omitted entirely — no empty tab slots reserving chrome.
+- Navigation chrome is secondary to active Workspace content and substantially secondary to Terminal when the user returns to the Session.
+- The visible set should be small enough to remain comprehensible; overflow is preferable to crowding.
+- Whitespace and hierarchy are preferred over card/tab proliferation.
+- Per-capability branding must not fragment Nession's visual language.
+- Active/relevant state may affect presence, but routine availability should remain quiet.
 
-### Contrast
+## Anti-patterns
 
-- Selected tool: `primary` within nav strip.
-- Unselected tools: `secondary`.
-- No per-tool accent colors in the strip.
+- `Files | Session | Agent | Git | Claude | Docker | K8s | ...` as an indefinitely growing permanent strip.
+- Disabled entries for capabilities that cannot work in the current environment.
+- One extension = one global tab.
+- A Workspace home page that is mostly a grid of feature launch cards.
+- A full-height secondary sidebar that exists only to list capabilities.
+- Tool-specific accent colors used as navigation identity.
+- Hard-coded closed enums that require shell changes for every extension.
 
-### Surface treatment
+## Migration from the current implementation
 
-- Flat nav on `workspace.navigation` surface shift — Web canonical uses bottom floating tool bar + grid layouts ([#566](https://github.com/BestNathan/nession/pull/566)); top strip remains valid for tool switching semantics.
-- No default permanent inner sidebar occupying full Workspace height.
+The current Session-first UI introduced a registry-driven Workspace tool bar/list for Files, Session, Agent, and extension tools. The registry remains useful, but the product semantics change:
 
-### State-driven emphasis
+```text
+old: registered -> permanent navigation presence
+new: registered -> capability -> contextual state -> Nession chooses presence
+```
 
-| State | Emphasis |
-|-------|----------|
-| Tool selected | That tool's nav label `primary` in strip; body shows tool |
-| Tool unavailable (`availability === false`) | Absent — no disabled ghost tab |
-| Agent unhealthy | May hide Files via availability; Session/Agent tools remain — nav does not fuse Agent status into tab color |
+Existing components should migrate incrementally. Do not remove reliable capability views merely to satisfy a document; first separate capability contribution from navigation placement, then converge the shell.
 
-### Anti-patterns
+## Acceptance for future implementation work
 
-- Duplicating [SurfaceSwitcher](surface-switcher.md) (Terminal vs Workspace) as extra segments here.
-- Full-width permanent sidebar for tool list.
-- Files master/detail chrome applied to Session or Agent tools.
-- Hard-coded closed tab enum as the only extension path.
-- Tool strip louder than the active editor or terminal (when user returns to Terminal).
-
-### Canonical reference
-
-- Web: `/#/fixture` with Workspace surface + `/#/fixture/workspace` 1440×900 — floating tool bar and Files layout ([#566](https://github.com/BestNathan/nession/pull/566)).
-- App: `/#/fixture/app` Workspace page — push navigation + `filesApp` layout ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Initial tools: Files, Session, Agent (Files may hide if unavailable).
-- [ ] No default permanent full-width Workspace-level sidebar.
-- [ ] File master/detail is not applied to Agent or Session tools.
-- [ ] Spec/implementation path exists to add a tool by registration without editing a hardcoded tab enum as the only means.
-- [ ] App: tool navigation is a stack; top-level spatial gestures still dismiss Workspace rather than the inner tool (unless the stack is at root).
+- [ ] Unavailable capabilities do not reserve permanent chrome.
+- [ ] Capability registration is separate from navigation placement.
+- [ ] Workspace root communicates context, not a global feature catalog.
+- [ ] Extensions cannot independently fragment the global navigation model.
+- [ ] Web/App may present the same capability differently while preserving semantic state.
+- [ ] Files-specific layout remains local to Files.
+- [ ] The visible capability set can grow without forcing the shell to grow proportionally.

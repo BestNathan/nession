@@ -1,175 +1,255 @@
 # Layout / Composition
 
-Page-level composition relationships for the Session-first shell: shell geometry, chrome width/height strategies, insets, gutters, vertical rhythm, responsive transitions, and Web vs App differences.
+> Upstream: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md) → [product-model.md](product-model.md) → [information-architecture.md](information-architecture.md) → [interaction](interaction/) → [visual-language.md](visual-language.md)
 
-**Umbrella:** [#561](https://github.com/BestNathan/nession/issues/561)
-**Upstream:** [visual-language.md](visual-language.md) · [interaction/web.md](interaction/web.md) · [interaction/app.md](interaction/app.md) · [information-architecture.md](information-architecture.md)
-**Downstream:** [design-system/tokens.md](design-system/tokens.md) · [design-system/contracts.md](design-system/contracts.md)
-**Status:** Phase 3 of #561 — relationships and intent first. A value becomes a token only when implementation needs a stable reusable value (Phase 5). Do not treat every sentence here as a token.
+This document defines page-level relationships for the Session-first shell: what owns space, how chrome yields to work, how contextual layers appear, and how Web/App differ.
 
-## Position in the chain
+Exact values belong in [design-system/tokens.md](design-system/tokens.md) and measurable rules in [design-system/contracts.md](design-system/contracts.md).
 
-```text
-Interaction Model
-      ↓
-Visual Language
-      ↓
-Layout / Composition        ← this document
-      ↓
-Design Tokens
-      ↓
-Component Recipes / Patterns
-      ↓
-Implementation
-```
+## Composition invariant
 
-## What this document owns
+> **The current work owns the frame. Persistent chrome must justify every pixel. Contextual depth overlays, replaces, or temporarily shares attention only when the user asks for it.**
 
-Page-level geometry and how regions relate: shell geometry, drawer and chrome strategies, work-surface insets, gutters and max widths, vertical rhythm, large-screen whitespace, responsive transitions, edge-to-edge and contained-vs-flush rules, Web vs App composition.
+For the current implementation, Terminal is the dominant work surface of an active Session.
 
-It does **not** own hierarchy and emphasis ([visual-language.md](visual-language.md)), values ([tokens.md](design-system/tokens.md), #467), measurable rules ([contracts.md](design-system/contracts.md), #545), or what a component contains ([patterns.md](design-system/patterns.md), #470).
+## 1. Session working frame
 
-## 1. Web shell geometry
-
-Canonical frame: `1440 × 900` (`web.standard-desktop` in the [#547 viewport matrix](design-system/validation.md#viewport-matrix-547)). Composition is judged at this frame and at `app.standard-phone` (390 × 844) for App.
+The default active Session should read approximately as:
 
 ```text
-┌────────────────────────────────────────────────────────────────────┐
-│ [≡]  fix-terminal-reconnect · online · active · attached           │
-│                                           [Terminal | Workspace]  ● │ ← 唯一常驻行
-│                                                                    │
-│                      TERMINAL (全屏,唯一亮面)                      │
-│                                                                    │
-│                           [ 输入胶囊  ▸ ]                          │
-└────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ quiet Session / connectivity context              [context]  │
+│                                                               │
+│                                                               │
+│                     TERMINAL / CURRENT WORK                   │
+│                                                               │
+│                                                               │
+│                [ contextual interaction capsule ]             │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-Relationships, not values:
+The drawing intentionally does not prescribe a permanent Session sidebar, permanent `Terminal | Workspace` switcher, or permanent Workspace tool bar. Those may be current implementation mechanisms, but they are not composition invariants.
 
-- The shell is **full-bleed**: no outer page gutter on desktop. There is **no global chrome bar** — no product wordmark, no app-level band. The **only persistent chrome is the top row** (two text rows, ≈ 60 px): the drawer button + session line + `[Terminal | Workspace]` + server micro-status. The persistent sidebar is gone — sessions live in a drawer overlay opened from `[≡]`.
-- The resting state (no session selected) still renders the top row — drawer button + server status — over an empty state; sessions are always one `[≡]` away.
-- The Active Surface owns every pixel the chrome does not consume. Chrome is sized by its own content; the surface absorbs the rest.
-- Top row and drawer never grow when the window grows — extra space goes to the work surface (see §7).
+Relationships:
 
-## 2. Drawer width strategy
+- active work receives the majority of horizontal and vertical space;
+- chrome stays close to the edges and is content-sized;
+- infrastructure metadata stays quiet unless it threatens work continuity;
+- the TerminalCapsule floats over/within the work surface without creating a new global chrome band;
+- capability presence appears contextually rather than reserving permanent slots;
+- Workspace is explicit contextual depth and preserves the active Session.
 
-- **No persistent column.** Sessions live in a left overlay drawer — `w-[min(20rem,90vw)]`, scrim + slide-in — opened from the top-row `[≡]` button. The resting state has **no sidebar at all**.
-- The drawer is wide enough for a [SessionItem](design-system/patterns/session-item.md) metadata line at its typography role — no wider; on compact widths it caps at 90vw. Not resizable by default.
-- The drawer overlays the Active Surface (scrim + elevation); the surface never shrinks or shifts to make room for it.
-- Extra horizontal space belongs to the Active Surface, never to the drawer.
-- The drawer holds search / filter / create / session rows. Its head's three stacked rows are known to exceed the visual-language intent of a single quiet head row; compacting it to one row is tracked as a follow-up (the approved mockup shows a one-line head).
-- No nested sidebars: Workspace tools live in the bottom floating tool bar; never a second full-width column ([interaction/web.md](interaction/web.md#surface-vs-tool-navigation)).
+## 2. Session navigation
 
-## 3. Chrome height strategy
+Session navigation must remain fast and discoverable while yielding space to the active work.
 
-- One band of chrome per region: the top row, Workspace tool nav. Never two stacked bands for the same region.
-- The top row is **two text rows, not a bordered bar**: a mono title row (drawer button + session name) over a muted context row (host · status · attachment, right-aligned `[Terminal | Workspace]` + server micro-status). It reads as text on canvas, not as a header control.
-- The server connection status lives in the **top row** as quiet mono micro-text — never as a badge ([visual-language.md](visual-language.md) P3).
-- Height is **content-driven** (text rows at their typography roles), not viewport-driven, and not title-driven.
-- Budget intent: the top row (≈ 60 px) plus the floating input capsule — and, when Workspace is active, the bottom floating tool bar — must remain a small fraction of the frame; the Terminal keeps the clear majority of vertical space. Chrome never grows to absorb viewport growth.
-- The session line identifies and provides context; it does not advertise ([visual-language.md](visual-language.md) P2/P3).
+Preferred composition families include:
 
-## 4. Primary work-surface insets
+- overlay drawer;
+- collapsible rail/sidebar;
+- compact Session switcher;
+- search/command entry with a visible navigation affordance.
 
-- **Terminal is flush within its region**: no page padding around xterm, no card, no radius, no border ([visual-language.md](visual-language.md) R-S1). Only the terminal's own internal cursor-comfort padding applies.
-- **Workspace tool content is inset** with a modest uniform margin; tool content breathes. The inset is a property of the tool region, not of individual components.
-- Files master/detail defines its own internal gutters; they stay inside the Workspace region ([workspace.md](workspace.md)).
+A wide permanent sidebar is not an invariant. On a layout where it materially helps repeated Session switching, it must still remain visually secondary and should collapse when space or focus requires it.
 
-## 5. Page gutters and content max widths
+Extra viewport width belongs to the work surface before it belongs to navigation.
 
-- The shell is full-bleed; gutters exist **inside** regions (list row padding, chrome padding, tool insets) — never as an outer frame.
-- **Max width** is allowed only for reading content inside Workspace (e.g. editor text). Never for the terminal, never for the shell, never as an app-level centered column.
-- Lists fill their region; only prose-like content constrains.
+## 3. Top chrome
 
-## 6. Vertical rhythm
+Top chrome should communicate only what the current work needs: Session identity, meaningful location/Agent context, recovery state, and explicit navigation affordances.
 
-- Chrome and tool spacing follow one small base unit (a 4 px grid relationship — the value is a Phase 5 concern). Spacing = base × n; no bespoke step lists per component.
-- The terminal is **exempt**: its content owns its own grid; chrome rhythm stops at the terminal boundary.
+Rules:
 
-## 7. Large-screen whitespace behavior
+- avoid multiple stacked toolbars for the same region;
+- avoid persistent product branding inside the active work shell when it adds no task value;
+- healthy state is represented quietly rather than as a row of badges;
+- Workspace access may be visible, but the exact widget is not a product invariant;
+- a capability should not add permanent top chrome merely because it is installed.
 
-- Extra width on wide viewports goes to the work surface (the terminal), never to chrome padding, never to a widening drawer.
-- No floating card / centered-column layouts on large screens. Whitespace is where the work surface lives, not decoration around a column.
+## 4. Terminal surface
 
-## 8. Responsive transition rules (Web)
+Terminal is flush within its work region:
 
-- **Wide (≥ `lg` ~1024 px):** top row + full-bleed surface, as in §1; sessions open as a drawer overlay on demand.
-- **Compact (< `lg`):** the same shell — the drawer caps at 90vw over a full-width Active Surface; the SurfaceSwitcher stays; the top row stays one band. Chrome never stacks vertically.
-- Order of sacrifice: **chrome yields first, the work surface yields last.** Terminal viewport priority is the invariant across all widths.
-- `lg` signals which family applies; `viewports.json` (#547) owns the actual sizes. Tests take expectations from contract `web` blocks, never ad-hoc conditionals ([validation.md](design-system/validation.md)).
-- Narrow Web is not App: Web on a phone is still the Web shell with a drawer, not the App spatial model ([interaction/app.md](interaction/app.md)).
+- no card treatment around xterm;
+- no decorative border/radius around the hero surface;
+- only the Terminal's own comfort padding and interaction-clearance rules apply;
+- chrome yields before terminal viewport space is sacrificed.
 
-## 9. Web vs App composition
+When contextual overlays/panels are opened, they should preserve the user's sense of the same Session rather than navigating to an unrelated dashboard.
 
-| | Web | App |
-|--|-----|-----|
-| Navigation | Sessions drawer overlay (left, scrim + slide-in) | Sessions drawer layer; no persistent column |
-| Surfaces | Terminal \| Workspace via SurfaceSwitcher | Spatial `Sessions ← Terminal → Workspace` ([interaction/app.md](interaction/app.md)) |
-| Chrome | Top row (drawer button + session line + switcher + server micro-status); no band | Single-row App header (`[≡] session · state fragment [☰]` on Terminal, `[←] tool label` on Workspace, ≈48px + top safe-area); overlay buttons removed — one visible navigation affordance per page (edge-band gestures are accelerators, never the only path) |
-| Work surface | Terminal owns the surface region | Terminal owns the maximum mid-screen region; layers overlay it |
-| Controls | Pointer density | Touch-target density (touch targets ≥ 44px, `experience.app.touchTarget.min` semantics); visible non-gesture controls required |
-| Affordances | Hover/focus disclosure | Thumb-reach placement per platform |
+## 5. TerminalCapsule
 
-Workspace tools own their push/pop sub-navigation (e.g. the Files editor sub-header `←` + path); top-level back always returns to Terminal. App chrome sizes come from tokens/`env()` — no fixed px.
+The TerminalCapsule is a floating interaction surface, not a bottom toolbar band.
 
-App composes the same surfaces and hierarchy with its own geometry; it is not a compressed Web layout.
+Composition rules:
 
-## 10. Edge-to-edge rules
+- compact at rest;
+- allowed to grow only as input or explicitly opened contextual content requires;
+- safe-area aware on App;
+- bounded/inset appropriately on Web;
+- capability presence is lightweight and state-driven;
+- `+`/expansion opens secondary controls without permanently widening the resting capsule;
+- deeper capability surfaces may open as popover, sheet, overlay, or contextual panel chosen by Nession.
 
-- Chrome bands (top row, drawer panel, tool nav) are **edge-to-edge** — flush with the screen/frame.
-- The Terminal surface is **flush within its region** — the only work surface that is edge-to-edge by default.
-- Workspace tool content is inset; overlays and dialogs are contained.
+See [design-system/patterns/terminal-capsule.md](design-system/patterns/terminal-capsule.md).
 
-## 11. Contained vs flush
+## 6. Workspace composition
 
-Containment is a **content decision**, not a chrome preference:
+Workspace is contextual depth around the logical work, not a tool lobby.
 
-| Content | Treatment |
-|---------|-----------|
-| Terminal | Flush |
-| File lists, session lists | Flush (fill the region) |
-| Editor / reading text | Contained: inset + optional max width |
-| Forms, dialogs, details | Contained |
+A Workspace root may contain resources, capability summaries, locations, and contextual sections. Its composition should follow what exists and matters in the current Workspace.
 
-## 12. Canonical frames
+Do not reserve a fixed navigation slot for every registered capability.
 
-- Composition is judged at `web.standard-desktop` (1440 × 900) and `app.standard-phone` (390 × 844) — the matrix ids of [#547](design-system/validation.md#viewport-matrix-547); sizes live only in `design/contracts/viewports.json`.
-- The Phase 2 canonical screens ([#561](https://github.com/BestNathan/nession/issues/561)) are the approval vehicle for the relationships in this document.
+Individual capability layouts remain local:
+
+- Files may use tree + editor master/detail on wide Web;
+- App Files may push an editor;
+- Git may use changes/status/detail regions;
+- Claude Code may expose state/history/configuration;
+- Agent/location detail may use a contained information layout.
+
+Workspace-level navigation should be compact or on-demand and must not create a second app shell.
+
+## 7. Web composition
+
+Web has more horizontal space but should not spend it automatically on chrome.
+
+Typical wide state:
+
+```text
+[quiet top context]
+┌───────────────────────────────────────────────────────────────┐
+│                    active work surface                       │
+│                                                               │
+│                 [interaction capsule]                        │
+└───────────────────────────────────────────────────────────────┘
+
+Session navigation / Workspace / capability depth open as needed.
+```
+
+Rules:
+
+- the shell is generally full-bleed;
+- extra width grows work capacity first;
+- drawers/side panels overlay or consume space only when intentionally opened;
+- reading/configuration content inside Workspace may use max widths;
+- Terminal should not be centered inside a decorative page column;
+- narrow Web remains Web interaction, not an accidental App clone.
+
+## 8. App composition
+
+App follows the spatial model:
+
+```text
+Sessions  ←  Terminal / current Session  →  Workspace
+```
+
+The Terminal gets the maximum usable central region. Visible controls provide alternatives to gestures but stay visually quiet.
+
+App-specific rules:
+
+- respect top/bottom safe areas;
+- prefer touch-target sizes over desktop compactness;
+- use native push/pop or sheets for deeper capability content;
+- nested capability navigation must not fight top-level spatial gestures;
+- capsule placement should support thumb reach without covering critical Terminal rows;
+- Workspace transition should feel spatially continuous with the Session.
+
+## 9. Responsive sacrifice order
+
+When space becomes constrained:
+
+```text
+optional chrome yields
+    ↓
+secondary metadata compresses/hides
+    ↓
+on-demand navigation replaces persistent navigation
+    ↓
+work surface yields last
+```
+
+Do not preserve a toolbar/sidebar at the cost of making the actual work unusable.
+
+## 10. Surface and inset rules
+
+| Content | Default treatment |
+|---------|-------------------|
+| Terminal/current live work | Flush / maximum region |
+| Session list | Fill its opened navigation region |
+| Workspace resource lists | Fill local region, modest contextual inset as needed |
+| Editors / reading content | Inset; optional max width where readability benefits |
+| Forms / settings / details | Contained |
+| TerminalCapsule | Floating contained surface |
+| Capability overlay/sheet | Contained/elevated contextual layer |
+
+Containment is a content decision, not a default desire to put everything in cards.
+
+## 11. Large-screen whitespace
+
+Whitespace is not unused product surface that must be filled with features.
+
+On large screens:
+
+- do not widen navigation indefinitely;
+- do not add feature cards merely because space exists;
+- allow work surfaces and meaningful contextual views to breathe;
+- keep reading-width constraints local to prose/configuration content.
+
+## 12. Current contracts and canonical screenshots
+
+Existing `design/contracts/*`, fixture screens, and visual-regression baselines encode the previously approved Session-first implementation. They remain useful evidence and migration protection, but some currently encode assumptions such as a persistent SurfaceSwitcher or Workspace tool bar.
+
+After this product convergence, those assumptions must be reviewed against [`PRINCIPLE.md`](../../PRINCIPLE.md).
+
+Do not silently change executable contracts in a documentation-only edit. Instead:
+
+1. mark the product-level relationship here;
+2. identify mismatched executable contracts/screens as implementation debt;
+3. update implementation + contracts + baselines together in follow-up work.
+
+A golden screenshot protects an intentional implementation. It does not outrank the product contract.
 
 ## 13. Tokenization rule
 
-Keep as **relationships** (do not tokenize prematurely):
+Tokenize stable reusable values, not product relationships.
 
-- Drawer = metadata-line width (capped `min(20rem,90vw)`); top row = two text rows.
-- Terminal = flush; chrome budget = small fraction of the frame.
-- Responsive transition semantics (chrome yields first, work surface last).
+Good token candidates:
 
-Promote to **tokens only when stable and needed** (Phase 5 convergence):
+- control heights;
+- touch-target minimums;
+- capsule radius/insets;
+- standard spacing;
+- drawer/sheet dimensions after the interaction pattern stabilizes.
 
-- Drawer width, top row height, base spacing unit, tool insets — once the canonical screens approve them and implementation requires a shared value.
+Do not tokenize:
 
-**Forbidden as a substitute:** new local metric variables (e.g. `--sf-*` extensions) invented to express composition on top of the token model ([#561](https://github.com/BestNathan/nession/issues/561) non-goals; [tokens.md](design-system/tokens.md) layer stack).
+- "Workspace is contextual depth";
+- capability relevance rules;
+- Session-first navigation semantics;
+- progressive-disclosure behavior.
 
-## 14. Shell control metrics (Phase 8 audit)
+Those belong in product/interaction documentation.
 
-Approved mapping from session-first shell chrome to Experience tokens (see `web/src/session-first/shellStyles.ts`):
+## Anti-patterns
 
-| Role | Token / class | Web | App |
-|------|---------------|-----|-----|
-| Header / toolbar icon buttons | `--shell-icon-button-size` → `shellIconButtonClass` | `control-lg` (36px) | `control-md` (44px) under `[data-experience="app"]` |
-| Compact row actions (filter, sort) | `--control-md` → `shellRowControlMinClass` | 32px min height | unchanged on web |
+- permanent chrome preserved only because a prior screenshot contained it;
+- every capability claiming a toolbar/tab slot;
+- wide-screen layouts filling empty space with feature cards;
+- stacked chrome bands around the Terminal;
+- nested full-height sidebars for Workspace + Files + capability navigation;
+- multiple floating controls competing with the TerminalCapsule;
+- responsive behavior that protects chrome before the work surface.
 
-**Documented exceptions** (composition / breakpoint-specific — not tokenized):
+## Ownership boundaries
 
-- `max-lg:min-h-11` on Session list actions — mobile web touch band (44px) without switching the whole shell to app experience.
-- Decorative glyph sizes inside controls (`size-3` … `size-5` sort arrows, menu icons, loaders) — semantic icon scale not yet duplicated in shell tokens.
-- `min-h-0` flex layout chains — structural, not touch targets.
-- Session row kill affordance (`size-8`) — secondary destructive control; revisit if a third pattern repeats it.
-
-## What this document does not own
-
-- Hierarchy and emphasis → [visual-language.md](visual-language.md).
-- Values → [tokens.md](design-system/tokens.md) / #467.
-- Measurable rules → [contracts.md](design-system/contracts.md) / #545.
-- Component internals → [patterns.md](design-system/patterns.md) / #470.
-- Which viewport sizes exist → `design/contracts/viewports.json` (#547).
+- product direction → [`VISION.md`](../../VISION.md)
+- product decisions → [`PRINCIPLE.md`](../../PRINCIPLE.md)
+- product entities → [product-model.md](product-model.md)
+- IA → [information-architecture.md](information-architecture.md)
+- interaction → [interaction/](interaction/)
+- Workspace semantics → [workspace.md](workspace.md)
+- visual hierarchy → [visual-language.md](visual-language.md)
+- values → [design-system/tokens.md](design-system/tokens.md)
+- measurable rules → [design-system/contracts.md](design-system/contracts.md)
