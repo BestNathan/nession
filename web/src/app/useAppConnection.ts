@@ -31,7 +31,11 @@ const SERVER_CAPABILITIES = [
 
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
-  const autoConnect = params.get('token') !== null || getToken() !== null;
+  // Whether to restore a session on load, frozen at the first render. Reading
+  // this per render would flip it true the moment a connect() writes the token
+  // to storage, and the auto-connect effect below would then supersede the
+  // connection that just started (#688).
+  const [autoConnect] = useState(() => params.get('token') !== null || getToken() !== null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>(
     () => autoConnect ? 'connecting' : 'disconnected',
   );
@@ -132,13 +136,19 @@ export function useAppConnection() {
     });
   }, [connectInternal]);
 
+  // Auto-connect is a load-time action: it runs once, for the credentials the
+  // page loaded with. Keeping connectInternal out of the deps (a ref holds it)
+  // is what stops a token or URL edit from re-arming a connect that would
+  // supersede whatever is already live.
+  const connectInternalRef = useRef(connectInternal);
+
   useEffect(() => {
     if (!autoConnect) {
       return;
     }
 
     let cancelled = false;
-    connectInternal(getRememberPreference(), true).catch(() => {
+    connectInternalRef.current(getRememberPreference(), true).catch(() => {
       if (!cancelled) {
         clearToken();
         setWasEverAuthed(false);
@@ -149,7 +159,7 @@ export function useAppConnection() {
     return () => {
       cancelled = true;
     };
-  }, [autoConnect, connectInternal]);
+  }, [autoConnect]);
 
   useVisibilityReconnect(wasEverAuthed, wsService);
 
