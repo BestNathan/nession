@@ -501,7 +501,7 @@ git fetch origin && git checkout main && git pull --ff-only origin/main
 EnterWorktree name: "fix/<new-slug>"
 # normal case — bases on origin/main (EnterWorktree default)
 # unreleased staging dependency:
-git worktree add -b fix/<new-slug> .claude/worktrees/fix-<slug> origin/staging
+git worktree add -b fix/<new-slug> .claude/worktrees/fix-<new-slug> origin/staging
 ```
 
 ### Branch base and merge method
@@ -519,7 +519,7 @@ Every branch comes off `main` (via worktree — never `git checkout -b` in proje
 | `chore/bump-version-X.Y.Z` — after the release merged | `main` | `main` | `--merge` |
 
 - **Anything touching `crates/` or `web/src/` must go through `staging`.** A PR to `main` gets no quality gate — `quality.yml` only runs on PRs to `staging`. Required status checks (`rust-check`, `web-check`) are configured on `staging`, not on `main`.
-- **One method everywhere, so ancestry is never rewritten.** Every landed branch stays reachable from the target with their original SHAs. That is what keeps `staging` an ancestor of `main` — making the step 9 sync a fast-forward forever — and it is why none of the orphan-and-patch-id reasoning that a rebase flow needs applies here.
+- **One method everywhere, so ancestry is never rewritten.** Every landed branch stays reachable from the target with its original SHAs. That is what keeps `staging` an ancestor of `main` — making the step 9 sync a fast-forward forever — and it is why none of the orphan-and-patch-id reasoning that a rebase flow needs applies here.
 - **The PR body never enters git history.** `--merge` writes `MERGE_MESSAGE` + `PR_TITLE`, not the body, and each commit keeps its own message. Only squash ever used the body, and nothing squashes. So commit messages are the permanent record — write them properly, and treat the PR body as review material.
 - `--auto` only on PRs that have checks. `main`-targeted PRs have none — omit it there.
 - Never put an empty commit on `staging`. Trigger workflows with `gh workflow run`, not `git commit --allow-empty`.
@@ -644,12 +644,12 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
   - 每个测试用的数据库/临时文件走 `tempfile::tempdir()`,**不准用 `temp_dir()` 拼固定名**,也不准用"时间戳 + 进程内计数"(两个进程同一秒启动、计数都从 0 开始,拼出同一个路径)。
   - 碰 `paths::nession_home()` 的测试**必须先把 `NESSION_HOME` 指到临时目录** —— 否则它解析成 `$HOME/.nession`,直接改开发者的真实配置。
 
-  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明门禁还真的能抓到 —— 门禁静默失效比没门禁更糟。
+  **门禁是静态检查**:`just check-test-isolation`(`scripts/check-test-isolation.sh`),已接入 `pre-commit`,改了 `.rs` 就跑,约 1.5 秒。扫描范围是 `crates/*/tests/**` 加上每个 `src/` 文件第一个 `#[cfg(test)]` 之后的部分。`just check-test-isolation-selftest` 逐条注入违规,证明它还真的能抓到 —— 门禁静默失效比没门禁更糟。
 
 - **tmux socket 门禁**:`just check-tmux-socket`(`scripts/check-tmux-socket.sh`),已接入 `pre-commit` 和 `just check`(CI)。拦住任何在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 的写法(含 `Command::new(<变量>)` 这种无字面量形态)、`scripts/**` `e2e/**` `deploy/**` `justfile` 里不带 `-S` 的 shell 调用,以及任何 `TMUX_TMPDIR` 赋值。`just check-tmux-socket-selftest` 逐形态注入违规自检。理由与解析规则见「tmux socket 隔离」。
 
   `just check-test-concurrency`(`scripts/check-test-concurrency.sh`,把每个测试二进制同时跑两遍)是**按需诊断工具,不是门禁**。它的价值是发现**未知类别**的共享状态(`NESSION_HOME` 那条就是它找到的,静态检查想不到要查)。但它不适合当门禁:竞态类问题它会漏报(实测同一份坏代码,一次 PASS 一次 FAIL),而并发让整机负载翻倍又可能让时序敏感的测试误报失败 —— 而 hook 不准绕,一次误报就把人卡死。
-- **清理测试遗留的 tmux 孤儿**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（整目录回收）。它只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`（目录模式即归属,绝不碰默认 socket 或开发者自己的会话）;目录 `owner.pid` 里的 PID 仍存活（`kill -0`）视为活轮次,列出但不动;对孤儿先 `#{socket_path}` 断言再 kill-server,再删目录。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常退出不该有残留 —— 孤儿只出现在测试进程被 SIGKILL / kill -9 / 崩溃(不走 trap)之后;Ctrl-C 会走 trap,正常清理。
+- **清理测试遗留的 tmux 孤儿**：`./scripts/sweep-test-sessions.sh`（列出）/ `--kill`（整目录回收）。它只认两类项目自有的运行目录 —— Rust 测试的 `$TMPDIR/nession-test-tmux.*` 与 e2e 的 `/tmp/nession-e2e-tmux-*`（目录模式即归属,绝不碰默认 socket 或开发者自己的会话）;目录 `owner.pid` 里的 PID 仍存活（`kill -0`)视为活轮次,列出但不动;对孤儿先做 `#{socket_path}` 断言再 kill-server,再删目录。集成测试的 `TestSession` guard 会在 panic 时自行清理,所以正常退出不该有残留 —— 孤儿只出现在测试进程被 SIGKILL / kill -9 / 崩溃(不走 trap)之后;Ctrl-C 会走 trap,正常清理。
 - **CI 触发**：`quality.yml`（PR -> staging:rust-check = `just check` = fmt + lint + check-tmux-socket + coverage,web-check = `just web-lint` + `just web-test`）;`staging.yml`（push to staging,纯文档改动经 `paths-ignore` 跳过:完整 build + deploy）;`release.yml`（push to main:release,全部 job 门禁在 `version_changed` 上）。
 - **⛔ 禁止任何手段跳过 git hooks**：`git commit --no-verify`、`git push --no-verify`、`--no-gpg-sign`、临时 unset `core.hooksPath` 等一律禁止。测试挂了修测试,覆盖率不够补测试,lint 报错修 lint——不准绕。pre-push hook 跑太久就等着,或者拆分 commit。
 - **⛔ 禁止 `TMUX_TMPDIR`,禁止在 `crates/nession-agent/src/tmux/cmd.rs` 之外派生 tmux 进程。** 寻址一律显式 `-S <绝对路径>`;`TMUX_TMPDIR` 在 `$TMUX` 存在时被 tmux 完全无视并静默落回默认 socket(实测 #574)。有静态门禁,详见「tmux socket 隔离」。
