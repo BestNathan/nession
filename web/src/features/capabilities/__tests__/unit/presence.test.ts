@@ -5,7 +5,7 @@ import {
 } from '../../presence';
 import type { CapabilitySnapshot, CapabilityState } from '../../model';
 
-function snapshot(state: CapabilityState, id = state): CapabilitySnapshot {
+function snapshot(state: CapabilityState, id: string = state): CapabilitySnapshot {
   return {
     id,
     title: id,
