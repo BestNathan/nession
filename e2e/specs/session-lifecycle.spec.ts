@@ -1,14 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { waitForSessionFirst } from '../helpers/sessionFirst';
 
-// NOTE: session-lifecycle test is skipped due to tmux terminal initialization
-// issues in CI environment ("terminal does not support clear").
-// The agent connection problem has been resolved, but tmux session creation
-// needs separate investigation for CI environments.
-// TODO: Re-enable once tmux CI environment issues are resolved.
+// CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
+// e2e webServer stack only provides in CI. The historical blocker ("terminal
+// does not support clear") was fixed in #633 — agent pins TERM=xterm-256color.
 test.describe('Session lifecycle', () => {
-  const SESSION_NAME = 'e2e-lifecycle';
-
   test.beforeEach(async ({ page }) => {
     // Use URL token to skip login. Server runs in no-auth mode (empty auth_token),
     // so any non-empty token is accepted.
@@ -17,7 +13,10 @@ test.describe('Session lifecycle', () => {
     await waitForSessionFirst(page);
   });
 
-  test.skip('create a session, verify it appears, then kill it', async ({ page }) => {
+  test('create a session, verify it appears, then kill it', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-lifecycle-${testInfo.retry}-${Date.now()}`;
+
     // ── Wait for the agent to register ──
     // The sidebar "Create session" button is enabled only when at least one
     // agent is online. In CI, cargo build + agent startup + heartbeat can
@@ -39,27 +38,31 @@ test.describe('Session lifecycle', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Create Session')).toBeVisible();
 
-    // Fill in session name (agent is preselected since there's only one)
+    // Agent is preselected — read the label span inside SelectTrigger (#agent),
+    // not the trigger's full textContent (radix appends a ▼ chevron).
+    const agentLabel = (await dialog.locator('#agent > span').textContent())?.trim() ?? '';
+    expect(agentLabel.length).toBeGreaterThan(0);
+    expect(agentLabel).not.toBe('Select an agent');
+
     const nameInput = page.locator('#name');
     await nameInput.fill(SESSION_NAME);
+
+    const sessionRow = page.locator('[data-testid="session-item-row"]', {
+      hasText: SESSION_NAME,
+    });
 
     // Submit the form
     await dialog.getByRole('button', { name: 'Create' }).click();
 
-    // Dialog should close after successful creation
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    // Wait for the row first — create can succeed server-side while the dialog
+    // close animation lags; the row is the authoritative success signal.
+    await expect(sessionRow).toBeVisible({ timeout: 15_000 });
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
-    // ── Verify session appears in the list ──
-    // Session-first rows show the session name in a span.font-medium
-    const sessionRow = page.locator('[data-testid="session-item-row"]', {
-      hasText: SESSION_NAME,
-    });
-    await expect(sessionRow).toBeVisible({ timeout: 10_000 });
-
-    // The meta line should contain the agent label
+    // Meta line format: "shell · {agentLabel} · {relative time}"
     await expect(
       sessionRow.locator('span.text-xs.text-muted-foreground'),
-    ).toContainText('e2e-test-node', { timeout: 5_000 });
+    ).toContainText(`shell · ${agentLabel} ·`, { timeout: 5_000 });
 
     // ── Kill session ──
     // The Kill button is in the same row as the session name.  Use the
