@@ -184,6 +184,11 @@ describe('useAppConnection', () => {
     expect(toast.error).toHaveBeenCalledWith('Connection failed: invalid token');
     // Clearing stored credentials is auto-connect semantics only.
     expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
+    // #692: the refusal is terminal, so nothing is retrying behind the login
+    // page — the Connect button is usable again on the next render instead of
+    // being disabled for the length of a reconnect budget.
+    expect(result.current.wsService?.connectionState).toBe('disconnected');
+    expect(result.current.wsService?.reconnectAttempts).toBe(0);
   });
 
   it('manual connect opens exactly one socket — no auto-connect supersede', async () => {
