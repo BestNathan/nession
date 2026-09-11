@@ -16,15 +16,20 @@ test('canonical Workspace fixture renders the plugin shell', async ({ page }) =>
   await expect(page.getByTestId('workspace-shell')).toBeVisible();
   await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
 
-  // tool bar from the registry: Files / Session / Agent
-  await expect(page.getByRole('tab', { name: 'Files' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Session' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Agent' })).toBeVisible();
+  // Contextual chrome: the opened capability holds the direct slot, and
+  // registration no longer produces a permanent navigation item.
+  await expect(page.getByTestId('workspace-tool-files')).toBeVisible();
+  await expect(page.getByTestId('workspace-tool-agent')).toHaveCount(0);
 
   // files web layout renders tree ‖ editor
   await expect(page.getByTestId('files-web-layout')).toBeVisible();
 
   await page.screenshot({ path: 'test-results/canonical-workspace.png', fullPage: true });
+
+  // Everything else available is progressively disclosed through More.
+  await page.getByTestId('workspace-capability-more').click();
+  await expect(page.getByTestId('workspace-capability-picker-agent')).toBeVisible();
+  await expect(page.getByTestId('workspace-capability-picker-session')).toBeVisible();
 });
 
 test('sessions drawer opens from the resting shell', async ({ page }) => {

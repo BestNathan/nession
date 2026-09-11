@@ -44,19 +44,31 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
-    test('session rows stay clipped; workspace strip entries are single-line inside the bar', async ({ page }) => {
+    test('session rows stay clipped; workspace direct chrome stays bounded inside the bar', async ({ page }) => {
       await page.goto('/#/fixture');
       await assertSessionRowsClipped(page, 'web', row.id);
 
       await page.goto('/#/fixture/workspace');
       const bar = page.getByTestId('workspace-tool-bar');
       await expect(bar).toBeVisible();
-      for (const tool of ['files', 'session', 'agent', 'env', 'claude-code']) {
-        const button = page.getByTestId(`workspace-tool-${tool}`);
-        await expect(button).toBeVisible();
-        await expectSingleLine(button, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
-        await expectVisibleWithin(button, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+
+      // Contextual direct chrome stays bounded at every viewport instead of
+      // rendering one permanent slot per registered capability.
+      const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
+      const direct = nav.locator('button[data-testid^="workspace-tool-"]');
+      expect(await direct.count()).toBeGreaterThan(0);
+      expect(await direct.count()).toBeLessThanOrEqual(2);
+
+      for (let i = 0; i < (await direct.count()); i += 1) {
+        await expect(direct.nth(i)).toBeVisible();
+        await expectSingleLine(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+        await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
       }
+
+      const more = page.getByTestId('workspace-capability-more');
+      await expect(more).toBeVisible();
+      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
     });
 
     test('a wrapping/overflow regression at this viewport fails automatically', async ({ page }) => {

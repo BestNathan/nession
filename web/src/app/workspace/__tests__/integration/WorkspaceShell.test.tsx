@@ -73,8 +73,11 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
+    // The menu mounts a tick after the click, so the negative assertion has to
+    // wait for a positive one first — otherwise "not advertised" would also
+    // pass on a menu that never opened.
+    expect(await screen.findByRole('menuitem', { name: 'Agent' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Files' })).not.toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Agent' })).toBeInTheDocument();
   });
 
   it('keeps an unavailable opened capability stable instead of switching arbitrarily', () => {
