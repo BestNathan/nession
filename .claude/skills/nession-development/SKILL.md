@@ -453,7 +453,7 @@ gh pr merge <PR-NUMBER> --auto --merge
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, release `staging` → `main`, bump if warranted, then sync `staging` last:
+**After staging validation**, release `staging` → `main`, and bump if warranted:
 
 ```bash
 # 1. Audit what ships, then open the release PR with every Closes line
@@ -472,13 +472,9 @@ gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge
 # 3. Wait for release.yml's promote-production (pauses at Environment
 #    approval) to write the gitops deploy commit, then ArgoCD rollout
 ./scripts/deploy-watch.sh prod
-
-# 4. Sync main → staging — a fast-forward, no force push. Last, once main has settled.
-git fetch origin
-git push origin origin/main:refs/heads/staging
 ```
 
-**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs. For the release that keeps `staging` an ancestor of `main`, which is what makes step 4 a fast-forward forever — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. Step 4 goes last because steps 2 and 3 both add commits to `main`. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
+**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
 
 ### PR Body Template
 
@@ -509,8 +505,7 @@ deploy lanes: **staging lane accepts any sha with built images** (merge to
 staging builds them — use `deploy.yml` to pull a specific commit onto
 `staging-01` for standalone validation); **production is release-lane only**
 (SemVer, behind Environment approval). After staging validation, the
-`staging → main` release PR merges with `--merge` and `main` is then synced
-back into `staging`; `release.yml` only builds if a version file changed, so
+`staging → main` release PR merges with `--merge`; `release.yml` only builds if a version file changed, so
 a release carrying runtime changes needs the follow-up bump PR to reach
 production. See `nession-cicd`.
 
