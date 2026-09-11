@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { toast } from 'sonner';
 import { useAppConnection } from '@/app/useAppConnection';
+import { useVisibilityReconnect } from '@/app/useVisibilityReconnect';
 import * as auth from '@/lib/auth';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import type { SocketMessage } from '@/services/socket/types';
@@ -158,6 +159,28 @@ describe('useAppConnection', () => {
     expect(vi.mocked(auth.clearToken)).toHaveBeenCalled();
   });
 
+  it('StrictMode: a refused auto-connect still lands on the login state', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('bad-token');
+
+    const { result } = renderHook(() => useAppConnection(), { wrapper: StrictMode });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+
+    await act(async () => {
+      socket.open();
+    });
+    replyToAuth(socket, 'failed');
+
+    await waitFor(() => {
+      expect(result.current.connectionStatus).toBe('disconnected');
+      expect(result.current.isRestoringSession).toBe(false);
+    });
+    // The restore flag has to clear in a StrictMode build exactly as it does in
+    // a production one: it gates the visibility-reconnect path, so leaving it
+    // set would send a doomed handshake on every tab focus.
+    expect(vi.mocked(useVisibilityReconnect)).toHaveBeenLastCalledWith(false, result.current.wsService);
+  });
+
   it('manual connect with a failing handshake toasts and drops to disconnected', async () => {
     const { result } = renderHook(() => useAppConnection());
 
@@ -263,20 +286,26 @@ describe('useAppConnection', () => {
     expect(socket.close).toHaveBeenCalled();
   });
 
-  it('StrictMode double-mount keeps exactly one live transport', async () => {
+  it('StrictMode double-mount starts exactly one auto-connect transport', async () => {
     vi.mocked(auth.getToken).mockReturnValue('stored-token');
 
     const { result } = renderHook(() => useAppConnection(), { wrapper: StrictMode });
 
-    // Both effect passes constructed a service; the first was disposed.
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
-    const [first, second] = MockWebSocket.instances;
-    expect(first.close).toHaveBeenCalled();
+    // Auto-connect is a load-time action, so StrictMode's mount→cleanup→mount
+    // must not start a second transport: the second would dispose the first
+    // while its socket was still CONNECTING, which the browser reports as a
+    // failed connection (the #688 warning string) on every dev page load
+    // (#697).
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0];
+    expect(socket.close).not.toHaveBeenCalled();
 
-    // Only the surviving transport completes the handshake.
-    await completeHandshake(second);
+    // The surviving transport must still drive React state. The simulated
+    // unmount tears down every effect-owned subscription, so a guard that left
+    // the service unreachable would strand the shell at 'connecting' instead.
+    await completeHandshake(socket);
     await waitFor(() => expect(result.current.connectionStatus).toBe('connected'));
     expect(result.current.isAuthenticated).toBe(true);
-    expect(second.close).not.toHaveBeenCalled();
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 });

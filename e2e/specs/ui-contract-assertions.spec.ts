@@ -153,16 +153,30 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     }
   });
 
-  test('web: workspace tool entries are single-line and inside the tool bar', async ({ page }) => {
+  test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {
     await page.goto('/#/fixture/workspace');
     const bar = page.getByTestId('workspace-tool-bar');
     await expect(bar).toBeVisible();
-    for (const tool of ['files', 'session', 'agent', 'env', 'claude-code']) {
-      const button = page.getByTestId(`workspace-tool-${tool}`);
-      await expect(button).toBeVisible();
-      await expectSingleLine(button, WEB);
-      await expectVisibleWithin(button, bar, WEB);
+
+    // Direct chrome is contextual and bounded: the fixture opens on Files, so
+    // Files is the only direct entry. Capability registration must not grow
+    // direct chrome 1:1 with the registry.
+    const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
+    const direct = nav.locator('button[data-testid^="workspace-tool-"]');
+    expect(await direct.count()).toBeGreaterThan(0);
+    expect(await direct.count()).toBeLessThanOrEqual(2);
+
+    for (let i = 0; i < (await direct.count()); i += 1) {
+      await expect(direct.nth(i)).toBeVisible();
+      await expectSingleLine(direct.nth(i), WEB);
+      await expectVisibleWithin(direct.nth(i), bar, WEB);
     }
+
+    // More is the disclosure path and shares the same bar contract.
+    const more = page.getByTestId('workspace-capability-more');
+    await expect(more).toBeVisible();
+    await expectSingleLine(more, WEB);
+    await expectVisibleWithin(more, bar, WEB);
   });
 });
 

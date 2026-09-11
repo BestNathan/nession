@@ -250,6 +250,9 @@ describe('SessionFirstWorkspace spatial shell', () => {
           selectedAgent: agent,
           domain,
           surface: 'workspace',
+          // Files is only available with file ops; the workspace surface must
+          // still show its deeper view once the capability is available.
+          fileOps: {} as never,
           showList: false,
           showDetail: true,
         })}
@@ -271,7 +274,8 @@ describe('SessionFirstWorkspace spatial shell', () => {
     await waitFor(() => {
       expectActiveAppPage('workspace');
     });
-    await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    await user.click(screen.getByTestId('workspace-capability-more'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Claude Code' })).toHaveLength(1);
 
