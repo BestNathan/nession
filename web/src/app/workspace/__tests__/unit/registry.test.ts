@@ -1,31 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { WORKSPACE_TOOLS } from '../../tools';
 
-describe('workspace tool registry', () => {
-  it('registers workspace tools in dock order', () => {
-    expect(WORKSPACE_TOOLS.map((t) => t.id)).toEqual([
-      'files',
-      'session',
-      'agent',
-      'env',
-      'claude-code',
-    ]);
-  });
-
-  it('ids are unique', () => {
-    const ids = WORKSPACE_TOOLS.map((t) => t.id);
+describe('legacy workspace view bindings', () => {
+  it('uses unique capability ids without defining presentation policy', () => {
+    const ids = WORKSPACE_TOOLS.map((tool) => tool.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('each tool provides web and app layouts', () => {
+  it('keeps web and app deeper-view renderers available during migration', () => {
     for (const tool of WORKSPACE_TOOLS) {
       expect(typeof tool.layout.web).toBe('function');
       expect(typeof tool.layout.app).toBe('function');
     }
   });
 
-  it('files requires fileOps (availability)', () => {
-    const files = WORKSPACE_TOOLS.find((t) => t.id === 'files')!;
+  it('keeps legacy availability as adapter input rather than direct chrome ownership', () => {
+    const files = WORKSPACE_TOOLS.find((tool) => tool.id === 'files')!;
     expect(files.availability({ fileOps: null } as never)).toBe(false);
     expect(files.availability({ fileOps: {} } as never)).toBe(true);
   });

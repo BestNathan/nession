@@ -2,12 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
-import { WORKSPACE_TOOLS } from '@/app/workspace/tools';
 import type { WorkspaceContext } from '@/app/workspace/toolTypes';
 
-// Swap only the files tool's layouts for a deterministic stub; the registry
-// entries (label/icon/availability) must stay intact so the bar renders all
-// five labels and availability logic still runs.
 vi.mock('@/app/workspace/tools/files', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/app/workspace/tools/files')>();
@@ -22,74 +18,85 @@ vi.mock('@/app/workspace/tools/files', async (importOriginal) => {
   };
 });
 
-const ctx: WorkspaceContext = {
-  session: null,
-  agent: undefined,
-  agents: [],
-  domain: null,
-  fileOps: null,
-  experience: 'web',
-  onToolChange: vi.fn(),
-};
+function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
+  return {
+    session: {
+      session_id: 'agent-1:work',
+      agent_id: 'agent-1',
+      session_name: 'work',
+    } as never,
+    agent: { agent_id: 'agent-1' } as never,
+    agents: [{ agent_id: 'agent-1' } as never],
+    domain: null,
+    fileOps: {} as never,
+    experience: 'web',
+    onToolChange: vi.fn(),
+    ...overrides,
+  };
+}
 
-describe('WorkspaceShell', () => {
-  it('renders the bottom floating tool bar from the registry', () => {
-    render(<WorkspaceShell ctx={ctx} activeTool="files" />);
-    expect(WORKSPACE_TOOLS.map((tool) => tool.id)).toEqual([
-      'files',
-      'session',
-      'agent',
-      'env',
-      'claude-code',
-    ]);
-    expect(screen.getAllByRole('tab').map((tab) => tab.id)).toEqual([
-      'workspace-tool-tab-files',
-      'workspace-tool-tab-session',
-      'workspace-tool-tab-agent',
-      'workspace-tool-tab-env',
-      'workspace-tool-tab-claude-code',
-    ]);
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())).toEqual([
-      'Files',
-      'Session',
-      'Agent',
-      'Env',
-      'Claude Code',
-    ]);
-    expect(screen.getByTestId('workspace-tool-bar')).toBeInTheDocument();
-  });
+describe('WorkspaceShell contextual capability presentation', () => {
+  it('renders only the opened capability directly and progressively discloses the rest', () => {
+    const ctx = workspaceContext();
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
-  it('renders the active tool web layout', () => {
-    render(<WorkspaceShell ctx={ctx} activeTool="files" />);
     expect(screen.getByTestId('mock-files-web')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-tool-session')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: 'More workspace capabilities' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-bar')).toHaveAttribute(
+      'data-navigation-mode',
+      'contextual',
+    );
   });
 
-  it('marks unavailable tools disabled in the bar', () => {
-    render(<WorkspaceShell ctx={ctx} activeTool="session" />);
-    const filesTab = screen.getByRole('tab', { name: 'Files' });
-    expect(filesTab).toBeDisabled();
-  });
-
-  it('calls onToolChange when a bar item is clicked', async () => {
-    const user = userEvent.setup();
-    render(<WorkspaceShell ctx={{ ...ctx, fileOps: {} as never }} activeTool="files" />);
-    await user.click(screen.getByRole('tab', { name: 'Agent' }));
-    expect(ctx.onToolChange).toHaveBeenCalledWith('agent');
-  });
-
-  it('calls onToolChange when the Claude Code tab is clicked', async () => {
+  it('puts available capabilities in More and invokes the selected deeper view', async () => {
     const user = userEvent.setup();
     const onToolChange = vi.fn();
-    const selectedContext: WorkspaceContext = {
-      ...ctx,
-      session: { session_id: 'agent-1:work' } as never,
-      agent: { agent_id: 'agent-1' } as never,
-      agents: [{ agent_id: 'agent-1' } as never],
-      onToolChange,
-    };
+    const ctx = workspaceContext({ onToolChange });
 
-    render(<WorkspaceShell ctx={selectedContext} activeTool="claude-code" />);
-    await user.click(screen.getByRole('tab', { name: 'Claude Code' }));
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Agent' }));
+
+    expect(onToolChange).toHaveBeenCalledWith('agent');
+  });
+
+  it('does not advertise unavailable capabilities in direct chrome or More', async () => {
+    const user = userEvent.setup();
+    const ctx = workspaceContext({ fileOps: null });
+
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
+    expect(screen.queryByRole('menuitem', { name: 'Files' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Agent' })).toBeInTheDocument();
+  });
+
+  it('keeps an unavailable opened capability stable instead of switching arbitrarily', () => {
+    const ctx = workspaceContext({ fileOps: null });
+
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+
+    expect(screen.queryByTestId('mock-files-web')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-capability-unavailable')).toHaveTextContent(
+      'Files is not available here',
+    );
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
+  });
+
+  it('keeps Claude Code discoverable through its direct capability provider', async () => {
+    const user = userEvent.setup();
+    const onToolChange = vi.fn();
+    const ctx = workspaceContext({ onToolChange });
+
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
+    await user.click(screen.getByRole('button', { name: 'More workspace capabilities' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Claude Code' }));
 
     expect(onToolChange).toHaveBeenCalledWith('claude-code');
   });

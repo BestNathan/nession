@@ -1,14 +1,20 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
+import type { CapabilityId } from '@/features/capabilities';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 
-export type WorkspaceToolId = 'files' | 'session' | 'agent' | 'claude-code' | 'env';
+/**
+ * Transitional alias for legacy Workspace view bindings. Capability identity is
+ * intentionally open-ended; adding a capability must not require extending a
+ * closed shell enum.
+ */
+export type WorkspaceToolId = CapabilityId;
 export type Experience = CapsuleExperience;
 
-/** Everything a tool layout needs from the workspace framework. */
+/** Everything a legacy tool layout needs from the workspace framework. */
 export interface WorkspaceContext {
   session: Session | null;
   agent: Agent | undefined;
@@ -20,14 +26,18 @@ export interface WorkspaceContext {
 }
 
 /**
- * A workspace tool is a plugin: it owns its label/icon/order/availability
- * and its own layouts per experience. Adding a tool = one file + one
- * registry line; the framework does not change.
+ * Migration-time Workspace view binding.
+ *
+ * The binding still owns the current React layouts and visual identity needed
+ * to render an existing deeper view. It no longer owns whether that capability
+ * receives direct Workspace presence; that decision belongs to the shared
+ * capability + Nession presentation policy.
  */
 export interface WorkspaceTool {
   id: WorkspaceToolId;
   label: string;
   icon: LucideIcon;
+  /** Legacy deterministic fallback order, never capability presence priority. */
   order: number;
   availability: (ctx: WorkspaceContext) => boolean;
   layout: {

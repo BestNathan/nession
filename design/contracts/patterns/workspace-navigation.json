@@ -1,6 +1,6 @@
 {
   "id": "pattern.workspace-navigation",
-  "$description": "Workspace tool navigation. Web: compact bottom strip; App: full-width strip at 390×844 (bar ~58px, tool entries single-line text). Strip height is layout-derived, not token-pinned — do not assert a height token on it. Tools that do not fit collapse into a menu — never a full-height sidebar (global clip overridden to menu).",
+  "$description": "Contextual Workspace capability navigation. Direct chrome is bounded and reserved for the opened capability plus capability presence justified by current context. Available capabilities are progressively disclosed through More/menu; unavailable capabilities render no dead slot. Capability registration never implies permanent navigation. Web and App may present the same semantics differently; overflow remains menu-based rather than a feature-lobby sidebar.",
   "extends": ["category.chrome"],
   "patternRef": "docs/design/design-system/patterns/workspace-navigation.md",
   "web": {
