@@ -47,7 +47,7 @@ export function FixtureWorkspace() {
       data-sf-design="polish"
       className="session-first-shell flex h-[100dvh] flex-col bg-background"
     >
-      <WorkspaceShell ctx={ctx} activeTool="files" />
+      <WorkspaceShell ctx={ctx} activeCapabilityId="files" />
     </div>
   );
 }
