@@ -192,6 +192,23 @@ function renderShell(initialEntry = '/') {
   return { store, ...view };
 }
 
+/**
+ * Open More and pick a progressively disclosed Workspace capability.
+ *
+ * Base UI keeps one popup node mounted across open/close and holds it inert
+ * (`pointer-events: none`) until the open transition settles, so a click issued
+ * the moment the item appears can land on a menu that is still animating in.
+ * Wait for the popup to actually be interactive rather than sleeping.
+ */
+async function clickDisclosedCapability(name: string) {
+  await userEvent.click(screen.getByTestId('workspace-capability-more'));
+  const item = await screen.findByRole('menuitem', { name });
+  await waitFor(() => {
+    expect(item).not.toHaveStyle({ pointerEvents: 'none' });
+  });
+  await userEvent.click(item);
+}
+
 describe('SessionFirstShell', () => {
   beforeEach(() => {
     // confirmAttach persists per-Session attach profiles on confirm; clear
@@ -251,7 +268,7 @@ describe('SessionFirstShell', () => {
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 
-  it('selects a session, defaults to Terminal, then Workspace Files and Agent', async () => {
+  it('selects a session, defaults to Terminal, then switches Workspace capabilities from More', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     await userEvent.click(screen.getByTestId('session-first-open-drawer'));
@@ -259,12 +276,20 @@ describe('SessionFirstShell', () => {
     expect(screen.getByRole('heading', { name: 'Fix terminal reconnect' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    expect(screen.getByRole('tab', { name: 'Files' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('tab', { name: 'Agent' }));
+
+    // Files is the default opened capability, but this shell has no file ops
+    // (relay-only), so it holds a stable explanatory state rather than a dead
+    // slot or an arbitrary switch to another registered capability.
+    expect(screen.getByTestId('workspace-capability-unavailable')).toHaveTextContent(
+      'Files is not available here',
+    );
+
+    // Available capabilities are progressively disclosed instead of parked in
+    // permanent chrome.
+    await clickDisclosedCapability('Agent');
     expect(screen.getByTestId('agent-detail')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('tab', { name: 'Env' }));
-    expect(screen.getByTestId('env-manager')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('tab', { name: 'Claude Code' }));
+
+    await clickDisclosedCapability('Claude Code');
     expect(screen.getByTestId('claude-code-workspace')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-detail')).not.toBeInTheDocument();
   });
@@ -320,7 +345,7 @@ describe('SessionFirstShell', () => {
     await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    await userEvent.click(screen.getByRole('tab', { name: 'Env' }));
+    await clickDisclosedCapability('Env');
     expect(screen.getByTestId('env-manager')).toBeInTheDocument();
   });
 

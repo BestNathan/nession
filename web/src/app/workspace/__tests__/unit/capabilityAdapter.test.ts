@@ -3,6 +3,7 @@ import { resolveCapabilityPresences } from '@/features/capabilities';
 import {
   createLegacyWorkspaceCapabilityRegistry,
   resolveLegacyWorkspaceCapabilities,
+  resolveWorkspaceCapabilities,
 } from '../../capabilities';
 import type { WorkspaceContext } from '../../toolTypes';
 
@@ -65,5 +66,27 @@ describe('legacy WorkspaceTool capability adapter', () => {
     expect(presence.find((item) => item.capabilityId === 'session')?.level).toBe(
       'discoverable',
     );
+  });
+
+  it('adds Claude Code through a direct provider in the shipping Workspace registry', () => {
+    const result = resolveWorkspaceCapabilities(workspaceContext());
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.snapshots.map((snapshot) => snapshot.id)).toEqual([
+      'files',
+      'session',
+      'agent',
+      'env',
+      'claude-code',
+    ]);
+
+    expect(result.snapshots.find((snapshot) => snapshot.id === 'claude-code')).toMatchObject({
+      state: 'available',
+      scope: {
+        locationId: 'agent-a',
+        sessionId: 'agent-a:dev',
+      },
+      views: [{ id: 'workspace-tool:claude-code', label: 'Claude Code' }],
+    });
   });
 });

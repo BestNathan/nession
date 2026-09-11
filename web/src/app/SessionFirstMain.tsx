@@ -19,7 +19,7 @@ import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
 
-interface WorkspaceTabPanelProps {
+interface WorkspacePanelProps {
   selectedSession: Session;
   selectedAgent: Agent | undefined;
   agents: Agent[];
@@ -32,7 +32,7 @@ interface WorkspaceTabPanelProps {
   onToolChange: (tool: WorkspaceToolId) => void;
 }
 
-function WorkspaceTabPanel({
+function WorkspacePanel({
   selectedSession,
   selectedAgent,
   agents,
@@ -43,17 +43,19 @@ function WorkspaceTabPanel({
   experience,
   onSurfaceChange,
   onToolChange,
-}: WorkspaceTabPanelProps) {
+}: WorkspacePanelProps) {
+  const activeLabel = WORKSPACE_TOOLS.find((item) => item.id === tool)?.label ?? 'Workspace';
+
   return (
     <div
-      role="tabpanel"
-      id="workspace-tool-panel"
-      aria-labelledby={`workspace-tool-tab-${tool}`}
+      role="region"
+      id="workspace-capability-panel"
+      aria-label="Workspace"
       className={cn('flex min-h-0 flex-1 flex-col', surface !== 'workspace' && 'hidden')}
     >
       {experience === 'app' ? (
         <AppToolHeader
-          toolLabel={WORKSPACE_TOOLS.find((t) => t.id === tool)!.label}
+          toolLabel={activeLabel}
           onBack={() => onSurfaceChange('terminal')}
         />
       ) : null}
@@ -67,7 +69,7 @@ function WorkspaceTabPanel({
           experience,
           onToolChange,
         }}
-        activeTool={tool}
+        activeCapabilityId={tool}
       />
     </div>
   );
@@ -194,7 +196,7 @@ export function SessionFirstMain({
               </TerminalWell>
             ) : null}
             {showWorkspace && hasSession ? (
-              <WorkspaceTabPanel
+              <WorkspacePanel
                 selectedSession={selectedSession}
                 selectedAgent={selectedAgent}
                 agents={agents}
