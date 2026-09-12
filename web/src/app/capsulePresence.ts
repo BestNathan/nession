@@ -1,4 +1,16 @@
-import { resolveCapabilityPresences, type CapabilityId, type CapabilitySnapshot, type CapabilityState } from '@/features/capabilities';
+import {
+  resolveCapabilityPresences,
+  type CapabilityFacts,
+  type CapabilityId,
+  type CapabilitySnapshot,
+  type CapabilityState,
+} from '@/features/capabilities';
+import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
+import type { DomainState } from '@/features/sessions/model/domainState';
+import type { FileOps } from '@/features/files';
+import type { Agent, Session } from '@/types';
+import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
+import type { Experience, WorkspaceToolId } from '@/app/workspace/toolTypes';
 
 /** The capability the capsule may show — narrowed to the states that earn it. */
 export interface CapsuleCapabilitySelection {
@@ -68,4 +80,59 @@ export function capsuleCapabilityCandidates(
     }
     return [{ id: snapshot.id, label: snapshot.title, state: snapshot.state }];
   });
+}
+
+/** Everything the capsule presence needs from the shell, plus its two actions. */
+export interface CapsuleCapabilityInput {
+  session: Session | null;
+  agent: Agent | undefined;
+  agents: Agent[];
+  domain: DomainState | null;
+  fileOps: FileOps | null;
+  experience: Experience;
+  facts: CapabilityFacts | undefined;
+  onToolChange: (id: WorkspaceToolId) => void;
+  /** Reveal the surface the capability lives on. */
+  onSurfaceChange: () => void;
+}
+
+/**
+ * Resolve the capsule's one capability contribution, if any earned it.
+ *
+ * Same capability resolution the Workspace presentation consumes, read for the
+ * `capsule` surface: the capsule cannot invent presence the registry did not
+ * grant, and it shows at most one chip (see `selectCapsuleCapability`).
+ *
+ * Activation hands the capability back to the Workspace — the capsule reports
+ * that something is relevant here; opening it belongs to the surface that owns
+ * the capability's view.
+ */
+export function resolveCapsuleCapabilityPresence(
+  input: CapsuleCapabilityInput,
+): CapsuleCapabilityPresence | undefined {
+  const { snapshots } = resolveWorkspaceCapabilities({
+    session: input.session,
+    agent: input.agent,
+    agents: input.agents,
+    domain: input.domain,
+    fileOps: input.fileOps,
+    experience: input.experience,
+    facts: input.facts,
+    onToolChange: input.onToolChange,
+  });
+
+  const selected = selectCapsuleCapability(capsuleCapabilityCandidates(snapshots));
+  if (!selected) {
+    return undefined;
+  }
+
+  return {
+    id: selected.id,
+    label: selected.label,
+    state: selected.state,
+    onActivate: () => {
+      input.onToolChange(selected.id);
+      input.onSurfaceChange();
+    },
+  };
 }

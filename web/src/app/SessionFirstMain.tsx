@@ -1,82 +1,19 @@
 import type { ReactNode } from 'react';
-import { Menu } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/features/files';
 import type { DomainState } from '@/features/sessions/model/domainState';
-import { SessionHeader, type Surface } from '@/app/patterns/SessionHeader';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { TerminalWell } from '@/app/TerminalWell';
-import { shellIconButtonClass } from '@/app/shellStyles';
-import { AppToolHeader } from '@/app/patterns/AppToolHeader';
 import type {
   Experience,
   WorkspaceToolId,
 } from '@/app/workspace/toolTypes';
-import { WORKSPACE_TOOLS } from '@/app/workspace/tools';
-import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
-import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
+import type { Surface } from '@/app/patterns/SessionHeader';
+import { SessionMainHeader } from '@/app/SessionMainHeader';
+import { WorkspacePanel } from '@/app/WorkspacePanel';
+import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
-
-interface WorkspacePanelProps {
-  selectedSession: Session;
-  selectedAgent: Agent | undefined;
-  agents: Agent[];
-  domain: DomainState;
-  surface: Surface;
-  tool: WorkspaceToolId;
-  fileOps: FileOps | null;
-  experience: Experience;
-  onSurfaceChange: (surface: Surface) => void;
-  onToolChange: (tool: WorkspaceToolId) => void;
-}
-
-function WorkspacePanel({
-  selectedSession,
-  selectedAgent,
-  agents,
-  domain,
-  surface,
-  tool,
-  fileOps,
-  experience,
-  onSurfaceChange,
-  onToolChange,
-}: WorkspacePanelProps) {
-  const activeLabel = WORKSPACE_TOOLS.find((item) => item.id === tool)?.label ?? 'Workspace';
-  const facts = useSessionCapabilityFacts(selectedSession);
-
-  return (
-    <div
-      role="region"
-      id="workspace-capability-panel"
-      aria-label="Workspace"
-      className={cn('flex min-h-0 flex-1 flex-col', surface !== 'workspace' && 'hidden')}
-    >
-      {experience === 'app' ? (
-        <AppToolHeader
-          toolLabel={activeLabel}
-          onBack={() => onSurfaceChange('terminal')}
-        />
-      ) : null}
-      <WorkspaceShell
-        ctx={{
-          session: selectedSession,
-          agent: selectedAgent,
-          agents,
-          domain,
-          fileOps,
-          experience,
-          onToolChange,
-          facts,
-        }}
-        activeCapabilityId={tool}
-      />
-    </div>
-  );
-}
 
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
@@ -124,55 +61,32 @@ export function SessionFirstMain({
   experience = 'web',
 }: SessionFirstMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
+  const { facts, presence: capsuleCapability } = useCapsuleCapability({
+    session: selectedSession,
+    agent: selectedAgent,
+    agents,
+    domain,
+    fileOps,
+    experience,
+    onToolChange,
+    onSurfaceChange: () => onSurfaceChange('workspace'),
+  });
+
   return (
     <>
-      {hasSession ? (
-        <SessionHeader
-          sessionName={selectedSession.session_name}
-          agentLabel={
-            selectedAgent ? agentDisplayName(selectedAgent) : selectedSession.agent_id
-          }
-          state={domain}
-          surface={surface}
-          onSurfaceChange={onSurfaceChange}
-          onOpenAgent={onOpenAgent}
-          onBackToSessions={onBackToSessions}
-          onOpenDrawer={onOpenDrawer}
-          onOpenWorkspace={onOpenWorkspace}
-          serverStatus={connectionStatus}
-          experience={experience}
-        />
-      ) : (
-        <div
-          data-testid="session-resting-header"
-          className="flex shrink-0 items-center justify-between px-[var(--shell-space-4)] py-[var(--shell-space-2)]"
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={shellIconButtonClass}
-            aria-label="Open sessions"
-            data-testid="session-first-open-drawer"
-            onClick={() => onOpenDrawer?.()}
-          >
-            <Menu className="size-5" />
-          </Button>
-          {connectionStatus ? (
-            <span
-              data-testid="server-connection"
-              className={cn(
-                'font-mono text-xs',
-                connectionStatus === 'disconnected'
-                  ? 'text-agent-error'
-                  : 'text-muted-foreground',
-              )}
-            >
-              server: {connectionStatus}
-            </span>
-          ) : null}
-        </div>
-      )}
+      <SessionMainHeader
+        session={selectedSession}
+        agent={selectedAgent}
+        domain={domain}
+        surface={surface}
+        connectionStatus={connectionStatus}
+        experience={experience}
+        onSurfaceChange={onSurfaceChange}
+        onOpenAgent={onOpenAgent}
+        onBackToSessions={onBackToSessions}
+        onOpenDrawer={onOpenDrawer}
+        onOpenWorkspace={onOpenWorkspace}
+      />
       <div
         data-testid="session-first-main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
@@ -194,6 +108,7 @@ export function SessionFirstMain({
                     hidden={surface !== 'terminal' || !selectedSession}
                     onDisconnect={() => undefined}
                     onError={() => undefined}
+                    capsuleCapability={capsuleCapability}
                   />
                 )}
               </TerminalWell>
@@ -208,6 +123,7 @@ export function SessionFirstMain({
                 tool={tool}
                 fileOps={fileOps}
                 experience={experience}
+                facts={facts}
                 onSurfaceChange={onSurfaceChange}
                 onToolChange={onToolChange}
               />
