@@ -94,8 +94,8 @@
         "scrollOwner": "self"
       }
     },
-    "pattern.terminal-toolbar": {
-      "id": "pattern.terminal-toolbar",
+    "pattern.terminal-capsule": {
+      "id": "pattern.terminal-capsule",
       "patternRef": "docs/design/design-system/patterns/terminal-capsule.md",
       "extends": [
         "category.chrome",

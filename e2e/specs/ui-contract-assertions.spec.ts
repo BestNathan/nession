@@ -56,14 +56,14 @@ test.describe('assertion helpers detect deliberate violations', () => {
     await expectSingleLine(page.locator('#root'), ITEM_WEB); // wrap: true — no violation
   });
 
-  test('height: wrong control height fails, token height passes (terminal-toolbar)', async ({ page }) => {
-    const toolbar = { pattern: 'pattern.terminal-toolbar', experience: 'web' as const };
-    const expected = patternBlock(toolbar.pattern, 'web').heightTokenPx!;
+  test('height: wrong control height fails, token height passes (terminal-capsule)', async ({ page }) => {
+    const capsule = { pattern: 'pattern.terminal-capsule', experience: 'web' as const };
+    const expected = patternBlock(capsule.pattern, 'web').heightTokenPx!;
     await page.setContent(`<div id="root" style="height: ${expected}px; box-sizing: border-box;"></div>`);
-    await expectTokenHeight(page.locator('#root'), toolbar); // passes
+    await expectTokenHeight(page.locator('#root'), capsule); // passes
 
     await page.setContent(`<div id="root" style="height: ${expected + 12}px; box-sizing: border-box;"></div>`);
-    await rejectsWith(expectTokenHeight(page.locator('#root'), toolbar), 'height');
+    await rejectsWith(expectTokenHeight(page.locator('#root'), capsule), 'height');
   });
 
   test('overflow: overflowing child fails clip, contained content passes', async ({ page }) => {
