@@ -61,8 +61,8 @@ test('session-list: pattern-level scroll overrides the global clip default', () 
   assert.equal(merged.app.heightToken, undefined, 'row density stays on session-item');
 });
 
-test('terminal-toolbar: chrome + control merge; app sheet overflow wins', () => {
-  const merged = mergeContracts(REAL, TOKENS)['pattern.terminal-toolbar'];
+test('terminal-capsule: chrome + control merge; app sheet overflow wins', () => {
+  const merged = mergeContracts(REAL, TOKENS)['pattern.terminal-capsule'];
   assert.deepEqual(merged.extends, ['category.chrome', 'category.control']);
   assert.equal(merged.web.wrap, false);
   assert.equal(merged.web.heightToken, 'experience.web.control.md');
