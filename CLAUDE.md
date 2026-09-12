@@ -538,6 +538,14 @@ Mechanics and rationale: `nession-cicd` skill.
 
 **After any functional UI change, collect screenshots via Playwright MCP** to prove the feature works visually. This is mandatory before creating a PR.
 
+**⚠ If the change alters chrome that a golden screenshot captures, the visual baseline moves in the same change set.** `e2e/specs/__snapshots__/fixture-visual.spec.ts/` holds the canonical baselines (`web-workspace`, `app-terminal`, …), and `FIXTURE_SCREENSHOT.maxDiffPixelRatio = 0.02` is wide enough to swallow a whole chrome change — so a stale baseline keeps passing and the gate silently stops protecting the current UI. Measured: PR #708 replaced the Workspace tool strip with the contextual bar, and the workspace baselines (last regenerated 2026-09-02) still passed.
+
+The principle and the replace-don't-preserve rule live in `docs/design/design-system/validation.md` and `docs/design/migration.md`; this is the operational half:
+
+- Regenerate in CI only — local e2e runs are banned (§ Quality Gates), so `--update-snapshots` happens on a CI runner (`CI=true npx playwright test fixture-visual --update-snapshots`) and the new golden images are committed.
+- Never widen `maxDiffPixelRatio` to get green. If the diff cannot be explained, find the cause rather than absorbing it.
+- Baseline drift that already shipped gets its own issue (see #714) — do not leave it for the next person to rediscover.
+
 ```bash
 # 1. Start the app locally (server + agent + web)
 cargo run -p nession-server &        # :19090 ws, :10080 http
@@ -565,7 +573,7 @@ Use `mcp__playwright__browser_navigate` to open pages, `mcp__playwright__browser
 
 1. Develop in a worktree off `origin/main` (never in project root — see **Two Iron Laws**)
 2. Build & test locally: `cargo test && cd web && npm run build`
-3. **Collect screenshots** via Playwright MCP for any functional UI change
+3. **Collect screenshots** via Playwright MCP for any functional UI change, and regenerate any affected golden baseline in the same change set (see **Screenshots with Playwright**)
 4. PR to `staging` — 变更内容 + 测试报告 in the body, screenshots in a PR comment. No `Closes #N` here.
 5. `gh pr merge <PR> --auto --merge` → verify with `./scripts/deploy-watch.sh staging`
 6. Release: PR `staging` → `main` with every `Closes #<ISSUE>` in the body → `gh pr merge <PR> --merge`
