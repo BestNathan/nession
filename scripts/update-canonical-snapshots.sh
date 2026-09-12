@@ -13,11 +13,14 @@ echo "→ Building web UI"
 echo "→ Building Rust server/agent"
 cargo build -p nession-server -p nession-agent
 
-echo "→ Updating Playwright snapshots (fixture-visual only)"
+# `=all` is required: a bare `--update-snapshots` means mode "changed", which
+# still compares through maxDiffPixelRatio and only rewrites snapshots that FAIL
+# tolerance — drift smaller than the ratio is skipped with no output at all.
+echo "→ Updating Playwright snapshots (fixture-visual only, --update-snapshots=all)"
 cd e2e
 npm ci
 npx playwright install chromium --with-deps
-CI=true npx playwright test fixture-visual --update-snapshots
+CI=true npx playwright test fixture-visual --update-snapshots=all
 
 echo "→ Snapshots written to e2e/specs/__snapshots__/fixture-visual.spec.ts/"
 echo "  Review diffs, commit, and open a PR to staging."

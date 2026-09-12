@@ -1,6 +1,6 @@
 // #561 Phase 7–8 / #548 — focused visual regression for canonical fixture routes.
 // Functional assertions run first; screenshots are the drift gate afterward.
-// Baseline update: CI=true npx playwright test fixture-visual --update-snapshots
+// Baseline update: CI=true npx playwright test fixture-visual --update-snapshots=all
 import { expect, test } from '@playwright/test';
 import {
   FIXTURE_SCREENSHOT,
