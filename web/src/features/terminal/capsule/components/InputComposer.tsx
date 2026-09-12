@@ -1,5 +1,6 @@
 import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
+import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
 import { CapsuleGhostInput } from '@/features/terminal/capsule/CapsuleGhostInput';
 import {
   CapsuleInputLeading,
@@ -13,6 +14,7 @@ import { useCapsuleContext } from '@/features/terminal/capsule/state/useCapsuleC
 
 interface InputComposerProps {
   leading?: React.ReactNode;
+  capability?: CapsuleCapabilityPresence;
 }
 
 /**
@@ -20,7 +22,7 @@ interface InputComposerProps {
  * Web flat: inline field + tools. App / stacked: full-width field, toolbar below.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ leading }, ref) {
+  function InputComposer({ leading, capability }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -91,6 +93,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
               className="relative z-[1] ml-auto shrink-0"
             >
               <CapsuleInputTrailingActions
+                capability={capability}
                 historyOpen={historyOpen}
                 onHistoryOpenChange={setHistoryOpen}
                 commandsOpen={commandsOpen}
@@ -117,6 +120,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
             className="col-start-2 row-start-1 relative z-[1] shrink-0 justify-self-end"
           >
             <CapsuleInputTrailingActions
+              capability={capability}
               historyOpen={historyOpen}
               onHistoryOpenChange={setHistoryOpen}
               commandsOpen={commandsOpen}

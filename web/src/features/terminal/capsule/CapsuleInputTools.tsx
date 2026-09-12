@@ -7,9 +7,13 @@ import {
   capsuleSecondaryIconButtonClass,
 } from '@/features/terminal/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
+import { CapsuleCapability } from '@/features/terminal/capsule/components/CapsuleCapability';
+import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
 
 interface CapsuleInputActionsProps {
   leading?: React.ReactNode;
+  /** Capability that earned capsule presence, if any. At most one. */
+  capability?: CapsuleCapabilityPresence;
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
   commandsOpen: boolean;
@@ -43,6 +47,7 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
  * App uses compact secondary icons so the field keeps horizontal space.
  */
 export function CapsuleInputTrailingActions({
+  capability,
   historyOpen,
   onHistoryOpenChange,
   commandsOpen,
@@ -64,6 +69,7 @@ export function CapsuleInputTrailingActions({
 
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
+      {capability ? <CapsuleCapability capability={capability} /> : null}
       <CapsuleHistoryPopover
         open={historyOpen}
         onOpenChange={(open) => {
