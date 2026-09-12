@@ -204,6 +204,7 @@ mod tests {
             },
             window_count: 2,
             attached_clients: attached,
+            foreground_command: None,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         }

@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityFacts, CapabilityId } from '@/features/capabilities';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
@@ -23,6 +23,8 @@ export interface WorkspaceContext {
   fileOps: FileOps | null;
   experience: Experience;
   onToolChange: (id: WorkspaceToolId) => void;
+  /** Observations about the session, supplied by the app layer (never probed here). */
+  facts?: CapabilityFacts;
 }
 
 /**

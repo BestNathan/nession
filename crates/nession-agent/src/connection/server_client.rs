@@ -71,6 +71,9 @@ pub struct SessionUpdatePayload {
     pub status: String,
     pub window_count: u32,
     pub attached_clients: u32,
+    /// Foreground command of the session's active pane, when tmux reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground_command: Option<String>,
 }
 
 /// Payload for registration response from server.
@@ -191,6 +194,7 @@ impl ServerClientHandle {
         status: &str,
         window_count: u32,
         attached_clients: u32,
+        foreground_command: Option<&str>,
     ) -> Result<()> {
         let payload = SessionUpdatePayload {
             agent_id: self.agent_id.clone(),
@@ -198,6 +202,7 @@ impl ServerClientHandle {
             status: status.to_string(),
             window_count,
             attached_clients,
+            foreground_command: foreground_command.map(std::string::ToString::to_string),
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
         self.enqueue(&msg)
@@ -1015,6 +1020,7 @@ impl ServerClient {
                             "created_at": s.created_at,
                             "window_count": s.window_count,
                             "attached_clients": s.attached_clients,
+                            "foreground_command": s.foreground_command,
                         })
                     })
                     .collect();
@@ -1312,7 +1318,7 @@ mod tests {
 
         // Send session update.
         handle
-            .send_session_update("test-session", "active", 3, 1)
+            .send_session_update("test-session", "active", 3, 1, Some("claude"))
             .await
             .expect("session update failed");
 
@@ -2473,6 +2479,7 @@ mod tests {
             status: "active".to_string(),
             window_count: 3,
             attached_clients: 1,
+            foreground_command: Some("claude".to_string()),
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["agent_id"], "a1");

@@ -441,6 +441,12 @@ impl ConnectionHandler {
         )
         .unwrap_or(0);
 
+        let foreground_command = payload
+            .get("foreground_command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|command| !command.is_empty())
+            .map(std::string::ToString::to_string);
+
         let session_info = crate::registry::session::SessionInfo {
             session_id: session_id.clone(),
             agent_id: agent_id.to_string(),
@@ -448,6 +454,7 @@ impl ConnectionHandler {
             status,
             window_count,
             attached_clients,
+            foreground_command,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         };
@@ -1622,6 +1629,9 @@ impl ConnectionHandler {
                         status: crate::registry::session::SessionStatus::Detached,
                         window_count: 1,
                         attached_clients: 0,
+                        // Just created: the agent reports the pane command on
+                        // its next update.
+                        foreground_command: None,
                         created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                     };
@@ -3202,6 +3212,7 @@ pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::V
         },
         "window_count": s.window_count,
         "attached_clients": s.attached_clients,
+        "foreground_command": s.foreground_command,
         "last_activity": s.last_activity.to_rfc3339(),
     })
 }
@@ -3243,6 +3254,11 @@ fn parse_agent_sessions(
                         .and_then(serde_json::Value::as_i64)
                         .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
                         .unwrap_or(now);
+                    let foreground_command = s
+                        .get("foreground_command")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|command| !command.is_empty())
+                        .map(std::string::ToString::to_string);
                     Some(crate::registry::SessionInfo {
                         session_id: format!("{agent_id}:{name}"),
                         agent_id: agent_id.to_string(),
@@ -3254,6 +3270,7 @@ fn parse_agent_sessions(
                         },
                         window_count,
                         attached_clients,
+                        foreground_command,
                         created_at,
                         last_activity: now,
                     })
@@ -4090,6 +4107,7 @@ mod tests {
                                 "window_count": 2,
                                 "attached_clients": 1,
                                 "created_at": 1000,
+                                "foreground_command": "claude",
                             },
                         ],
                     }),
@@ -4108,6 +4126,10 @@ mod tests {
         assert_eq!(sessions[0]["session_id"], "a1:real");
         assert_eq!(sessions[0]["status"], "active");
         assert_eq!(sessions[0]["window_count"], 2);
+        assert_eq!(
+            sessions[0]["foreground_command"], "claude",
+            "the agent-reported pane command must survive the refresh into the wire payload"
+        );
         assert!(reply["payload"]["stale_agents"]
             .as_array()
             .unwrap()
@@ -4115,6 +4137,27 @@ mod tests {
     }
 
     // ---- parse_agent_sessions ----
+    #[test]
+    fn parse_agent_sessions_reads_the_foreground_command() {
+        let resp = json!({
+            "sessions": [
+                { "name": "running", "window_count": 1, "attached_clients": 1, "created_at": 1, "foreground_command": "claude" },
+                { "name": "empty", "window_count": 1, "attached_clients": 0, "created_at": 1, "foreground_command": "" },
+                { "name": "missing", "window_count": 1, "attached_clients": 0, "created_at": 1 },
+            ],
+        });
+        let sessions = parse_agent_sessions("a1", &resp);
+        assert_eq!(sessions[0].foreground_command.as_deref(), Some("claude"));
+        assert_eq!(
+            sessions[1].foreground_command, None,
+            "an empty command is no observation"
+        );
+        assert_eq!(
+            sessions[2].foreground_command, None,
+            "an absent field is tolerated"
+        );
+    }
+
     #[test]
     fn parse_agent_sessions_derives_status_from_attached_clients() {
         let resp = json!({

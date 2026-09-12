@@ -2,6 +2,7 @@ export type {
   CapabilityAction,
   CapabilityContext,
   CapabilityDefinition,
+  CapabilityFacts,
   CapabilityId,
   CapabilityScope,
   CapabilitySnapshot,
@@ -23,3 +24,4 @@ export {
   type CapabilityPresenceLevel,
   type PresenceContext,
 } from './presence';
+export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';
