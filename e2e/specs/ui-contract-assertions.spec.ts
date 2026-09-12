@@ -153,6 +153,20 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     }
   });
 
+  test('web: a healthy session header keeps infrastructure context quiet', async ({ page }) => {
+    await page.goto('/#/fixture');
+    const header = page.getByTestId('session-header-line');
+    await expect(header).toBeVisible();
+
+    // Identity and non-gesture navigation are permanent; healthy infrastructure
+    // is not — a member that carries nothing actionable must not occupy space.
+    await expect(page.getByTestId('agent-context')).toHaveCount(0);
+    await expect(page.getByTestId('connection-status')).toHaveCount(0);
+    await expect(page.getByTestId('server-connection')).toHaveCount(0);
+    await expect(page.getByTestId('session-first-open-drawer')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Workspace' })).toBeVisible();
+  });
+
   test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {
     await page.goto('/#/fixture/workspace');
     const bar = page.getByTestId('workspace-tool-bar');
