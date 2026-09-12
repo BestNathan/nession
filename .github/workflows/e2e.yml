@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       update_visual_snapshots:
-        description: 'Regenerate canonical visual baselines (download artifact and commit PNGs)'
+        description: 'Regenerate canonical visual baselines with --update-snapshots=all (download artifact and commit PNGs)'
         type: boolean
         default: false
   push:
@@ -71,7 +71,13 @@ jobs:
         run: |
           cd e2e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
-            npx playwright test fixture-visual --update-snapshots
+            # `=all` is required, not optional. A bare `--update-snapshots` means
+            # mode "changed", which still compares through maxDiffPixelRatio and
+            # only rewrites snapshots that FAIL tolerance — a chrome change small
+            # enough to sit inside the 2% ratio is silently left alone, and the
+            # run logs nothing to say so. That is how the Workspace baselines
+            # stayed stale through the contextual-bar change (#714).
+            npx playwright test fixture-visual --update-snapshots=all
           else
             npx playwright test
           fi

@@ -285,8 +285,12 @@ After an **intentional** visual change to a canonical screen:
 ```bash
 ./scripts/update-canonical-snapshots.sh
 # or manually:
-cd e2e && CI=true npx playwright test fixture-visual --update-snapshots
+cd e2e && CI=true npx playwright test fixture-visual --update-snapshots=all
 ```
+
+`=all` is required: a bare `--update-snapshots` means mode `changed`, which still
+compares through `maxDiffPixelRatio` and rewrites only what fails tolerance — drift
+smaller than the ratio is skipped silently.
 
 Review the diff, commit updated PNGs, and note the visual change in the PR. CI uploads `visual-snapshot-diffs` artifacts on failure.
 
