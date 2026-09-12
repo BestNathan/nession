@@ -14,6 +14,7 @@ export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityCon
     sessionId: ctx.session?.session_id,
     locationId: ctx.agent?.agent_id ?? ctx.session?.agent_id,
     surface: 'workspace',
+    facts: ctx.facts,
   };
 }
 

@@ -30,6 +30,11 @@ export interface Session {
   status: 'active' | 'detached' | 'zombie';
   window_count: number;
   attached_clients: number;
+  /**
+   * Foreground command of the session's active pane, as reported by the agent.
+   * Absent when the agent does not report one (older agent, or no pane).
+   */
+  foreground_command?: string | null;
   last_activity: string; // ISO 8601 timestamp
 }
 

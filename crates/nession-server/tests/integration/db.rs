@@ -56,6 +56,7 @@ fn make_session_info(id: &str, agent: &str, name: &str) -> SessionInfo {
         status: SessionStatus::Active,
         window_count: 1,
         attached_clients: 0,
+        foreground_command: None,
         created_at: Utc::now(),
         last_activity: Utc::now(),
     }

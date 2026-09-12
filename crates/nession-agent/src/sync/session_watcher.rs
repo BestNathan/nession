@@ -113,7 +113,10 @@ impl SessionWatcher {
             for name in self.prev_sessions.keys() {
                 if !current_sessions.iter().any(|s| s.name == *name) {
                     debug!("Reporting stale session as gone: {}", name);
-                    let _ = self.handle.send_session_update(name, "gone", 0, 0).await;
+                    let _ = self
+                        .handle
+                        .send_session_update(name, "gone", 0, 0, None)
+                        .await;
                 }
             }
 
@@ -165,7 +168,9 @@ impl SessionWatcher {
             if !current_map.contains_key(name) {
                 debug!("Session removed: {}", name);
                 // Send a "removed" update with status "gone".
-                self.handle.send_session_update(name, "gone", 0, 0).await?;
+                self.handle
+                    .send_session_update(name, "gone", 0, 0, None)
+                    .await?;
             }
         }
 
@@ -190,6 +195,7 @@ impl SessionWatcher {
                 status,
                 session.window_count,
                 session.attached_clients,
+                session.foreground_command.as_deref(),
             )
             .await?;
 
@@ -208,6 +214,7 @@ fn session_changed(prev: &SessionInfo, current: &SessionInfo) -> bool {
         || prev.attached_clients != current.attached_clients
         || prev.width != current.width
         || prev.height != current.height
+        || prev.foreground_command != current.foreground_command
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +233,7 @@ mod tests {
             attached_clients: attached,
             width: 80,
             height: 24,
+            foreground_command: None,
         }
     }
 
@@ -256,6 +264,20 @@ mod tests {
     fn test_session_changed_no_change() {
         let session = make_session("test", 1, 2);
         assert!(!session_changed(&session, &session));
+    }
+
+    #[test]
+    fn test_session_changed_detects_foreground_command_change() {
+        // A foreground command change is the whole point of carrying the field:
+        // without it here, starting or leaving Claude Code never reaches the UI.
+        let prev = make_session("test", 0, 1);
+        let mut current = prev.clone();
+        current.foreground_command = Some("claude".to_string());
+        assert!(session_changed(&prev, &current));
+
+        let mut back_to_shell = current.clone();
+        back_to_shell.foreground_command = Some("bash".to_string());
+        assert!(session_changed(&current, &back_to_shell));
     }
 
     #[test]
