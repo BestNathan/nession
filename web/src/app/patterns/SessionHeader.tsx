@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
+import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
 import type { ConnectionState } from '@/services/socket';
 
 export type { Surface };
@@ -69,6 +70,7 @@ export function SessionHeader({
   serverStatus,
   experience = 'web',
 }: SessionHeaderProps) {
+  const chrome = resolveSessionChrome(state);
   const title = (
     <h1 className="min-w-0 truncate font-mono text-base font-semibold">{sessionName}</h1>
   );
@@ -88,7 +90,9 @@ export function SessionHeader({
           : null}
         {title}
         <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
-          <SessionConnectionStatus state={state} />
+          {chrome.agent !== 'quiet' || chrome.connection !== 'quiet' ? (
+            <SessionConnectionStatus state={state} />
+          ) : null}
         </div>
         {onOpenWorkspace ? (
           <Button
@@ -137,11 +141,15 @@ export function SessionHeader({
       </div>
       <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
-          <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
-          <SessionConnectionStatus state={state} />
+          {chrome.agent !== 'quiet' ? (
+            <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
+          ) : null}
+          {chrome.connection !== 'quiet' ? (
+            <SessionConnectionStatus state={state} includeAgent={false} />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {serverStatus ? (
+          {serverStatus && serverStatus !== 'connected' ? (
             <span
               data-testid="server-connection"
               className={cn(

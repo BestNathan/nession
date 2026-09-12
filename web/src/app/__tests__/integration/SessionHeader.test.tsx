@@ -15,7 +15,7 @@ const offline: DomainState = {
 };
 
 describe('SessionHeader', () => {
-  it('shows session name, quiet agent identity, and surface switcher', async () => {
+  it('shows session identity and navigation, and keeps healthy infrastructure quiet', async () => {
     const onSurface = vi.fn();
     render(
       <SessionHeader
@@ -29,7 +29,7 @@ describe('SessionHeader', () => {
     );
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
     expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-context')).toHaveTextContent('devbox-01');
+    expect(screen.queryByTestId('agent-context')).not.toBeInTheDocument();
     expect(screen.queryByText('Agent offline')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
     expect(onSurface).toHaveBeenCalledWith('workspace');
@@ -99,7 +99,7 @@ describe('SessionHeader', () => {
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the server micro-status when provided', () => {
+  it('keeps a connected server out of the header', () => {
     render(
       <SessionHeader
         sessionName="s"
@@ -111,7 +111,7 @@ describe('SessionHeader', () => {
         serverStatus="connected"
       />,
     );
-    expect(screen.getByTestId('server-connection')).toHaveTextContent('server: connected');
+    expect(screen.queryByTestId('server-connection')).not.toBeInTheDocument();
   });
 
   it('marks the server micro-status with the error tone when disconnected', () => {

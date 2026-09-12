@@ -24,7 +24,7 @@ describe('SessionHeader app branch', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a single row: sessions, name, state fragment, workspace', () => {
+  it('renders a single row: sessions, name, workspace — and no status while healthy', () => {
     render(
       <SessionHeader
         {...base}
@@ -37,8 +37,22 @@ describe('SessionHeader app branch', () => {
     expect(screen.getByTestId('app-header-sessions')).toBeInTheDocument();
     expect(screen.getByTestId('app-header-workspace')).toBeInTheDocument();
     expect(screen.getByText('fix-terminal-reconnect')).toBeInTheDocument();
-    // state fragment survives compression (no status collapsing)
-    expect(screen.getByTestId('connection-status')).toHaveTextContent(/online/);
+    // Healthy + redundant infrastructure is quiet: the status line exists only
+    // when it has something the user can act on.
+    expect(screen.queryByTestId('connection-status')).not.toBeInTheDocument();
+  });
+
+  it('renders the status line when the agent is unreachable', () => {
+    render(
+      <SessionHeader
+        {...base}
+        state={{ ...healthy, agent: { channel: 'offline', copy: 'Agent offline' } }}
+        experience="app"
+        onOpenDrawer={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('connection-status')).toHaveTextContent(/offline/);
   });
 
   it('omits the sessions and workspace buttons when callbacks are absent', () => {

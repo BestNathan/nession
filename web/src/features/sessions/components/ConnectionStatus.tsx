@@ -46,17 +46,33 @@ function fragmentClass(stateClass: string): string {
   return cn('text-muted-foreground', stateClass);
 }
 
-/** Compact single-line form: values joined by ·; healthy = fully muted (P3). */
-export function ConnectionStatus({ state }: { state: DomainState }) {
+/**
+ * Compact single-line form: values joined by ·; healthy = fully muted (P3).
+ *
+ * `includeAgent` exists because the surface decides who reports the agent: the
+ * Web header has a dedicated agent member, so repeating the channel here would
+ * state the same fact twice. Surfaces without one keep it.
+ */
+export function ConnectionStatus({
+  state,
+  includeAgent = true,
+}: {
+  state: DomainState;
+  includeAgent?: boolean;
+}) {
   return (
     <div
       data-testid="connection-status"
       className="truncate flex min-w-0 items-center gap-1 text-xs"
     >
-      <span data-testid="channel-agent" className={fragmentClass(agentValueClass(state.agent.channel))}>
-        {state.agent.channel}
-      </span>
-      <span className="text-muted-foreground/40">·</span>
+      {includeAgent ? (
+        <>
+          <span data-testid="channel-agent" className={fragmentClass(agentValueClass(state.agent.channel))}>
+            {state.agent.channel}
+          </span>
+          <span className="text-muted-foreground/40">·</span>
+        </>
+      ) : null}
       <span data-testid="channel-session" className={fragmentClass(sessionValueClass(state.session.channel))}>
         {state.session.copy ?? state.session.channel}
       </span>
