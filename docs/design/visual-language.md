@@ -1,187 +1,213 @@
 # Visual Language
 
-What Nession looks like and why: the product visual principles, the typography / surface / density hierarchy systems, and the visual emphasis levels that let a screen say what must dominate and what must recede.
+> Upstream: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md) → [product-model.md](product-model.md) → [information-architecture.md](information-architecture.md) → [interaction](interaction/)
 
-**Umbrella:** [#561](https://github.com/BestNathan/nession/issues/561)
-**Upstream:** [product-model.md](product-model.md) · [information-architecture.md](information-architecture.md) · [interaction/web.md](interaction/web.md) · [interaction/app.md](interaction/app.md)
-**Downstream:** [composition.md](composition.md) · [design-system/tokens.md](design-system/tokens.md) · [design-system/patterns.md](design-system/patterns.md) · [design-system/contracts.md](design-system/contracts.md)
-**Status:** Phase 1 of #561 — vocabulary and rules. Exact values are locked only after the canonical screens (Phase 2) approve them; the screens are the approval vehicle.
+This document defines how Nession makes hierarchy visible: what dominates, what recedes, how state gains emphasis, and how a minimal interface still feels refined rather than unfinished.
 
-## Position in the chain
-
-```text
-Product Model
-      ↓
-Information Architecture
-      ↓
-Interaction Model
-      ↓
-Visual Language             ← this document
-      ↓
-Layout / Composition
-      ↓
-Design Tokens
-      ↓
-Component Recipes
-      ↓
-Patterns
-      ↓
-Implementation
-```
-
-## What this document owns
-
-- What must dominate and what must recede, and why — the product visual principles.
-- Typography, surface, and density hierarchy systems.
-- Visual emphasis levels and state-driven emphasis rules.
-
-It does **not** own page geometry ([composition.md](composition.md)), token values ([tokens.md](design-system/tokens.md), #467), measurable rules ([contracts.md](design-system/contracts.md), #545), or component internals ([patterns.md](design-system/patterns.md), #470).
+It owns visual hierarchy and relative treatment. Exact values live in [design-system/tokens.md](design-system/tokens.md), layout relationships in [composition.md](composition.md), and measurable rules in [design-system/contracts.md](design-system/contracts.md).
 
 ## The Nession signal
 
-> **Terminal dominates. Chrome recedes. Healthy status stays quiet. Workspace augments the Session.**
+> **Work dominates. Chrome recedes. Capabilities earn presence. Healthy infrastructure stays quiet. Precision creates quality.**
 
-Nession is a **precision instrument**, not a consumer app: dark, compact, terminal-native. The UI is a frame around the terminal, and the frame is styled as if it could render inside the terminal itself — flat surfaces, hairline separators, monospace where labels name code — built on platform primitives underneath. When a frame part competes with the terminal, the frame part is wrong.
+For the current Session-first experience, Terminal is the dominant live work surface. That does not mean every future Nession surface must look like terminal chrome; it means the current work always receives the strongest visual weight.
 
-Carried forward from the 2026-08-08 UI design protocol: heavy dark canvas, high contrast for terminal content, a single accent, and a visual hierarchy of `Terminal > Workspace > Metadata > Chrome`.
+Nession should feel calm and deliberate even when the system behind it is distributed and capable. The interface should absorb complexity rather than advertise it.
 
-## 1. Product visual principles
+## Product visual principles
 
-**P1 — Terminal dominates.** The Terminal surface is the strongest visual weight in the app. When the Active Surface is Terminal, nothing else on screen is brighter, larger, or more attention-drawing.
+### P1 — Current work dominates
 
-**P2 — Chrome recedes.** Session navigation, headers, and switchers exist to serve the work surface. They are quiet by construction: restrained contrast, no decorative color, minimal size.
+The active work surface receives the strongest visual weight and the majority of usable space.
 
-**P3 — Healthy is quiet; degraded gains emphasis.** `agent.online` renders as identity, not as a badge. Emphasis appears only when a domain condition threatens reachability or work: Agent offline/reconnecting/error, attachment `failed`, Session `exited`. The system never advertises health.
+When Terminal is active, nothing in surrounding chrome should compete with terminal output. When the user explicitly opens Workspace or a deeper capability surface, the new context may become locally dominant while preserving Session continuity.
 
-**P4 — One dominant action per region.** Each region has at most one primary action; everything else is secondary, ghost, or progressively disclosed. Two competing primary actions in one region is a visual-language error.
+### P2 — Chrome recedes
 
-**P5 — Spacing groups; borders are exceptional.** Group related content with whitespace first. Borders, containers, and cards appear only when whitespace alone cannot separate — and a background shift is preferred over a border even then.
+Navigation, headers, infrastructure metadata, and switching controls exist to support work. They should be restrained in contrast, size, and persistence.
 
-**P6 — Color communicates state or action, not decoration.** Accent appears where the user acts (selection, primary action) or where the system needs attention (degraded states). It never decorates chrome, rows, or marks.
+A control that can be reached on demand does not need to remain permanently visible.
 
-**P7 — Metadata yields to workload.** Secondary text (Agent host, recency, tool labels) never competes with its region's primary content: the Session name, the terminal output, the file being edited.
+### P3 — Capabilities earn presence from context
 
-**P8 — Disclose progressively, never occupy permanently.** Secondary controls hide behind hover, focus, selection, or menus. A healthy row shows no kill button; a healthy header shows no alarm.
+Do not visually advertise every available extension.
 
-**P9 — Empty space is intentional.** Whitespace is a hierarchy tool: chrome is sized so the work surface keeps the majority of the frame, and content is never stretched to fill space that should stay empty.
-
-**P10 — Hierarchy over uniformity.** Consistency means every region obeys the same *relative* rules, not that everything is the same size. A row's primary text differs from its metadata by design; two regions with the same role use the same treatment.
-
-## 2. Typography hierarchy
-
-Roles are semantic, not raw sizes. A role defines relative emphasis, weight, line height, contrast, and where it may appear; the concrete values resolve through Experience tokens when #467 extends into type and are validated by the canonical screens.
-
-| Role | Emphasis | Weight | Line height | Contrast | Appears when |
-|------|----------|--------|-------------|----------|--------------|
-| Product / page title | Secondary | Bold | Loose | Secondary | Only outside the working shell: login, settings, dialogs. No persistent product wordmark in the shell |
-| Active Session title | Primary | Semi-bold | Tight | Highest in chrome | [SessionHeader](design-system/patterns/session-header.md); the only primary text in the header |
-| Section title | Secondary | Semi-bold | Tight | Secondary | Workspace tool headers, dialog titles, list group labels |
-| Primary content | Primary | Regular | Normal | Highest in region | Session name in [SessionItem](design-system/patterns/session-item.md); a region's hero text |
-| Secondary content | Secondary | Regular | Normal | Secondary | SessionItem metadata line; supporting text below a primary |
-| Metadata | Tertiary | Regular | Normal | Tertiary | Recency, Agent host, captions — never larger than secondary |
-| Caption | Tertiary | Regular | Normal | Tertiary | Helper text, tooltips, keyboard hints |
-| Code / terminal / mono | Independent | Regular | Normal | As its surface needs | Terminal text, file paths, commands, editor code |
-
-Rules:
-
-- **R-T1** A region carries at most one primary-level text. Two primaries in one region (e.g. Session name and Agent name at equal weight) is a hierarchy failure.
-- **R-T2** Mono signals code and terminal identity: paths, commands, session names in terminal contexts, editor content. Mono is never decoration.
-- **R-T3** Metadata is never larger or heavier than the secondary content it annotates.
-- **R-T4** Web and App share the same roles. App scales sizes for touch density and safe-area reading; it never reorders roles or invents new ones.
-- **R-T5** Terminal text is not chrome typography. xterm + Catppuccin own it ([web/CLAUDE.md](../../web/CLAUDE.md)); this hierarchy governs the UI around it, not the terminal glyphs themselves.
-
-## 3. Surface hierarchy
-
-Named surfaces, and the preferred mechanism that separates each from its neighbors.
-
-Separation ladder — prefer the weakest cue that works, in this order:
+Capability presence should track product state:
 
 ```text
-whitespace  >  background shift  >  border  >  radius  >  shadow / elevation
+unavailable -> available -> relevant -> active
 ```
 
-Never stack more than two separation cues on the same edge by default.
+Routine availability is quiet. Relevance can create a contextual affordance. Activity can create lightweight presence. Full capability UI is explicitly opened.
 
-| Surface | Role | Default separation |
-|---------|------|---------------------|
-| App canvas | Ground of the app | None — the base background |
-| Navigation surface | Sessions drawer | Same canvas; hairline separator (terminal-native) |
-| Workspace ground tier | Workspace tool content — one step darker than canvas (`--muted` tier, `bg-muted/40`); canvas → workspace → terminal darkening ladder | Background shift vs canvas |
-| Primary work surface | Terminal | **Flush**; the darkest surface; no border, no card, no radius |
-| Floating control surface | Terminal input capsule + workspace tool bar (same capsule family); floating actions | Elevation (shadow); no border |
-| Popover / overlay | Menu, sheet, dialog | Elevation over a dimmed canvas; contained radius |
-| Destructive / warning surface | Confirm dialog, error state | Background tint + text color; no glow, no border stack |
+### P4 — Progressive disclosure is visible hierarchy
+
+The first layer communicates only what is needed now. Secondary state, commands, configuration, history, and advanced controls appear at deeper interaction levels.
+
+Visual density must not become a substitute for discoverability.
+
+### P5 — One dominant action per region
+
+A region should have one clear primary intent. Other actions remain secondary, ghost, contextual, or hidden until requested.
+
+The TerminalCapsule, for example, should read first as one input surface rather than as a row of equally important buttons.
+
+### P6 — Healthy is quiet; degraded gains emphasis
+
+Healthy infrastructure is identity/context, not an achievement badge.
+
+Agent/location reconnecting, attachment failure, Session exit, and other states that threaten continuity may gain prominence. The rest of the interface should not become louder with them.
+
+### P7 — Spacing and hierarchy before containers
+
+Group related information with whitespace, alignment, typography, and background relationship before adding borders, cards, or shadows.
+
+Use the weakest separation cue that works:
+
+```text
+whitespace -> background shift -> border -> radius -> elevation
+```
+
+Floating controls and overlays may use elevation because their spatial role requires it.
+
+### P8 — Color communicates state or action
+
+Color should communicate selection, action, or state. It should not decorate generic chrome or give every extension a competing brand identity.
+
+Capability-specific branding may appear as subtle identity where useful, but the surrounding control language remains Nession's.
+
+### P9 — Precision creates the premium feeling
+
+Minimal does not mean primitive.
+
+Quality comes from exact spacing, alignment, typography, stable geometry, focus behavior, motion timing, state transitions, touch/pointer targets, and consistent feedback.
+
+A quiet component with excellent details is preferable to a visually busy component trying to signal sophistication.
+
+### P10 — Empty space is intentional
+
+Unused space belongs to the work, not to decoration or expanding chrome. On larger screens, extra space should generally increase breathing room or work-surface capacity rather than widen navigation.
+
+## Typography hierarchy
+
+Typography roles are semantic and relative.
+
+| Role | Visual intent | Typical use |
+|------|---------------|-------------|
+| Work / local primary | Highest within region | Session name, active file, current capability title, focused input |
+| Secondary | Supporting but fully readable | supporting labels, secondary actions |
+| Metadata | Quiet | Agent/location, recency, status details |
+| Caption | Lowest readable hierarchy | helper text, keyboard hints |
+| Code / terminal / mono | Workload-specific | terminal text, paths, commands, code |
 
 Rules:
 
-- **R-S1** The Terminal is not a box. The hero surface is flush and borderless; its content *is* the terminal.
-- **R-S2** Selection uses one coherent cue. Do not stack background + border + shadow + accent on a selected row (the [SessionItem](design-system/patterns/session-item.md) anti-pattern).
-- **R-S3** Bordered cards group *content* where whitespace fails (e.g. editor pane separators in Files) — never rows, headers, or the terminal.
-- **R-S4** Overlays dim the canvas; they do not recolor the chrome behind them.
-- **R-S5** Healthy chrome never elevates: no shadows on headers, sidebars, or rows in the default state. Elevation is reserved for floating controls and overlays.
-- **R-S6** Approved canonical screen (2026-09-01, #561 Phase 2A): navigation separates by hairline on the same canvas, not by a background block. This overrides the separation ladder's background-shift preference for navigation surfaces. Background blocks remain reserved for the work surface and state-driven surfaces.
+- one region should not contain multiple competing primary text roles;
+- metadata never outweighs the thing it describes;
+- monospace communicates code/terminal identity, not decoration;
+- Web and App share semantic roles while Experience tokens may change sizes/hit areas;
+- terminal glyph rendering remains owned by the terminal surface rather than chrome typography.
 
-## 4. Density hierarchy
+## Surface hierarchy
 
-One density everywhere is as wrong as equal contrast everywhere. Density is a hierarchy signal: the more a surface supports focused work, the denser it is; the more it supports scanning or input, the more relaxed.
-
-| Context | Density | Rationale |
-|---------|---------|-----------|
-| Session navigation | Comfortable, scannable | Rows are read quickly; generous row height, quiet chrome |
-| Terminal work surface | **Densest** | The work itself; surrounding chrome must not inflate it |
-| Workspace tools | Dense | File trees, editors, detail surfaces |
-| Forms / dialogs | Relaxed | Reading and input comfort |
-| Metadata / status | Compact | Quiet by size as well as by contrast |
-| Floating controls | Compact | Single-line capsule; does not grow with content |
-| App touch interactions | Touch-target density | `experience.app.touchTarget.min` and larger hit areas, per platform |
+| Surface | Role | Default treatment |
+|---------|------|-------------------|
+| App/Web canvas | Base product ground | quiet, minimal separation |
+| Active work surface | Terminal/current work | maximum usable area; Terminal is flush and borderless |
+| Workspace context | contextual depth | subtle surface relationship; content-driven |
+| Floating interaction | TerminalCapsule/contextual control | contained surface with restrained elevation |
+| Capability overlay/panel | explicitly requested depth | elevated or layered, without redefining global shell |
+| Popover/dialog | temporary action/detail | contained + elevated |
+| Warning/error | continuity-threatening state | local state emphasis, not global decorative alarm |
 
 Rules:
 
-- **R-D1** Density follows role, not preference. A component does not choose its density; its surface does.
-- **R-D2** Chrome density never compresses the terminal. Chrome is sized by its own content, never by viewport pressure.
-- **R-D3** Web/App density differences are Experience token ids (#467) — never ad-hoc `if (mobile)` metrics in components (see [contracts.md](design-system/contracts.md) inheritance).
+- Terminal is not a card.
+- Do not stack background + border + shadow + accent for one selection.
+- Persistent healthy chrome should not use elevation.
+- Extension content may be visually distinct inside its own detail view, but global chrome remains coherent.
 
-## 5. Visual emphasis
+## Density hierarchy
 
-Explicit levels patterns and screens use to map content. Every visual element in a healthy screen should be classifiable.
+Density follows the work being performed, not a single app-wide preference.
 
-| Level | Used for | Treatment |
-|-------|----------|-----------|
-| `primary` | A region's hero text or action | Highest contrast in the region; the only element allowed accent color (P4) |
-| `secondary` | Supporting text, secondary actions | Quiet but fully readable |
-| `tertiary` | Metadata, captions | Near-floor contrast |
-| `quiet` | Healthy status, chrome decoration | Present but not perceived; never below accessibility floor |
-| `conditional-prominent` | State-driven escalation | Quiet by default; jumps to `primary` treatment when its condition holds |
+| Context | Density intent |
+|---------|----------------|
+| Terminal | dense work content |
+| Workspace resource tools | dense where information-rich |
+| Session navigation | comfortable and scannable |
+| Forms / configuration | relaxed enough for comprehension |
+| Metadata | compact |
+| TerminalCapsule | compact at rest, expands only when input/context requires |
+| App touch controls | adequate touch-target density |
 
-Rules:
+Chrome should yield before the work surface yields.
 
-- **R-E1** Emphasize problems, not facts. Healthy states live at `quiet` / `tertiary`; degraded states take `conditional-prominent`.
-- **R-E2** Escalation is additive and specific: the failing channel gains prominence, the others stay (Agent `offline` grows [AgentContext](design-system/patterns/agent-context.md); the Session title and attachment channels remain).
-- **R-E3** Alarm treatment (danger surfaces, error banners) never appears for healthy or merely informational states.
-- **R-E4** Motion is subtle and state-driven; it communicates change, never celebrates it.
+## State-driven emphasis
 
-Canonical state-driven emphasis (the mapping patterns should quote):
+Emphasize what changes the user's ability to continue working.
 
-| Domain condition | Emphasis change | Where |
-|------------------|-----------------|-------|
-| `agent.online` | `quiet` — identity only, no badge | [AgentContext](design-system/patterns/agent-context.md) |
-| `agent.reconnecting` | `conditional-prominent`, medium | AgentContext phrase |
-| `agent.offline` / `agent.error` | `conditional-prominent`, high — phrase + tint | AgentContext |
-| `session.exited` | name treatment drops a level | [SessionItem](design-system/patterns/session-item.md) |
-| `attachment.failed` | `conditional-prominent`, local | [ConnectionStatus](design-system/patterns/connection-status.md) attachment channel |
-| All healthy | nothing gains emphasis | Default shell |
+Examples:
 
-## 6. How this document is enforced
+| Condition | Default visual response |
+|-----------|-------------------------|
+| Agent/location healthy | quiet identity/context |
+| reconnecting | local medium emphasis |
+| offline/error | local high emphasis where reachability matters |
+| Session exited | Session identity/state changes clearly |
+| attachment failed | local actionable emphasis |
+| capability available | quiet / discoverable only when useful |
+| capability relevant | contextual affordance may appear |
+| capability active | lightweight presence; deeper UI only on request |
 
-- **Phase 2 (#561):** the canonical screens (Web Active Terminal 1440×900, Web Workspace 1440×900, App Active Terminal 390×844) are the approval vehicle for every rule and value in this document. A rule that the screens cannot demonstrate is not a rule.
-- **Phase 4 (#561):** pattern specs gain Visual Contract sections that quote the emphasis levels and anti-patterns from this document.
-- **Phase 6–7 (#561):** golden screenshots capture the approved composition; CI protects it from drift. Visual regression prevents accidental change; it does not decide whether a design is good.
-- **Contracts (#545):** measurable rules may reference hierarchy only where measurable; taste stays in prose.
+## Contextual interaction surfaces
 
-## 7. What this document does not own
+The TerminalCapsule is the primary example of a control that should feel sophisticated without becoming busy.
 
-- Page geometry, insets, and rhythm → [composition.md](composition.md).
-- Values (sizes, colors, radii) → [tokens.md](design-system/tokens.md) / #467.
-- Measurable layout rules → [contracts.md](design-system/contracts.md) / #545.
-- Component internals → [patterns.md](design-system/patterns.md) / #470.
-- A second palette, or branded forks of generic primitives — never. Identity lives in these rules and in patterns, not in a custom button kit ([components.md](design-system/components.md)).
+Its resting state should have a stable silhouette and few visible controls. `+`, shortcuts, capability identity, or secondary actions should appear progressively. When a capability becomes active, Nession can acknowledge it with precise, lightweight presence rather than immediately opening a large panel.
+
+Workspace follows the same rule at a broader depth: rich capability does not justify a rich permanent navigation bar.
+
+## Motion
+
+Motion communicates spatial relationship, state transition, and continuity.
+
+Use it to clarify:
+
+- Session/Workspace spatial transitions;
+- capability presence appearing/disappearing;
+- capsule expansion;
+- overlay/panel depth;
+- reconnect/recovery state change.
+
+Motion should be subtle and interruptible. Routine actions do not need celebratory animation.
+
+## Anti-patterns
+
+- feature grids or tab bars used mainly to advertise capability;
+- one accent color per extension in global chrome;
+- multiple primary actions in one small control region;
+- disabled permanent entries for unavailable capabilities;
+- excessive cards, borders, shadows, or gradients used to manufacture "premium" appearance;
+- infrastructure metadata visually competing with the work;
+- permanent stacked chrome that reduces Terminal space;
+- preserving an old approved screenshot when it now contradicts Vision or Principles.
+
+## Enforcement
+
+Use this document as qualitative visual guidance. Measurable pieces should be expressed through tokens/contracts/validation only after the product relationship is stable.
+
+Canonical screenshots and regression tests protect an approved implementation from accidental drift; they do **not** outrank [`VISION.md`](../../VISION.md) or [`PRINCIPLE.md`](../../PRINCIPLE.md). When the product model changes intentionally, update the screenshot/contract baseline rather than treating an old baseline as immutable product truth.
+
+## Ownership boundaries
+
+- product direction → [`VISION.md`](../../VISION.md)
+- product decision rules → [`PRINCIPLE.md`](../../PRINCIPLE.md)
+- product concepts → [product-model.md](product-model.md)
+- IA → [information-architecture.md](information-architecture.md)
+- interaction → [interaction/](interaction/)
+- Workspace semantics → [workspace.md](workspace.md)
+- page geometry → [composition.md](composition.md)
+- values → [design-system/tokens.md](design-system/tokens.md)
+- measurable layout rules → [design-system/contracts.md](design-system/contracts.md)
+- component/pattern internals → [design-system/patterns.md](design-system/patterns.md)

@@ -1,153 +1,187 @@
 # ConnectionStatus
 
-Atom for **independent** presentation of the three domain dimensions. Other patterns compose it; they must not invent a fused “session.running / session.failed” light.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [product model](../../product-model.md) → [information architecture](../../information-architecture.md)
+
+ConnectionStatus is a reusable state pattern for presenting **independent continuity dimensions without collapsing them into one generic status**.
+
+It does not require all dimensions to be permanently visible. It shows the smallest set of state that matters to the current work and reveals deeper detail on demand.
 
 ## Purpose
 
-Make Agent connection, Session lifecycle, and this-client attachment readable as three facts ([product-model.md](../../product-model.md), [tokens.md](../tokens.md)).
+Preserve semantic truth when Nession needs to explain why work is reachable, degraded, detached, or ended.
 
-Used compactly in [SessionHeader](session-header.md) / [AgentContext](agent-context.md) neighbors, and more explicitly in [AgentDetail](agent-detail.md). [SessionItem](session-item.md) may use a reduced form for reachability.
+Current dimensions are:
+
+```text
+Agent / Workspace Location connectivity
+Session lifecycle
+this-client attachment
+```
+
+These facts can coexist independently.
+
+## Contextual presentation
+
+The full model may contain all three dimensions, but the UI should not automatically render three badges everywhere.
+
+```text
+healthy + redundant
+    -> may show nothing
+
+one degraded dimension
+    -> show that affected dimension
+
+ambiguous recovery / explicit detail
+    -> show two or three labeled dimensions
+```
+
+Examples:
+
+- Agent offline, Session last-known active, client detached → surface the infrastructure problem; do not label the Session dead.
+- Agent online, Session exited → surface Session lifecycle; no need for a green Agent badge.
+- Agent online, Session active, attachment failed → explain attach failure; do not call it an Agent outage.
+- Explicit Agent/Location detail → all applicable dimensions may be shown for diagnosis.
+
+## Canonical states
+
+### Infrastructure / location connectivity
+
+Current Agent-backed values:
+
+```text
+online
+connecting
+reconnecting
+offline
+error
+```
+
+### Session lifecycle
+
+```text
+active
+exited
+unknown
+```
+
+### This-client attachment
+
+```text
+attached
+attaching
+detached
+failed
+```
+
+Do not infer one dimension from another unless the underlying system actually provides that guarantee.
+
+## Disclosure levels
+
+A useful model is:
+
+1. **implicit healthy state** — no status chrome when nothing needs attention;
+2. **contextual state** — one concise phrase/indicator near affected work;
+3. **expanded status** — labeled dimensions when ambiguity/recovery requires them;
+4. **diagnostic detail** — evidence/history/provider facts in a deeper view such as AgentDetail.
+
+This pattern exists to reduce both semantic ambiguity and permanent status noise.
 
 ## Anatomy
 
-Three **channels**. Compact header form may show one line with three labeled fragments; detail form may stack them.
+Compact contextual form:
 
 ```text
-Compact:
-
-  Agent  online    Session  active    Attached
-
-Detail:
-
-  Agent connection    online
-  Session             active
-  This client         attached
+Agent reconnecting
 ```
 
-| Channel | Dimension | Allowed values |
-|---------|-----------|----------------|
-| Agent | Agent connection | `online` `connecting` `reconnecting` `offline` `error` |
-| Session | Session lifecycle | `active` `exited` `unknown` |
-| Attachment | This client | `attached` `attaching` `detached` `failed` |
+Expanded form when needed:
 
-Each channel has a label (or accessible name) so a color-only encoding is not the only signal.
+```text
+Agent / Location    offline
+Session             active (last known)
+This client          detached
+```
 
-## States
+Each visible value must retain a label or accessible semantic name. Color alone is never sufficient.
 
-### Canonical example (normative)
+## State-driven emphasis
 
-Agent `offline`, Session last-known `active`, attachment `detached` or `failed`:
+| Condition | Emphasis |
+|-----------|----------|
+| Healthy, no ambiguity | hidden or quiet |
+| Transient reconnect / attaching | medium, local |
+| Continuity-threatening failure | prominent on the affected dimension |
+| Explicit diagnostics | all applicable channels readable, but only degraded facts use alarm emphasis |
 
-| Channel | Value | UI |
-|---------|-------|-----|
-| Agent | `offline` | Prominent; “Agent offline” / “Agent unreachable” |
-| Session | `active` or `unknown` | Neutral; **not** painted as failed |
-| Attachment | `detached` / `failed` | “Not attached” / “Attach failed” — not “Session offline” |
+Do not promote healthy `online` / `attached` states merely to prove that the system works.
 
-The user must be able to tell this is an **Agent connectivity** problem.
+## Location / Agent evolution
 
-### Other combinations (illustrative)
+The current executable Domain vocabulary uses `agent.*`, because today's transport is Agent-backed. Product semantics should be read as execution/location connectivity rather than as a requirement that every future Workspace Location expose a visible Agent object.
 
-| Agent | Session | Attachment | Reading |
-|-------|---------|------------|---------|
-| `online` | `active` | `attached` | Healthy working state; Agent channel quiet |
-| `online` | `active` | `detached` | Session exists; this client is not in it |
-| `online` | `exited` | `detached` | Session ended; Agent is fine |
-| `online` | `active` | `attaching` | Attach in flight; do not reuse Agent `connecting` chrome |
-| `reconnecting` | `active` | `attached` | Keep Session+attachment; Agent channel prominent |
-| `error` | `unknown` | `failed` | All three visible; still three labels |
+If future providers require distinct state semantics, evolve the Domain vocabulary deliberately while preserving dimension independence.
 
 ## Tokens
 
-| Channel | Domain tokens |
-|---------|-----------------|
-| Agent | `agent.online` `agent.connecting` `agent.reconnecting` `agent.offline` `agent.error` |
+| Dimension | Current Domain tokens |
+|-----------|-----------------------|
+| Agent-backed connectivity | `agent.online` `agent.connecting` `agent.reconnecting` `agent.offline` `agent.error` |
 | Session | `session.active` `session.exited` `session.unknown` |
 | Attachment | `attachment.attached` `attachment.attaching` `attachment.detached` `attachment.failed` |
 
-Labels: Semantic `text.secondary`. Values: corresponding Domain token (and Semantic `success` / `warning` / `danger` only as the Semantic parent of those Domain tokens, never a Primitive class in product TSX).
+Labels use Semantic text tokens. Product components must not consume Primitive palette classes directly.
 
-**Forbidden:** one `bg-green-500` / `bg-gray-400` dot for the whole widget.
+A token existing does not require a visible badge.
 
 ## Web vs App
 
-Same three channels and copy rules.
+Same semantic model, different presentation density.
 
 | | Web | App |
 |--|-----|-----|
-| Compact | Header-scale | Header-scale with `touchTarget` if tappable to expand |
-| Detail | AgentDetail section | AgentDetail section |
-| Color + text | Both required | Both required (gestures do not replace status text) |
+| Contextual status | inline metadata / banner / local affordance | compact row / banner / local affordance |
+| Expanded status | popover, panel, Workspace detail | sheet / push view / Workspace detail |
+| Healthy dimensions | may be omitted | may be omitted |
+| Touch | pointer behavior as appropriate | tappable disclosure meets touch target |
 
-## Visual Contract
+## Relationship to other patterns
 
-Derived from [visual-language.md](../../visual-language.md) and canonical Active Terminal / App fixtures ([#563](https://github.com/BestNathan/nession/pull/563), [#568](https://github.com/BestNathan/nession/pull/568)).
+- [SessionItem](session-item.md) may show one affected dimension when it helps the user choose/return to work.
+- [SessionHeader](session-header.md) may show continuity-critical state when useful.
+- [AgentContext](agent-context.md) focuses only infrastructure/location connectivity.
+- [AgentDetail](agent-detail.md) may show an expanded diagnostic form.
+
+None of those patterns must always render the complete ConnectionStatus model.
+
+## Visual contract
 
 ### Dominance
 
-- In compact header form, ConnectionStatus is **quieter than the Session title** and must not compete with the Terminal surface below.
-- No channel dominates until its domain condition is degraded.
-
-### Information hierarchy
-
-- Three **labeled** channels: Agent connection, Session lifecycle, this-client attachment.
-- Labels at `tertiary`; values at `secondary` when healthy, `conditional-prominent` when that channel alone is degraded.
-- Compact form may collapse to one metadata line; detail form (AgentDetail) stacks channels with equal structure.
-
-### Alignment
-
-- Compact: horizontal fragments with consistent label→value rhythm; baseline-aligned in header.
-- Detail: label column + value column; left-aligned.
-
-### Density
-
-- **Metadata / status density** — smallest readable chrome text in the header region.
-- Detail view may use relaxed line spacing; compact form stays single-line where the UI contract allows.
-
-### Whitespace
-
-- Channels separated by whitespace or neutral separators — not three bordered pills.
-- Do not wrap each channel in its own card.
-
-### Contrast
-
-- Healthy Agent channel: `quiet` — may show "online" at tertiary or omit value entirely.
-- Healthy Session + attachment: `tertiary` / `secondary` — readable but never accent-colored.
-- Degraded channel only: `conditional-prominent` — that channel's value and indicator gain emphasis; siblings unchanged.
+- Healthy status should never compete with current work.
+- Only the affected dimension gains conditional prominence.
+- Expanded diagnostic forms can be denser because the user explicitly requested them.
 
 ### Surface treatment
 
-- Flat inline metadata — no elevation, no per-channel backgrounds in compact form.
-- Detail form may use hairline dividers between stacked rows; not bordered cards.
+- Compact form prefers text/indicator in existing context rather than three pills/cards.
+- Avoid decorative success surfaces.
+- Use the weakest sufficient warning/error treatment.
 
-### State-driven emphasis
+## Anti-patterns
 
-Normative example (Agent `offline`, Session `active`, attachment `detached`):
+- One dot or badge encoding Agent + Session + attachment.
+- Always showing three channels simply because the model has three dimensions.
+- Permanent `online`/`attached` success badges in routine work.
+- `Session offline` when only Agent/location reachability failed.
+- Color-only status with no semantic label/accessibility name.
+- Inferring Session death from an infrastructure outage.
+- Making every provider implement Agent-specific UI terminology forever.
 
-| Channel | Emphasis | Must read as |
-|---------|----------|--------------|
-| Agent | `conditional-prominent`, high | Connectivity problem |
-| Session | `secondary` / `tertiary` | Session still exists |
-| Attachment | `tertiary` | This client not attached — not "Session dead" |
+## Acceptance for future implementation work
 
-See **States → Canonical example** above for copy rules.
-
-### Anti-patterns
-
-- One chromatic dot encoding Agent + Session + attachment (shipping predecessor).
-- "Session offline" when Agent is the failing dimension.
-- Color-only encoding without accessible labels.
-- Three accent colors in one compact line.
-- Prominent healthy "online" badges (violates P3 — system must not advertise health).
-
-### Canonical reference
-
-- Web: `/#/fixture` 1440×900 — `server: connected` and header status fragments ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — header status compressed beside Session title ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Three channels are labeled (visually or via accessible name).
-- [ ] Agent offline + Session still present does not render as a single “Session offline”.
-- [ ] Attachment `failed` is distinct from Agent `error`.
-- [ ] No Primitive palette classes on the indicators.
+- [ ] Independent state dimensions remain semantically separate.
+- [ ] Healthy/redundant status may disappear.
+- [ ] A degraded dimension can surface alone without forcing unrelated badges to appear.
+- [ ] Expanded detail labels every applicable dimension clearly.
+- [ ] Infrastructure failure does not falsely redefine Session lifecycle.
+- [ ] Current `agent.*` implementation can evolve toward broader Workspace Location/provider semantics.

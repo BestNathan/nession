@@ -1,132 +1,116 @@
 # SessionHeader
 
-Chrome for the **active Session**: identity plus always-available connection context.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [information architecture](../../information-architecture.md) → [interaction](../../interaction/)
 
-> **Contract:** `design/contracts/patterns/session-header.json` — measurable layout rules ([contracts.md](../contracts.md)).
+SessionHeader is optional compact chrome for the **active Session**. It provides identity, navigation, or continuity-critical state only when those signals are useful to the current work.
+
+> Existing contract: `design/contracts/patterns/session-header.json` ([contracts.md](../contracts.md)). Any contract that requires permanently visible healthy metadata should be reviewed as implementation convergence debt.
 
 ## Purpose
 
-Tell the user which Session they are in, and keep Agent/connection context at disclosure level 2 ([information-architecture.md](../../information-architecture.md)) — more explicit than the list row, less than [AgentDetail](agent-detail.md).
+Help the user answer a small set of current-work questions without turning the top of the Terminal into an infrastructure dashboard:
 
-Must not replace [SurfaceSwitcher](surface-switcher.md) or become a second Session list.
+- Which Session am I in?
+- How do I reach Sessions / Workspace when a visible affordance is needed?
+- Is there a connectivity, attachment, or lifecycle problem that threatens continuity?
+- Where is this work running, when that distinction matters?
 
-## Anatomy
+The header is **not** a mandatory container for every available context signal.
+
+## Contextual anatomy
 
 ```text
-┌─ SessionHeader ──────────────────────────────────────────┐
-│ [ nav to Sessions ]  Session name                        │
-│                      AgentContext     ConnectionStatus   │
-│                      SurfaceSwitcher (Web)               │
-└──────────────────────────────────────────────────────────┘
+┌─ SessionHeader (when useful) ──────────────────────────────┐
+│ [Sessions?]  Session name     [location/state?] [Workspace?] │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+Possible parts:
 
 | Part | Role |
 |------|------|
-| Session title | Active Session name |
-| Back / Sessions control | Web: optional if the list is already visible. **App: required visible control** to open the Sessions layer ([interaction/app.md](../../interaction/app.md)) |
-| [AgentContext](agent-context.md) | Agent identity + quiet/prominent health |
-| [ConnectionStatus](connection-status.md) | Three channels; may be compact in the header |
-| [SurfaceSwitcher](surface-switcher.md) | Web only, in this header or immediately under it |
-| Workspace control (App) | Visible control to open Workspace; not a shrink of SurfaceSwitcher |
+| Session title | Active Session identity; usually the primary header text |
+| Sessions affordance | Visible path to Session navigation when navigation is otherwise hidden |
+| Workspace affordance | Visible path to Workspace contextual depth |
+| Agent/location context | Optional infrastructure identity when it helps disambiguate or recover work |
+| ConnectionStatus | Optional compact continuity state when relevant |
+| SurfaceSwitcher | One possible Web implementation of Terminal ↔ Workspace access; not required product anatomy |
 
-Keep chrome compact so the Terminal viewport stays large.
+Not every part is rendered in every state or viewport.
 
-## States
+## Presence rules
 
-Header **contains** AgentContext and ConnectionStatus; it does not invent a fourth status.
+Apply [`PRINCIPLE.md`](../../../../PRINCIPLE.md) directly:
 
-| Header concern | Source |
-|----------------|--------|
-| Which Session | Session identity (name). Session `exited` / `unknown` may annotate the title via ConnectionStatus session channel |
-| Can we reach the Agent | AgentContext + Agent channel of ConnectionStatus |
-| Is this client attached | Attachment channel of ConnectionStatus |
+- healthy Agent/location metadata may be omitted when it adds no useful context;
+- degraded connectivity or failed attachment can gain prominence because it affects the work;
+- a persistent `Terminal | Workspace` control is optional, not an invariant;
+- active capability identity normally belongs near the contextual interaction layer rather than accumulating in the SessionHeader;
+- controls that can be reached reliably on demand should not occupy permanent header space without a current reason.
 
-When Agent is unhealthy, AgentContext grows visually **inside the header**; the title remains the Session name.
+## State dimensions
 
-## Tokens
+SessionHeader may compose existing patterns but must not collapse their domains:
 
-| Part | Tokens |
-|------|--------|
-| Bar background | Semantic `surface.1` / `surface.2` |
-| Title | Semantic `text.primary` |
-| Controls | Experience `control.*` |
-| Unhealthy emphasis | Domain `agent.*` via AgentContext — not a Primitive red bar around the whole header unless Agent is `error`/`offline` |
+```text
+Agent / location connectivity
+Session lifecycle
+client attachment
+```
+
+If more than one dimension is shown, preserve their semantic distinction through [ConnectionStatus](connection-status.md) and/or [AgentContext](agent-context.md).
+
+A Session title should not silently turn into a generic "Disconnected" state that obscures whether the Agent, Session, or attachment failed.
 
 ## Web vs App
 
 | | Web | App |
 |--|-----|-----|
-| Sessions access | List already in the left column | Visible control **and** swipe-right. Header is the primary non-gesture path |
-| Surface switch | SurfaceSwitcher in/near header | No Terminal\|Workspace segmented control as the shell. Visible Workspace control + swipe-left |
-| Height | Compact (Experience Web control/row) | Larger controls; respect safe area ([#473](https://github.com/BestNathan/nession/issues/473)) |
+| Session navigation | May already be visible, collapsible, or on demand; header affordance is conditional | Visible non-gesture Sessions affordance required somewhere around the work surface |
+| Workspace access | May use SurfaceSwitcher, a compact button, command, or another explicit affordance | Visible non-gesture Workspace affordance + swipe-left |
+| Infrastructure context | Show only when useful/relevant | Same semantic rule, adapted to limited space |
+| Height | Compact; may disappear/minimize when redundant | Safe-area aware; touch targets must remain accessible |
 
-## Visual Contract
+App's visible controls do not imply a permanent dense header. They may be composed adjacent to the Session surface as long as gestures are not the only route.
 
-Derived from [visual-language.md](../../visual-language.md), [composition.md](../../composition.md), and canonical screens ([#563](https://github.com/BestNathan/nession/pull/563), [#568](https://github.com/BestNathan/nession/pull/568)).
+## Visual contract
+
+Derived from [visual-language.md](../../visual-language.md) and [composition.md](../../composition.md).
 
 ### Dominance
 
-- **Session title is the only primary text** in the header band.
-- [AgentContext](agent-context.md), [ConnectionStatus](connection-status.md), and switchers are secondary chrome — they must not outrank the title or steal area from the Terminal below.
-- On App, the single-row header is navigation + context — not a second application shell.
-
-### Information hierarchy
-
-- **Primary:** Active Session name.
-- **Secondary:** AgentContext identity, compact ConnectionStatus, SurfaceSwitcher (Web) or Workspace affordance (App).
-- **Tertiary:** Healthy server/attachment fragments when shown at all.
-
-### Alignment
-
-- Web: title and metadata share the header band; controls right-aligned or trailing per [composition.md](../../composition.md).
-- App: `[≡] Session name · status [☰]` single row — 44px touch band, safe-area top; Workspace page uses `[←] tool name` push header instead.
-
-### Density
-
-- **Compact chrome density** — minimum height that fits disclosure level 2 ([information-architecture.md](../../information-architecture.md)).
-- Chrome density must not compress the Terminal viewport (R-D2).
-
-### Whitespace
-
-- Header is one horizontal band — no stacked card chrome.
-- Vertical rhythm: header → work surface with minimal gap; terminal-native chrome stays flat.
-
-### Contrast
-
-- Title: `primary` / highest in chrome.
-- Subcomponents follow their own Visual Contracts at `secondary`–`quiet`.
-- No full-width danger treatment unless the header itself must signal attach failure — prefer channel-local emphasis.
+- Current work remains dominant.
+- Session title is the only normal primary text if a header is shown.
+- Healthy infrastructure context stays secondary/quiet.
+- Continuity-threatening state may temporarily gain emphasis.
 
 ### Surface treatment
 
-- Flat `surface.1` / `surface.2` bar — no shadow, no card radius (healthy chrome never elevates, R-S5).
-- Unhealthy Agent emphasis stays **inside** the header via AgentContext tint — not a red wrapper around the entire shell.
+- Flat, content-sized chrome; no healthy elevation.
+- Avoid full-width alarm treatment when only one local state is degraded.
+- Avoid stacked header/tool bars.
+- Do not preserve empty header height solely for controls that are not currently useful.
 
-### State-driven emphasis
+### Quality through precision
 
-| Condition | Behavior |
-|-----------|----------|
-| Agent `online`, Session `active`, attached | All sub-patterns at `quiet` / default |
-| Agent degraded | AgentContext + Agent channel escalate; **title unchanged** |
-| Session `exited` | Title may annotate via Session channel — not replace name with error chrome |
-| App navigation | Visible Sessions / Workspace controls always present — not gesture-only |
+Use stable alignment, concise copy, consistent hit areas, and predictable state transitions. A smaller, well-resolved header is preferable to a richer band of status badges.
 
-### Anti-patterns
+## Anti-patterns
 
-- SessionHeader becoming a second Session list or Files sidebar.
-- SurfaceSwitcher or App header duplicating floating spatial buttons (chrome dedup — [#568](https://github.com/BestNathan/nession/pull/568)).
-- Permanent alarm bar for healthy connected state.
-- Title and Agent name at equal weight.
-- Header height that permanently consumes Terminal viewport.
+- Always showing Agent identity merely because the data exists.
+- Treating SurfaceSwitcher as required SessionHeader anatomy.
+- Adding one header control per active/installed extension.
+- Duplicating the Session list inside the header.
+- Permanent connected/healthy badges competing with Session identity.
+- A header whose height materially reduces Terminal space without current task value.
+- Extension-specific visual chrome that fragments Nession's language.
 
-### Canonical reference
+## Acceptance for future implementation work
 
-- Web: `/#/fixture` 1440×900 — terminal-native header line above flush terminal well ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — single-row header, no SurfaceSwitcher, no duplicated FABs ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Header identifies the active Session by name.
-- [ ] Agent context is always present, quiet when `agent.online`.
-- [ ] App: Sessions and Workspace are reachable from visible header (or adjacent) controls.
-- [ ] Header chrome does not permanently steal a Files sidebar.
+- [ ] Session identity remains clear when required by the surrounding composition.
+- [ ] Sessions and Workspace remain explicitly reachable; App does not depend on gestures alone.
+- [ ] Healthy infrastructure context is allowed to recede or disappear when redundant.
+- [ ] Degraded state names the affected dimension rather than collapsing status.
+- [ ] SurfaceSwitcher is optional implementation, not mandatory product anatomy.
+- [ ] Capability growth does not imply SessionHeader growth.
+- [ ] Header chrome yields before the current work surface yields.

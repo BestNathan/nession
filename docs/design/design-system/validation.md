@@ -1,161 +1,181 @@
 # UI Validation (architecture)
 
-How Nession **enforces** [UI contracts](contracts.md): browser assertions, the Web/App viewport matrix, and a small visual-regression net.
+> Upstream: [`VISION.md`](../../../VISION.md) → [`PRINCIPLE.md`](../../../PRINCIPLE.md) → [patterns](patterns.md) → [UI contracts](contracts.md)
+
+UI validation enforces the **current approved executable contract** through DOM/layout assertions, viewport coverage, and a deliberately small visual-regression net.
+
+Validation protects implementation from accidental drift. It does not turn yesterday's contract or screenshot into tomorrow's product direction.
 
 **Tracking:** [#544](https://github.com/BestNathan/nession/issues/544)  
 **Child issues:** [#546](https://github.com/BestNathan/nession/issues/546) assertions · [#547](https://github.com/BestNathan/nession/issues/547) matrix · [#548](https://github.com/BestNathan/nession/issues/548) visual  
-**Depends on:** [contracts.md](contracts.md), [#467](https://github.com/BestNathan/nession/issues/467) for resolved token values  
-**Runner home:** existing `e2e/` Playwright suite (extend; do not create a second E2E stack)
+**Runner:** existing `e2e/` Playwright stack
 
-## Principle
+## Core rule
 
-Prefer **computed layout/DOM measurements** for measurable rules. Screenshots are a final safety net, not the primary checker for line count, height, overflow, or touch target.
+> Prefer structured assertions for measurable rules; use screenshots as a focused safety net; update validation when an intentional upstream product decision changes the rule.
 
-Failures must be structured so an AI coding agent can repair without a human restating the same UI constraint.
+A failing assertion can mean either:
 
-## Assertion framework (#546)
+1. implementation drifted from the approved contract; or
+2. the product/pattern intentionally changed and the lower-level contract/validation has not converged yet.
 
-### Location
+Do not automatically "repair" implementation back to an obsolete contract without checking the upstream design owner.
 
-Reusable helpers under `e2e/helpers/` (e.g. `ui-assert/`). Helpers consume:
+## Assertion framework
 
-1. Merged contract data from `design/contracts/`
-2. Token resolution from `#467` generated metadata
+Reusable helpers consume merged executable contracts and generated token metadata. They must not hard-code a second copy of product or design values.
 
-Do **not** hard-code a second copy of design values inside helpers.
+Useful assertions include:
 
-### Initial helper set (names illustrative)
+| Assertion | Measures |
+|-----------|----------|
+| single-line / wrap | stable text geometry |
+| token height / min size | approved control/row metrics |
+| overflow strategy | menu/sheet/scroll/clip behavior |
+| touch target | App accessibility |
+| visibility | whether an element is present under the tested context |
+| alignment | contract-defined spatial relation |
+| scroll ownership | which surface receives scroll |
+| occlusion / clearance | Terminal/capsule geometry |
 
-| Helper | Measures |
-|--------|----------|
-| `expectSingleLine` | Element behaves as one line (vs unintended wrap) |
-| `expectTokenHeight` | Measured height ≈ resolved height token (± documented tolerance) |
-| `expectNoUnexpectedOverflow` | No overflow beyond the contract's `overflow` strategy |
-| `expectTouchTarget` | Hit area ≥ App `touchTargetToken` |
-| `expectVisibleWithin` | Target visible within a named container |
-| `expectAligned` | Matches contract alignment intent |
-| `expectScrollable` | `scrollOwner` scrolls; siblings do not steal scroll |
+### Context-aware validation
 
-### Required failure shape
+Viewport is not sufficient to describe modern Nession UI.
+
+Test fixtures should increasingly be able to express product context such as:
+
+```text
+capability: unavailable | available | relevant | active
+location: reachable | degraded | unreachable
+session: active | exited | unknown
+attachment: attached | attaching | detached | failed
+surface: current work | workspace depth | capability detail
+```
+
+Assertions then verify the contract for that context rather than assuming every capability/control is permanently present.
+
+This is especially important for contextual capability emergence and progressive disclosure.
+
+## Failure shape
+
+Failures should be structured enough for an AI coding agent or developer to diagnose without guessing:
 
 ```text
 UI_CONTRACT_VIOLATION
 pattern: pattern.session-header
-rule: single-line
+rule: visibility / single-line / min-height / ...
 experience: web
 viewport: web.standard-desktop
-expected: wrap=false (1 line)
-actual: 2 lines
-measuredHeight: 56px
-expectedHeightToken: experience.web.row.md
-resolvedExpectedHeight: 36px
+context: <named fixture context>
+expected: <contract expectation>
+actual: <measurement>
 ```
 
-Always include: `pattern`, `rule`, `expected`, `actual`, and when applicable `experience` + `viewport`.
+Include `pattern`, `rule`, `expected`, and `actual`; include `experience`, `viewport`, and context when applicable.
 
-### Proof and CI
+If the failure is caused by an intentional upstream product change, update the pattern/contract/fixture together rather than suppressing the assertion.
 
-- Each important assertion has a **deliberately broken fixture** that must fail.
-- At least one real Session / Terminal / Workspace pattern is protected.
-- Run via the existing Playwright workflow (`.github/workflows/e2e.yml`).
-- Fast enough for normal local + CI use.
+## Viewport matrix
 
-### Non-goals
+Canonical dimensions remain in `design/contracts/viewports.json`.
 
-- Asserting subjective aesthetics.
-- Replacing pattern prose semantics.
-- Scattering viewport-specific expected values inside individual specs.
+Representative families include compact/standard/wide Web and narrow/standard/large App phone sizes.
 
-## Viewport matrix (#547)
+The matrix verifies experience-specific composition; it does not define product presence by itself.
 
-### Single source
+For example:
 
-Canonical sizes and experience tags live in **`design/contracts/viewports.json`** (created with #545/#547). Tests must not redefine dimensions.
+- a capability can be absent on wide Web because it is irrelevant, not because the viewport is narrow;
+- a degraded state can appear on both experiences because context requires it;
+- App touch sizing must not inflate Web controls;
+- Web density must not erase explicit non-gesture access required by App interaction.
 
-### Initial matrix
+Do not scatter ad-hoc viewport constants through test files.
 
-| ID | Experience | Role | Suggested size |
-|----|------------|------|----------------|
-| `web.compact-laptop` | web | Compact laptop | 1280×800 |
-| `web.standard-desktop` | web | Default desktop | 1440×900 |
-| `web.wide-desktop` | web | Wide desktop | 1920×1080 |
-| `app.narrow-phone` | app | Narrow phone | 375×812 |
-| `app.standard-phone` | app | Standard phone | 390×844 |
-| `app.large-phone` | app | Large phone (only if product-supported) | 430×932 |
+## Focused visual regression
 
-Exact pixels may be tuned, but **only** by editing `viewports.json`.
+Screenshots catch appearance changes that structured metrics cannot describe well: hierarchy, rhythm, surface balance, unexpected decorative noise, or major composition regressions.
 
-### Experience mapping (near term)
+Keep the baseline set intentionally small and representative.
 
-Nession's App interaction model ([interaction/app.md](../interaction/app.md)) is not a shrunk Web layout. Until a native App shell ships, **App matrix rows run on Mobile Web** as a proxy: narrow viewport + **App** contract blocks (touch targets, `overflow: sheet`, etc.).
+Useful baseline categories include:
 
-Product chrome commonly treats Tailwind `lg` (~1024px) as the wide/narrow boundary. That breakpoint informs which matrix family applies; it does not replace `viewports.json` as the size source.
+```text
+Web current-work / Terminal state
+Web Workspace contextual depth
+App current-work spatial state
+App Workspace depth
+one or two contextual capability states
+one meaningful degraded/recovery state
+```
 
-Native App later reuses the same viewport IDs and contracts — do not invent a parallel matrix vocabulary.
+Baseline names should describe the product state being protected rather than immortalize a particular control (`permanent-workspace-tab-strip`, etc.).
 
-### Execution rules
+### Screenshot rules
 
-For each critical pattern:
+1. Run structured contract assertions before screenshot comparison.
+2. Use deterministic fixtures and normalize truly dynamic content.
+3. Baseline updates require explicit review/action.
+4. CI should publish useful diff artifacts.
+5. Do not snapshot every component or every capability state.
+6. Do not use a golden screenshot as the sole reason to reject an intentional upstream product change.
 
-1. Load the merged contract for the pattern.
-2. Run applicable `#546` assertions on each applicable matrix row.
-3. Take **all** expectations from the contract's `web` / `app` block — never from ad-hoc conditionals in the test body.
+## Canonical screen relationship
 
-Cover: wrap/single-line, overflow ownership, visibility/collapse, App touch targets, minimum usable panel width, toolbar overflow strategy, scroll ownership.
+Historical canonical screens are valuable visual records, but their authority is downstream:
 
-### Density isolation
+```text
+VISION / PRINCIPLE
+    ↓
+product / interaction / visual docs
+    ↓
+pattern + contract
+    ↓
+implementation
+    ↓
+screenshot baseline
+```
 
-- Web compact-density checks must **not** impose App touch sizing.
-- App touch / sheet rules must **not** force Web desktop controls larger.
-- CI output must name failing `experience` + `viewport` id.
-
-## Focused visual regression (#548)
-
-### Role
-
-Screenshots run **after** executable UI assertions. They catch appearance regressions that metrics miss. They do **not** replace contract checks for measurable rules.
-
-### Initial baselines (keep small)
-
-| Baseline ID | Experience | Surface |
-|-------------|------------|---------|
-| `web.session-terminal-primary` | web | Session + Terminal primary workspace |
-| `web.workspace-shell` | web | Workspace navigation / shell |
-| `web.agent-context-in-flow` | web | Agent/connection presentation on the primary path (if bound to shell) |
-| `app.session-terminal-primary` | app (Mobile Web proxy) | Representative App primary surface |
-
-### Rules
-
-1. Assertions (#546/#547) before screenshot compare.
-2. Deterministic fixtures and stable data; mask or normalize inherently dynamic regions.
-3. Baseline updates require an **explicit** developer action (dedicated command/flag) — no silent refresh.
-4. CI publishes useful diff artifacts on failure.
-5. Do not snapshot every component or state.
+When product direction changes, a canonical screenshot can become a migration artifact. The correct response is to intentionally replace the affected baseline after the new design is implemented and reviewed.
 
 ## Agent / CI loop
 
 ```text
 change UI
-  → contract static validate (#545, needs #467 metadata)
-  → Playwright assertions across matrix (#546/#547)
-  → focused screenshots (#548)
-  → on UI_CONTRACT_VIOLATION: agent repairs from structured fields
+  -> identify upstream pattern / product decision
+  -> static contract validation
+  -> DOM/layout assertions across context + viewport matrix
+  -> focused screenshots
+  -> diagnose failure as drift OR intentional convergence
+  -> repair the appropriate lower layer
 ```
 
-Design truth remains in architecture docs, tokens, and contracts — not in repeated human visual feedback.
+AI repair loops should be given both the contract failure and the canonical pattern reference so they do not optimize blindly for stale geometry.
 
-## Implementation gate
+## Validation of progressive disclosure
 
-This document is architecture only. No assertion helpers, viewport JSON, or baselines are required for this doc to land.
+Validation should explicitly test absence as well as presence.
 
-When implementing:
+Examples:
 
-1. `#467` on `main` (token resolution).
-2. `#545` contract files + schema.
-3. `#546` helpers + broken fixtures.
-4. `#547` matrix wiring.
-5. `#548` small baseline set.
+- unavailable capability leaves no dead navigation slot;
+- available-but-not-relevant capability does not automatically become primary chrome;
+- relevant/active capability can gain approved contextual presence;
+- deeper history/configuration appears only after explicit action;
+- healthy infrastructure metadata can be absent when redundant;
+- degraded continuity state becomes visible where required.
+
+This protects the Principles against gradual feature-chrome accumulation.
+
+## Non-goals
+
+- Treating screenshots as product source of truth.
+- Asserting subjective aesthetics through hundreds of brittle pixel baselines.
+- Encoding product semantics directly in test helper code.
+- Keeping obsolete controls alive because tests expect them.
+- Using only breakpoints to model contextual product state.
+- Building a second E2E stack for design validation.
 
 ## Maintenance
 
-Edit in place. Reference [#544](https://github.com/BestNathan/nession/issues/544) and the relevant child issue. Keep the critical visual set intentionally small to avoid screenshot churn.
+Validation evolves with the approved design hierarchy. Every changed expectation should be traceable to a contract/pattern change, and every contract/pattern change should remain traceable to the higher-level product model and Principles.

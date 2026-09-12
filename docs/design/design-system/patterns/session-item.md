@@ -1,163 +1,187 @@
 # SessionItem
 
-One row in [SessionList](session-list.md): a Session, with Agent as **secondary metadata**.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [product model](../../product-model.md) → [information architecture](../../information-architecture.md)
 
-> **Contract:** `design/contracts/patterns/session-item.json` — measurable layout rules ([contracts.md](../contracts.md)).
+SessionItem represents one Session in Session navigation. It helps the user recognize and return to work without making infrastructure or tool identity the primary object.
 
 ## Purpose
 
-Identify a Session at a glance (name, workload hint, which Agent, recency) and show whether the user can reach it **without** claiming the Session itself is “offline” when only the Agent is unreachable.
+Answer, at a glance:
 
-## Anatomy
+- which work/session is this;
+- what kind of workload is happening there, when useful;
+- where it is running, when that helps distinguish it;
+- how recent it is;
+- whether a reachability/lifecycle issue needs attention.
+
+The Session name remains the primary identity.
+
+## Contextual anatomy
 
 ```text
-┌─ SessionItem ─────────────────────────────────────────────┐
-│ ●  Fix terminal reconnect                                 │  name + recency/activity mark
-│    Claude Code · devbox-01 · 2m                           │  workload · Agent · recency
-└───────────────────────────────────────────────────────────┘
+Fix terminal reconnect
+Claude Code · devbox-01 · 2m
 ```
 
-| Part | Content | Notes |
-|------|---------|--------|
-| Selection affordance | Highlight / bar when this is the active Session | Not an Agent selection |
-| Session name | Primary text | Truncate; name is the object |
-| Workload hint | e.g. Claude Code, Codex, zsh | Hint only. Not an IA type. Unknown/generic workload is fine (e.g. `shell`) |
-| Agent identity | Display name or host id (`devbox-01`) | Metadata, not a link that replaces Session navigation |
-| Recency | Relative last activity | |
-| Reachability | Quiet when Agent `online`; prominent when Agent is not healthy | See States. Copy must name **Agent**, not Session offline |
+Possible parts:
 
-Optional trailing actions (preview, kill) must not dominate the row. Destructive actions use a confirm pattern (AlertDialog on Web).
+| Part | Role |
+|------|------|
+| Session name | Primary work identity |
+| Workload hint | Optional hint such as Claude Code, Codex, zsh; never an IA type |
+| Location / Agent hint | Optional execution-context metadata when useful for disambiguation |
+| Recency | Optional last-activity signal |
+| Selection | Shows the active Session |
+| Degraded state | Local, explicit signal only when continuity is affected |
+| Secondary actions | Progressive-disclosure actions such as rename/kill |
 
-## States
+Do not force every row to show every metadata fragment. If six rows are all on the same healthy Location, repeating the Agent name six times may add no value.
 
-Map independently. A single row color/dot **must not** encode all three.
+## Metadata priority
 
-### Agent connection (reachability)
+Apply the principle "show only what matters now":
 
-| Agent | Presentation | Copy (normative examples) |
-|-------|----------------|---------------------------|
-| `online` | Quiet. No extra badge required. | — |
-| `connecting` / `reconnecting` | Subtle Agent-side indicator | “Agent reconnecting” — not “Session reconnecting” unless attachment is also in flight |
-| `offline` | Prominent on the metadata line or a compact badge | “Agent unreachable” / “Agent offline”. **Forbidden:** “Session offline”, “Session failed” as the only message |
-| `error` | Prominent, `agent.error` | “Agent error” |
+1. Session identity is always the strongest signal.
+2. Workload/location/recency are supporting hints and may be omitted when redundant.
+3. Degraded reachability or lifecycle state may temporarily outrank routine metadata.
+4. Destructive actions stay hidden until hover/focus/selection/explicit overflow.
 
-When Agent is `offline` and Session last-known is `active`: the row **stays**. Show Agent connectivity problem. Do not hide or grey the Session name as if it were `exited`.
+## Workload semantics
+
+A workload hint can be inferred from foreground process or integration state, but it is not a permanent Session type.
+
+```text
+shell
+Claude Code
+Codex
+OpenCode
+vim
+other TUI / process
+unknown
+```
+
+An active coding-agent capability may gain contextual presence elsewhere in the Session. The SessionItem only needs enough hint to help recognition; it should not become a mini capability dashboard.
+
+## Location / Agent semantics
+
+Long term, execution context belongs to Workspace Location/provider semantics. Today Agent identity is a common source.
+
+The row should therefore conceptually present **where this work is running**, not imply that Agent is the parent of the Session.
+
+Location/Agent metadata may be:
+
+- shown when Sessions span different machines/environments;
+- shown when a connectivity problem affects this Session;
+- hidden when redundant;
+- replaced by a more user-meaningful Workspace Location label as the product model evolves.
+
+## Independent state dimensions
+
+Do not collapse infrastructure connectivity, Session lifecycle, and this-client attachment into one colored dot.
+
+### Infrastructure / location reachability
+
+| State | Presentation |
+|-------|--------------|
+| Healthy | Usually quiet or omitted |
+| Connecting / reconnecting | Short contextual phrase when it affects entry |
+| Offline / error | Explicit local signal such as `Agent unreachable` / `Location unreachable` |
 
 ### Session lifecycle
 
-| Session | Presentation |
-|---------|----------------|
-| `active` | Normal name weight |
-| `exited` | Secondary treatment; still a Session row if it remains in the list |
-| `unknown` | Neutral; do not invent `exited` |
+| State | Presentation |
+|-------|--------------|
+| `active` | Normal Session identity |
+| `exited` | Secondary treatment; row can remain if useful/history allows |
+| `unknown` | Neutral; do not invent failure |
 
-### Attachment (this client)
+### This-client attachment
 
-| Attachment | Presentation |
-|------------|----------------|
-| `attached` | Optional quiet mark that *this client* is attached (not “Session running”) |
-| `attaching` | Transient; do not reuse Agent `connecting` chrome |
-| `detached` | Default for a listed Session the user is not in |
-| `failed` | Attachment failure copy, distinct from Agent `error` |
+Attachment is usually not useful on every inactive row. Show it only where it clarifies current state, such as attach-in-progress or attach failure.
 
-Shipping predecessor paints `session.status === 'active' | 'detached' | 'zombie'` as one dot. The v2 row must not revive that collapse.
+An Agent being offline does not prove the Session exited. A detached client does not prove the Session stopped.
+
+## Visual contract
+
+### Dominance
+
+- Session name is the only normal high-emphasis text.
+- Supporting metadata shares a quieter band.
+- One degraded fact may gain local emphasis without turning the whole row into an alarm card.
+
+### Density
+
+Rows should remain highly scannable. Prefer two concise lines over multiple badges, chips, and icons.
+
+Web can use compact navigation density; App must preserve touch targets without inflating every metadata element.
+
+### Surface treatment
+
+- Flat list rows, not nested cards.
+- Selection uses one coherent cue.
+- Healthy state needs no green success badge.
+- Per-capability branding should not color the row.
+
+## Progressive disclosure
+
+Secondary actions and technical detail should not occupy permanent row width.
+
+```text
+rest
+    -> identify work
+
+hover / focus / selection
+    -> small actions
+
+degraded
+    -> affected state becomes visible
+
+explicit detail
+    -> deeper Session / Location / capability information
+```
 
 ## Tokens
 
 | Part | Tokens |
 |------|--------|
-| Name | Semantic `text.primary` |
-| Metadata line | Semantic `text.secondary` |
-| Selected row | Semantic surface/accent |
-| Agent healthy | Domain `agent.online` only if an indicator is shown; otherwise inherit quiet metadata |
-| Agent not healthy | Domain `agent.offline` / `agent.reconnecting` / `agent.error` |
-| Session exited | Domain `session.exited` (name/metadata, not the Agent badge) |
-| This-client attached | Domain `attachment.attached` |
-| Row height | Experience `row.*` |
+| Session name | Semantic `text.primary` |
+| Metadata | Semantic `text.secondary` / `text.tertiary` |
+| Selection | Semantic accent/surface |
+| Infrastructure failure | current `agent.*` Domain state where Agent-backed |
+| Session lifecycle | `session.*` |
+| Attachment | `attachment.*` when shown |
+| Row density | Experience `row.*` / App touch-target tokens |
 
-No Primitive `bg-green-500` / `bg-gray-400` dots.
+Do not use Primitive palette colors directly.
 
 ## Web vs App
 
-Same information hierarchy on both: name first, metadata second.
+The semantic hierarchy remains the same.
 
 | | Web | App |
 |--|-----|-----|
-| Hit target | Experience Web row | `touchTarget.min` |
-| Secondary actions | Icon buttons / overflow | Prefer swipe actions or overflow; keep kill behind confirm |
-| Agent prominence when unhealthy | Metadata line or compact badge | Same, larger type allowed; still not an Agent header |
+| Density | Compact, scan-oriented | Touch-safe, still concise |
+| Secondary actions | Hover/focus/overflow | Overflow/swipe/context action |
+| Metadata | May fit one secondary line | May truncate/reduce before adding vertical chrome |
+| Session navigation | Often list/sidebar/drawer depending current Web composition | Spatial Sessions layer |
 
-## Visual Contract
+## Anti-patterns
 
-Derived from [visual-language.md](../../visual-language.md) and Session navigation in the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+- Agent as a section header/navigation parent for every Session.
+- Equal visual weight for Session name, Agent, workload, recency, and status.
+- Always showing healthy Agent/location metadata even when redundant.
+- One chromatic dot representing Agent + Session + attachment.
+- `Session offline` when only infrastructure reachability is known to have failed.
+- Permanent destructive controls.
+- Extension-specific badges accumulating until the row becomes a plugin strip.
+- Treating `Claude Code`, `Codex`, etc. as permanent Session types that redefine navigation.
 
-### Dominance
+## Acceptance for future implementation work
 
-- **Session name is the only high-emphasis text** in a healthy row.
-- Agent identity, workload hint, and recency are secondary metadata — never equal weight to the name.
-- Reachability indicators must not become a header-scale badge when `agent.online`.
-
-### Information hierarchy
-
-- **Primary:** Session name (`primary` typography role).
-- **Secondary:** Metadata line — workload · Agent · recency (`secondary` / `tertiary`).
-- **Conditional-prominent:** Agent reachability phrase or compact badge only when Agent is not healthy.
-
-### Alignment
-
-- Name on the first line (or leading column); metadata directly below or trailing on the same baseline cluster.
-- Selection affordance is a single leading bar or background shift — left-aligned with list gutter.
-
-### Density
-
-- Experience Web `row.md` (~36px) on Web; App row + `touchTarget.min`.
-- Comfortable scannable density ([visual-language.md](../../visual-language.md) §4) — not card-padding inflation.
-
-### Whitespace
-
-- Row padding groups name from metadata; **no bordered card** per row.
-- Trailing actions live in the row's action gutter — not permanent layout width when hidden.
-
-### Contrast
-
-- Name: highest contrast in the row.
-- Metadata: secondary/tertiary — all metadata fragments share one emphasis band (no equal-contrast competition).
-- Selection: one accent cue — not stacked border + shadow + accent bar.
-
-### Surface treatment
-
-- Flat list row on navigation surface background shift — not a nested card ([visual-language.md](../../visual-language.md) R-S2, R-S3).
-- Selection: **one coherent cue** (background shift *or* leading accent bar — not both plus border plus shadow).
-
-### State-driven emphasis
-
-| Condition | Emphasis change |
-|-----------|-----------------|
-| `agent.online` | Reachability stays `quiet` — no badge required |
-| `agent.offline` / `error` | Metadata line or compact badge → `conditional-prominent`; name stays `primary` |
-| `session.exited` | Name drops one level — secondary treatment; not greyed as if Agent died |
-| Row selected | Selection cue only — does not elevate metadata |
-
-Destructive actions (kill): **progressive disclosure** — visible on hover, focus, or selection only (P8).
-
-### Anti-patterns
-
-- Equal contrast for all metadata fragments (workload, Agent, recency).
-- Multiple accent colors in one row.
-- Permanent visible kill / destructive control in normal visual flow.
-- Nested-card appearance (border + radius + shadow on each row).
-- Single dot standing for Agent + Session + attachment.
-- "Session offline" copy when only Agent is unreachable.
-
-### Canonical reference
-
-- Web: `/#/fixture` 1440×900 — six fixture rows, one selected, mixed Agent health ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — Sessions spatial layer rows ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Row represents a Session, not an Agent.
-- [ ] Metadata includes workload hint, Agent identity, recency.
-- [ ] Agent `offline` + Session still listed → copy blames Agent connectivity, not Session death.
-- [ ] Selection state is visible.
-- [ ] No single chromatic dot stands for Agent + Session + attachment together.
+- [ ] Session identity remains the primary row signal.
+- [ ] Workload and execution context are optional supporting metadata, not navigation parents.
+- [ ] Redundant healthy metadata can disappear.
+- [ ] Degraded infrastructure/lifecycle/attachment states remain semantically distinct.
+- [ ] Capability growth does not cause proportional badge growth in Session rows.
+- [ ] Destructive/secondary actions use progressive disclosure.
+- [ ] The pattern can evolve from Agent labels toward Workspace Location/provider labels without changing its product role.

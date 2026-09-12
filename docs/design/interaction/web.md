@@ -1,65 +1,117 @@
 # Web Interaction Model
 
-Web shares the [product model](../product-model.md) and [information architecture](../information-architecture.md) with App. It does **not** permanently show Terminal and Workspace side-by-side.
+> Upstream: [`VISION.md`](../../../VISION.md) → [`PRINCIPLE.md`](../../../PRINCIPLE.md) → [product model](../product-model.md) → [information architecture](../information-architecture.md)
 
-## Top-level layout
+Web shares the same product semantics as App but realizes them for a large pointer-driven surface.
 
-```text
-┌──────────────────┬───────────────────────────────────────────────┐
-│                  │                                               │
-│ Sessions         │ Active Session                                │
-│                  │                                               │
-│                  │       [ Terminal ] [ Workspace ]              │
-│                  │                                               │
-│                  │            Active Surface                     │
-│                  │                                               │
-└──────────────────┴───────────────────────────────────────────────┘
-```
+The current work remains dominant. Session navigation, Workspace, infrastructure detail, and extension capabilities should remain reachable without becoming permanent competing chrome.
 
-## Rules
-
-- Session navigation remains available on the left (Sessions sidebar).
-- Terminal is the default active surface.
-- Terminal and Workspace are top-level **peer** surfaces within the active Session: they occupy the same surface slot. Terminal remains the default; Workspace is auxiliary, not a permanent split.
-- Only one of Terminal / Workspace is shown at a time.
-- A compact top-level surface switcher/toggle changes the active surface.
-- This preserves maximum horizontal and vertical space for xterm.js during normal work.
-
-Do not treat a persistent Terminal | Files split as the Web shell. Files lives inside Workspace; see [workspace.md](../workspace.md).
-
-## Surface vs tool navigation
-
-Two levels, not one merged tab strip:
+## Top-level model
 
 ```text
-Surface level:
-
-Terminal | Workspace
-
-Workspace tool level:
-
-Files | Session | Agent | ...
+Session navigation       Active Session
+      │                       │
+      │                       ├── Terminal / current work surface
+      │                       ├── contextual capability presence
+      │                       └── Workspace contextual depth
+      │
+      └── on demand / compact / collapsible
 ```
 
-Workspace owns its own secondary navigation. Do **not** create another permanent full-width sidebar inside Workspace by default. Prefer compact top navigation / tool switching. Individual tools define their own internal layout (Files may use master/detail; Agent need not).
+Terminal remains the default live surface for the current Session implementation.
+
+## Session navigation
+
+Sessions are the primary way to return to work, but a persistent full-width navigation column is not an invariant.
+
+On Web, Session navigation may use a drawer, collapsible rail, compact sidebar, command/search entry, or another pattern that preserves fast switching while letting the active work surface dominate.
+
+The product rule is stronger than the exact control:
+
+- users can switch Sessions quickly;
+- Agent/location metadata remains secondary;
+- navigation does not consume permanent space merely because it can;
+- current work receives the majority of the frame.
+
+## Terminal and Workspace
+
+Terminal and Workspace are related but serve different depths:
+
+- **Terminal / current Session surface:** what is happening now.
+- **Workspace:** resources, locations, broader state, and capabilities relevant to the work.
+
+Only the layer the user currently needs should receive significant visual weight.
+
+A compact Workspace affordance or surface switcher may exist, but it must not become a permanent feature catalog. Opening Workspace should preserve Session identity and continuity.
+
+Do not treat a persistent Terminal | Files split as the global Web shell. Files is one Workspace capability.
+
+## Contextual interaction capsule
+
+Web should use the same core interaction idea as App: a lightweight capsule over or adjacent to the Terminal surface for conversational / intent input.
+
+Its secondary affordances are contextual rather than exhaustive.
+
+Typical sources of additional actions:
+
+- explicit `+` expansion;
+- keyboard / command entry;
+- current Session state;
+- current Workspace context;
+- active or relevant capabilities.
+
+The capsule must not accumulate one permanent button per extension.
+
+## Capability emergence
+
+The generic lifecycle is defined in [product-model.md](../product-model.md):
+
+```text
+unavailable -> available -> relevant -> active
+```
+
+Web presentation should follow the same semantics:
+
+- unavailable capabilities remain hidden;
+- available capabilities may be discoverable in Workspace or explicit expansion;
+- relevant capabilities can gain contextual presence;
+- active capabilities can gain lightweight Session presence and contextual capsule actions;
+- deeper views are opened explicitly.
+
+For example, when Claude Code is detected as active in the current Session, Nession may show a small Claude Code presence near the interaction layer and expose session-scoped actions/history/state without replacing the Terminal by default.
+
+## Workspace capability navigation
+
+Workspace must not require one static tab or toolbar entry for every registered capability.
+
+A Workspace implementation may use search, grouped contextual sections, compact switching, a temporary palette, or another presentation chosen by Nession. The visible set should be derived from Workspace context rather than extension registration alone.
+
+Individual capabilities own their internal content model, not the global shell. Files may use master/detail; Git may show repository state; Claude Code may expose configuration/history; Agent/location detail may use a focused information surface.
+
+See [workspace.md](../workspace.md).
+
+## Infrastructure context
+
+Agent and Workspace Location information should remain accessible, but healthy infrastructure should stay visually quiet.
+
+Connectivity or attachment failures may become prominent because they directly threaten the current work. Infrastructure should not become a navigation parent simply because the current transport requires it.
 
 ## What Web must not do
 
-- Permanently display Terminal and Workspace at the same time as the default layout.
-- Group the primary Session list by Agent (see [information-architecture.md](../information-architecture.md)).
-- Implement Web as a large-canvas copy of the App spatial pager.
-- Encode Workspace tool hierarchy as visual tokens ([design-system/tokens.md](../design-system/tokens.md)); that belongs here and in pattern specs ([#470](https://github.com/BestNathan/nession/issues/470)).
-
-## Patterns involved
-
-Web composition is expected to use SessionList, SessionHeader / AgentContext, SurfaceSwitcher, and WorkspaceNavigation. Specs: [design-system/patterns.md](../design-system/patterns.md).
+- Permanently surround the active work with a dashboard of feature entry points.
+- Group primary Session navigation by Agent by default.
+- Show unavailable extensions as dead permanent navigation simply to advertise them.
+- Turn the interaction capsule into an exhaustive toolbar.
+- Require users to leave the Session just to discover an active contextual capability.
+- Let extension-specific UI fragment the global Nession interaction model.
+- Treat current shipping chrome as more authoritative than the repository Vision and Principles.
 
 ## Transport runtime boundary ([#593](https://github.com/BestNathan/nession/issues/593))
 
-Web terminal attach uses a shared **SessionRuntime** per `sessionId`:
+The terminal attach implementation uses a shared **SessionRuntime** per `sessionId`:
 
 ```text
-React (session-first + legacy Dashboard)
+React
       ↓ subscribe / mirror
 SessionRuntimeRegistry
       ↓
@@ -68,14 +120,10 @@ SessionRuntime — AgentSocketClient, attach policy, FileCapability
 ConnectionManager (terminal I/O only; no Jotai reads)
 ```
 
-- **Session-first** and **legacy `TerminalWorkspace`** both use the same registry entry and the same runtime-owned attach protocol. The deprecated `transportFirst` option no longer selects a lifecycle implementation.
-- React hooks (`useSessionRuntime`, `useP2PAttachTransport`) subscribe to the runtime external-store snapshot; Jotai is retained only for UI/session preferences and compatibility mirrors. Terminal code must not import hook types or call `getDefaultStore()` directly.
-- Session-first attach protocol is owned by `SessionAttachController` on the shared runtime; hooks only subscribe and mirror outcomes.
-- `routeIntentEpoch` (user route switch) and `transportGeneration` (runtime candidate rotation) replace `p2pEpoch` for transport identity.
-- Server relay and P2P agent sockets both correlate requests through the shared `MessageRouter` implementation.
-- `ConnectionManager` gates outbound input/resize via an explicit `isAttached()` callback wired from the attach state machine.
+This is an implementation boundary, not information architecture.
 
-### Follow-ups (post-#593)
+- React hooks subscribe to runtime state; UI should not redefine transport lifecycle.
+- Server relay and P2P sockets correlate through the shared runtime/router model.
+- Connection state should surface only to the degree it affects the current work.
 
-- **Legacy Dashboard attach:** `TerminalWorkspace` now uses the same `useTerminalOrchestration` and `SessionAttachController` as session-first; only its chrome and scrollback policy remain different.
-- **Playwright smoke:** connection / attach / failover browser verification still pending.
+As runtime architecture evolves, preserve product semantics rather than exposing transport structure directly in navigation.

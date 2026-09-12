@@ -18,7 +18,6 @@ Local dev → verify locally
   → staging builds + deploys to staging environment → validate on staging
   → audit what is being released → PR staging → main with every `Closes #N` → --merge
   → version bump if warranted → release builds multi-arch images → ArgoCD syncs to production
-  → sync main → staging (fast-forward)
 ```
 
 **Every merge is `--merge`.** Nothing is ever rebased or squashed — `--rebase` rewrites commits and orphans the branch tip, `--squash` collapses N commits into one unmatched patch; both leave a class of re-conflicting orphans behind. See **Why every merge is `--merge`**.
@@ -128,7 +127,7 @@ gh pr merge <N> --merge
 
 **Merging feature branches (auto-merge to staging):**
 
-For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → merge to staging → staging deploy → validate → PR staging → main with `--merge` → sync main back to staging**.
+For `feat/**` and `fix/**` branches, the flow is **refresh root main → worktree off origin/main → PR to staging → quality gate → merge to staging → staging deploy → validate → PR staging → main with `--merge`**.
 
 ```bash
 # 1. Push → create PR targeting staging
@@ -182,18 +181,11 @@ gh pr merge <PR-NUMBER> --merge
 
 # 4. Version bump if warranted (see "Version bump"), then wait for release.yml
 ./scripts/deploy-watch.sh prod
-
-# 5. Sync main → staging. Always a fast-forward; no force push.
-#    Last, once main has stopped moving (bump + prod tag commit are in).
-git fetch origin
-git push origin origin/main:refs/heads/staging
 ```
-
-**Step 5 goes last** because the bump and `release.yml`'s `chore: update prod image tags` both land on `main` after step 3 — syncing earlier just leaves `staging` two commits behind again. It is still a fast-forward at that point: `staging`'s tip is an ancestor of the merge commit, which is an ancestor of everything added after it.
 
 ### Why every merge is `--merge`
 
-**`--merge` records the head branch's tip as a second parent**, so every landed branch stays reachable from the target with its original SHAs. For the release that means `staging` stays an ancestor of `main` and step 5 is a fast-forward forever — no orphaned commits anywhere, no force push. That is the whole point of the rule: a feature branch merged into `staging` keeps its original SHAs in `staging`'s ancestry, so the orphan class below never starts.
+**`--merge` records the head branch's tip as a second parent**, so every landed branch stays reachable from the target with its original SHAs — no orphaned commits anywhere, no force push. That is the whole point of the rule: a feature branch merged into `staging` keeps its original SHAs in `staging`'s ancestry, so the orphan class below never starts.
 
 **`--rebase` rewrites and orphans, so no merge in this flow may use it.** GitHub's rebase-merge *always* rewrites the commits and leaves the head branch pointing at the originals. It rewrites even when nothing requires it: measured on PR #305, whose branch was already a linear descendant of `main`, the landed commit `787f8be` and the branch tip `39825da` had the **identical tree** `deaf21f4` and differed only because the committer date moved 12:14:04 → 12:16:43. There is no configuration that makes it fast-forward.
 
@@ -254,7 +246,7 @@ gh pr create --base main --head chore/release-<sha> --title "chore: release (...
 gh pr merge <PR-NUMBER> --merge
 ```
 
-Then sync step 5 as usual. Measured 2026-08-17: `staging → main` reported `mergeable: false` (conflict on `k8s/overlays/staging/kustomization.yaml`); `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. The cherry-pick branch (PR #300) merged cleanly and `staging` was never touched. Under this flow the conflict should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes it.
+Measured 2026-08-17: `staging → main` reported `mergeable: false` (conflict on `k8s/overlays/staging/kustomization.yaml`); `mergeable: false` blocks `--merge`, `--rebase` and `--squash` alike, so switching method never routes around a real conflict. The cherry-pick branch (PR #300) merged cleanly and `staging` was never touched. Under this flow the conflict should not arise at all — see the `k8s/overlays/**` rule below for the one thing that causes it.
 
 **Verify before merging** that the release is actually mergeable:
 
@@ -314,32 +306,31 @@ Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`,
 
 Two consequences to accept:
 
-- Direct-to-main changes never pass through `staging`, so `staging` falls behind until the next sync. If `staging` has no unreleased work on it, sync immediately (`git push origin origin/main:refs/heads/staging` — a fast-forward, no PR needed); otherwise wait for the next release, which syncs it anyway. Note that a feature branch cut from `main` also carries `main`'s newer commits into `staging` when it merges, so the gap tends to close on its own.
-- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `staging` is synced — a workflow fix merged to `main` does not change staging builds until the sync runs.
+- Direct-to-main changes never pass through `staging`, so `staging` sits without them until they reach it: a feature branch cut from `main` carries them in when it merges, and the next release merges `staging` into `main` regardless. Nothing is pushed between the two by hand.
+- `.github/workflows/*` changes only take effect from the default branch, which is why they were already on this path. Note that `push`-triggered workflows use the workflow file *at the pushed commit*, so `staging.yml` behaviour on `staging` still reflects `staging`'s copy until `main`'s commits arrive there — a workflow fix merged to `main` does not change staging builds until then.
 
 **⚠ Never put an empty commit on `staging`.** Empty commits have no patch-id, so nothing can de-duplicate them, and they ride into `main` on the release as noise. Use `gh workflow run` to trigger workflows, not `git commit --allow-empty`. Drop an existing one with `git rebase -i origin/staging`.
 
-### Why `main` and `staging` never diverge anymore
+### How `main` and `staging` move relative to each other
 
-Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch, never on `main` — so `main` and `staging` only differ by unreleased feature work. The old mechanism (staging.yml writing kustomize commits to `main`) and its whole conflict class (0.29.0, overlay snapshots riding feature branches into release PRs) are gone: `main` is no longer a deploy target for anything.
+Since issue #592 (2026-09-05) deploy commits live on the `gitops` orphan branch, never on `main` — so `main` and `staging` only differ by unreleased feature work and direct-to-main work. The old mechanism (staging.yml writing kustomize commits to `main`) and its whole conflict class (0.29.0, overlay snapshots riding feature branches into release PRs) are gone: `main` is no longer a deploy target for anything.
 
 | Step | Method | Effect |
 |------|--------|--------|
 | `feature → staging` | `--merge` | Records the head tip as a second parent — original SHAs stay in `staging`'s ancestry. No orphans anywhere. |
-| `staging → main` | `--merge` | Same, and it keeps `staging` an ancestor of `main`, which makes the sync a fast-forward. |
-| `main → staging` sync | fast-forward push | Possible only because every release merged with `--merge`. Never force-push. |
+| `staging → main` | `--merge` | Same — and the release PR's diff is exactly the unreleased work. |
 
-After the sync the refs are identical, and the next staging build puts `main` exactly 1 commit ahead again. That is the expected steady state.
+The two refs sit at different commits between releases, and that is the normal state: `staging` carries unreleased feature work, `main` carries direct-to-main work plus whatever shipped last. The release PR is the only thing that moves work between them.
 
 ### Branch base
 
-A PR's diff is computed against `merge-base(base, head)`. Branching everything off `main` is correct **because the post-release sync keeps `main` from falling behind `staging`** — right after a release the two refs are identical, so "off `main`" and "off `staging`" are the same commit.
+A PR's diff is computed against `merge-base(base, head)`, so the base decides what the reviewer sees.
 
-Skip the sync and that stops being true: `main` starts missing unreleased work, and a branch cut from `main` lacks code it needs. Measured — with a feature on `staging` but not yet released, a follow-up fix branched from `main` **conflicts**, while the same fix branched from `origin/staging` applies cleanly as a single commit. So the one exception is:
+New work comes off `main` by default. The exception is work that depends on code already on `staging` but not yet released — `main` does not have those commits, so it must come off `origin/staging`. Measured — with a feature on `staging` but not yet released, a follow-up fix branched from `main` **conflicts**, while the same fix branched from `origin/staging` applies cleanly as a single commit:
 
 > Follow-up work on code that is on `staging` but not yet released → worktree off `origin/staging` (not root reset).
 
-The reverse mistake still applies in the other direction: a branch cut from `main` but targeting `staging` while `main` is *ahead* drags every extra commit into `staging`. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`. The sync is what prevents this. (Those dragged commits are de-duplicated at the release, so they are noise in review rather than a correctness problem.)
+The mirror-image mistake is a branch cut from `main` but targeting `staging` while `main` is *ahead*: it drags `main`'s extra commits into `staging` with it. Measured: a `docs/**` branch cut from `main` dragged 5 of `main`'s commits into `staging`. That is also how the two refs re-converge without anyone pushing between them — a branch cut from `main` carries `main`'s commits into `staging` when it merges. (Those dragged commits are de-duplicated at the release, so they are noise in review rather than a correctness problem.)
 
 `EnterWorktree` bases on `origin/main` by default. For the staging exception, use manual `git worktree add … origin/staging` — do not reset project root away from `main`.
 
@@ -387,7 +378,7 @@ When the PR is merged to staging, GitHub Actions (`staging.yml`) automatically:
 5. `deploy-staging-gitops` writes `deploy(staging): <sha>` to `gitops/environments/staging` via `scripts/gitops-commit.sh`
 6. ArgoCD detects the gitops change and syncs the staging environment
 
-**After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`), bump the version if warranted, then sync `main` → `staging` last. The `release.yml` workflow then:
+**After staging validation**, open the release PR (`staging` → `main`, merged with `--merge`) and bump the version if warranted. The `release.yml` workflow then:
 1. Builds version-tagged Docker images (`server-{version}`, `agent-{version}`, `ui-{version}`)
 2. Creates GitHub Release with native binaries
 3. `promote-production` waits for GitHub Environment `production` approval, then writes `deploy(production): <version>` to `gitops/environments/production`

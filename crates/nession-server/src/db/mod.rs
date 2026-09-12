@@ -612,6 +612,7 @@ mod tests {
             status,
             window_count: 2,
             attached_clients: 0,
+            foreground_command: None,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         }

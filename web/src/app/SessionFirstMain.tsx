@@ -16,6 +16,7 @@ import type {
 } from '@/app/workspace/toolTypes';
 import { WORKSPACE_TOOLS } from '@/app/workspace/tools';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
+import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
 
@@ -45,6 +46,7 @@ function WorkspacePanel({
   onToolChange,
 }: WorkspacePanelProps) {
   const activeLabel = WORKSPACE_TOOLS.find((item) => item.id === tool)?.label ?? 'Workspace';
+  const facts = useSessionCapabilityFacts(selectedSession);
 
   return (
     <div
@@ -68,6 +70,7 @@ function WorkspacePanel({
           fileOps,
           experience,
           onToolChange,
+          facts,
         }}
         activeCapabilityId={tool}
       />

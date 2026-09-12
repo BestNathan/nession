@@ -453,7 +453,7 @@ gh pr merge <PR-NUMBER> --auto --merge
 
 **Auto-merge to staging is safe** — staging is the integration environment. The quality gate ensures correctness. Human validation happens on staging before the staging → main merge.
 
-**After staging validation**, release `staging` → `main`, bump if warranted, then sync `staging` last:
+**After staging validation**, release `staging` → `main`, and bump if warranted:
 
 ```bash
 # 1. Audit what ships, then open the release PR with every Closes line
@@ -472,13 +472,9 @@ gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge
 # 3. Wait for release.yml's promote-production (pauses at Environment
 #    approval) to write the gitops deploy commit, then ArgoCD rollout
 ./scripts/deploy-watch.sh prod
-
-# 4. Sync main → staging — a fast-forward, no force push. Last, once main has settled.
-git fetch origin
-git push origin origin/main:refs/heads/staging
 ```
 
-**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs. For the release that keeps `staging` an ancestor of `main`, which is what makes step 4 a fast-forward forever — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. Step 4 goes last because steps 2 and 3 both add commits to `main`. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
+**Everything is `--merge`. Nothing is ever rebased or squashed.** Every merge records the head branch's tip as a second parent, so every landed branch stays in the target's ancestry with its original SHAs — no orphaned commits anywhere, no force push. `--rebase` always rewrites commits and leaves the branch tip orphaned, a class that has re-conflicted at release (see `nession-cicd` for the measurements), so **no** merge in this flow may use it, feature-to-staging included. If the release PR reports `mergeable: false`, do **not** back-merge `main` into `staging` — cherry-pick onto a branch off `main`, resolve there, and PR that. See `nession-cicd` for the measurements.
 
 ### PR Body Template
 
@@ -509,8 +505,7 @@ deploy lanes: **staging lane accepts any sha with built images** (merge to
 staging builds them — use `deploy.yml` to pull a specific commit onto
 `staging-01` for standalone validation); **production is release-lane only**
 (SemVer, behind Environment approval). After staging validation, the
-`staging → main` release PR merges with `--merge` and `main` is then synced
-back into `staging`; `release.yml` only builds if a version file changed, so
+`staging → main` release PR merges with `--merge`; `release.yml` only builds if a version file changed, so
 a release carrying runtime changes needs the follow-up bump PR to reach
 production. See `nession-cicd`.
 
@@ -581,6 +576,15 @@ cd web && npm run dev
 - [ ] **连接状态** — 断开/重连 banner 显示正确
 - [ ] **控制台** — 浏览器 console 无 error/warning（`browser_console_messages`）
 - [ ] **网络** — WebSocket 消息类型符合预期，无不必要的消息
+- [ ] **视觉基线** — 改动是否影响 `e2e/specs/__snapshots__/fixture-visual.spec.ts/` 里 golden 截图覆盖的 chrome？影响则必须同批重生成（见下）
+
+**视觉基线同批更新（intentional UI 变化）**
+
+`FIXTURE_SCREENSHOT.maxDiffPixelRatio = 0.02` 足以吞掉整片 chrome 变化 —— baseline 过期也照样绿，门禁等于失效。原则见 `docs/design/design-system/validation.md` 与 `docs/design/migration.md`；操作是：
+
+- 只能在 CI 重生成（本地禁止跑 e2e）：`CI=true npx playwright test fixture-visual --update-snapshots`，然后提交新的 golden 图。
+- **不得靠放宽 `maxDiffPixelRatio` 变绿**；解释不了的差异要查原因。
+- 已经发出去的漂移单独开 issue，不要留给下一个人重新发现。
 
 **Collecting screenshots (posted as a PR comment, not in the body):**
 

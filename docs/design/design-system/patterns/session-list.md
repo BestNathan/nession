@@ -1,26 +1,30 @@
 # SessionList
 
-Primary navigation: a **flat** list of Sessions. Not an Agent directory.
+> Upstream: [`VISION.md`](../../../../VISION.md) → [`PRINCIPLE.md`](../../../../PRINCIPLE.md) → [information architecture](../../information-architecture.md) → [interaction](../../interaction/)
 
-> **Contract:** `design/contracts/patterns/session-list.json` — measurable layout rules ([contracts.md](../contracts.md)).
+SessionList is the primary **work-return navigation pattern**: a flat list of Sessions, not an Agent directory.
+
+Its information model is stable; its placement is not required to be a permanent left column.
+
+> Existing contract: `design/contracts/patterns/session-list.json` — measurable layout rules ([contracts.md](../contracts.md)). Contracts that assume a permanently visible Web column should be reviewed with the shell implementation.
 
 ## Purpose
 
-Let the user find and switch Sessions the way an IM client finds conversations — without importing an IM data model and without requiring Agent → Sessions drill-down.
+Let the user find and switch Sessions quickly without requiring Agent → Sessions drill-down and without forcing the active work surface to permanently surrender space to navigation.
 
 Must not:
 
 - Group rows by Agent by default.
 - Treat Agent as a navigation parent.
-- Hide Sessions whose Agent is currently unreachable (those rows stay, with reachability from [SessionItem](session-item.md)).
-
-Related shipping/overlap: dashboard `SessionList.tsx` is a predecessor (it still mixes `session.status` with attachment). Refresh/global session state: [#343](https://github.com/BestNathan/nession/issues/343) — coordinate; this spec does not redefine that issue.
+- Hide Sessions whose Agent/location is currently unreachable.
+- Require a permanent sidebar solely because Session is the primary navigation object.
 
 ## Anatomy
 
 ```text
-┌─ SessionList ─────────────────────────────────┐
-│ [ search / filter ]                           │  optional chrome
+SessionList
+┌────────────────────────────────────────────────┐
+│ [ search / filter ]                           │  optional
 │                                               │
 │  SessionItem                                  │
 │  SessionItem  ← selected                      │
@@ -31,124 +35,131 @@ Related shipping/overlap: dashboard `SessionList.tsx` is a predecessor (it still
 └───────────────────────────────────────────────┘
 ```
 
-Parts:
-
 | Part | Role |
 |------|------|
-| List viewport | Scrolls rows. No Agent section headers. |
-| SessionItem | One Session. Spec: [session-item.md](session-item.md). |
-| Search/filter | Optional. Filters the flat list; must not switch the list into Agent grouping. |
-| Empty | No Sessions (or no matches). Copy talks about Sessions, not “no agents”. |
-| Loading | Skeleton rows or equivalent; does not flash an Agent grid. |
-| Error | List-level failure to fetch. Distinct from per-row Agent offline. |
+| List viewport | Scrolls Session rows. No Agent section headers. |
+| SessionItem | One Session. See [session-item.md](session-item.md). |
+| Search/filter | Optional. Filters the flat list; does not turn Agent into a hierarchy. |
+| Empty | No Sessions / no matches. Copy talks about Sessions, not Agents. |
+| Loading | Skeleton rows or equivalent. |
+| Error | Failure to load the Session list, distinct from per-row reachability. |
 
-Create-session / kill actions may live as list chrome or on the item. They are not Agent-card actions.
+Create/kill actions may be reachable from list or row context where useful. Destructive controls should use progressive disclosure rather than permanently dominating navigation.
+
+## Placement
+
+SessionList is a navigation **capability/pattern**, not a guarantee of a fixed shell column.
+
+### Web
+
+Acceptable placements include:
+
+- collapsible sidebar/rail;
+- overlay drawer;
+- compact Session switcher that opens the list;
+- on-demand panel combined with search/command navigation.
+
+A persistent left column may still be appropriate on some desktop compositions, but it is an implementation choice. It must remain secondary to the active Session and should yield when space/focus makes that beneficial.
+
+### App
+
+SessionList lives in the Sessions spatial layer to the left of Terminal conceptually:
+
+```text
+Sessions ← Terminal → Workspace
+```
+
+Swipe-right may accelerate access, but a visible non-gesture control is required.
 
 ## States
 
-SessionList itself has **container** states. Per-row domain state belongs on SessionItem / ConnectionStatus.
+SessionList itself has container states. Per-row Agent/location, Session lifecycle, and attachment state belong to SessionItem / ConnectionStatus.
 
 | Container state | Meaning | Must not imply |
 |-----------------|---------|----------------|
-| `populated` | One or more rows | — |
-| `empty` | Zero Sessions (or zero matches) | Agents are offline |
-| `loading` | First load or explicit refresh in flight | Sessions are `exited` |
-| `error` | Client could not load the list | Every Agent is `offline` |
+| `populated` | One or more Sessions | — |
+| `empty` | Zero Sessions or zero matches | Agents are offline |
+| `loading` | First load / refresh | Sessions are exited |
+| `error` | List could not be loaded | Every Agent is offline |
 
-Partial failure (some Agents missed refresh): keep those Sessions visible; mark the row (see SessionItem reachability). Do not drop the rows and do not paint the whole list as error.
+Partial reachability failure must not remove the affected Session rows. Keep the work discoverable and surface the infrastructure problem locally.
 
-Domain dimensions **not** collapsed at list level: Agent connection, Session lifecycle, attachment. The list does not show a single “system status”.
+## Session row content
+
+The list is flat, but rows can carry compact context to help users distinguish work:
+
+```text
+Fix terminal reconnect
+Claude Code · devbox-01 · 2m
+```
+
+Session name is primary. Workload hint, Workspace Location/Agent identity, recency, and reachability are secondary metadata.
+
+This supports work-first navigation without importing an IM/chat domain model or an Agent-first tree.
 
 ## Tokens
 
 | Surface | Token layer |
 |---------|-------------|
-| List background | Semantic `surface.*` / Domain `workspace.surface` as appropriate for the nav column |
-| Row hover/selected | Semantic `accent` / `surface` — not Primitive palettes |
-| Empty/error copy | Semantic `text.secondary` / `danger` |
-| Density | Experience `row.*` (Web compact, App larger touch rows) |
+| List/navigation surface | Semantic `surface.*` |
+| Row hover/selected | Semantic surface/accent |
+| Empty/error copy | Semantic `text.secondary` / state semantics |
+| Density | Experience `row.*` |
 
-No Primitive color classes on the list or its empty states.
+Do not introduce feature-specific palette literals or decorative per-Agent coloring.
 
 ## Web vs App
 
 | | Web | App |
 |--|-----|-----|
-| Placement | Persistent left column ([interaction/web.md](../../interaction/web.md)) | Spatial **Sessions** layer: drawer/stack left of Terminal ([interaction/app.md](../../interaction/app.md), [#473](https://github.com/BestNathan/nession/issues/473)) |
-| How it opens | Always visible at desktop shell width | Gesture **and** a visible control. Gesture-only is not acceptable. |
-| Density | Experience Web `row.md` (~36px) | Experience App `row.md` / `touchTarget.min` |
-| Grouping | Flat | Flat. Do not introduce Agent sections on mobile “for space.” |
+| Placement | On-demand, collapsible, compact, or persistent when justified | Sessions spatial layer |
+| Opening | Must remain fast/discoverable; exact shell control may vary | Gesture + visible control |
+| Density | Web Experience row density | App/touch Experience density |
+| Grouping | Flat by default | Flat by default |
+| Infrastructure metadata | Secondary | Secondary |
 
-Same SessionItem content on both platforms.
+## Visual contract
 
-## Visual Contract
-
-Derived from [visual-language.md](../../visual-language.md) and the Web Active Terminal canonical screen ([#563](https://github.com/BestNathan/nession/pull/563)).
+Derived from [visual-language.md](../../visual-language.md) and [composition.md](../../composition.md).
 
 ### Dominance
 
-- SessionList is **navigation chrome** — it must recede so the Terminal (or Workspace when active) dominates the frame (P1, P2).
-- The list never draws more visual weight than the active work surface in the shell split.
+- SessionList is navigation chrome and remains visually secondary to the active work surface.
+- When temporarily opened as an overlay/drawer, it may dominate local attention for selection, then recede again.
+- A wide screen does not automatically justify a permanently wider Session list.
 
 ### Information hierarchy
 
-- **Primary within the list:** the selected [SessionItem](session-item.md) name.
-- **Container chrome** (search, empty, error): `secondary` at most — never product-title scale.
-- No list-level "system status" that competes with row-level domain facts.
-
-### Alignment
-
-- Rows share one left gutter; optional search/filter aligns to the same inset.
-- Flat vertical stack — no Agent section headers breaking alignment.
-
-### Density
-
-- **Session navigation density** — comfortable, scannable rows ([visual-language.md](../../visual-language.md) §4).
-- List viewport scrolls; chrome above the list (search) is compact and optional.
-
-### Whitespace
-
-- Background shift separates navigation surface from app canvas — whitespace and surface shift before borders.
-- Empty and loading states use vertical whitespace; do not fill with Agent card grids.
-
-### Contrast
-
-- List background: navigation surface — quieter than primary work surface.
-- Empty/error copy: `secondary`; danger only for list-fetch failure, not per-Agent offline.
+- Primary within a row/list: Session identity.
+- Search/filter and metadata: secondary.
+- Reachability problems: conditional emphasis on affected rows only.
 
 ### Surface treatment
 
-- Navigation surface: background shift vs canvas; hairline border only if shift alone is illegible (R-S5 — no elevation on healthy chrome).
-- No card wrapper around the entire list.
+- Flat navigation surface; whitespace/background shift before borders/elevation.
+- No Agent card grid.
+- No nested cards per Session row.
 
-### State-driven emphasis
+### Progressive disclosure
 
-| Container state | Emphasis |
-|-----------------|----------|
-| `populated` | Default — quiet chrome, row selection carries accent |
-| `empty` | Informative copy at `secondary` — not alarm |
-| `loading` | Skeleton at `tertiary` — no flash of Agent grid |
-| `error` | List-level `conditional-prominent` — distinct from row Agent offline |
-| Partial Agent refresh miss | Rows stay; per-row reachability escalates on [SessionItem](session-item.md) only |
+- Search/filter appears when useful.
+- Destructive actions appear on hover/focus/selection/overflow or equivalent touch affordance.
+- Infrastructure detail stays compact until explicitly opened or degraded.
 
-### Anti-patterns
+## Anti-patterns
 
-- Agent-grouped sections or Agent card grid as primary nav.
-- Dropping Sessions when Agent is unreachable (hides the connectivity problem).
-- List-level error styling when only one Agent missed refresh.
-- Decorative color on the list chrome.
-- Search/filter that switches the list into Agent-parent grouping.
+- Agent-grouped sections or Agent-card navigation.
+- Dropping Sessions when their Agent/location is unreachable.
+- Permanent destructive actions in every row.
+- Treating “primary navigation” as “must always consume a fixed column.”
+- Expanding navigation width because additional capability metadata exists.
+- A list-level global health indicator that collapses independent state dimensions.
 
-### Canonical reference
+## Acceptance for future implementation work
 
-- Web: `/#/fixture` 1440×900 — left Sessions column with six rows ([#563](https://github.com/BestNathan/nession/pull/563)).
-- App: `/#/fixture/app` 390×844 — Sessions spatial layer (drawer/stack) ([#568](https://github.com/BestNathan/nession/pull/568)).
-
-## Acceptance
-
-- [ ] Primary nav is a Session list, not an Agent card grid.
-- [ ] No default grouping by Agent.
-- [ ] Selecting a row activates that Session (Terminal default surface).
-- [ ] Empty copy refers to Sessions.
-- [ ] Sessions whose Agent missed refresh or is offline remain listed.
-- [ ] App: Sessions layer is reachable without a swipe.
+- [ ] Session navigation remains flat by default and never requires Agent drill-down.
+- [ ] Sessions remain visible when their execution location is unreachable.
+- [ ] Selecting a Session returns to that Session's current work surface.
+- [ ] Web placement can collapse/go on demand without changing SessionList semantics.
+- [ ] App Sessions layer is reachable without a swipe.
+- [ ] Navigation chrome yields before the active work surface yields.

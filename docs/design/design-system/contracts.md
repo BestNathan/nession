@@ -1,179 +1,190 @@
 # UI Contracts (architecture)
 
-Machine-readable **layout and pattern constraints** for Nession UI. This layer sits above [tokens](tokens.md) and beside [pattern prose](patterns.md): prose owns product semantics; contracts own **measurable** rules that tooling and AI repair loops can enforce.
+> Upstream: [`VISION.md`](../../../VISION.md) → [`PRINCIPLE.md`](../../../PRINCIPLE.md) → [product model](../product-model.md) → [information architecture](../information-architecture.md) → [patterns](patterns.md)
+
+Machine-readable UI contracts encode **measurable consequences of an approved product/pattern decision**. They help tooling and AI repair loops preserve layout, interaction, and accessibility constraints without turning current implementation geometry into product law.
 
 **Tracking:** [#544](https://github.com/BestNathan/nession/issues/544)  
-**Implements:** [#545](https://github.com/BestNathan/nession/issues/545)  
-**Upstream:** [#468](https://github.com/BestNathan/nession/issues/468) / [#469](https://github.com/BestNathan/nession/issues/469), [#467](https://github.com/BestNathan/nession/issues/467), [#470](https://github.com/BestNathan/nession/issues/470)  
-**Validation stack:** [validation.md](validation.md)
+**Implementation:** [#545](https://github.com/BestNathan/nession/issues/545)  
+**Validation:** [validation.md](validation.md)
 
-## Principle
+## Core rule
 
-> AI decides what to change; Nession's UI architecture constrains how that change is allowed to look and behave.
+> Contracts constrain implementation. They do not outrank Vision, Principles, product model, IA, or pattern semantics.
+
+When upstream product meaning intentionally changes, the affected pattern, executable contract, implementation, and visual baseline should converge together.
+
+An old contract is evidence of a previous approved behavior, not proof that a higher-level product decision cannot change.
 
 ## Layer stack
 
 ```text
-Product / IA / Interaction     docs/design/{product-model,information-architecture,interaction/*}
+VISION.md / PRINCIPLE.md
         ↓
-Pattern prose (semantics)     docs/design/design-system/patterns/*.md     ← #470
+Product model / IA / Interaction
         ↓
-Design Tokens (values)        design/tokens/ + design/generated/          ← #467 GATE
+Pattern prose (semantics + progressive disclosure)
         ↓
-UI Contracts (measurable)     design/contracts/                           ← #545
+Design Tokens (reusable values)
         ↓
-Browser assertions            e2e helpers                                 ← #546
+UI Contracts (measurable consequences)
         ↓
-Web/App viewport matrix       design/contracts/viewports.json             ← #547
+Implementation
         ↓
-Focused visual regression     small e2e baselines                         ← #548
+Assertions / viewport matrix / visual regression
 ```
 
 ## Ownership
 
 | Layer | Owns | Does not own |
-|-------|------|----------------|
-| Pattern markdown | Purpose, anatomy, states, Web/App narrative | Pixels, wrap rules, raw heights |
-| Tokens (#467) | Resolvable values and identifiers | Layout strategy (`wrap`, `overflow`) |
-| Contracts | Measurable rules + token **references** | Product semantics; a second palette |
-| Assertions / matrix / visual | How to measure, where to run, screenshot net | Design truth |
+|-------|------|--------------|
+| Product / IA docs | Product relationships, presence rules, mental model | Component pixels |
+| Pattern markdown | Purpose, contextual anatomy, states, progressive disclosure, Web/App meaning | Raw duplicated values |
+| Tokens | Reusable values and semantic vocabulary | Product presence/navigation policy |
+| Contracts | Testable layout/visibility/overflow/touch constraints derived from patterns | Product direction; capability entitlement to UI |
+| Assertions / visual baselines | Enforcement of the current contract | Design truth |
 
-Development skills may **point** at contracts. They must not become the source of design truth.
+Development skills may point at contracts; they must not create a parallel product/design source of truth.
 
-## Relationship to pattern specs
+## Contract maturity
 
-[patterns.md](patterns.md) remains the human-readable product contract (Purpose / Anatomy / States / Tokens / Web vs App / Acceptance).
+Do not encode every exploratory UI choice immediately.
 
-Executable contracts:
+A relationship is ready for a rigid executable contract when:
 
-- Express only **testable** constraints (single-line, height token, overflow strategy, touch target, scroll owner, visibility/collapse, allowed layout primitive).
-- Reference the pattern via `patternRef` (path to the markdown spec).
-- Pattern specs should gain a short index line when a contract exists, e.g. `Contract: pattern.session-header` — do **not** duplicate numeric values into Acceptance.
+- the upstream product/pattern meaning is clear;
+- the rule is measurable and useful to enforce;
+- the rule is expected to remain stable enough that automated enforcement reduces drift rather than blocking exploration.
 
-## #467 gate
+Prefer delaying a narrow contract over prematurely freezing an uncertain shell anatomy.
 
-Contract **identifiers** and schema are defined here so docs can land before executable tokens are on `main`.
+## What contracts should express
 
-**Resolving token values** (static validation of unknown tokens, height px checks) requires [#467](https://github.com/BestNathan/nession/issues/467) generated metadata (`design/generated/`, lint metadata) on the default branch.
+Examples of useful measurable consequences:
 
-Implementation order:
+| Field / concept | Role |
+|-----------------|------|
+| `wrap` | Whether a stable element must stay single-line |
+| `heightToken` / `minHeightToken` | Approved Experience token reference |
+| `overflow` | `clip` / `menu` / `sheet` / `scroll` / `wrap` strategy |
+| `align` | Measurable alignment intent |
+| `minWidth` / `maxWidth` | Token or named semantic bound |
+| `scrollOwner` | Which surface owns scrolling |
+| `touchTargetToken` | App touch accessibility |
+| `visibility` | Context/experience-dependent visibility rule |
+| `allowedPrimitive` | Allowed composition primitive when stable |
+| `patternRef` | Canonical pattern prose owner |
+
+Contracts should increasingly support **contextual presence**, not only static viewport presence.
+
+For example, a capability entry may need conditions such as:
 
 ```text
-docs (this file + validation.md)
-    ↓
-#467 on main
-    ↓
-#545 design/contracts/* + schema validation
-    ↓
-#546 → #547 → #548
+unavailable -> absent
+available   -> discoverable, not necessarily persistent
+relevant    -> direct presence allowed
+active      -> stronger contextual presence allowed
 ```
 
-Do not invent a second token vocabulary inside contracts. Prefer Experience identifiers such as `experience.web.control.md` and `experience.app.touchTarget.min` from [tokens.md](tokens.md).
+The exact schema is an implementation concern, but the product meaning must come from upstream pattern specs.
+
+## What contracts must not encode
+
+Avoid turning historical shell choices into universal invariants, such as:
+
+- a permanent `Terminal | Workspace` switcher must always exist;
+- every registered Workspace capability must own a visible tab;
+- a healthy Agent badge must always occupy SessionHeader space;
+- a fixed tool enum defines the Workspace;
+- one Agent equals one Workspace;
+- one Location failure hides every Workspace resource.
+
+If existing executable contracts encode these assumptions, classify them as **implementation convergence debt** until the corresponding UI is intentionally migrated.
+
+## Storage
+
+Platform-neutral executable contracts live under:
+
+```text
+design/contracts/
+  schema.json
+  global.json
+  categories/
+  patterns/
+  viewports.json
+```
+
+Generated output remains under `design/generated/` and must not be hand-edited.
+
+`docs/design/` owns the human-readable product/design architecture; executable contract files implement a subset of it.
 
 ## Inheritance
+
+Shared measurable constraints may inherit:
 
 ```text
 global.rules
   ↓
-category.<layout|chrome|list-row|control|...>
+category.<chrome|control|list-row|surface|...>
   ↓
-pattern.<session-header|session-list|...>
+pattern.<...>
   ↓
-override.<rare local>    // discouraged; requires rationale
+override.<rare local>    // requires rationale
 ```
 
-Merge: deeper layers override same-named fields. `web` and `app` blocks merge **independently** — neither silently inherits the other's interaction strategy.
+Web and App blocks remain explicit where interaction differs. Neither experience silently inherits the other's navigation strategy.
 
-## Storage (executable)
+## Context versus viewport
 
-Platform-neutral contracts live next to tokens:
+Viewport is only one source of UI state.
+
+Contracts may also need to consider:
+
+- Session/attachment/connectivity state;
+- Workspace Location/source availability;
+- capability lifecycle (`unavailable -> available -> relevant -> active`);
+- whether a deeper surface is explicitly opened;
+- whether metadata is redundant or needed for disambiguation.
+
+Do not force context-sensitive product behavior into breakpoint-only rules.
+
+## Initial / current coverage
+
+Existing contracts were created around the Session-first shell and remain useful for implementation stability. High-value coverage includes:
+
+- Session navigation rows;
+- compact Session chrome where still rendered;
+- Terminal surface/capsule geometry;
+- Workspace contextual navigation where the current implementation exposes it;
+- touch targets and scroll ownership;
+- shared control categories.
+
+Names such as `workspace-navigation` or old toolbar/switcher contracts describe current implementation surfaces, not permanent product topology.
+
+## Change protocol
+
+When an intentional product change invalidates a contract:
 
 ```text
-design/contracts/
-  schema.json                 # JSON Schema (or equivalent)
-  global.json
-  categories/
-    chrome.json
-    control.json
-    # list-row.json is reserved for future fixed-height row patterns;
-    # shipped SessionItem rows are layout-derived two-line stacks (#546)
-  patterns/
-    session-header.json
-    session-list.json
-    session-item.json
-    terminal-toolbar.json
-    workspace-navigation.json
-  viewports.json              # sole viewport matrix source (#547)
+1. confirm upstream Vision / Principle / product-model intent
+2. update canonical pattern/design prose
+3. update shipping implementation
+4. update executable contract/schema if needed
+5. update assertions and focused visual baselines
+6. review the diff as one semantic change
 ```
 
-Implemented by #545: `design/contracts/schema.json` documents every file shape; `design/scripts/resolve-contracts.mjs` enforces those rules (mirrored in code: unknown/invalid token refs, broken `extends`, orphan categories, filename↔id mismatch, missing `patternRef`) and merges inheritance into **`design/generated/contracts.json`** (generated — never hand-edit). Px-measurable token fields gain a resolved `<field>Px` sibling so consumers never re-derive design values. `just contracts-gen` / `contracts-check`; the drift gate runs in `web-lint` (CI web-check); unit tests via `just design-test` (`node --test design/scripts/*.test.mjs`).
-
-`docs/design/` describes and indexes; it is not the machine-readable contract tree.
-
-## Expressible constraints
-
-Contracts must be able to represent:
-
-| Field | Role |
-|-------|------|
-| `wrap` | Single-line vs wrapping |
-| `heightToken` / `minHeightToken` | Experience token id for control/row height |
-| `overflow` | Strategy enum: `clip` \| `menu` \| `sheet` \| `scroll` \| `wrap` |
-| `align` | Alignment intent sufficient for assertions |
-| `minWidth` / `maxWidth` | Token reference or named content semantics — no magic numbers unless `override` + rationale |
-| `scrollOwner` | Which region owns scrolling |
-| `touchTargetToken` | App (e.g. `experience.app.touchTarget.min`) |
-| `visibility` | Show/collapse rules by experience |
-| `allowedPrimitive` / `patternRef` | Allowed layout primitive or link to #470 prose |
-
-Web/App differences **must** be explicit under `web` / `app`. Tests must not invent divergent expectations with ad-hoc `if (mobile)` branches.
-
-## Conceptual shape
-
-```json
-{
-  "id": "pattern.session-header",
-  "extends": ["category.chrome"],
-  "patternRef": "docs/design/design-system/patterns/session-header.md",
-  "web": {
-    "wrap": false,
-    "heightToken": "experience.web.row.md",
-    "overflow": "menu"
-  },
-  "app": {
-    "wrap": false,
-    "heightToken": "experience.app.row.md",
-    "touchTargetToken": "experience.app.touchTarget.min",
-    "overflow": "sheet"
-  }
-}
-```
-
-Exact on-disk format (JSON vs TypeScript modules) is an #545 implementation choice. Requirements that do not move:
-
-1. Statically readable by tests/tooling.
-2. Values are token identifiers or strategy enums — not copied raw px/colors.
-3. Unknown token references fail validation once #467 metadata is available.
-4. Shared category rules prevent per-component repetition.
-
-## Initial coverage (vertical slice)
-
-Prefer Session-first chrome involved in [#471](https://github.com/BestNathan/nession/issues/471):
-
-1. `session-list` / `session-item` (list-row)
-2. `session-header` (chrome)
-3. `terminal-toolbar` (or equivalent session chrome control strip)
-4. `workspace-navigation` (shell)
-5. One shared `control` / action category pattern
+Do not update a screenshot or relax a contract silently to make a test green. The change should be traceable to the upstream product decision.
 
 ## Non-goals
 
 - A second design system.
-- Bespoke prose rulebooks for every component.
-- Encoding design truth in agent prompts or skills.
-- Letting agents invent arbitrary CSS/layout values outside tokens/contracts.
-- Full-site screenshot coverage (see [validation.md](validation.md) visual layer).
+- Encoding product direction in JSON.
+- One contract file per component regardless of value.
+- Freezing exploratory feature placement too early.
+- Treating current fixtures/screenshots as canonical product policy.
+- Letting extensions publish arbitrary global layout contracts that bypass Nession's product language.
 
 ## Maintenance
 
-One requirement = one issue. Schema or ownership changes edit this file in place and reference [#545](https://github.com/BestNathan/nession/issues/545) / [#544](https://github.com/BestNathan/nession/issues/544). Do not fork a parallel contracts tree under `docs/` or `e2e/`.
+Keep one canonical owner for each rule. Pattern prose owns product semantics; contracts own measurable consequences. When they disagree, determine whether the implementation is stale or the product decision changed, then converge the lower layers intentionally.
