@@ -48,6 +48,34 @@ export type SessionRuntimeEvent =
   | { type: 'transport-exhausted'; manualRoute: boolean }
   | { type: 'route-intent-changed'; phase: AttachPhase };
 
+/**
+ * Value equality for the published snapshot.
+ *
+ * The store has to be idempotent: subscribers re-render on every notification,
+ * and a caller that rebuilds its context on every render would otherwise feed
+ * its own re-render back through `updateContext` → `emitSnapshot` — an
+ * unbounded loop that any extra render source above the terminal falls into.
+ * Republishing a value-equal snapshot is the only thing that makes that
+ * feedback possible, so the identity changes only when the content does.
+ *
+ * Mirrors the fields `buildSnapshot` publishes — the two lists move together.
+ * `lastResize` compares by value: callers may hand over an equal but freshly
+ * built size.
+ */
+function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): boolean {
+  return a.sessionId === b.sessionId
+    && a.phase === b.phase
+    && a.transportGeneration === b.transportGeneration
+    && a.connectionState === b.connectionState
+    && a.agentTerminalApi === b.agentTerminalApi
+    && a.activeUrl === b.activeUrl
+    && a.waitingForAddressPlan === b.waitingForAddressPlan
+    && a.transportReady === b.transportReady
+    && a.lastResize?.cols === b.lastResize?.cols
+    && a.lastResize?.rows === b.lastResize?.rows
+    && a.reconnectCount === b.reconnectCount;
+}
+
 export class SessionRuntime {
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
@@ -363,7 +391,11 @@ export class SessionRuntime {
     if (this.disposed) {
       return;
     }
-    this.snapshot = this.buildSnapshot();
+    const next = this.buildSnapshot();
+    if (this.snapshot && isSameSnapshot(this.snapshot, next)) {
+      return;
+    }
+    this.snapshot = next;
     for (const listener of this.snapshotListeners) {
       listener();
     }

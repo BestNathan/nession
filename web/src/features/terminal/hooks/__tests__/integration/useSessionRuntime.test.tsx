@@ -106,6 +106,16 @@ function wrapper(store: ReturnType<typeof createStore>, strict = false) {
 
 const SESSION_IDS = ['agent:a', 'agent:b', 'agent:failover-b', 'agent:failover-relay', 'agent:manual-fail', 'agent:relay'];
 
+/** Relay handle built fresh on every call — an unstable context value on purpose. */
+function makeRelayHandle(state: ConnectionState): RelayServerHandle {
+  return {
+    beginRelay: vi.fn(),
+    endRelay: vi.fn(),
+    isReady: () => state === 'connected',
+    onConnectionStateChange: () => () => {},
+  };
+}
+
 function expectRegistryEmpty(): void {
   for (const sid of SESSION_IDS) {
     expect(sessionRuntimeRegistry.get(sid)).toBeNull();
@@ -238,6 +248,39 @@ describe('useSessionRuntime integration', () => {
 
     expect(seen.length).toBeGreaterThan(0);
     expect(new Set(seen).size).toBe(1);
+  });
+
+  it('survives a caller that rebuilds its context on every render', async () => {
+    const store = makeStore('agent:a', 'token-a');
+    const renders = vi.fn();
+
+    // An extra render source above the terminal hands down a fresh object on
+    // every render. That rebuilds the runtime config, so the config-owner
+    // effect re-runs and calls `updateContext` again — the shape that used to
+    // feed its own re-render back through the snapshot store until React threw
+    // "Maximum update depth exceeded" (see #718).
+    const { result } = renderHook(
+      () => {
+        renders();
+        return useSessionRuntime({
+          configOwner: true,
+          serverConnection: makeRelayHandle('disconnected'),
+        });
+      },
+      { wrapper: wrapper(store) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.runtime?.sessionId).toBe('agent:a');
+    });
+
+    const settled = renders.mock.calls.length;
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+    });
+    expect(renders.mock.calls.length).toBe(settled);
   });
 
   it('clears P2P state when forced to relay', async () => {
