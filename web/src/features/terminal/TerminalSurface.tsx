@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { TerminalCapsule, type CapsuleMode } from '@/features/terminal/capsule/TerminalCapsule';
+import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
 import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
 
 export interface TerminalSurfaceProps {
@@ -11,6 +12,8 @@ export interface TerminalSurfaceProps {
   controller: TerminalController | null;
   /** Address route switch in progress — subtle veil over viewport. */
   isSwitching?: boolean;
+  /** The capability that earned capsule presence, if any. At most one. */
+  capsuleCapability?: CapsuleCapabilityPresence;
 }
 
 /**
@@ -22,6 +25,7 @@ export function TerminalSurface({
   inputDisabled,
   controller,
   isSwitching = false,
+  capsuleCapability,
 }: TerminalSurfaceProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
@@ -59,6 +63,7 @@ export function TerminalSurface({
         onModeChange={capsuleExperience === 'app' ? setCapsuleMode : undefined}
         sendText={capsuleSendText}
         disabled={inputDisabled}
+        capability={capsuleCapability}
       />
     </div>
   );

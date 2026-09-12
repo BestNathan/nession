@@ -56,14 +56,14 @@ test.describe('assertion helpers detect deliberate violations', () => {
     await expectSingleLine(page.locator('#root'), ITEM_WEB); // wrap: true — no violation
   });
 
-  test('height: wrong control height fails, token height passes (terminal-toolbar)', async ({ page }) => {
-    const toolbar = { pattern: 'pattern.terminal-toolbar', experience: 'web' as const };
-    const expected = patternBlock(toolbar.pattern, 'web').heightTokenPx!;
+  test('height: wrong control height fails, token height passes (terminal-capsule)', async ({ page }) => {
+    const capsule = { pattern: 'pattern.terminal-capsule', experience: 'web' as const };
+    const expected = patternBlock(capsule.pattern, 'web').heightTokenPx!;
     await page.setContent(`<div id="root" style="height: ${expected}px; box-sizing: border-box;"></div>`);
-    await expectTokenHeight(page.locator('#root'), toolbar); // passes
+    await expectTokenHeight(page.locator('#root'), capsule); // passes
 
     await page.setContent(`<div id="root" style="height: ${expected + 12}px; box-sizing: border-box;"></div>`);
-    await rejectsWith(expectTokenHeight(page.locator('#root'), toolbar), 'height');
+    await rejectsWith(expectTokenHeight(page.locator('#root'), capsule), 'height');
   });
 
   test('overflow: overflowing child fails clip, contained content passes', async ({ page }) => {
@@ -151,6 +151,20 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     for (let i = 0; i < 6; i += 1) {
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_WEB);
     }
+  });
+
+  test('web: a healthy session header keeps infrastructure context quiet', async ({ page }) => {
+    await page.goto('/#/fixture');
+    const header = page.getByTestId('session-header-line');
+    await expect(header).toBeVisible();
+
+    // Identity and non-gesture navigation are permanent; healthy infrastructure
+    // is not — a member that carries nothing actionable must not occupy space.
+    await expect(page.getByTestId('agent-context')).toHaveCount(0);
+    await expect(page.getByTestId('connection-status')).toHaveCount(0);
+    await expect(page.getByTestId('server-connection')).toHaveCount(0);
+    await expect(page.getByTestId('session-first-open-drawer')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Workspace' })).toBeVisible();
   });
 
   test('web: workspace direct chrome is bounded and inside the tool bar', async ({ page }) => {

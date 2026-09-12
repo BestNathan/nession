@@ -37,6 +37,34 @@ async fn test_create_and_kill_session() {
 }
 
 #[tokio::test]
+async fn test_list_sessions_reports_pane_foreground_command() {
+    let manager = SessionManager::new();
+    let session = TestSession::new("foreground");
+    let session_name = session.name().to_string();
+
+    manager
+        .create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let sessions = manager.list_sessions().await.unwrap();
+    let info = sessions
+        .iter()
+        .find(|s| s.name == session_name)
+        .expect("session is listed");
+    let command = info
+        .foreground_command
+        .as_deref()
+        .expect("a live pane reports its foreground command");
+    assert!(
+        !command.is_empty(),
+        "foreground command should not be empty, got {command:?}"
+    );
+
+    manager.kill_session(&session_name).await.unwrap();
+}
+
+#[tokio::test]
 async fn test_send_keys() {
     let manager = SessionManager::new();
     let session = TestSession::new("send-keys");

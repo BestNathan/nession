@@ -4,6 +4,7 @@ import {
   type CapabilityDefinition,
   type CapabilityResolution,
   type CapabilityScope,
+  type CapabilityState,
 } from '@/features/capabilities';
 import {
   adaptWorkspaceTool,
@@ -29,23 +30,59 @@ function scopeFromContext(context: CapabilityContext): CapabilityScope {
 }
 
 /**
- * First direct Workspace capability provider. Runtime/process detection stays
- * outside this slice, so an attached Session currently means Claude Code is
- * discoverable rather than relevant/active.
+ * Commands that mean "Claude Code is running here".
+ *
+ * `claude.exe` is the name the CLI actually runs under: the distributed package
+ * installs its native binary as `bin/claude.exe`, and that is what the agent
+ * reports as the pane's foreground command (measured against a real install).
+ * The bare name covers installs that expose a plain `claude` wrapper.
+ *
+ * Deliberately excludes `node`: `claude` surfaces as `node` on some installs,
+ * but so does every other node TUI, and a false positive would light Claude
+ * Code up for unrelated work. Under-matching is the honest failure here.
+ */
+const CLAUDE_CODE_COMMANDS = ['claude', 'claude.exe'];
+
+function isClaudeCodeCommand(command: string): boolean {
+  return CLAUDE_CODE_COMMANDS.includes(command);
+}
+
+/**
+ * First direct Workspace capability provider.
+ *
+ * Runtime detection belongs to the surface that owns the signal: the agent
+ * reports the session's foreground command, the app layer records what it has
+ * seen, and this provider turns those facts into state.
  */
 const claudeCodeCapability: CapabilityDefinition = {
   id: 'claude-code',
   title: 'Claude Code',
-  resolve: (context) => ({
-    scope: scopeFromContext(context),
-    state: context.sessionId ? 'available' : 'unavailable',
-    views: [
-      {
-        id: legacyWorkspaceViewId('claude-code'),
-        label: 'Claude Code',
-      },
-    ],
-  }),
+  resolve: (context) => {
+    const current = context.facts?.sessionForegroundCommand;
+    const observed = context.facts?.sessionObservedCommands ?? [];
+
+    let state: CapabilityState;
+    if (!context.sessionId) {
+      state = 'unavailable';
+    } else if (current && isClaudeCodeCommand(current)) {
+      state = 'active';
+    } else if (observed.some(isClaudeCodeCommand)) {
+      state = 'relevant';
+    } else {
+      state = 'available';
+    }
+
+    return {
+      scope: scopeFromContext(context),
+      state,
+      views: [
+        {
+          id: legacyWorkspaceViewId('claude-code'),
+          label: 'Claude Code',
+        },
+      ],
+    };
+  },
 };
 
 /**

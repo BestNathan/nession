@@ -12,6 +12,10 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub window_count: u32,
     pub attached_clients: u32,
+    /// Foreground command of the session's active pane, when the agent reports
+    /// one. Held in memory only: it is a runtime observation that the agents
+    /// re-report after a reconnect, so persisting it would only add write churn.
+    pub foreground_command: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,
 }
@@ -60,6 +64,9 @@ impl SessionRegistry {
                         status,
                         window_count: row.window_count,
                         attached_clients: row.attached_clients,
+                        // Not persisted: it is re-reported by the agent's first
+                        // update after a reconnect.
+                        foreground_command: None,
                         created_at,
                         last_activity,
                     };
@@ -232,6 +239,7 @@ mod tests {
             status: SessionStatus::Detached,
             window_count: 1,
             attached_clients: 0,
+            foreground_command: None,
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }

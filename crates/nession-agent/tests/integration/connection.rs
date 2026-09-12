@@ -289,7 +289,7 @@ async fn integration_session_update_message_format() {
 
     // Send session update.
     handle
-        .send_session_update("my-session", "active", 5, 2)
+        .send_session_update("my-session", "active", 5, 2, Some("claude"))
         .await
         .expect("session update failed");
 

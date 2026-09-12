@@ -59,6 +59,37 @@ pub struct SessionInfo {
     pub attached_clients: u32,
     pub width: u16,
     pub height: u16,
+    /// Foreground command of the session's active pane (`#{pane_current_command}`).
+    ///
+    /// Runtime observation, not durable session metadata: it changes as the user
+    /// runs things, and it is absent when tmux reports nothing.
+    pub foreground_command: Option<String>,
+}
+
+/// Parse one `list-sessions -F` row.
+///
+/// `foreground_command` is last and the split is capped, so a `|` inside the
+/// command stays part of it instead of shifting the row into the unparseable
+/// branch. Session names are the first field and still positional.
+fn parse_session_line(line: &str) -> Option<SessionInfo> {
+    let parts: Vec<&str> = line.splitn(7, '|').collect();
+    if parts.len() != 7 {
+        return None;
+    }
+
+    let foreground = parts.get(6).copied().unwrap_or_default();
+    Some(SessionInfo {
+        name: parts
+            .first()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_default(),
+        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
+        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
+        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
+        width: parts.get(4).and_then(|s| s.parse().ok())?,
+        height: parts.get(5).and_then(|s| s.parse().ok())?,
+        foreground_command: (!foreground.is_empty()).then(|| foreground.to_string()),
+    })
 }
 
 /// Manages the lifecycle of tmux sessions (create / list / kill).
@@ -138,7 +169,8 @@ impl SessionManager {
             "-F",
             // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
             // in -F format strings to underscores (0x5F), so \t is unusable.
-            "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}",
+            // pane_current_command is last so a | inside it cannot shift the row.
+            "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_command}",
         ]);
         let output = tmux_output(&mut cmd, self.list_timeout).await?;
 
@@ -158,27 +190,7 @@ impl SessionManager {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let sessions: Vec<SessionInfo> = stdout
-            .lines()
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.split('|').collect();
-                if parts.len() == 6 {
-                    Some(SessionInfo {
-                        name: parts
-                            .first()
-                            .map(std::string::ToString::to_string)
-                            .unwrap_or_default(),
-                        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
-                        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
-                        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
-                        width: parts.get(4).and_then(|s| s.parse().ok())?,
-                        height: parts.get(5).and_then(|s| s.parse().ok())?,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let sessions: Vec<SessionInfo> = stdout.lines().filter_map(parse_session_line).collect();
 
         tracing::info!("tmux list-sessions: {} session(s) found", sessions.len());
         Ok(sessions)
@@ -651,5 +663,46 @@ mod window_size_lock_tests {
             "error connecting to /tmp/x/tmux.sock (File name too long)"
         ));
         assert!(!is_no_sessions_stderr("lost server"));
+    }
+}
+
+#[cfg(test)]
+mod session_line_tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_session_row_including_foreground_command() {
+        let info = parse_session_line("work|1700000000|2|1|120|40|claude").expect("row parses");
+        assert_eq!(info.name, "work");
+        assert_eq!(info.created_at, 1_700_000_000);
+        assert_eq!(info.window_count, 2);
+        assert_eq!(info.attached_clients, 1);
+        assert_eq!(info.width, 120);
+        assert_eq!(info.height, 40);
+        assert_eq!(info.foreground_command.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn keeps_a_pipe_inside_the_foreground_command() {
+        // The command is the last field, so a delimiter inside it must survive
+        // instead of shifting every row into the "unparseable" branch.
+        let info = parse_session_line("work|1700000000|1|0|80|24|we|ird").expect("row parses");
+        assert_eq!(info.foreground_command.as_deref(), Some("we|ird"));
+    }
+
+    #[test]
+    fn reports_an_absent_foreground_command_as_none() {
+        let info = parse_session_line("work|1700000000|1|0|80|24|").expect("row parses");
+        assert_eq!(info.foreground_command, None);
+    }
+
+    #[test]
+    fn rejects_rows_with_too_few_fields() {
+        assert!(parse_session_line("work|1700000000|1|0|80|24").is_none());
+    }
+
+    #[test]
+    fn rejects_rows_with_unparseable_numbers() {
+        assert!(parse_session_line("work|not-a-number|1|0|80|24|claude").is_none());
     }
 }

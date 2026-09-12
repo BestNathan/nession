@@ -10,9 +10,21 @@ export interface CapabilityScope {
   sessionId?: string;
 }
 
+/**
+ * Observations about the current context, supplied by the surface that owns the
+ * signal. Facts describe what was observed — never what it means: a provider
+ * interprets them into capability state, so detection stays out of the core.
+ */
+export interface CapabilityFacts {
+  /** Foreground command of the session's active pane, when the agent reports one. */
+  sessionForegroundCommand?: string | null;
+  /** Foreground commands observed during the current session, most recent last. */
+  sessionObservedCommands?: readonly string[];
+}
+
 export interface CapabilityContext extends CapabilityScope {
   surface?: CapabilitySurface;
-  facts?: Readonly<Record<string, unknown>>;
+  facts?: CapabilityFacts;
 }
 
 export interface CapabilitySummary {

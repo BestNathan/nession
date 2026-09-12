@@ -1,0 +1,12 @@
+{
+  "id": "pattern.terminal-capsule",
+  "$description": "Terminal capsule contextual interaction surface (prose: terminal-capsule.md). The capsule carries the Session's direct terminal input plus contextual capability interaction — it is not a permanent toolbar, and a capability earns presence by context rather than by registration. The measurable fields constrain the chrome band: single line, control.md density, overflow collapses into a popover (web) / sheet (app).",
+  "extends": ["category.chrome", "category.control"],
+  "patternRef": "docs/design/design-system/patterns/terminal-capsule.md",
+  "web": {
+    "justify": "space-between"
+  },
+  "app": {
+    "justify": "space-between"
+  }
+}

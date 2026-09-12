@@ -253,6 +253,40 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('leaves the published snapshot untouched when the context does not change', () => {
+    const rt = new SessionRuntime(makeConfig());
+    const published = rt.getSnapshot();
+    const changes = vi.fn();
+    const unsubscribe = rt.subscribe(changes);
+
+    // Callers rebuild the context object on every render, so a value-equal
+    // update has to be a no-op. Notifying here re-renders the external-store
+    // subscriber, whose next render rebuilds the context again — the loop that
+    // any extra render source above the terminal used to fall into.
+    rt.updateContext({ transportReady: false });
+    rt.updateContext({});
+
+    expect(rt.getSnapshot()).toBe(published);
+    expect(changes).not.toHaveBeenCalled();
+
+    unsubscribe();
+    rt.dispose();
+  });
+
+  it('still publishes when the context actually changes', () => {
+    const rt = new SessionRuntime(makeConfig());
+    const changes = vi.fn();
+    const unsubscribe = rt.subscribe(changes);
+
+    rt.updateContext({ transportReady: true });
+
+    expect(changes).toHaveBeenCalledTimes(1);
+    expect(rt.getSnapshot().transportReady).toBe(true);
+
+    unsubscribe();
+    rt.dispose();
+  });
+
   it('opens one socket when route changes with same URL (configure + forceReconnect)', async () => {
     let openCount = 0;
     vi.stubGlobal('WebSocket', class {

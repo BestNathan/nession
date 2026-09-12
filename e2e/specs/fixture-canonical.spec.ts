@@ -23,7 +23,11 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
   await expect(page.getByTestId('session-item-row')).toHaveCount(6);
   await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 
-  await expect(page.getByTestId('server-connection')).toContainText('server: connected');
+  // Healthy canonical state: identity + navigation only. Infrastructure
+  // members appear as they degrade (see SessionHeader contextual presence).
+  await expect(page.getByTestId('agent-context')).toHaveCount(0);
+  await expect(page.getByTestId('connection-status')).toHaveCount(0);
+  await expect(page.getByTestId('server-connection')).toHaveCount(0);
 
   await page.screenshot({ path: 'test-results/canonical-active-terminal.png', fullPage: true });
 

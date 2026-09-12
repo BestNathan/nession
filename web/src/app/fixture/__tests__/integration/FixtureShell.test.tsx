@@ -13,7 +13,10 @@ describe('FixtureShell', () => {
     expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
     expect(screen.getByTestId('session-first-main-content')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
-    expect(screen.getByTestId('server-connection')).toHaveTextContent('server: connected');
+    // Canonical fixture is healthy: identity + navigation only.
+    expect(screen.queryByTestId('server-connection')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('agent-context')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('connection-status')).not.toBeInTheDocument();
   });
 
   it('renders the sessions drawer deterministically', () => {
