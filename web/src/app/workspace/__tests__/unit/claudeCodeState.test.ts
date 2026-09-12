@@ -42,6 +42,15 @@ describe('claude-code capability state from session facts', () => {
     ).toBe('active');
   });
 
+  it('matches the name the CLI actually runs under', () => {
+    // The npm package installs the CLI as `bin/claude.exe` — that is the process
+    // name tmux reports, so matching only the bare `claude` would leave the
+    // capability dark for every real install (measured in the local stack).
+    expect(
+      claudeCodeState(workspaceContext({ sessionForegroundCommand: 'claude.exe' })),
+    ).toBe('active');
+  });
+
   it('stays relevant once Claude Code has run in this session', () => {
     expect(
       claudeCodeState(

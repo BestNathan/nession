@@ -32,11 +32,16 @@ function scopeFromContext(context: CapabilityContext): CapabilityScope {
 /**
  * Commands that mean "Claude Code is running here".
  *
+ * `claude.exe` is the name the CLI actually runs under: the distributed package
+ * installs its native binary as `bin/claude.exe`, and that is what the agent
+ * reports as the pane's foreground command (measured against a real install).
+ * The bare name covers installs that expose a plain `claude` wrapper.
+ *
  * Deliberately excludes `node`: `claude` surfaces as `node` on some installs,
  * but so does every other node TUI, and a false positive would light Claude
  * Code up for unrelated work. Under-matching is the honest failure here.
  */
-const CLAUDE_CODE_COMMANDS = ['claude'];
+const CLAUDE_CODE_COMMANDS = ['claude', 'claude.exe'];
 
 function isClaudeCodeCommand(command: string): boolean {
   return CLAUDE_CODE_COMMANDS.includes(command);
