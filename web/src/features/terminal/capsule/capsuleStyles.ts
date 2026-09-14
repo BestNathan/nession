@@ -22,7 +22,6 @@ export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
 
 /** Dialog layer above composer popovers (--composer-popover-zindex is 100). */
-export const capsuleDialogOverlayClass = 'z-[110]';
 export const capsuleDialogContentClass = 'z-[110]';
 
 export const capsuleCommandsPanelClass =
@@ -64,9 +63,6 @@ export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-r
 /** Inner (interactive) shell: full-width, clips children to the capsule corners. */
 export const capsuleShellInnerClass =
   'pointer-events-auto w-full overflow-hidden';
-
-export const capsuleShellInnerSizeClass =
-  'pointer-events-auto w-full max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
 
 export const capsuleShellWebOuterClass =
   'inset-x-[length:var(--composer-shell-margin-x)] flex flex-col items-stretch pointer-events-none';
@@ -151,12 +147,6 @@ export const capsuleCommandsScrollClass =
 
 export const capsuleCommandsMoreClass =
   'shrink-0';
-
-export const capsuleDropdownMinWidthClass =
-  'min-w-[length:var(--composer-dropdown-min-width)]';
-
-export const capsuleDropdownItemClass =
-  'cursor-pointer font-mono text-[length:var(--composer-font-size)]';
 
 export const capsuleDialogStackClass = 'flex flex-col gap-[length:var(--composer-dialog-gap)]';
 

@@ -9,11 +9,3 @@ export const WEB_COMPOSER_METRICS: ComposerMetrics = {
   maxLines: 5,
 };
 
-/** App experience fixture — larger touch targets and row rhythm. */
-export const APP_COMPOSER_METRICS: ComposerMetrics = {
-  textLineHeight: 48,
-  controlHeight: 44,
-  fieldPadY: 16,
-  singleHeightTolerance: 2,
-  maxLines: 5,
-};

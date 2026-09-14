@@ -72,43 +72,7 @@ export function formatRelativeTimeSeconds(ts: number): string {
   return `${days}d ago`;
 }
 
-/** Format agent uptime from registered_at ISO timestamp. */
-export function formatUptime(registeredAtIso: string | undefined): string {
-  if (!registeredAtIso) {return '';}
-  const diff = Date.now() - new Date(registeredAtIso).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) {return `${seconds}s`;}
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {return `${minutes}m`;}
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {return `${hours}h`;}
-  return `${Math.floor(hours / 24)}d`;
-}
-
 /** Resolve the effective display name for an agent. */
 export function agentDisplayName(agent: { display_name?: string; hostname: string }): string {
   return agent.display_name || agent.hostname;
-}
-
-/** Compute uptime string from registered_at ISO timestamp. */
-export function computeUptime(registeredAt?: string): string | null {
-  if (!registeredAt) {return null;}
-  const diffMs = Date.now() - new Date(registeredAt).getTime();
-  if (diffMs < 0) {return null;}
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0) {return `${hours}h ${minutes}m`;}
-  return `${minutes}m`;
-}
-
-/** Format a session's running duration from its last_activity timestamp. */
-export function formatSessionDuration(lastActivity: string): string {
-  const diffMs = Date.now() - new Date(lastActivity).getTime();
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0) {return `${hours}h ${minutes}m`;}
-  if (minutes > 0) {return `${minutes}m`;}
-  return 'just now';
 }
