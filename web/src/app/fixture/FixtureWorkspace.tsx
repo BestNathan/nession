@@ -1,4 +1,6 @@
+import { useLocation } from 'react-router-dom';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
+import { fixtureCapabilityFacts } from '@/app/fixture/fixtureCapabilityFacts';
 import type { WorkspaceContext } from '@/app/workspace/toolTypes';
 import {
   FIXTURE_AGENTS,
@@ -17,6 +19,9 @@ const fixtureOps = fixtureFileOps();
  * deterministic files data, no network. Phase 6 baseline source.
  */
 export function FixtureWorkspace() {
+  // Route parameters express session observations; without them the fixture is
+  // exactly the canonical screen the golden screenshots capture.
+  const facts = fixtureCapabilityFacts(useLocation().search);
   const selectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === FIXTURE_SELECTED_ID) ?? null;
   const selectedAgent = FIXTURE_AGENTS.find(
@@ -39,6 +44,7 @@ export function FixtureWorkspace() {
     domain,
     fileOps: fixtureOps,
     experience: 'web',
+    facts,
     onToolChange: () => {},
   };
   return (
