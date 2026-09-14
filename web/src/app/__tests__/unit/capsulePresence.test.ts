@@ -1,55 +1,58 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CapabilityId, CapabilityState } from '@/features/capabilities';
+import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/features/capabilities';
 import type { Session } from '@/types';
 import {
   resolveCapsuleCapabilityPresence,
   selectCapsuleCapability,
-  type CapsuleCapabilityCandidate,
   type CapsuleCapabilityInput,
 } from '../../capsulePresence';
 
-function candidate(id: CapabilityId, state: CapabilityState): CapsuleCapabilityCandidate {
-  return { id, label: id, state };
+function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot {
+  return { id, title: id, scope: {}, state };
 }
 
 describe('capsule capability presence', () => {
   it('gives no presence to a capability that is merely available', () => {
-    expect(selectCapsuleCapability([candidate('claude-code', 'available')])).toBeUndefined();
+    expect(selectCapsuleCapability([snapshot('claude-code', 'available')])).toBeUndefined();
   });
 
   it('gives no presence to an unavailable capability', () => {
-    expect(selectCapsuleCapability([candidate('claude-code', 'unavailable')])).toBeUndefined();
+    expect(selectCapsuleCapability([snapshot('claude-code', 'unavailable')])).toBeUndefined();
   });
 
   it('lets a relevant capability appear', () => {
-    expect(selectCapsuleCapability([candidate('claude-code', 'relevant')])?.id).toBe('claude-code');
+    expect(selectCapsuleCapability([snapshot('claude-code', 'relevant')])?.id).toBe('claude-code');
   });
 
   it('lets an active capability appear', () => {
-    expect(selectCapsuleCapability([candidate('claude-code', 'active')])?.id).toBe('claude-code');
+    expect(selectCapsuleCapability([snapshot('claude-code', 'active')])?.id).toBe('claude-code');
+  });
+
+  it('prefers the active capability over a relevant one', () => {
+    const selected = selectCapsuleCapability([
+      snapshot('claude-code', 'relevant'),
+      snapshot('docker', 'active'),
+    ]);
+
+    expect(selected?.id).toBe('docker');
+    expect(selected?.state).toBe('active');
   });
 
   it('keeps the capsule bounded — one capsule, one capability', () => {
     const selected = selectCapsuleCapability([
-      candidate('claude-code', 'relevant'),
-      candidate('docker', 'active'),
-      candidate('git', 'available'),
+      snapshot('claude-code', 'relevant'),
+      snapshot('docker', 'active'),
+      snapshot('git', 'available'),
     ]);
-    expect(selected?.id).toBe('docker');
-  });
 
-  it('prefers the active capability over a relevant one regardless of order', () => {
-    const selected = selectCapsuleCapability([
-      candidate('docker', 'active'),
-      candidate('claude-code', 'relevant'),
-    ]);
+    expect(selected).toBeDefined();
     expect(selected?.id).toBe('docker');
   });
 
   it('is deterministic between equally-ranked capabilities', () => {
     // Registration order is the only tie-break; it must not depend on which
     // capability happens to resolve first.
-    const items = [candidate('claude-code', 'relevant'), candidate('docker', 'relevant')];
+    const items = [snapshot('claude-code', 'relevant'), snapshot('docker', 'relevant')];
     expect(selectCapsuleCapability(items)?.id).toBe('claude-code');
     expect(selectCapsuleCapability([...items].reverse())?.id).toBe('docker');
   });

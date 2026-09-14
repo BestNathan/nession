@@ -24,4 +24,9 @@ export {
   type CapabilityPresenceLevel,
   type PresenceContext,
 } from './presence';
+export {
+  resolveCapabilityDisclosure,
+  type CapabilityDisclosure,
+  type CapabilityDisclosureOptions,
+} from './discovery';
 export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';
