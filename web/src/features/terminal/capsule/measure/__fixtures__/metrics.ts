@@ -8,4 +8,3 @@ export const WEB_COMPOSER_METRICS: ComposerMetrics = {
   singleHeightTolerance: 2,
   maxLines: 5,
 };
-
