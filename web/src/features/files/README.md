@@ -28,7 +28,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 | Tree structure, expand/collapse, lazy load, selection, active | `features/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
 | File operations (list/read/write/rename/delete) | `FileOps` RPC surface (`FilesPlugin`) | Per SessionRuntime agent socket; surfaced to UI as `ctx.fileOps` when a P2P transport is attached |
 | Explorer extensions (decorations, context menus) | `features/explorer` — `ExplorerRegistry` | One registry per `Explorer` mount; register/unregister notify subscribers → incremental row refresh |
-| Open-files/tab state | Per-surface hooks: `useFileTabs` (legacy desktop `FileTabs`), `useFilesPanelNav` (legacy mobile layout), single-selection state in `session-first` `filesWeb`/`filesApp` tools | Per mount; content is re-read from the backend on every viewer mount — deliberately no cross-surface cache today |
+| Open-files/tab state | Single-selection state inside the `filesWeb`/`filesApp` Workspace views (`app/workspace/tools/`) | Per mount; content is re-read from the backend on every viewer mount — deliberately no cross-surface cache today |
 | File content / edit state (dirty, saving) | `useFileViewer` per viewer mount | Discarded on tab switch (viewers unmount) |
 | Editor UI state (cursor/selection) | Inside `CodeMirrorEditor`'s EditorView | Not lifted; only text diffs are used for dirty tracking |
 
@@ -67,6 +67,5 @@ surface — never through module globals.
 
 The app shell (`app/workspace/tools/files*.tsx`) composes the feature
 through `@/features/files/...` subpaths. The legacy desktop terminal layouts
-(`components/FileTabs.tsx`, `components/MobileTerminalLayout.tsx`) that also
-composed it — and the now-dead `useFileTabs` tab-strip state — were deleted
-with the Dashboard shell in #655.
+that also composed it — and the now-dead `useFileTabs` tab-strip state — were
+deleted with the Dashboard shell in #655.

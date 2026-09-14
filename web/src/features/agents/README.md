@@ -21,7 +21,6 @@ It does **not** own probe/connectivity state (`atoms/probe.ts` +
 | `components/AgentDetail.tsx` | Session-workspace agent tool page (read-only info + extension slot `agent-detail` via `@/extensions/registry`) |
 | `components/AgentContext.tsx` | Agent chip in the session header (channel-colored label + offline copy) |
 | `hooks/useAgentData.ts` | Per-mount agent list state, fetch, heartbeat-history Map (capped at 5), dedupe (`agentsEqual`, last_heartbeat excluded) |
-| `hooks/useAgentRename.ts` | Rename-in-place state machine calling `agentsApi.renameAgent` |
 
 ## State ownership
 

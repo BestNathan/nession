@@ -112,7 +112,8 @@ check-tmux-socket-selftest:
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
 # Unit tests for both Rust and web (pre-commit)
-# Note: web-test-unit dependency added in Phase 2 (Task 2.4)
+# `unit` is a redundant alias for `test-unit`; the web unit project is
+# `web-test-unit`.
 unit: test-unit
 
 pre-push: test coverage web-test web-coverage

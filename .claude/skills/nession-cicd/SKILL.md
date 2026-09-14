@@ -300,7 +300,7 @@ gh pr create --base main --title "docs: ..." --body "..."
 gh pr merge <PR-NUMBER> --merge      # no --auto: no checks to wait on
 ```
 
-Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, and `k8s/**` manifests.
+Applies to `docs/**`, `chore/**` (config, deps, cleanup), `.github/workflows/*`, `scripts/**`, and the `justfile`. Note that no k8s manifests live on `main` any more — deployment desired state is on the `gitops` branch and is written only by `scripts/gitops-commit.sh`.
 
 **Hard boundary: anything under `crates/` or `web/src/` must go through `staging`.** `quality.yml` only runs on PRs targeting `staging`, so a PR to `main` has no CI gate at all — the only protection is the local pre-commit hook. Routing code changes straight to `main` would ship them with no independent verification and no staging soak.
 

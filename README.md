@@ -88,7 +88,9 @@ Produces three binaries: `nession` (CLI), `nession-agent`, `nession-server`.
 nession-server                 # reads ./config.toml if present, else uses defaults
 ```
 
-Without a config it listens on `127.0.0.1:8080` with no auth and stores its DB under `~/.nession/`. To customize, create a `config.toml`:
+Without a config it listens on `127.0.0.1:8080` with no auth and stores its DB under `~/.nession/`. **The Vite dev server proxies `/ws` to `19090`, not `8080`** — so a config-less server is reachable by the CLI but not by the UI. Either pass a config that sets `listen_address = "127.0.0.1:19090"`, or expect to log in and see "disconnected" with no other clue.
+
+To customize, create a `config.toml`:
 
 ```toml
 listen_address = "0.0.0.0:8080"
@@ -170,18 +172,24 @@ Zoom level is session-specific and resets on page refresh.
 
 ```
 nession/
-├── crates/                 # Rust workspace
+├── crates/                 # Rust workspace (5 crates)
 │   ├── nession-common/     # shared protocol, config, paths, errors
 │   ├── nession-server/     # broker, registry, SQLite persistence, WS server + TLS
 │   ├── nession-agent/      # per-node agent: tmux management, server connection, P2P server
-│   └── nession-cli/        # CLI: attach, list, create/kill, lifecycle
+│   ├── nession-cli/        # CLI: attach, list, create/kill, lifecycle
+│   └── nession-claude-code/# Claude Code config browser extension
 ├── web/                    # React + Vite + TypeScript + shadcn/ui + xterm.js
 ├── deploy/                 # docker-compose + entrypoints + nginx template
-├── k8s/                    # kustomize base + staging/production overlays
-├── scripts/install.sh      # release-binary installer
+├── design/                 # design tokens + executable UI contracts (`design/generated/` is codegen output)
+├── e2e/                    # Playwright specs + canonical visual baselines
+├── scripts/                # gates, coverage, gitops writer, install.sh
 ├── Dockerfile.*            # server/agent/ui build variants
-└── Cargo.toml              # workspace root (v0.3.8)
+└── Cargo.toml              # workspace root (version lives here, and in web/package.json)
 ```
+
+Deployment desired state — the kustomize base, per-environment overlays and the
+ArgoCD app-of-apps — lives on the **`gitops` orphan branch**, not on `main`
+(issue #592). See "Deploying to Kubernetes" in the root `CLAUDE.md`.
 
 ---
 
@@ -237,10 +245,11 @@ kubectl apply -k k8s/overlays/production     # or overlays/staging
 | Service        | Port  | Purpose                          |
 |----------------|-------|----------------------------------|
 | nession-server | 19090 | WebSocket (agents + clients)     |
-| nession-server | 10080 | HTTP (health, UI)                |
 | nession-agent  | 19090 | WebSocket (P2P terminal)         |
-| nession-agent  | 10080 | HTTP (health)                    |
 | nession-ui     | 80    | nginx serving `web/dist/`        |
+
+`10080` is the container's **nginx**, not a Rust listener: neither binary opens
+an HTTP port. nginx serves `/health` and the UI and proxies `/ws` to 19090.
 
 CI publishes multi-arch images and updates the production overlay's image tags automatically on every version change (see `.github/workflows/release.yml`).
 
