@@ -93,7 +93,19 @@ test('workspace-navigation: menu overflow both experiences, no pinned strip heig
   assert.equal(merged.app.overflow, 'menu');
   assert.equal(merged.app.justify, 'start');
   assert.equal(merged.app.heightToken, undefined);
-  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.min');
+  // The App band floats over the terminal, so it declares its own floor (#730)
+  // and overrides the 44px that category.chrome applies to chrome bands.
+  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.compact');
+  assert.equal(merged.app.touchTargetTokenPx, 28);
+});
+
+test('a pattern may declare its own touch floor without changing the category', () => {
+  const merged = mergeContracts(REAL, TOKENS);
+
+  // The override is local: patterns that declare nothing keep the chrome default.
+  assert.equal(merged['pattern.session-header'].app.touchTargetToken, 'experience.app.touchTarget.min');
+  assert.equal(merged['pattern.session-header'].app.touchTargetTokenPx, 44);
+  assert.equal(merged['pattern.workspace-navigation'].app.touchTargetTokenPx, 28);
 });
 
 test('every merged pattern keeps provenance and experience blocks', () => {

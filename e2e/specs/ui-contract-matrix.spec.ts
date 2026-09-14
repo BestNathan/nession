@@ -107,19 +107,19 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       expect(await direct.count()).toBeGreaterThan(0);
       expect(await direct.count()).toBeLessThanOrEqual(2);
 
-      // Touch target is deliberately not asserted here: `category.chrome` requires
-      // 44px at App density and these controls ship at 28px, which is a real
-      // defect tracked in #730 — asserting it would fail this coverage test for
-      // a reason it does not own. The bar's disclosure contract is what this
-      // test protects.
+      // The pattern declares its own App touch floor (touchTarget.compact, #730):
+      // this band floats over the terminal, so it is held to 28px rather than the
+      // 44px chrome default — and no lower than that.
       for (let i = 0; i < (await direct.count()); i += 1) {
         await expect(direct.nth(i)).toBeVisible();
+        await expectTouchTarget(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
         await expectSingleLine(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
         await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       }
 
       const more = page.getByTestId('workspace-capability-more');
       await expect(more).toBeVisible();
+      await expectTouchTarget(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
       await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
     });

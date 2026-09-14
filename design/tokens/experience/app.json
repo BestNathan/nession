@@ -18,7 +18,8 @@
     "padding": { "value": "16px" }
   },
   "touchTarget": {
-    "min": { "value": 44 }
+    "min": { "value": 44 },
+    "compact": { "value": 28 }
   },
   "shell": {
     "iconButtonSize": { "ref": "experience.app.control.md" }

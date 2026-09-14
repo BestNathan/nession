@@ -1,6 +1,6 @@
 {
   "id": "pattern.workspace-navigation",
-  "$description": "Contextual Workspace capability navigation. Direct chrome is bounded and reserved for the opened capability plus capability presence justified by current context. Available capabilities are progressively disclosed through More/menu; unavailable capabilities render no dead slot. Capability registration never implies permanent navigation. Web and App may present the same semantics differently; overflow remains menu-based rather than a feature-lobby sidebar.",
+  "$description": "Contextual Workspace capability navigation. Direct chrome is bounded and reserved for the opened capability plus capability presence justified by current context. Available capabilities are progressively disclosed through More/menu; unavailable capabilities render no dead slot. Capability registration never implies permanent navigation. Web and App may present the same semantics differently; overflow remains menu-based rather than a feature-lobby sidebar. The App band is a compact pill floating over the terminal, so it declares its own touch floor instead of the 44px chrome default: chrome yields before the work surface, and the entries are secondary controls the user reaches deliberately rather than in a hurry (#730).",
   "extends": ["category.chrome"],
   "patternRef": "docs/design/design-system/patterns/workspace-navigation.md",
   "web": {
@@ -9,6 +9,7 @@
   },
   "app": {
     "overflow": "menu",
-    "justify": "start"
+    "justify": "start",
+    "touchTargetToken": "experience.app.touchTarget.compact"
   }
 }

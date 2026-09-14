@@ -359,6 +359,7 @@
   --icon-md: 20px;
   --panel-padding: 16px;
   --touch-target-min: 44;
+  --touch-target-compact: 28;
   --shell-icon-button-size: 44px;
   --composer-font-size: 1rem;
   --composer-text-line-height: 1.5rem;
