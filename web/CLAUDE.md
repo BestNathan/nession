@@ -86,7 +86,7 @@ When a lower-level design doc, executable contract, fixture, screenshot, or ship
 | Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
 | Components | `src/components/ui/` holds only shared shadcn primitives. Feature UI belongs in `features/<feature>/components/`; shell UI in `src/app/`. |
 | Layers | Import direction app → features → core → shared (`nession/no-reverse-imports`). Full module map: `docs/architecture/web.md`. |
-| WebSocket | New capabilities go in `src/services/socket/plugins/` (constructor-injected `CapabilityPlugin`s), not in core `WebSocketService`. |
+| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented **inside its own feature** (`features/<feature>/<Name>Plugin.ts`), registered centrally in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`) — not in core `WebSocketService`. There is no `services/socket/plugins/` directory. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. **One** stylesheet: `src/index.css`. Component styles = Tailwind utilities only. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -114,7 +114,7 @@ When a lower-level design doc, executable contract, fixture, screenshot, or ship
 
 ### WebSocket singleton
 
-`WebSocketService` is a browser-session singleton: request/response correlation, event pub/sub, auto-reconnect. Prefer existing plugins (`RequestPlugin`, `TerminalPlugin`, `EventPlugin`, …) before adding transport hacks in components.
+`WebSocketService` is a browser-session singleton: request/response correlation, event pub/sub, auto-reconnect. Prefer an existing capability plugin over adding transport hacks in components — the shipping set is `FilesPlugin`, `SessionsPlugin`, `AgentsPlugin`, `EnvPlugin`, `CommandsPlugin`, `ServerPlugin`, `ClaudeCodePlugin` and `features/terminal/server.ts`.
 
 ---
 
@@ -174,7 +174,7 @@ E2E Playwright lives in repo-root `e2e/`, not under `web/`.
 | Layer | Command / location | Notes |
 |-------|-------------------|--------|
 | Unit / component | `npm test` (Vitest) | Colocate `__tests__/unit` and `__tests__/integration` |
-| Coverage | `npm run coverage` | Thresholds in `vite.config.ts` (lines 78 / functions 72 / statements 76 / branches 65). Pre-push enforces web coverage when `web/**` changes. |
+| Coverage | `npm run coverage` | Thresholds in `vite.config.ts` (lines 80 / functions 72 / statements 78 / branches 65). Pre-push enforces web coverage when `web/**` changes. |
 | Typecheck | `npx tsc --noEmit` | Also part of `npm run build` |
 | Lint | `npm run lint` | `--max-warnings 0` |
 | E2E | `e2e/` Playwright | Login, session lifecycle, terminal I/O; CI workflow `e2e.yml` |

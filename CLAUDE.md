@@ -149,7 +149,7 @@ tmux sessions (per-node)
 
 - **hooks placement**: shared hooks in `shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `app/`. Never place hooks in `components/`.
 - **components/**: only the shared `ui/` shadcn primitives live under `components/ui/`; feature UI belongs in `features/<feature>/components/`, shell UI in `app/`.
-- **services/websocket/plugins/**: WebSocket functionality is plugin-based. New capabilities go in a plugin, not in the core.
+- **services/socket/**: WebSocket functionality is plugin-based. A new capability is a `CapabilityPlugin` (`services/socket/types.ts`) implemented inside its own feature and registered in `app/useAppConnection.ts` — never added to the core `WebSocketService`.
 - **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
 
 ### Key Design Decisions
@@ -166,7 +166,7 @@ tmux sessions (per-node)
 
 Full component inventory and custom-component-to-primitive mapping: **`.claude/skills/nession-development/references/shadcn-components.md`**
 
-Summary: 21 installed primitives + 2 custom wrappers. All hand-rolled tab strips, raw resize logic, and destructive confirms have been replaced with shadcn equivalents (Tabs, Resizable, AlertDialog). ~20 Tooltips added to icon-only buttons. See the reference doc for the complete inventory, priority queue, and golden rules.
+Summary: 25 installed primitives + 2 custom wrappers, built on `@base-ui/react` (`alert-dialog` is the only Radix one). Four are currently unused — Resizable, Sheet, Sonner, Toggle — because their Dashboard-era consumers were deleted in #655. See the reference doc for the complete inventory, what is genuinely not installed, and the golden rules.
 
 ---
 
@@ -239,7 +239,7 @@ git stash pop
 ```bash
 cargo build                    # Build all crates
 cargo test                     # Run all tests
-cargo run -p nession-server    # Start server (port 19090 ws, 10080 http)
+cargo run -p nession-server    # Start server (ws only — see port note below)
 cargo run -p nession-agent     # Start agent (needs config)
 ```
 
@@ -311,7 +311,11 @@ HOME=/tmp/nession-demo cargo run -p nession-agent -- agent-config.toml
 # Web (vite proxies /ws → localhost:19090)
 cd web && npm run dev
 ```
-Server listens on `127.0.0.1:19090` (ws) + `:10080` (http), agent on `:19091`. In the browser (http://localhost:13000), use any non-empty token to log in. Run `localStorage.clear()` first to drop stale prefilled values. Clean up with `pkill -f 'target/debug/nession-(server|agent)'` and `pkill -f vite`.
+Server listens on `127.0.0.1:19090` (ws), agent on `:19091` — **no HTTP port
+locally** (`10080` is nginx inside the image; see the port note above). In the
+browser (http://localhost:13000), use any non-empty token to log in. Run
+`localStorage.clear()` first to drop stale prefilled values. Clean up with
+`pkill -f 'target/debug/nession-(server|agent)'` and `pkill -f vite`.
 
 **Web UI:** work inside `web/`.
 ```bash
@@ -349,13 +353,32 @@ Prebuilt variants expect `--build-arg` or multi-stage `COPY --from` sources.
 
 ### CI/CD (GitHub Actions)
 
-Triggered by push to `main` or PR. See `.github/workflows/docker-publish.yml`.
+Five workflows, each with its own trigger — there is no single publish workflow:
 
-**Image naming:** `ghcr.io/bestnathan/nession-{server,agent,ui}` with two tags:
-- `sha-<short-sha>` — immutable, per-commit
-- Branch name (`main`, `feat-*`) — moving tag
+| Workflow | Trigger | Does |
+|---|---|---|
+| `quality.yml` | PR → `staging` | `rust-check` + `web-check` (the required checks) |
+| `e2e.yml` | PR / push / manual | Playwright; the `e2e` job is **not** a required check |
+| `staging.yml` | push to `staging` | versions → build → multi-arch manifests → `deploy-staging-gitops` |
+| `release.yml` | push to `main` | 15 of 16 jobs gated on `version_changed`; then `promote-production` |
+| `deploy.yml` | manual dispatch | deploy any built sha to any env (except `production`) |
 
-**Build matrix:** `linux/amd64`, `linux/arm64` (multi-arch).
+**Image naming:** **one** repository, `ghcr.io/<owner>/nession`, with a
+per-component tag prefix — not three repositories:
+
+```
+ghcr.io/<owner>/nession:server-<short-sha>     # multi-arch manifest
+ghcr.io/<owner>/nession:agent-<short-sha>
+ghcr.io/<owner>/nession:ui-<short-sha>
+```
+
+`<component>-<version>` is the release-lane equivalent. The per-arch
+intermediates `<component>-<short-sha>-amd64` / `-arm64` are build artifacts
+that `docker buildx imagetools create` (`staging.yml`) folds into the
+un-suffixed manifest above — the gitops overlays reference the un-suffixed
+tag. There is no branch-name moving tag.
+
+**Build matrix:** `linux/amd64` and `linux/arm64` (multi-arch).
 
 ### Deploying to Kubernetes
 
@@ -398,10 +421,23 @@ Service ports:
 | Service | Port | Purpose |
 |---------|------|---------|
 | nession-server | 19090 | WebSocket (agents + clients) |
-| nession-server | 10080 | HTTP (health, UI) |
 | nession-agent | 19090 | WebSocket (P2P terminal) |
-| nession-agent | 10080 | HTTP (health) |
 | nession-ui | 80 | nginx serving web/dist/ |
+
+**`10080` is nginx, not a Rust listener.** Neither Rust binary opens an HTTP
+port or serves `/health` — `grep -rn 10080 crates/` finds nothing. In the image,
+`deploy/nginx.conf.template` listens on `${LISTEN_PORT}` (10080), serves
+`/health` and `/` (the UI) itself, and proxies `/ws` to the Rust process on
+19090 (`deploy/entrypoint-{server,agent}.sh`). So health checks and the UI
+belong to the container's nginx; `cargo run` locally has neither.
+
+Default listen addresses differ by how you start it, which is a common trap:
+
+| | address |
+|---|---|
+| `ServerConfig::default()` | `0.0.0.0:19090` |
+| `nession-server` with **no config file** | `127.0.0.1:8080` (`main.rs` `load_config` else-branch) |
+| `nession-agent` default | `0.0.0.0:8080` (`config.rs` `default_listen_address`) |
 
 ### Development Cycle
 
@@ -548,7 +584,7 @@ The principle and the replace-don't-preserve rule live in `docs/design/design-sy
 
 ```bash
 # 1. Start the app locally (server + agent + web)
-cargo run -p nession-server &        # :19090 ws, :10080 http
+cargo run -p nession-server &        # ws only; no HTTP/health locally
 cargo run -p nession-agent &          # needs tmux
 cd web && npm run dev                 # :13000
 
@@ -665,7 +701,7 @@ All commits co-authored by Claude: `Co-Authored-By: Claude <noreply@anthropic.co
   | `nession-common` / `nession-server` | 80% line |
   | `nession-agent` | 80% line（macOS 上 79%，control-mode 测试在 macOS 被跳过） |
   | `nession-cli` | 40% line（不可测的命令已排除） |
-  | `nession-claude-code` | **未登记 → 不检查** |
-  | web（`web/vite.config.ts`） | lines 78%，functions 72%，statements 76%，**branches 65%** |
+  | `nession-claude-code` | 55% line（**地板,不是目标** —— `check-coverage.sh` 里挂着一条 "raise to 80%" 的债务,尚未开 issue） |
+  | web（`web/vite.config.ts`） | lines 80%，functions 72%，statements 78%，**branches 65%** |
 
 - **CI 的 web-check 不跑 `just web-coverage`**。web 覆盖率阈值只由本地 pre-push 把关,PR 上没有独立验证。改动 web 代码时不要指望 CI 拦住覆盖率回退。

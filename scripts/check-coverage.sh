@@ -48,7 +48,7 @@ declare -A FIX_HINTS=(
     ["nession-agent"]="Add unit tests in crates/nession-agent/src/. Run: cargo test -p nession-agent"
     ["nession-server"]="Add unit tests in crates/nession-server/src/. Run: cargo test -p nession-server"
     ["nession-cli"]="CLI coverage target is 40%. Add tests in crates/nession-cli/."
-    ["nession-claude-code"]="Claude Code extension coverage target is 55% (floor). Add tests in crates/nession-claude-code/. Debt issue: raise to 80%."
+    ["nession-claude-code"]="Claude Code extension coverage target is 55% (floor, not the 80% the other crates hold). Add tests in crates/nession-claude-code/. Raising this to 80% is known debt and still has no issue tracking it."
 )
 
 # Filter to specified crates if arguments provided

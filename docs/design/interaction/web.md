@@ -115,7 +115,7 @@ React
       ↓ subscribe / mirror
 SessionRuntimeRegistry
       ↓
-SessionRuntime — AgentSocketClient, attach policy, FileCapability
+SessionRuntime — AddressAttachPolicy, SessionAttachController, AttachStateMachine
       ↓
 ConnectionManager (terminal I/O only; no Jotai reads)
 ```

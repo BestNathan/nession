@@ -1,125 +1,102 @@
 # Nession shadcn/ui Component Inventory
 
-Last updated: 2026-08-06 (post-standardization refactor)
+Last verified against `web/src/components/ui/` on 2026-09-14.
 
-## Installed Primitives (21)
+**The primitives are built on `@base-ui/react`, not Radix.** 18 of the files
+import from it; the single exception is `alert-dialog.tsx`, which uses
+`@radix-ui/react-alert-dialog`. `@radix-ui/react-alert-dialog` is the only
+Radix package in `package.json` — an older revision of this document listed a
+Radix package per component, and none of those were ever installed.
 
-Generated via `npx shadcn@latest add`, version-controlled in `web/src/components/ui/`.
+## Installed Primitives (25)
 
-| Component | File | Radix Dependency | Notes |
-|-----------|------|-----------------|-------|
-| AlertDialog | `ui/alert-dialog.tsx` | `@radix-ui/react-alert-dialog` | Destructive confirmations |
-| Badge | `ui/badge.tsx` | (none) | Status indicators |
-| Button | `ui/button.tsx` | `@radix-ui/react-slot` | 7 variants (default/destructive/outline/secondary/ghost/link/icon) |
-| Card | `ui/card.tsx` | (none) | Card/Header/Title/Description/Content/Footer |
-| Checkbox | `ui/checkbox.tsx` | `@radix-ui/react-checkbox` | Form checkbox |
-| Collapsible | `ui/collapsible.tsx` | `@radix-ui/react-collapsible` | Expand/collapse sections |
-| ContextMenu | `ui/context-menu.tsx` | `@radix-ui/react-context-menu` | Right-click menus (FileBrowser) |
-| Dialog | `ui/dialog.tsx` | `@radix-ui/react-dialog` | Modal dialogs |
-| DropdownMenu | `ui/dropdown-menu.tsx` | (Base UI) | Dropdown menus (SessionDropdown) |
-| Input | `ui/input.tsx` | (none) | Text input |
-| Label | `ui/label.tsx` | `@radix-ui/react-label` | Form labels |
-| ScrollArea | `ui/scroll-area.tsx` | `@radix-ui/react-scroll-area` | Scrollable containers |
-| Select | `ui/select.tsx` | `@radix-ui/react-select` | Dropdown select (AddressSelector) |
-| Separator | `ui/separator.tsx` | `@radix-ui/react-separator` | Horizontal/vertical dividers |
-| Sheet | `ui/sheet.tsx` | `@radix-ui/react-dialog` | Slide-over panels (AgentDetailPanel) |
-| Skeleton | `ui/skeleton.tsx` | (none) | Loading placeholders |
-| Sonner | `ui/sonner.tsx` | `sonner` | Toast notifications |
-| Tabs | `ui/tabs.tsx` | `@base-ui/react` | Tab strips (BottomBar, BottomSheet, AgentDetailPanel) |
-| Textarea | `ui/textarea.tsx` | (none) | Multi-line text input (InputPanel) |
-| Tooltip | `ui/tooltip.tsx` | `@base-ui/react` | Icon button hints (~20 sites) |
-| Resizable | `ui/resizable.tsx` | `react-resizable-panels` | Drag-resize panels (SidePanel + FileTabs) |
+Generated via `npx shadcn@latest add`, version-controlled in
+`web/src/components/ui/`. **In use** is how many files import it (excluding
+tests).
+
+| Component | File | Base | In use |
+|-----------|------|------|--------|
+| AlertDialog | `ui/alert-dialog.tsx` | `@radix-ui/react-alert-dialog` | 4 |
+| Badge | `ui/badge.tsx` | `@base-ui/react/merge-props` | 3 |
+| Button | `ui/button.tsx` | `@base-ui/react/button` | 27 |
+| Card | `ui/card.tsx` | (none) | 1 |
+| Checkbox | `ui/checkbox.tsx` | `@base-ui/react/checkbox` | 1 |
+| Collapsible | `ui/collapsible.tsx` | `@base-ui/react/collapsible` | 1 |
+| ContextMenu | `ui/context-menu.tsx` | `@base-ui/react/context-menu` | 4 |
+| Dialog | `ui/dialog.tsx` | `@base-ui/react/dialog` | 5 |
+| DropdownMenu | `ui/dropdown-menu.tsx` | `@base-ui/react/menu` | 2 |
+| Input | `ui/input.tsx` | `@base-ui/react/input` | 11 |
+| Label | `ui/label.tsx` | (none) | 6 |
+| Popover | `ui/popover.tsx` | `@base-ui/react/popover` | 2 |
+| Progress | `ui/progress.tsx` | `@base-ui/react/progress` | 1 |
+| ScrollArea | `ui/scroll-area.tsx` | `@base-ui/react/scroll-area` | 4 |
+| Select | `ui/select.tsx` | `@base-ui/react/select` | 3 |
+| Separator | `ui/separator.tsx` | `@base-ui/react/separator` | 2 |
+| Skeleton | `ui/skeleton.tsx` | (none) | 3 |
+| Tabs | `ui/tabs.tsx` | `@base-ui/react/tabs` | 2 |
+| Textarea | `ui/textarea.tsx` | (none) | 1 |
+| ToggleGroup | `ui/toggle-group.tsx` | `@base-ui/react/toggle` | 1 |
+| Tooltip | `ui/tooltip.tsx` | `@base-ui/react/tooltip` | 5 |
+
+Installed but **currently unused** — nothing imports them. They are not load-
+bearing; treat them as candidates for removal rather than as available
+building blocks:
+
+| Component | File | Base | Notes |
+|-----------|------|------|-------|
+| Resizable | `ui/resizable.tsx` | `react-resizable-panels` | its consumer, `SidePanel`, was deleted with the Dashboard (#655) |
+| Sheet | `ui/sheet.tsx` | `@base-ui/react/dialog` | its consumers, `AgentDetailPanel` / mobile overlays, are gone |
+| Sonner | `ui/sonner.tsx` | `sonner` | `main.tsx` imports `Toaster` from the `sonner` package directly, bypassing this wrapper |
+| Toggle | `ui/toggle.tsx` | `@base-ui/react/toggle` | only `toggle-group` remains in use; `toggle-variants.ts` is shared by both |
+
+`Button` has **6 variants** (`default` / `outline` / `secondary` / `ghost` /
+`destructive` / `link`) and sizes `xs` / `sm` / `default` / `lg` / `icon` —
+`icon` is a *size*, not a variant.
 
 ## Custom UI Wrappers (2)
 
-Thin domain wrappers over shadcn primitives. This is the intended shadcn composition pattern.
+Thin domain wrappers over shadcn primitives. This is the intended shadcn
+composition pattern.
 
 | Component | File | Wraps | Purpose |
 |-----------|------|-------|---------|
-| ConnectionStatusBadge | `ui/ConnectionStatusBadge.tsx` | Badge | Colored pulse dot + status text (disconnected/connecting/connected/authenticated) |
-| RefreshButton | `ui/RefreshButton.tsx` | Button | Icon-only refresh with loading spinner animation |
+| ConnectionStatusBadge | `ui/ConnectionStatusBadge.tsx` | Badge | Colored pulse dot + status text |
+| RefreshButton | `ui/RefreshButton.tsx` | Button | Icon-only refresh with loading spinner |
 
-## Custom Components → shadcn Mapping
+## Where feature UI lives
 
-Each custom component in `web/src/components/` is audited against available shadcn primitives.
+`web/src/components/` contains **only** `ui/`. Feature UI lives in
+`features/<feature>/components/`; shell UI lives in `app/` (enforced by
+`nession/no-reverse-imports`; see `docs/architecture/web.md`). Only
+shadcn-generated primitives and the two wrappers above belong in `ui/`.
 
-### ✅ Correctly Composed (no changes needed)
+## Not Installed
 
-| Component | shadcn Used | Notes |
-|-----------|------------|-------|
-| LoginPage | Card, Button, Input, Label, Checkbox, ConnectionStatusBadge | Full shadcn composition |
-| DashboardHeader | Button, ConnectionStatusBadge, RefreshButton | Full shadcn composition |
-| SearchBar | Input, Button | Filter group could use ToggleGroup if installed |
-| AgentCard | Card, Badge, Button, Input | Full shadcn composition |
-| SessionList | Button, ScrollArea, Skeleton | Could use Table if data gets denser |
-| SessionPanel | Button, Input, Badge, ScrollArea, Skeleton | Full shadcn composition |
-| SessionDropdown | DropdownMenu, Input, ScrollArea, Skeleton, Button | Correct; could enhance with Command |
-| CreateSessionDialog | Dialog, Button, Input, Label, Select | Full shadcn composition |
-| KillConfirmDialog | Dialog, Button | Should standardize destructive confirms on AlertDialog |
-| AddressSelector | Select | Full shadcn composition |
-| FileBrowser | Button, Input, Skeleton, ContextMenu, AlertDialog | Best example of shadcn composition in codebase |
-| InputPanel | Button, Textarea | Domain-specific terminal input |
-| QuickCommandsPanel | Button, Input, Badge, Separator | Domain-specific escape-sequence builder |
-| Terminal / TerminalLayout / MobileTerminalLayout | (composition only) | Orchestration layers, no direct shadcn usage needed |
+Verified absent from `web/src/components/ui/`, ordered by how likely a feature
+is to want one. Install via `npx shadcn@latest add <name> --yes` from `web/`.
 
-### ⚠️ Partially Using shadcn
-
-| Component | shadcn Used | Issue | Recommendation |
-|-----------|------------|-------|----------------|
-| AgentDetailPanel | Sheet, Card, Badge, Button, Separator | Internal `TabBar` duplicates hand-rolled tab pattern | Install shadcn Tabs |
-| BottomSheet | Button | Tab strip is hand-rolled `<button>`s with `border-b-2` styling | Install shadcn Tabs |
-
-### ❌ Not Using shadcn (Reimplementing Primitives)
-
-| Component | Issue | Lines Affected | Recommendation |
-|-----------|-------|---------------|----------------|
-| BottomBar | Full tab strip reimplementation using only `cn()` | ~20 lines (tab buttons) | Install shadcn Tabs |
-| FileTabs | Custom `TabBar` with dirty indicators and close buttons | ~30 lines (TabBar component) | Domain-specific; could use Tabs as base |
-| SidePanel | Raw `mousemove`/`mouseup` listeners for drag-resize; custom mobile overlay | ~30 lines (resize logic) | Install shadcn Resizable + use Sheet for mobile |
-
-## shadcn Components NOT Installed — Priority Queue
-
-Install via `npx shadcn@latest add <name> --yes` from `web/`. Components land in `web/src/components/ui/`.
-
-### 🔴 High Priority (replace hand-rolled implementations)
-
-| Component | Sites Affected | Radix/Peer Dependency | Install Command |
-|-----------|---------------|----------------------|-----------------|
-| **Tabs** | BottomSheet, BottomBar, AgentDetailPanel TabBar, FileTabs TabBar, SearchBar filter group (5 sites) | `@radix-ui/react-tabs` | `npx shadcn@latest add tabs` |
-| **Resizable** | SidePanel drag-resize (~30 lines raw DOM) | `react-resizable-panels` | `npx shadcn@latest add resizable` |
-
-### 🟡 Medium Priority (enhance existing UX)
-
-| Component | Sites Affected | Radix/Peer Dependency |
-|-----------|---------------|----------------------|
-| **Tooltip** | ~20 icon-only buttons across the app | `@radix-ui/react-tooltip` |
-| **Command** | SessionDropdown search/filter | `cmdk` |
-| **Popover** | Info popovers, mini-menus | `@radix-ui/react-popover` |
-
-### 🟢 Low Priority (nice to have)
-
-| Component | Sites Affected | Radix/Peer Dependency |
-|-----------|---------------|----------------------|
-| Toggle / ToggleGroup | SearchBar filter buttons | `@radix-ui/react-toggle` |
-| Table | FileBrowser rows, SessionList columns | (none) |
-| Breadcrumb | FileBrowser crumb trail | (none) |
-| Avatar | Agent icons | `@radix-ui/react-avatar` |
-| Accordion | AgentDetailPanel sections | `@radix-ui/react-accordion` |
-| Progress | Operation feedback | `@radix-ui/react-progress` |
-| HoverCard | Agent/session quick preview | `@radix-ui/react-hover-card` |
+| Component | Would serve | Peer dependency |
+|-----------|-------------|-----------------|
+| Command | session/agent search & filtering | `cmdk` |
+| Table | dense file-browser rows, session columns | (none) |
+| Breadcrumb | file-browser crumb trail | (none) |
+| Avatar | agent identity | (none) |
+| Accordion | collapsible detail sections | (none) |
+| HoverCard | session/agent quick preview | (none) |
 
 ## Golden Rules
 
-1. **Always check this inventory before building a new UI pattern** — shadcn likely has a primitive for it
+1. **Check this inventory before building a new UI pattern** — shadcn likely has a primitive for it
 2. **Install via CLI only** — `npx shadcn@latest add <name> --yes`, never hand-write shadcn components
-3. **Custom wrappers are the intended pattern** — thin domain wrappers over shadcn primitives (like ConnectionStatusBadge, RefreshButton)
-4. **Before hand-rolling any layout pattern** (tabs, resize, tooltip), check the "NOT installed" list above
-5. **Destructive confirmation dialogs → AlertDialog**, not Dialog (matching FileBrowser's delete pattern)
-6. **New component files go in `web/src/components/`**, not `ui/`. Only shadcn-generated primitives live in `ui/`.
+3. **Custom wrappers are the intended pattern** — thin domain wrappers over primitives (like ConnectionStatusBadge, RefreshButton)
+4. **Before hand-rolling a layout pattern, check the "Not Installed" list** — and prefer composing an existing primitive over a bespoke one
+5. **Destructive confirmation dialogs → AlertDialog**, not Dialog
+6. **Only shadcn-generated primitives (and the two wrappers) live in `ui/`** — no `index.ts` barrel. Feature UI goes in `features/<feature>/components/`, shell UI in `app/`
 
 ## Cross-References
 
 - **CLAUDE.md** — Frontend Conventions, Key Design Decisions (section 1)
-- **nession-development SKILL.md** — "shadcn/ui Component Conventions" section
+- **web/CLAUDE.md** — "UI kit" and the layout-of-code table
+- **docs/architecture/web.md** — layer model and import direction
 - **nession-env SKILL.md** — Troubleshooting: "shadcn cn import fails"
 - **shadcn docs** — https://ui.shadcn.com/docs/components

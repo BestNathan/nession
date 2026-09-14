@@ -54,7 +54,9 @@ src/
 │   └── claude-code/         # Claude Code capability plugin
 ├── core/terminal-runtime/   # React-free runtime: controller, transports, input, xterm
 ├── runtime/                 # SessionRuntime registry + attach state machines
-├── services/                # services/socket WebSocketService + plugins, attachPrefs, deepLinkAttach
+├── services/                # socket/ (WebSocketService, MessageRouter, clientId) +
+│                            #   attachPrefs, sessionAttachProfile, deepLinkAttach, addressSelection
+│                            #   — capability plugins live in features/, not here
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)

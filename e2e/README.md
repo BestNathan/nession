@@ -29,15 +29,26 @@ e2e/
 
 ## Running E2E Tests
 
-### Locally
+> **⛔ Do not run the suite locally.** `npx playwright test` and the `cargo run`
+> stack it starts are forbidden on a dev machine (root `CLAUDE.md` § Quality
+> Gates) — the suite drives real tmux sockets and leaves orphans behind. Local
+> UI work is verified with `cd web && npm run dev` plus the Playwright MCP
+> browser tools; for spec syntax, `npx playwright test --list` is allowed and
+> runs nothing. Every spec is gated with
+> `test.skip(!process.env.CI, 'local only — runs in CI workflow only')`.
+>
+> Registration below is for reference — the suite executes in the `e2e.yml`
+> workflow, which is also where baselines are regenerated.
+
+### Locally (syntax only)
 
 ```bash
 cd e2e
 npm install
-npx playwright test
+npx playwright test --list    # lists specs; runs nothing
 ```
 
-**Note:** Local E2E tests require:
+**Note:** CI's e2e job requires:
 - Rust toolchain (for `cargo run`)
 - tmux installed
 - Node.js 20+
@@ -266,15 +277,19 @@ The E2E workflow (`.github/workflows/e2e.yml`):
 
 Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `specs/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
 
+Playwright appends the platform suffix to every snapshot filename, so the
+committed files all end in `-linux` (baselines are generated on the Linux CI
+runner):
+
 | Baseline | Viewport | Snapshot name |
 |----------|----------|---------------|
-| Web Active Terminal | 1440×900 | `web-active-terminal.png` |
-| Web Workspace | 1440×900 | `web-workspace.png` |
-| Web compact Terminal | 1024×768 | `web-compact-terminal.png` |
-| Web compact Workspace | 1024×768 | `web-compact-workspace.png` |
-| App Terminal | 390×844 | `app-terminal.png` |
-| App Sessions | 390×844 | `app-sessions.png` |
-| App Workspace | 390×844 | `app-workspace.png` |
+| Web Active Terminal | 1440×900 | `web-active-terminal-linux.png` |
+| Web Workspace | 1440×900 | `web-workspace-linux.png` |
+| Web compact Terminal | 1024×768 | `web-compact-terminal-linux.png` |
+| Web compact Workspace | 1024×768 | `web-compact-workspace-linux.png` |
+| App Terminal | 390×844 | `app-terminal-linux.png` |
+| App Sessions | 390×844 | `app-sessions-linux.png` |
+| App Workspace | 390×844 | `app-workspace-linux.png` |
 
 Snapshots live in `e2e/specs/__snapshots__/fixture-visual.spec.ts/` (committed to git).
 

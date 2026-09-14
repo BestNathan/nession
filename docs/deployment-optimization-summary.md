@@ -1,5 +1,18 @@
 # Deployment Optimization Summary
 
+> **Status: historical record (June 2026). This document does not describe how
+> Nession deploys today.**
+>
+> It describes the model in which `k8s/` and `argocd/` lived on `main` and CI
+> committed image tags into `k8s/kustomization.yaml`. Both directories were
+> moved to the **`gitops` orphan branch** in issue #592 (2026-09-05), and
+> deploys are now bot commits on that branch written only by
+> `scripts/gitops-commit.sh` — `main` carries application source alone.
+> Following the commands below will not work.
+>
+> Current model: root `CLAUDE.md` § "Deploying to Kubernetes" and the
+> `nession-cicd` skill.
+
 ## Changes Implemented
 
 ### Docker Build Optimization
