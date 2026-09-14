@@ -1,14 +1,11 @@
 import { UserRound } from 'lucide-react';
-import type { WorkspaceTool } from '../toolTypes';
+import type { WorkspaceViewBinding } from '../workspaceContext';
 import { AppToolScroll } from '../AppToolScroll';
 import { AgentDetail } from '@/features/agents/components/AgentDetail';
 
-export const agentTool: WorkspaceTool = {
+export const agentView: WorkspaceViewBinding = {
   id: 'agent',
-  label: 'Agent',
   icon: UserRound,
-  order: 30,
-  availability: () => true,
   layout: {
     web: ({ ctx }) => (ctx.agent && ctx.domain ? <AgentDetail agent={ctx.agent} state={ctx.domain} /> : null),
     app: ({ ctx }) =>

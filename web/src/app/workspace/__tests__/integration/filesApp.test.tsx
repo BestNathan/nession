@@ -2,9 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
-import { FilesAppLayout } from '@/app/workspace/tools/filesApp';
+import { FilesAppLayout } from '@/app/workspace/views/filesApp';
 import type { FileEntry, FileOps } from '@/features/files';
-import type { WorkspaceContext } from '@/app/workspace/toolTypes';
+import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },

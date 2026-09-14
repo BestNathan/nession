@@ -64,14 +64,15 @@ Conceptually, a capability contributes semantic data:
 ```ts
 interface WorkspaceCapability {
   id: string
-  state: (context: WorkspaceContext) => CapabilityState
-  summary?: (context: WorkspaceContext) => CapabilitySummary
-  actions?: (context: WorkspaceContext) => CapabilityAction[]
-  view?: unknown
+  title: string
+  state: (context: CapabilityContext) => CapabilityState
 }
 ```
 
-The exact API is implementation-specific.
+The exact API is implementation-specific. What a capability contributes is its
+semantic identity and state — a summary, an action list, or a self-declared view
+descriptor is not part of the contract, because each of those is a placement
+decision wearing a semantic name.
 
 Important boundary:
 

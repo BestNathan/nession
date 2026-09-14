@@ -4,10 +4,8 @@ import type { FileOps } from '@/features/files';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { TerminalWell } from '@/app/TerminalWell';
-import type {
-  Experience,
-  WorkspaceToolId,
-} from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
+import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
@@ -21,10 +19,10 @@ export interface SessionFirstMainProps {
   agents: Agent[];
   domain: DomainState | null;
   surface: Surface;
-  tool: WorkspaceToolId;
+  tool: CapabilityId;
   fileOps: FileOps | null;
   onSurfaceChange: (surface: Surface) => void;
-  onToolChange: (tool: WorkspaceToolId) => void;
+  onToolChange: (tool: CapabilityId) => void;
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;

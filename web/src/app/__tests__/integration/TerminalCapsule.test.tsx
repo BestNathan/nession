@@ -145,8 +145,8 @@ describe('TerminalCapsule', () => {
     expect(screen.getByTestId('capsule-shell').className).toMatch(/composer-shell-pill-radius/);
   });
 
-  it('still accepts legacy variant prop', () => {
-    render(<TerminalCapsule variant="desktop" sendText={vi.fn()} />);
+  it('defaults to the web experience when none is given', () => {
+    render(<TerminalCapsule sendText={vi.fn()} />);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-experience', 'web');
   });
 });

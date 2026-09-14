@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { fixtureCapabilityFacts } from '@/app/fixture/fixtureCapabilityFacts';
-import type { WorkspaceContext } from '@/app/workspace/toolTypes';
+import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import {
   FIXTURE_AGENTS,
   FIXTURE_SELECTED_ID,

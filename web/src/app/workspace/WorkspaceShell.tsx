@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { resolveCapabilityPresences } from '@/features/capabilities';
+import { resolveCapabilityPresences, type CapabilityId } from '@/features/capabilities';
 import {
   CapabilityDisclosureMenu,
   type CapabilityDisclosureMenuEntry,
@@ -10,23 +10,19 @@ import {
   buildWorkspacePresentationModel,
   type WorkspacePresentationItem,
 } from '@/app/workspace/presentation';
-import { WORKSPACE_TOOLS } from '@/app/workspace/tools';
-import type {
-  WorkspaceContext,
-  WorkspaceTool,
-  WorkspaceToolId,
-} from '@/app/workspace/toolTypes';
+import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
+import type { WorkspaceContext, WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
 
-const workspaceViewBindings = new Map<string, WorkspaceTool>(
-  WORKSPACE_TOOLS.map((tool) => [tool.id, tool]),
+const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
+  WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
 );
 
 export interface WorkspaceShellProps {
   ctx: WorkspaceContext;
-  activeCapabilityId: WorkspaceToolId;
+  activeCapabilityId: CapabilityId;
 }
 
-function bindingFor(item: WorkspacePresentationItem): WorkspaceTool | undefined {
+function bindingFor(item: WorkspacePresentationItem): WorkspaceViewBinding | undefined {
   return workspaceViewBindings.get(item.snapshot.id);
 }
 
@@ -62,6 +58,11 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
   const activeBinding = workspaceViewBindings.get(activeCapabilityId);
   const canRenderActive = activeBinding && openedPresence?.level !== 'hidden';
   const ActiveLayout = canRenderActive ? activeBinding.layout[ctx.experience] : null;
+  // A view binding carries no name of its own — the capability does, so the
+  // unavailable-state copy reads the same title the navigation shows.
+  const activeTitle =
+    resolution.snapshots.find((snapshot) => snapshot.id === activeCapabilityId)?.title ??
+    activeCapabilityId;
 
   const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
   const discoverableItems = presentation.discoverable.filter(bindingFor);
@@ -83,7 +84,7 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
           >
             <div className="max-w-sm space-y-1.5">
               <p className="text-sm font-medium text-foreground">
-                {activeBinding?.label ?? activeCapabilityId} is not available here
+                {activeTitle} is not available here
               </p>
               <p className="text-xs text-muted-foreground">
                 Choose another capability from More. Nession will keep this view stable instead of switching automatically.
