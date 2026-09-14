@@ -41,37 +41,11 @@ export interface CapabilityContext extends CapabilityScope {
   facts?: CapabilityFacts;
 }
 
-export interface CapabilitySummary {
-  label: string;
-  detail?: string;
-}
-
-/**
- * Semantic action metadata only. Execution is deliberately kept outside the
- * capability model so providers do not become coupled to React handlers or a
- * transport-specific command protocol.
- */
-export interface CapabilityAction {
-  id: string;
-  label: string;
-  description?: string;
-}
-
-/** A semantic deeper-view descriptor. Surface placement remains Nession-owned. */
-export interface CapabilityView {
-  id: string;
-  label: string;
-  description?: string;
-}
-
 export interface CapabilitySnapshot {
   id: CapabilityId;
   title: string;
   scope: CapabilityScope;
   state: CapabilityState;
-  summary?: CapabilitySummary;
-  actions?: readonly CapabilityAction[];
-  views?: readonly CapabilityView[];
 }
 
 export type CapabilitySnapshotData = Omit<CapabilitySnapshot, 'id' | 'title'>;

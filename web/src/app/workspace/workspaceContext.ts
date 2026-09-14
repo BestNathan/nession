@@ -6,15 +6,9 @@ import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 
-/**
- * Transitional alias for legacy Workspace view bindings. Capability identity is
- * intentionally open-ended; adding a capability must not require extending a
- * closed shell enum.
- */
-export type WorkspaceToolId = CapabilityId;
 export type Experience = CapsuleExperience;
 
-/** Everything a legacy tool layout needs from the workspace framework. */
+/** Everything a Workspace view layout needs from the workspace framework. */
 export interface WorkspaceContext {
   session: Session | null;
   agent: Agent | undefined;
@@ -22,26 +16,22 @@ export interface WorkspaceContext {
   domain: DomainState | null;
   fileOps: FileOps | null;
   experience: Experience;
-  onToolChange: (id: WorkspaceToolId) => void;
+  onToolChange: (id: CapabilityId) => void;
   /** Observations about the session, supplied by the app layer (never probed here). */
   facts?: CapabilityFacts;
 }
 
 /**
- * Migration-time Workspace view binding.
+ * How a capability draws itself in the Workspace.
  *
- * The binding still owns the current React layouts and visual identity needed
- * to render an existing deeper view. It no longer owns whether that capability
- * receives direct Workspace presence; that decision belongs to the shared
- * capability + Nession presentation policy.
+ * Only the two things a view owns: the React layouts and the icon its chrome
+ * shows. What the capability *is* — its title, whether it is available, whether
+ * it deserves a slot — is decided by its provider in the capability layer, so a
+ * binding cannot grant itself presence by existing.
  */
-export interface WorkspaceTool {
-  id: WorkspaceToolId;
-  label: string;
+export interface WorkspaceViewBinding {
+  id: CapabilityId;
   icon: LucideIcon;
-  /** Legacy deterministic fallback order, never capability presence priority. */
-  order: number;
-  availability: (ctx: WorkspaceContext) => boolean;
   layout: {
     web: ComponentType<{ ctx: WorkspaceContext }>;
     app: ComponentType<{ ctx: WorkspaceContext }>;
