@@ -86,7 +86,7 @@ Active Session / current work
                └── capability-specific deeper views
 ```
 
-A current Web implementation may use SessionHeader + SurfaceSwitcher + WorkspaceNavigation. Those are valid patterns, but this diagram intentionally avoids declaring each of them permanently present.
+A current Web implementation may use SessionHeader + SurfaceSwitcher + WorkspaceNavigation. Those are valid patterns and this diagram does not fix their presence in general — with one recorded exception: on Web the SurfaceSwitcher is permanent while it is the only visible route to Workspace.
 
 App realizes the same semantics through its spatial `Sessions ← Terminal → Workspace` model and native deeper navigation.
 

@@ -58,7 +58,7 @@ Concepts being broadened or corrected include:
 - capabilities can be available, relevant, or active and should gain UI presence contextually;
 - TerminalCapsule evolves from a terminal quick-input toolbar into a conversational/contextual interaction surface;
 - Claude Code / Codex structured state may be surfaced by extensions without making an AI-chat model universal to every Session;
-- persistent SurfaceSwitcher / Workspace tool bars are implementation options, not product invariants.
+- Workspace navigation is contextual rather than a fixed tool strip; the Web SurfaceSwitcher, by contrast, **is** approved as permanent while it is the only visible route to Workspace (decision recorded in [surface-switcher.md](design-system/patterns/surface-switcher.md)).
 
 ## Current convergence path
 
@@ -84,7 +84,7 @@ Claude Code is the first reference integration used to validate that capability 
 
 ## Executable-contract migration debt
 
-Existing UI contracts, fixtures, and visual baselines encode some assumptions from the previous Session-first implementation. Examples include permanent SurfaceSwitcher placement, Workspace navigation shape, and the older TerminalCapsule semantics.
+Existing UI contracts, fixtures, and visual baselines encode some assumptions from the previous Session-first implementation. The Workspace navigation shape and the older TerminalCapsule semantics have since been migrated; the SurfaceSwitcher's permanence was reviewed and kept deliberately, so it is no longer migration debt. Where a contract still encodes an assumption nobody has revisited, treat it as debt — but decide it rather than assuming it away.
 
 The documentation convergence in #699 should **not** silently rewrite those executable constraints without the corresponding implementation change.
 

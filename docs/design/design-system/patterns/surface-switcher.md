@@ -4,7 +4,17 @@
 
 SurfaceSwitcher is one possible **Web affordance** for moving between the active Session's Terminal and Workspace contextual depth.
 
-It is a compact interaction pattern, not a product-level requirement and not a feature-navigation model.
+It is a compact interaction pattern and not a feature-navigation model.
+
+**Decision (2026-09-14, #727):** on Web the switcher **does** ship permanently in
+the SessionHeader, and that is now the approved behavior rather than migration
+debt. It is the only visible non-gesture route to Workspace — the alternatives
+that exist today (the capsule's capability entry, a deep link) do not replace it,
+and removing it would strand Workspace behind a control the user has to find
+first. The rule that survives is not "hide it when possible" but "never render it
+without something to switch to" (see States). Replacing it with a quieter
+affordance is a design slice that must ship the alternative *before* the header
+loses the control, not a convergence chore to be done later.
 
 ## Purpose
 
@@ -17,7 +27,8 @@ Must not:
 - show Terminal and Workspace side-by-side as the default layout;
 - merge Workspace capabilities into the same segmented control;
 - grow into `Terminal | Files | Env | Git | Claude | ...`;
-- remain permanently visible merely because an implementation already has it if a quieter contextual affordance satisfies the same need.
+- remain visible without a Session to switch between (see States: absence, not dead chrome);
+- grow into the only way to reach Workspace **without** a shipped replacement — see the decision above.
 
 ## Anatomy
 
@@ -27,7 +38,7 @@ The simplest current form is:
 [ Terminal | Workspace ]
 ```
 
-However, this exact segmented control is **not** the canonical product model. Web may later use a quieter Workspace affordance, command, drawer/layer entry, or contextual transition as long as Workspace remains explicit and discoverable.
+This exact segmented control is the shipped Web form. A quieter Workspace affordance — command, drawer/layer entry, contextual transition — remains a legitimate future design, but it has to arrive as a replacement: while the header control is the only visible path, it stays.
 
 ## States
 
@@ -51,7 +62,7 @@ See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md]
 
 | | Web | App |
 |--|-----|-----|
-| Pattern | Available when a compact visible Workspace switch is useful | Not used as the shell |
+| Pattern | Shipped permanently in the SessionHeader (decision above) | Not used as the shell |
 | Terminal default | Yes | Yes |
 | Workspace access | SurfaceSwitcher or another explicit Web affordance | Visible Workspace control + swipe-left |
 | Session access | Separate Session navigation | Visible Sessions control + swipe-right |
@@ -64,7 +75,7 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
 - Compact and flat; no elevation in healthy chrome.
 - One selected state, one quiet unselected state.
 - No per-surface decorative color.
-- If the control is not needed in the current composition, absence is preferable to occupying permanent chrome without purpose.
+- Without a Session there is nothing to switch between, so the control is absent rather than inert.
 
 ## Anti-patterns
 
@@ -74,8 +85,10 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
 - Treating this widget as required architecture rather than one interaction implementation.
 - Reusing it as the App spatial shell.
 
-## Migration note
+## Replacing it
 
-The current Web shell and visual contracts may assume a persistent SurfaceSwitcher. Treat that as an implementation/migration state.
-
-When the shell evolves toward more contextual presence, update executable contracts and canonical screenshots together rather than preserving a permanent control solely because it was previously approved.
+If a quieter affordance is ever designed, the order is: ship the affordance, make
+Workspace reachable through it, then remove the header control — updating
+executable contracts and canonical screenshots in the same change. Dropping the
+control first is what leaves Workspace unreachable, which is why the permanence
+above was recorded as a decision instead of being left as debt.
