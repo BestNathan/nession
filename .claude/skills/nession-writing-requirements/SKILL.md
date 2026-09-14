@@ -37,7 +37,7 @@ Write issue bodies in the reporter's language; keep the section headers below, p
 1. **`superpowersexy:clarifying-requirements`** — run the clarification process in full
 2. **Skip its local-file step** (`docs/superpowers/requirement/...`) — the document becomes the issue body
 3. **Ensure labels exist** (see Labels)
-4. **Create the issue**
+4. **Create the issue** — including its `## Product alignment` section (see Issue body below); an unticked box is a finding to state, not a formality to skip
 5. **Append the conversation record**
 6. **User reviews**, iterate as needed
 7. **`superpowers:brainstorming`**
@@ -51,11 +51,24 @@ Write issue bodies in the reporter's language; keep the section headers below, p
  Background / Goals / Non-Goals / Scope / Constraints /
  Success Criteria / Edge Cases / Open Questions]
 
+## Product alignment
+
+- [ ] Does this move Nession toward `VISION.md`?
+- [ ] Does it obey `PRINCIPLE.md`?
+- [ ] Were the relevant `docs/design/*` documents checked for consistency?
+- [ ] If it deviates from a canonical design decision, is the deviation stated here or in a linked follow-up?
+
 ---
 **Status:** Draft | In Discussion | Approved
 **Created:** [YYYY-MM-DD]
 **Author:** [user]
 ```
+
+**On the alignment box you cannot tick.** The first three are the questions `VISION.md`
+and `PRINCIPLE.md` exist to force; if one cannot be ticked honestly, that is a finding, not
+a formality — say so in the body and let it shape the requirement. The fourth box is the one
+that decays fastest: a deviation is easy to make and easy to leave unrecorded (see the
+decision-E episode on #702), so write it down where the next reader will look.
 
 ### Commands
 
