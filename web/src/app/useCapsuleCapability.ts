@@ -1,11 +1,14 @@
 import { useSessionCapabilityFacts } from '@/app/useSessionCapabilityFacts';
-import { resolveCapsuleCapabilityPresence, type CapsuleCapabilityInput } from '@/app/capsulePresence';
+import {
+  resolveCapsuleCapabilities,
+  type CapsuleCapabilityContribution,
+  type CapsuleCapabilityInput,
+} from '@/app/capsulePresence';
 import type { CapabilityFacts } from '@/features/capabilities';
-import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
 
 export interface CapsuleCapability {
   facts: CapabilityFacts | undefined;
-  presence: CapsuleCapabilityPresence | undefined;
+  capabilities: CapsuleCapabilityContribution;
 }
 
 /**
@@ -19,5 +22,5 @@ export function useCapsuleCapability(
   input: Omit<CapsuleCapabilityInput, 'facts'>,
 ): CapsuleCapability {
   const facts = useSessionCapabilityFacts(input.session);
-  return { facts, presence: resolveCapsuleCapabilityPresence({ ...input, facts }) };
+  return { facts, capabilities: resolveCapsuleCapabilities({ ...input, facts }) };
 }

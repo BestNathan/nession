@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveCapabilityPresences,
+  type CapabilityPresence,
   type CapabilitySnapshot,
 } from '@/features/capabilities';
 import { buildWorkspacePresentationModel } from '../../presentation';
@@ -76,15 +77,18 @@ describe('buildWorkspacePresentationModel', () => {
     expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['session']);
   });
 
-  it('uses Nession-owned prominent policy before registration order', () => {
+  it('ranks a stronger presence ahead of registration order', () => {
     const snapshots = [
       snapshot('git', 'relevant'),
       snapshot('docker', 'available'),
     ];
-    const presences = resolveCapabilityPresences(snapshots, {
-      surface: 'workspace',
-      prominentCapabilityIds: ['docker'],
-    });
+    // Presence levels are inputs here: this pins the Workspace *ordering* rule
+    // (a stronger level outranks registration order), not how a state maps to a
+    // level — that mapping is the presence policy's, tested in presence.test.ts.
+    const presences: CapabilityPresence[] = [
+      { capabilityId: 'git', surface: 'workspace', level: 'contextual' },
+      { capabilityId: 'docker', surface: 'workspace', level: 'prominent' },
+    ];
 
     const model = buildWorkspacePresentationModel({
       snapshots,

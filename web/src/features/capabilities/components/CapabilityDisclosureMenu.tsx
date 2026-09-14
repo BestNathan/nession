@@ -8,18 +8,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { CapabilityId, CapabilityState } from '@/features/capabilities';
+import type { CapabilityDisclosureEntry, CapabilityId } from '@/features/capabilities';
 
-/** One capability offered through disclosure. The icon is the caller's presentation. */
-export interface CapabilityDisclosureEntry {
-  id: CapabilityId;
-  title: string;
-  icon: LucideIcon;
-  state: CapabilityState;
-}
+/** A disclosure entry plus the icon this surface happens to have for it. */
+export type CapabilityDisclosureMenuEntry = CapabilityDisclosureEntry & { icon?: LucideIcon };
 
 export interface CapabilityDisclosureMenuProps {
-  entries: readonly CapabilityDisclosureEntry[];
+  entries: readonly CapabilityDisclosureMenuEntry[];
   onSelect: (id: CapabilityId) => void;
   /**
    * The affordance that opens the list. A surface supplies its own geometry —
@@ -62,7 +57,7 @@ export function CapabilityDisclosureMenu({
                 data-capability-state={entry.state}
                 onClick={() => onSelect(entry.id)}
               >
-                <Icon />
+                {Icon ? <Icon /> : null}
                 <span className="min-w-0 flex-1 truncate">{entry.title}</span>
               </DropdownMenuItem>
             );

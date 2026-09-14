@@ -2,7 +2,21 @@ export type CapabilityId = string;
 
 export type CapabilityState = 'unavailable' | 'available' | 'relevant' | 'active';
 
-export type CapabilitySurface = 'workspace' | 'session' | 'capsule' | 'detail';
+/**
+ * Surfaces that actually consume capability presence.
+ *
+ * A surface is listed here when something reads it — the Workspace presentation
+ * and the Session interaction layer (the capsule) today. `session` and `detail`
+ * used to sit alongside them with no consumer: the axis existed, the code that
+ * would have given it meaning did not, so the model advertised presence no
+ * surface could show. An unused axis is worse than a missing one — it makes an
+ * absent feature look implemented. Session-level presence for an `active`
+ * capability is the capsule chip, per `docs/design/product-model.md`
+ * ("may surface directly in the Session interaction layer").
+ *
+ * Adding one back is a union member plus the code that consumes it.
+ */
+export type CapabilitySurface = 'workspace' | 'capsule';
 
 export interface CapabilityScope {
   workspaceId?: string;

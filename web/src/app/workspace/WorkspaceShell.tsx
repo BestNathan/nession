@@ -2,7 +2,7 @@ import { Plus } from 'lucide-react';
 import { resolveCapabilityPresences } from '@/features/capabilities';
 import {
   CapabilityDisclosureMenu,
-  type CapabilityDisclosureEntry,
+  type CapabilityDisclosureMenuEntry,
 } from '@/features/capabilities/components/CapabilityDisclosureMenu';
 import { cn } from '@/lib/utils';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
@@ -30,7 +30,7 @@ function bindingFor(item: WorkspacePresentationItem): WorkspaceTool | undefined 
   return workspaceViewBindings.get(item.snapshot.id);
 }
 
-function disclosureEntries(items: WorkspacePresentationItem[]): CapabilityDisclosureEntry[] {
+function disclosureEntries(items: WorkspacePresentationItem[]): CapabilityDisclosureMenuEntry[] {
   return items.map((item) => {
     const binding = bindingFor(item)!;
     return {

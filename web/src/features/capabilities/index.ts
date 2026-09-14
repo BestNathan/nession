@@ -27,6 +27,7 @@ export {
 export {
   resolveCapabilityDisclosure,
   type CapabilityDisclosure,
+  type CapabilityDisclosureEntry,
   type CapabilityDisclosureOptions,
 } from './discovery';
 export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';

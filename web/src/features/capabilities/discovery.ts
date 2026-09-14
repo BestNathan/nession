@@ -1,4 +1,4 @@
-import type { CapabilityId } from './model';
+import type { CapabilityId, CapabilityState } from './model';
 import type { CapabilityPresence, CapabilityPresenceLevel } from './presence';
 
 /**
@@ -27,6 +27,19 @@ export interface CapabilityDisclosureOptions {
    * stronger candidates, so opening a view never loses its own chrome.
    */
   pinned?: readonly CapabilityId[];
+}
+
+/**
+ * A capability offered through disclosure.
+ *
+ * Icon-free on purpose: a surface that has one supplies it, a surface that does
+ * not (the capsule's chip carries a state dot, not an icon) is not forced to
+ * invent one.
+ */
+export interface CapabilityDisclosureEntry {
+  id: CapabilityId;
+  title: string;
+  state: CapabilityState;
 }
 
 /** Every presence, sorted into exactly one bucket. */
