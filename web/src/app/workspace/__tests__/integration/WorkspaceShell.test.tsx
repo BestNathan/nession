@@ -2,14 +2,14 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
-import type { WorkspaceContext } from '@/app/workspace/toolTypes';
+import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
-vi.mock('@/app/workspace/tools/files', async (importOriginal) => {
+vi.mock('@/app/workspace/views/filesView', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@/app/workspace/tools/files')>();
+    await importOriginal<typeof import('@/app/workspace/views/filesView')>();
   return {
-    filesTool: {
-      ...actual.filesTool,
+    filesView: {
+      ...actual.filesView,
       layout: {
         web: () => <div data-testid="mock-files-web" />,
         app: () => <div />,

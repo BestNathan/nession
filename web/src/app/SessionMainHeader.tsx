@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import { SessionHeader, type Surface } from '@/app/patterns/SessionHeader';
 import { shellIconButtonClass } from '@/app/shellStyles';
-import type { Experience } from '@/app/workspace/toolTypes';
+import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
 

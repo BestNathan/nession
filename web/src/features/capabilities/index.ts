@@ -1,5 +1,4 @@
 export type {
-  CapabilityAction,
   CapabilityContext,
   CapabilityDefinition,
   CapabilityFacts,
@@ -8,9 +7,7 @@ export type {
   CapabilitySnapshot,
   CapabilitySnapshotData,
   CapabilityState,
-  CapabilitySummary,
   CapabilitySurface,
-  CapabilityView,
 } from './model';
 export {
   CapabilityRegistry,

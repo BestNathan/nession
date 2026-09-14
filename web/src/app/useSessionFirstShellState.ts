@@ -13,7 +13,7 @@ import { persistConfirmedChoice } from '@/services/sessionAttachProfile';
 import { mapDomainState } from '@/features/sessions/model/domainState';
 import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
 import type { Session } from '@/types';
 
 export function useSessionFirstShellState() {
@@ -41,7 +41,7 @@ export function useSessionFirstShellState() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
-  const [tool, setTool] = useState<WorkspaceToolId>('files');
+  const [tool, setTool] = useState<CapabilityId>('files');
   const { isWide, showList, showDetail, openDetail, openList } =
     useSessionFirstMobileNav(selectedId);
 

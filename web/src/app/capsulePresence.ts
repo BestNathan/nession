@@ -15,7 +15,7 @@ import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
-import type { Experience, WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { Experience } from '@/app/workspace/workspaceContext';
 
 /** The capability the capsule may show — narrowed to the states that earn it. */
 export interface CapsuleCapabilitySelection {
@@ -82,7 +82,7 @@ export interface CapsuleCapabilityInput {
   fileOps: FileOps | null;
   experience: Experience;
   facts: CapabilityFacts | undefined;
-  onToolChange: (id: WorkspaceToolId) => void;
+  onToolChange: (id: CapabilityId) => void;
   /** Reveal the surface the capability lives on. */
   onSurfaceChange: () => void;
 }
@@ -116,7 +116,7 @@ export function resolveCapsuleCapabilities(
   const disclosure = capsuleDisclosure(snapshots);
   const selected = selectionFrom(snapshots, disclosure.direct);
 
-  const activate = (id: WorkspaceToolId) => {
+  const activate = (id: CapabilityId) => {
     input.onToolChange(id);
     input.onSurfaceChange();
   };
