@@ -34,7 +34,7 @@ Possible parts:
 | Workspace affordance | Visible path to Workspace contextual depth |
 | Agent/location context | Optional infrastructure identity when it helps disambiguate or recover work |
 | ConnectionStatus | Optional compact continuity state when relevant |
-| SurfaceSwitcher | One possible Web implementation of Terminal ↔ Workspace access; not required product anatomy |
+| SurfaceSwitcher | The Web implementation of Terminal ↔ Workspace access, shipped permanently while it is the only visible route (decision recorded in [surface-switcher.md](surface-switcher.md)) |
 
 Not every part is rendered in every state or viewport.
 
@@ -67,7 +67,7 @@ A Session title should not silently turn into a generic "Disconnected" state tha
 | | Web | App |
 |--|-----|-----|
 | Session navigation | May already be visible, collapsible, or on demand; header affordance is conditional | Visible non-gesture Sessions affordance required somewhere around the work surface |
-| Workspace access | May use SurfaceSwitcher, a compact button, command, or another explicit affordance | Visible non-gesture Workspace affordance + swipe-left |
+| Workspace access | SurfaceSwitcher, permanently — it is the only visible non-gesture route today | Visible non-gesture Workspace affordance + swipe-left |
 | Infrastructure context | Show only when useful/relevant | Same semantic rule, adapted to limited space |
 | Height | Compact; may disappear/minimize when redundant | Safe-area aware; touch targets must remain accessible |
 
@@ -98,7 +98,7 @@ Use stable alignment, concise copy, consistent hit areas, and predictable state 
 ## Anti-patterns
 
 - Always showing Agent identity merely because the data exists.
-- Treating SurfaceSwitcher as required SessionHeader anatomy.
+- Treating SurfaceSwitcher as a *capability* surface (it switches work depth, not tools).
 - Adding one header control per active/installed extension.
 - Duplicating the Session list inside the header.
 - Permanent connected/healthy badges competing with Session identity.
@@ -111,6 +111,6 @@ Use stable alignment, concise copy, consistent hit areas, and predictable state 
 - [ ] Sessions and Workspace remain explicitly reachable; App does not depend on gestures alone.
 - [ ] Healthy infrastructure context is allowed to recede or disappear when redundant.
 - [ ] Degraded state names the affected dimension rather than collapsing status.
-- [ ] SurfaceSwitcher is optional implementation, not mandatory product anatomy.
+- [ ] Workspace stays reachable without gestures on both experiences; on Web the SurfaceSwitcher is currently what provides that, and removing it requires a shipped replacement.
 - [ ] Capability growth does not imply SessionHeader growth.
 - [ ] Header chrome yields before the current work surface yields.

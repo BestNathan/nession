@@ -542,7 +542,7 @@ Mechanics and rationale: `nession-cicd` skill.
 
 The principle and the replace-don't-preserve rule live in `docs/design/design-system/validation.md` and `docs/design/migration.md`; this is the operational half:
 
-- Regenerate in CI only — local e2e runs are banned (§ Quality Gates), so `--update-snapshots` happens on a CI runner (`CI=true npx playwright test fixture-visual --update-snapshots`) and the new golden images are committed.
+- Regenerate in CI only — local e2e runs are banned (§ Quality Gates), so `--update-snapshots=all` happens on a CI runner (`CI=true npx playwright test fixture-visual --update-snapshots=all`) and the new golden images are committed. **`=all` is not optional:** a bare `--update-snapshots` means mode `changed`, which still compares through `maxDiffPixelRatio` and rewrites only what fails tolerance — drift smaller than the ratio is skipped, and the run says nothing about it.
 - Never widen `maxDiffPixelRatio` to get green. If the diff cannot be explained, find the cause rather than absorbing it.
 - Baseline drift that already shipped gets its own issue (see #714) — do not leave it for the next person to rediscover.
 

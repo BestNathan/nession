@@ -582,7 +582,7 @@ cd web && npm run dev
 
 `FIXTURE_SCREENSHOT.maxDiffPixelRatio = 0.02` 足以吞掉整片 chrome 变化 —— baseline 过期也照样绿，门禁等于失效。原则见 `docs/design/design-system/validation.md` 与 `docs/design/migration.md`；操作是：
 
-- 只能在 CI 重生成（本地禁止跑 e2e）：`CI=true npx playwright test fixture-visual --update-snapshots`，然后提交新的 golden 图。
+- 只能在 CI 重生成（本地禁止跑 e2e）：`CI=true npx playwright test fixture-visual --update-snapshots=all`，然后提交新的 golden 图。**`=all` 不是可选项**：不带值时模式是 `changed`，仍按 `maxDiffPixelRatio` 比较，只重写超出容差的那几张 —— 小于比率的漂移会被静默跳过，日志里也不会留痕。
 - **不得靠放宽 `maxDiffPixelRatio` 变绿**；解释不了的差异要查原因。
 - 已经发出去的漂移单独开 issue，不要留给下一个人重新发现。
 

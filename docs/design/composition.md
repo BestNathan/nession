@@ -199,7 +199,7 @@ On large screens:
 
 ## 12. Current contracts and canonical screenshots
 
-Existing `design/contracts/*`, fixture screens, and visual-regression baselines encode the previously approved Session-first implementation. They remain useful evidence and migration protection, but some currently encode assumptions such as a persistent SurfaceSwitcher or Workspace tool bar.
+Existing `design/contracts/*`, fixture screens, and visual-regression baselines encode the previously approved Session-first implementation. They remain useful evidence and migration protection, but some still encode assumptions from that shell. The Workspace tool bar has since converged on contextual presentation; the SurfaceSwitcher was reviewed and its permanence kept deliberately (see [surface-switcher.md](design-system/patterns/surface-switcher.md)).
 
 After this product convergence, those assumptions must be reviewed against [`PRINCIPLE.md`](../../PRINCIPLE.md).
 
