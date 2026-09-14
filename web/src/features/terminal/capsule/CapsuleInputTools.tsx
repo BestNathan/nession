@@ -7,13 +7,20 @@ import {
   capsuleSecondaryIconButtonClass,
 } from '@/features/terminal/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
+import { Plus } from 'lucide-react';
+import { CapabilityDisclosureMenu } from '@/features/capabilities/components/CapabilityDisclosureMenu';
 import { CapsuleCapability } from '@/features/terminal/capsule/components/CapsuleCapability';
-import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
+import type {
+  CapsuleCapabilityDisclosure,
+  CapsuleCapabilityPresence,
+} from '@/features/terminal/capsule/types';
 
 interface CapsuleInputActionsProps {
   leading?: React.ReactNode;
   /** Capability that earned capsule presence, if any. At most one. */
   capability?: CapsuleCapabilityPresence;
+  /** Capabilities that earned no chip, reachable through the disclosure entry. */
+  capabilityDisclosure?: CapsuleCapabilityDisclosure;
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
   commandsOpen: boolean;
@@ -28,6 +35,36 @@ interface CapsuleInputActionsProps {
   onPaste: () => void;
   onCopy: () => void;
   compactSecondary?: boolean;
+}
+
+/**
+ * The capsule's discovery entry.
+ *
+ * A capability that is merely available earns no chip (prose:
+ * terminal-capsule.md), but it must stay reachable — otherwise the only way to
+ * a capability the session does not currently need would be to leave the
+ * terminal. One muted control, and the list opens as a popover, so the band
+ * stays a single line however many capabilities exist.
+ */
+function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDisclosure }) {
+  return (
+    <CapabilityDisclosureMenu
+      entries={disclosure.entries}
+      onSelect={disclosure.onSelect}
+      label="Capabilities"
+      testIdPrefix="capsule-capability-picker"
+      trigger={
+        <button
+          type="button"
+          aria-label="More capabilities"
+          data-testid="capsule-capability-more"
+          className={capsuleIconButtonClass}
+        >
+          <Plus className="size-[length:var(--icon-md)]" />
+        </button>
+      }
+    />
+  );
 }
 
 /** Optional leading slot (e.g. mobile mode toggle) — left side only. */
@@ -48,6 +85,7 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
  */
 export function CapsuleInputTrailingActions({
   capability,
+  capabilityDisclosure,
   historyOpen,
   onHistoryOpenChange,
   commandsOpen,
@@ -70,6 +108,9 @@ export function CapsuleInputTrailingActions({
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
       {capability ? <CapsuleCapability capability={capability} /> : null}
+      {capabilityDisclosure && capabilityDisclosure.entries.length > 0 ? (
+        <CapsuleCapabilityMore disclosure={capabilityDisclosure} />
+      ) : null}
       <CapsuleHistoryPopover
         open={historyOpen}
         onOpenChange={(open) => {

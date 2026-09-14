@@ -1,6 +1,9 @@
 import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
-import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
+import type {
+  CapsuleCapabilityDisclosure,
+  CapsuleCapabilityPresence,
+} from '@/features/terminal/capsule/types';
 import { CapsuleGhostInput } from '@/features/terminal/capsule/CapsuleGhostInput';
 import {
   CapsuleInputLeading,
@@ -15,6 +18,7 @@ import { useCapsuleContext } from '@/features/terminal/capsule/state/useCapsuleC
 interface InputComposerProps {
   leading?: React.ReactNode;
   capability?: CapsuleCapabilityPresence;
+  capabilityDisclosure?: CapsuleCapabilityDisclosure;
 }
 
 /**
@@ -22,7 +26,7 @@ interface InputComposerProps {
  * Web flat: inline field + tools. App / stacked: full-width field, toolbar below.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ leading, capability }, ref) {
+  function InputComposer({ leading, capability, capabilityDisclosure }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -94,6 +98,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
             >
               <CapsuleInputTrailingActions
                 capability={capability}
+                capabilityDisclosure={capabilityDisclosure}
                 historyOpen={historyOpen}
                 onHistoryOpenChange={setHistoryOpen}
                 commandsOpen={commandsOpen}
@@ -121,6 +126,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
           >
             <CapsuleInputTrailingActions
               capability={capability}
+              capabilityDisclosure={capabilityDisclosure}
               historyOpen={historyOpen}
               onHistoryOpenChange={setHistoryOpen}
               commandsOpen={commandsOpen}

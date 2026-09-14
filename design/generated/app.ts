@@ -19,6 +19,7 @@ export const panel = {
 } as const;
 export const touchTarget = {
   min: 44,
+  compact: 28,
 } as const;
 export const shell = {
   iconButtonSize: 44,

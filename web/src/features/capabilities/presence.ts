@@ -12,11 +12,6 @@ export type CapabilityPresenceLevel =
 
 export interface PresenceContext {
   surface: CapabilitySurface;
-  /**
-   * Nession-owned product policy may explicitly promote selected capabilities.
-   * Providers cannot set this themselves.
-   */
-  prominentCapabilityIds?: readonly CapabilityId[];
 }
 
 export interface CapabilityPresence {
@@ -37,16 +32,14 @@ export function resolveCapabilityPresence(
 
   if (snapshot.state === 'unavailable') {
     level = 'hidden';
-  } else if (context.prominentCapabilityIds?.includes(snapshot.id)) {
-    level = 'prominent';
   } else if (snapshot.state === 'available') {
     level = 'discoverable';
   } else if (snapshot.state === 'relevant') {
     level = 'contextual';
   } else {
-    level = context.surface === 'session' || context.surface === 'capsule'
-      ? 'prominent'
-      : 'contextual';
+    // The Session interaction layer is where an active capability belongs in
+    // the user's face; every other surface keeps it alongside its peers.
+    level = context.surface === 'capsule' ? 'prominent' : 'contextual';
   }
 
   return {

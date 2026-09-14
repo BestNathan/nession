@@ -192,6 +192,41 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     await expectSingleLine(more, WEB);
     await expectVisibleWithin(more, bar, WEB);
   });
+
+  test('web: capability presence follows what the session was seen running', async ({ page }) => {
+    // The route expresses observations (the pane's command and what it ran
+    // before); the resolved state is the capability layer's to decide. Asserting
+    // the *state* therefore proves the decision ran, not that a fixture echoed
+    // a label back.
+    await page.goto('/#/fixture/workspace?pane=claude.exe');
+    const bar = page.getByTestId('workspace-tool-bar');
+    const running = page.getByTestId('workspace-tool-claude-code');
+    await expect(running).toHaveAttribute('data-capability-state', 'active');
+    await expectSingleLine(running, WEB);
+    await expectVisibleWithin(running, bar, WEB);
+
+    await page.goto('/#/fixture/workspace?pane=zsh&observed=claude.exe');
+    const ran = page.getByTestId('workspace-tool-claude-code');
+    await expect(ran).toHaveAttribute('data-capability-state', 'relevant');
+    await expect(ran).toHaveAttribute('data-capability-presence', 'contextual');
+    await expectSingleLine(ran, WEB);
+    await expectVisibleWithin(ran, bar, WEB);
+
+    // Presence is earned, not granted: a session that never ran it keeps the
+    // capability out of direct chrome — and out of the bar entirely.
+    await page.goto('/#/fixture/workspace');
+    await expect(page.getByTestId('workspace-tool-claude-code')).toHaveCount(0);
+  });
+
+  test('web: earning presence does not grow direct chrome past its bound', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?pane=claude.exe');
+
+    const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
+    const direct = nav.locator('button[data-testid^="workspace-tool-"]');
+    expect(await direct.count()).toBeLessThanOrEqual(2);
+    // The ones that did not fit are disclosed, not dropped.
+    await expect(page.getByTestId('workspace-capability-more')).toBeVisible();
+  });
 });
 
 test.describe('app fixtures at 390×844', () => {

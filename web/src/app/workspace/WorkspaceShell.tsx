@@ -1,13 +1,9 @@
 import { Plus } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { resolveCapabilityPresences } from '@/features/capabilities';
+import {
+  CapabilityDisclosureMenu,
+  type CapabilityDisclosureMenuEntry,
+} from '@/features/capabilities/components/CapabilityDisclosureMenu';
 import { cn } from '@/lib/utils';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
@@ -34,50 +30,16 @@ function bindingFor(item: WorkspacePresentationItem): WorkspaceTool | undefined 
   return workspaceViewBindings.get(item.snapshot.id);
 }
 
-interface CapabilityDisclosureMenuProps {
-  items: WorkspacePresentationItem[];
-  onSelect: (id: WorkspaceToolId) => void;
-}
-
-/** Progressive disclosure for capabilities that earned no direct presence. */
-function CapabilityDisclosureMenu({ items, onSelect }: CapabilityDisclosureMenuProps) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <button
-            type="button"
-            aria-label="More workspace capabilities"
-            data-testid="workspace-capability-more"
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
-          >
-            <Plus className="size-3.5" />
-            More
-          </button>
-        }
-      />
-      <DropdownMenuContent side="top" align="center" className="w-52">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Workspace capabilities</DropdownMenuLabel>
-          {items.map((item) => {
-            const binding = bindingFor(item)!;
-            const Icon = binding.icon;
-            return (
-              <DropdownMenuItem
-                key={item.snapshot.id}
-                data-testid={`workspace-capability-picker-${item.snapshot.id}`}
-                data-capability-state={item.snapshot.state}
-                onClick={() => onSelect(item.snapshot.id)}
-              >
-                <Icon />
-                <span className="min-w-0 flex-1 truncate">{item.snapshot.title}</span>
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+function disclosureEntries(items: WorkspacePresentationItem[]): CapabilityDisclosureMenuEntry[] {
+  return items.map((item) => {
+    const binding = bindingFor(item)!;
+    return {
+      id: item.snapshot.id,
+      title: item.snapshot.title,
+      icon: binding.icon,
+      state: item.snapshot.state,
+    };
+  });
 }
 
 /**
@@ -170,8 +132,21 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
 
             {discoverableItems.length > 0 ? (
               <CapabilityDisclosureMenu
-                items={discoverableItems}
+                entries={disclosureEntries(discoverableItems)}
                 onSelect={ctx.onToolChange}
+                label="Workspace capabilities"
+                testIdPrefix="workspace-capability-picker"
+                trigger={
+                  <button
+                    type="button"
+                    aria-label="More workspace capabilities"
+                    data-testid="workspace-capability-more"
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
+                  >
+                    <Plus className="size-3.5" />
+                    More
+                  </button>
+                }
               />
             ) : null}
           </nav>
