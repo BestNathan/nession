@@ -31,33 +31,25 @@ describe('resolveCapabilityPresence', () => {
     expect(levels).toEqual(['hidden', 'discoverable', 'contextual', 'contextual']);
   });
 
-  it('promotes an active capability in Session and Capsule without changing its state', () => {
+  it('promotes an active capability only in the Session interaction layer', () => {
     const active = snapshot('active', 'claude-code');
 
-    expect(resolveCapabilityPresence(active, { surface: 'session' }).level).toBe('prominent');
     expect(resolveCapabilityPresence(active, { surface: 'capsule' }).level).toBe('prominent');
+    expect(resolveCapabilityPresence(active, { surface: 'workspace' }).level).toBe('contextual');
     expect(active.state).toBe('active');
   });
 
-  it('allows Nession product policy to promote a non-unavailable capability', () => {
+  it('keeps an available capability discoverable rather than promoting it', () => {
     const available = snapshot('available', 'git');
 
-    expect(
-      resolveCapabilityPresence(available, {
-        surface: 'workspace',
-        prominentCapabilityIds: ['git'],
-      }).level,
-    ).toBe('prominent');
+    expect(resolveCapabilityPresence(available, { surface: 'workspace' }).level).toBe('discoverable');
+    expect(resolveCapabilityPresence(available, { surface: 'capsule' }).level).toBe('discoverable');
   });
 
   it('never promotes an unavailable capability into visible chrome', () => {
     const unavailable = snapshot('unavailable', 'docker');
 
-    expect(
-      resolveCapabilityPresence(unavailable, {
-        surface: 'session',
-        prominentCapabilityIds: ['docker'],
-      }).level,
-    ).toBe('hidden');
+    expect(resolveCapabilityPresence(unavailable, { surface: 'workspace' }).level).toBe('hidden');
+    expect(resolveCapabilityPresence(unavailable, { surface: 'capsule' }).level).toBe('hidden');
   });
 });

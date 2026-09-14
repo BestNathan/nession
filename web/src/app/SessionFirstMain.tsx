@@ -61,7 +61,7 @@ export function SessionFirstMain({
   experience = 'web',
 }: SessionFirstMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
-  const { facts, presence: capsuleCapability } = useCapsuleCapability({
+  const { facts, capabilities: capsuleCapabilities } = useCapsuleCapability({
     session: selectedSession,
     agent: selectedAgent,
     agents,
@@ -108,7 +108,7 @@ export function SessionFirstMain({
                     hidden={surface !== 'terminal' || !selectedSession}
                     onDisconnect={() => undefined}
                     onError={() => undefined}
-                    capsuleCapability={capsuleCapability}
+                    capsuleCapabilities={capsuleCapabilities}
                   />
                 )}
               </TerminalWell>

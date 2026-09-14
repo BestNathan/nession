@@ -94,6 +94,36 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
     test.use({ viewport: { width: row.width, height: row.height } });
 
+    test('workspace direct chrome stays bounded and disclosed inside the App bar', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(page.getByTestId('files-app-layout')).toBeVisible();
+
+      const bar = page.getByTestId('workspace-tool-bar');
+      await expect(bar).toBeVisible();
+
+      const nav = page.getByRole('navigation', { name: 'Workspace capabilities' });
+      const direct = nav.locator('button[data-testid^="workspace-tool-"]');
+      expect(await direct.count()).toBeGreaterThan(0);
+      expect(await direct.count()).toBeLessThanOrEqual(2);
+
+      // The pattern declares its own App touch floor (touchTarget.compact, #730):
+      // this band floats over the terminal, so it is held to 28px rather than the
+      // 44px chrome default — and no lower than that.
+      for (let i = 0; i < (await direct.count()); i += 1) {
+        await expect(direct.nth(i)).toBeVisible();
+        await expectTouchTarget(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+        await expectSingleLine(direct.nth(i), optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+        await expectVisibleWithin(direct.nth(i), bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      }
+
+      const more = page.getByTestId('workspace-capability-more');
+      await expect(more).toBeVisible();
+      await expectTouchTarget(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectSingleLine(more, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+      await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'app', row.id));
+    });
+
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {
       await page.goto('/#/fixture/app');
       await page.getByTestId('app-header-sessions').first().click();

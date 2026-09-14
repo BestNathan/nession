@@ -12,6 +12,7 @@ import { useCapsuleState } from '@/features/terminal/capsule/state/useCapsuleSta
 import {
   experienceFromVariant,
   layoutFromLineCount,
+  type CapsuleCapabilityDisclosure,
   type CapsuleCapabilityPresence,
   type CapsuleExperience,
   type CapsuleMode,
@@ -30,6 +31,8 @@ export interface TerminalCapsuleProps {
   onModeChange?: (mode: CapsuleMode) => void;
   /** The capability that earned capsule presence, if any. At most one. */
   capability?: CapsuleCapabilityPresence;
+  /** Capabilities that earned no chip, reachable through the disclosure entry. */
+  capabilityDisclosure?: CapsuleCapabilityDisclosure;
 }
 
 export function TerminalCapsule({
@@ -40,6 +43,7 @@ export function TerminalCapsule({
   mode = 'input',
   onModeChange,
   capability,
+  capabilityDisclosure,
 }: TerminalCapsuleProps) {
   const resolvedExperience =
     experience ?? (variant ? experienceFromVariant(variant) : 'web');
@@ -139,6 +143,7 @@ export function TerminalCapsule({
               ) : null
             }
             capability={capability}
+            capabilityDisclosure={capabilityDisclosure}
           />
         )}
       </CapsuleShell>

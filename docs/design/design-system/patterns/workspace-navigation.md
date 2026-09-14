@@ -114,6 +114,22 @@ App should prefer native spatial and push/pop interaction:
 - system/back navigation returns through capability detail before leaving Workspace;
 - nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
+### Touch floor (recorded decision, #730)
+
+The App band is a compact pill floating over the terminal, and it declares its own
+touch floor — `experience.app.touchTarget.compact` (28px) — instead of the 44px
+that `category.chrome` applies to chrome bands. The reasoning: chrome yields
+before the work surface, the pill already floats *over* the terminal rather than
+taking a row from it, and these entries are secondary controls reached
+deliberately rather than in a hurry.
+
+This is a floor, not a waiver: the contract states the size the pill is allowed to
+be, the executable assertion enforces it at every App viewport, and shrinking it
+further fails CI. What it does not claim is comfort — 28px is below the platform
+guideline, and that cost is accepted in exchange for the terminal keeping its
+space. If the pill ever gains a touch-first role, the token moves back to `min`
+and the implementation has to grow with it.
+
 ## Files and other capability-specific layouts
 
 Files may use master/detail on Web and push navigation on App. That composition belongs to Files.
@@ -158,5 +174,6 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
+- [ ] The App band meets its declared compact touch floor (`experience.app.touchTarget.compact`), enforced by the viewport matrix.
 - [ ] Files-specific layout remains local to Files.
 - [ ] The visible capability set can grow without forcing the shell to grow proportionally.

@@ -1,7 +1,8 @@
-import type {
-  CapabilityId,
-  CapabilityPresence,
-  CapabilitySnapshot,
+import {
+  resolveCapabilityDisclosure,
+  type CapabilityId,
+  type CapabilityPresence,
+  type CapabilitySnapshot,
 } from '@/features/capabilities';
 
 export const WORKSPACE_DIRECT_CAPABILITY_LIMIT = 2;
@@ -29,24 +30,13 @@ export interface WorkspacePresentationInput {
   directLimit?: number;
 }
 
-function presenceRank(item: WorkspacePresentationItem): number {
-  switch (item.presence.level) {
-    case 'prominent':
-      return 2;
-    case 'contextual':
-      return 1;
-    default:
-      return 0;
-  }
-}
-
 /**
  * Nession-owned Workspace presentation policy.
  *
- * Registration order remains deterministic input, but it is not equivalent to
- * UI placement. Direct chrome is bounded and only the opened capability plus
- * contextual/prominent candidates can enter it. Everything else that is
- * visible is progressively disclosed through discovery.
+ * The rule that decides slot / disclosure / absence lives in the capability
+ * layer (`resolveCapabilityDisclosure`); what belongs to the Workspace is how
+ * many direct slots it has and that the opened capability keeps one of them.
+ * Registration order stays deterministic input, but it is not UI placement.
  */
 export function buildWorkspacePresentationModel({
   snapshots,
@@ -54,45 +44,29 @@ export function buildWorkspacePresentationModel({
   openedCapabilityId,
   directLimit = WORKSPACE_DIRECT_CAPABILITY_LIMIT,
 }: WorkspacePresentationInput): WorkspacePresentationModel {
-  const presenceById = new Map(
-    presences.map((presence) => [presence.capabilityId, presence]),
-  );
-
   const items = snapshots.flatMap((snapshot) => {
-    const presence = presenceById.get(snapshot.id);
+    const presence = presences.find((candidate) => candidate.capabilityId === snapshot.id);
     return presence ? [{ snapshot, presence }] : [];
   });
+  const itemById = new Map(items.map((item) => [item.snapshot.id, item]));
 
-  const opened = openedCapabilityId
-    ? items.find((item) => item.snapshot.id === openedCapabilityId)
-    : undefined;
-  const visible = items.filter((item) => item.presence.level !== 'hidden');
-  const limit = Math.max(0, directLimit);
+  const disclosure = resolveCapabilityDisclosure(presences, {
+    directLimit,
+    pinned: openedCapabilityId ? [openedCapabilityId] : [],
+  });
 
-  const primary = opened && opened.presence.level !== 'hidden' && limit > 0
-    ? [opened]
-    : [];
-
-  const contextualCandidates = visible
-    .filter(
-      (item) =>
-        item.snapshot.id !== openedCapabilityId &&
-        (item.presence.level === 'contextual' || item.presence.level === 'prominent'),
-    )
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => presenceRank(b.item) - presenceRank(a.item) || a.index - b.index)
-    .map(({ item }) => item);
-
-  const contextual = contextualCandidates.slice(0, Math.max(0, limit - primary.length));
-  const directIds = new Set(
-    [...primary, ...contextual].map((item) => item.snapshot.id),
-  );
-  const discoverable = visible.filter((item) => !directIds.has(item.snapshot.id));
+  const direct = disclosure.direct.flatMap((presence) => {
+    const item = itemById.get(presence.capabilityId);
+    return item ? [item] : [];
+  });
 
   return {
-    opened,
-    primary,
-    contextual,
-    discoverable,
+    opened: openedCapabilityId ? itemById.get(openedCapabilityId) : undefined,
+    primary: direct.filter((item) => item.snapshot.id === openedCapabilityId),
+    contextual: direct.filter((item) => item.snapshot.id !== openedCapabilityId),
+    discoverable: disclosure.discoverable.flatMap((presence) => {
+      const item = itemById.get(presence.capabilityId);
+      return item ? [item] : [];
+    }),
   };
 }

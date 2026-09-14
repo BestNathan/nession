@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/features/terminal/capsule/TerminalCapsule';
 
@@ -65,5 +65,67 @@ describe('capsule capability presence', () => {
     );
 
     expect(screen.getAllByTestId('capsule-capability')).toHaveLength(1);
+  });
+});
+
+describe('capsule capability disclosure', () => {
+  it('renders no discovery entry when nothing earned disclosure', () => {
+    render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+
+    expect(screen.queryByTestId('capsule-capability-more')).not.toBeInTheDocument();
+  });
+
+  it('offers capabilities that earned no chip, and activates the one chosen', async () => {
+    const onSelect = vi.fn();
+    render(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capabilityDisclosure={{
+          entries: [
+            { id: 'files', title: 'Files', state: 'available' },
+            { id: 'env', title: 'Environment Files', state: 'available' },
+          ],
+          onSelect,
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-more'));
+
+    const entry = await screen.findByTestId('capsule-capability-picker-env');
+    expect(entry).toHaveAttribute('data-capability-state', 'available');
+    // Base UI holds the popup inert until its open transition settles.
+    await waitFor(() => {
+      expect(entry).not.toHaveStyle({ pointerEvents: 'none' });
+    });
+
+    await userEvent.click(entry);
+    expect(onSelect).toHaveBeenCalledWith('env');
+  });
+
+  it('keeps the chip and the discovery entry independent', () => {
+    render(
+      <TerminalCapsule
+        experience="web"
+        sendText={vi.fn()}
+        capability={{
+          id: 'claude-code',
+          label: 'Claude Code',
+          state: 'active',
+          onActivate: vi.fn(),
+        }}
+        capabilityDisclosure={{
+          entries: [{ id: 'files', title: 'Files', state: 'available' }],
+          onSelect: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('capsule-capability')).toHaveAttribute(
+      'data-capability-state',
+      'active',
+    );
+    expect(screen.getByTestId('capsule-capability-more')).toBeInTheDocument();
   });
 });
