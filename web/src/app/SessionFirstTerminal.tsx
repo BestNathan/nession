@@ -1,15 +1,15 @@
 import { cn } from '@/lib/utils';
 import { SessionFirstTerminalPane } from '@/features/terminal/SessionFirstTerminalPane';
 import { TerminalSurface } from '@/features/terminal/TerminalSurface';
-import type { CapsuleCapabilityPresence } from '@/features/terminal/capsule/types';
+import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import { useTerminalOrchestration } from '@/features/terminal/useTerminalOrchestration';
 
 export interface SessionFirstTerminalProps {
   hidden: boolean;
   onDisconnect: () => void;
   onError: (error: Error) => void;
-  /** The capability that earned capsule presence, if any. At most one. */
-  capsuleCapability?: CapsuleCapabilityPresence;
+  /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
+  capsuleCapabilities?: CapsuleCapabilityContribution;
 }
 
 /**
@@ -20,7 +20,7 @@ export function SessionFirstTerminal({
   hidden,
   onDisconnect,
   onError,
-  capsuleCapability,
+  capsuleCapabilities,
 }: SessionFirstTerminalProps) {
   const {
     sessionId,
@@ -46,7 +46,7 @@ export function SessionFirstTerminal({
           inputDisabled={inputDisabled}
           controller={controller}
           isSwitching={isSwitching}
-          capsuleCapability={capsuleCapability}
+          capsuleCapabilities={capsuleCapabilities}
         >
           <SessionFirstTerminalPane
             sessionId={sessionId}

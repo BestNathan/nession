@@ -1,3 +1,5 @@
+import type { CapabilityDisclosureEntry, CapabilityId } from '@/features/capabilities';
+
 export type CapsuleMode = 'input' | 'commands';
 
 /** @deprecated Use CapsuleExperience — desktop≡web, mobile≡app */
@@ -29,6 +31,17 @@ export function experienceFromVariant(variant: CapsuleVariant): CapsuleExperienc
  * resting presence and `unavailable` earns none at all, so the capsule cannot
  * be handed a capability that has not earned its place.
  */
+/**
+ * Capabilities the capsule did not give a chip to, reachable on demand.
+ *
+ * The capsule reports presence; opening a capability stays the app's business,
+ * so the app supplies both the entries and what selecting one does.
+ */
+export interface CapsuleCapabilityDisclosure {
+  entries: readonly CapabilityDisclosureEntry[];
+  onSelect: (id: CapabilityId) => void;
+}
+
 export interface CapsuleCapabilityPresence {
   id: string;
   label: string;

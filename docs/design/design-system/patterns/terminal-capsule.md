@@ -46,7 +46,7 @@ The exact ordering is experience-specific. The semantic regions are:
 |------|------|
 | Capsule shell | Quiet floating surface anchored to the current Session |
 | Primary input | Conversational / intent input; the main interaction |
-| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions |
+| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions; lists the capabilities that earned no presence, so one control covers a growing set |
 | Capability presence | Optional identity/state for a capability that has earned relevance or is active |
 | Primary action | Send / execute current intent |
 | Secondary actions | Contextual commands, paste/copy, physical keys, history, and extension-provided actions |
@@ -64,7 +64,7 @@ Capsule behavior:
 | Capability state | Capsule behavior |
 |------------------|------------------|
 | `unavailable` | No presence |
-| `available` | Normally no resting presence; may be discoverable after explicit `+` expansion when useful |
+| `available` | No resting presence; reachable through the capsule's `+` discovery entry, which lists them without taking a slot |
 | `relevant` | May appear as a contextual action or lightweight hint |
 | `active` | May gain lightweight identity/state directly on or next to the capsule |
 
