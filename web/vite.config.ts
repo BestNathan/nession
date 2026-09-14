@@ -99,14 +99,10 @@ export default defineConfig(({ mode }) => {
         'src/App.tsx',
         // Deep link restoration - requires react-router integration testing
         'src/app/useDeepLinkRestore.ts',
-        // ── Browser-only terminal internals (xterm lifecycle, mouse) ──
-        'src/core/terminal-runtime/MouseIntentResolver.ts',
         // ── WebSocket / interval integration (browser-only, covered by E2E) ──
         'src/app/useProbePolling.ts',
         'src/features/commands/hooks/useQuickCommands.ts',
         'src/app/useVisibilityReconnect.ts',
-        // Browser-only PNG export (DOM manipulation, offscreen xterm)
-        'src/lib/previewPng.ts',
         'src/features/env/components/EnvUploadDialog.tsx',
         'src/features/env/components/EnvInlineEditor.tsx',
         'src/features/env/hooks/useEnvManager.ts',

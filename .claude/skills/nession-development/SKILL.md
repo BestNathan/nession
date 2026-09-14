@@ -172,7 +172,7 @@ git branch -d feat/<slug>
 Three terminals, from repo root:
 
 ```bash
-# Terminal 1 — server (WebSocket :19090, HTTP :10080)
+# Terminal 1 — server (WebSocket :19090; no HTTP locally)
 cargo run -p nession-server
 
 # Terminal 2 — agent (needs tmux on the host)
@@ -207,13 +207,13 @@ cd web && npm run lint         # ESLint
 5. **Hand-rolled tab strips → use shadcn Tabs** (duplicated in 5 sites)
 6. **Raw resize listeners → use shadcn Resizable** (currently in SidePanel)
 
-**Installed (18 primitives):** AlertDialog, Badge, Button, Card, Checkbox, Collapsible, ContextMenu, Dialog, DropdownMenu, Input, Label, ScrollArea, Select, Separator, Sheet, Skeleton, Sonner, Textarea
+**Installed (25 primitives):** AlertDialog, Badge, Button, Card, Checkbox, Collapsible, ContextMenu, Dialog, DropdownMenu, Input, Label, Popover, Progress, Resizable, ScrollArea, Select, Separator, Sheet, Skeleton, Sonner, Tabs, Textarea, Toggle, ToggleGroup, Tooltip — plus 2 custom wrappers (ConnectionStatusBadge, RefreshButton). Built on `@base-ui/react`; `alert-dialog` is the only Radix one. Four (Resizable, Sheet, Sonner, Toggle) currently have no importer.
 
-**High-priority to install:** Tabs, Resizable, Tooltip, Command
+**Not installed, most likely to be wanted:** Command, Table, Breadcrumb, Avatar, Accordion, HoverCard
 
 ## 3. Tests
 
-Rust unit tests go in `#[cfg(test)]` modules inside `src/` or standalone files under `crates/*/tests/`. All async, using `#[tokio::test]`. Web uses `tsc --noEmit` + `eslint` as quality gates (no test runner).
+Rust unit tests go in `#[cfg(test)]` modules inside `src/` or standalone files under `crates/*/tests/`. All async, using `#[tokio::test]`. On the web side there **is** a test runner — Vitest, split into `unit` and `integration` projects (`just web-test`, or `npm test` in `web/`) — alongside `tsc --noEmit` and `eslint`. Run it through the npm script or `just`, not a bare `vitest run` at the repo root.
 
 ```bash
 cargo test                  # All tests (unit + integration)
@@ -232,7 +232,7 @@ Before merging any PR, these MUST pass:
 | Clippy (no allow) | `cargo clippy --workspace -- -D warnings` | 0 warnings, **zero** `#[allow]` |
 | Formatting | `cargo fmt --all -- --check` | clean |
 | Web unit tests | `cd web && npm test` | 100% pass |
-| Web coverage | `just web-coverage` | lines/functions/statements 80%, branches 65% |
+| Web coverage | `just web-coverage` | lines 80 / functions 72 / statements 78 / branches 65 |
 | TypeScript | `cd web && npx tsc --noEmit` | 0 errors |
 | ESLint | `cd web && npm run lint` | 0 warnings |
 | Build | `cd web && npm run build` | success |
@@ -244,9 +244,9 @@ Rust coverage thresholds are per-crate and live in `scripts/check-coverage.sh` �
 | `nession-common` / `nession-server` | 80% line |
 | `nession-agent` | 80% line (79% on macOS — control-mode tests are skipped there) |
 | `nession-cli` | 40% line (untestable command paths excluded) |
-| `nession-claude-code` | not registered → **not checked** |
+| `nession-claude-code` | 55% line — a **floor, not a target**; `check-coverage.sh` carries a "raise to 80%" debt note with no issue behind it |
 
-Web thresholds live in `web/vite.config.ts` and are not a flat number: lines / functions / statements 80%, **branches 65%**. Note that CI's `web-check` runs `just web-lint` + `just web-test` but **not** `just web-coverage`, so web coverage is gated only by the local pre-push hook.
+Web thresholds live in `web/vite.config.ts` and are not a flat number: lines 80 / functions 72 / **statements 78** / branches 65. Note that CI's `web-check` runs `just web-lint` + `just web-test` but **not** `just web-coverage`, so web coverage is gated only by the local pre-push hook.
 
 The tool is `cargo-llvm-cov`, not tarpaulin:
 
@@ -490,7 +490,7 @@ gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge
 - `cargo fmt --all -- --check`: OK
 - `cargo clippy -- -D warnings`: 0 errors
 - `npm test`: <N> passed
-- `just web-coverage`: <X>% stmts (thresholds: 80/80/65/80)
+- `just web-coverage`: <X>% stmts (thresholds: lines 80 / functions 72 / statements 78 / branches 65)
 - `npx tsc --noEmit`: 0 errors
 - `npm run lint`: 0 warnings
 - `npm run build`: success
@@ -533,7 +533,7 @@ This is NOT optional. This is NOT just for screenshots. This is functional verif
 
 ```bash
 # Use isolated HOME so env/DB files don't pollute ~/.nession
-# Terminal 1 — server (WebSocket :19090, HTTP :10080)
+# Terminal 1 — server (WebSocket :19090; no HTTP locally)
 HOME=/tmp/nession-demo cargo run -p nession-server
 
 # Terminal 2 — agent (needs tmux)
@@ -695,7 +695,7 @@ List the files each issue will touch, then group:
 
 | Overlap | Arrangement |
 |---|---|
-| Disjoint (`web/src/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
+| Disjoint (`web/src/features/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
 | Same directory, different files | Sequential in one lane, rebase each on the previous |
 | Same file, same function | One branch |
 | One issue governs the other's verification (coverage excludes vs the refactor they measure) | Sequential, the governing issue **last** |

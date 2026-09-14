@@ -18,7 +18,7 @@ export const forcedRelayAtom = atom(false);
 export const rendererAtom = atom<'webgl' | 'canvas'>('webgl');
 export const envRefsAtom = atom<EnvFileRef[]>([]);
 
-/** Currently open attach dialog session (shared between Dashboard & SessionDropdown). */
+/** Currently open attach dialog session (the session-first shell's attach flow). */
 export const attachDialogSessionAtom = atom<Session | null>(null);
 
 /** Why the attach dialog is open: 'attach' (confirm → attach) or 'configure'

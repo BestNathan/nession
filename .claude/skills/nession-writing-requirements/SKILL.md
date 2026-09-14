@@ -180,7 +180,7 @@ gh issue comment [N] --repo BestNathan/nession \
 | `ui` / `ux` | renders wrong / behaves or communicates wrong |
 | `backend` | roll-up for any Rust-side work |
 | `server` `agent` `cli` `protocol` | `crates/nession-{server,agent,cli,common}/**` |
-| `infra` | Docker, `k8s/**`, `deploy/**`, shipped `*.toml` configs |
+| `infra` | Docker, `deploy/**`, shipped `*.toml` configs, deployment desired state (the `gitops` branch — no k8s manifests live on `main`) |
 | `ci` | workflows, `scripts/**`, `justfile`, git hooks |
 | `test` | coverage and test infrastructure |
 | `documentation` | a written convention must change |
@@ -196,7 +196,7 @@ Bug: terminal toolbar quick command does nothing    → bug, terminal, web, ui, 
 Bug: server drops session events after agent reconnect → bug, backend, agent, server, protocol, web, ux
 Bug: nession-cli PTY size not synced after resize   → bug, terminal, cli, backend, protocol, ui, ux
 Requirement: group session list by agent, collapsible → requirement, web, ui, ux
-Requirement: k8s overlay image tags written by CI   → requirement, ci, infra, documentation
+Requirement: gitops deploy commits written by CI    → requirement, ci, infra, documentation
 ```
 
 Examples show shape only. **The rules win over the examples** — if your analysis names an area an example omits, apply it.
@@ -242,7 +242,7 @@ gh issue edit [N] --repo BestNathan/nession --remove-label server --remove-label
 
 | Situation | Action |
 |---|---|
-| No `gh` | Save to `docs/superpowers/{requirement,bug}/YYYY-MM-DD-<topic>.md` and tell the user |
+| No `gh` | Save to `docs/superpowers/requirement/YYYY-MM-DD-<topic>.md` (that directory exists; create `docs/superpowers/bug/` alongside it if you need one) and tell the user |
 | Already mid-debug | Don't restart the investigation — take the Phase 1–3 findings to B2 |
 | User wants the fix now | File first, then Phase 4 on a `fix/` branch. Never fix silently and retro-file |
 | Conversation record > 65536 chars | Summarize early rounds, keep recent ones verbatim |

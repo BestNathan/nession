@@ -147,14 +147,16 @@ Install via Claude Code:
 /install-mcp
 ```
 
-Or manually add to `~/.claude/mcp.json` or `.claude/mcp.json`:
+Or write the project-scoped config at the **repository root**, as `.mcp.json`.
+Note the shape: Claude Code's project file is a bare map of server name →
+definition, with **no `mcpServers` wrapper**. This repo's `.mcp.json` is already
+committed and reads:
+
 ```json
 {
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest"]
-    }
+  "playwright": {
+    "command": "npx",
+    "args": ["@playwright/mcp@latest", "--output-dir", ".playwright-mcp"]
   }
 }
 ```
@@ -197,8 +199,8 @@ claude plugins install https://github.com/BestNathan/superpowersexy
 
 # 6.5. Playwright MCP (required for WebUI development)
 # In Claude Code, run: /install-mcp
-# Or manually add to ~/.claude/mcp.json:
-# { "mcpServers": { "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] } } }
+# Or use the committed project config at the repo root: .mcp.json
+# (bare map, no "mcpServers" wrapper — see the section below)
 
 # 7. Verify
 rustc --version && cargo --version
@@ -248,18 +250,12 @@ cd web && npm install --save-dev typescript-eslint
 This is already in `web/package.json` — only needed if working from a stale checkout or partial install.
 
 ### `mcp__playwright__browser_navigate` tool not available
-Playwright MCP server not configured. This is required for WebUI functional verification. Install via `/install-mcp` in Claude Code, or manually add the Playwright server to `~/.claude/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest"]
-    }
-  }
-}
-```
-Restart Claude Code after adding. Verify with: `ls ~/.claude/mcp.json` or `.claude/mcp.json`.
+Playwright MCP server not configured. This is required for WebUI functional
+verification. Install via `/install-mcp` in Claude Code, or use the committed
+project config — `.mcp.json` at the repository root (bare map of server name →
+definition, no `mcpServers` wrapper).
+
+Restart Claude Code after changing it. Verify with: `ls .mcp.json`.
 
 ### Vite dev server won't start
 Check port 13000 not in use: `lsof -i :13000`. Check `web/vite.config.ts` for correct proxy target.

@@ -4,7 +4,7 @@
 //! system-level information useful for monitoring daemon processes.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Get the system boot time as a Unix timestamp.
@@ -112,14 +112,6 @@ pub fn get_process_uptime(pid: u32) -> Option<u64> {
 pub fn get_process_uptime(_pid: u32) -> Option<u64> {
     // On non-Linux systems, we can't easily determine process uptime
     None
-}
-
-/// Get the current timestamp as a DateTime<Local>.
-///
-/// Returns the current local time.
-#[allow(dead_code)]
-pub fn current_timestamp() -> DateTime<Local> {
-    Local::now()
 }
 
 /// Format a timestamp as a human-readable relative time string.
