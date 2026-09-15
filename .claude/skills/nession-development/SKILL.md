@@ -483,6 +483,7 @@ gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge
 ```markdown
 ## 变更内容
 - [简述改了什么]
+- **Product alignment**: 写 "无偏离",或说明本 PR 偏离了哪个 canonical 决定(`VISION.md` / `PRINCIPLE.md` / `docs/design/*` / 上游 issue 的 Resolved Decisions)以及为什么
 
 ## 测试报告
 - `cargo test`: <N> passed, 0 failed
@@ -497,6 +498,8 @@ gh pr merge <PR-NUMBER> --merge  # No --auto: chore/** has no checks, auto-merge
 ```
 
 Note the issue this addresses somewhere in 变更内容 so the release PR audit can pick it up — but keep the `Closes #N` keyword out of feat→staging bodies. It only functions in the release PR, whose body carries one `Closes #N` line per issue being shipped.
+
+**Why the Product alignment line is in the body and not just in the upstream issue.** Writing it in the issue is not enough: the deviation gets made later, in the PR, by whoever is implementing — and that person may never re-read the requirement's Resolved Decisions. That is exactly what happened when a workspace refactor overturned #702's decision E: the requirement said deviations must be explained, the issue had a box for it, and the PR still shipped without a word. The box that gets filled in is the one in front of the person making the change.
 
 Quality gate triggers on PR to staging. After merge to staging, CI builds
 Docker images and `deploy-staging-gitops` writes `deploy(staging): <sha>` to

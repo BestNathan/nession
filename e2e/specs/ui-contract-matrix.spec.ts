@@ -14,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import {
   expectNoUnexpectedOverflow,
   expectSingleLine,
+  expectTokenHeight,
   expectTouchTarget,
   expectVisibleWithin,
 } from '../helpers/ui-assert/assertions';
@@ -25,6 +26,7 @@ const { viewports } = loadContracts();
 
 const PATTERN_SESSION_ITEM = 'pattern.session-item';
 const PATTERN_WORKSPACE_NAV = 'pattern.workspace-navigation';
+const PATTERN_TERMINAL_CAPSULE = 'pattern.terminal-capsule';
 
 function optsFor(pattern: string, experience: Experience, viewport: string) {
   return { pattern, experience, viewport } as const;
@@ -71,6 +73,11 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expectVisibleWithin(more, bar, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
     });
 
+    test('terminal capsule controls hold the control token height', async ({ page }) => {
+      await page.goto('/#/fixture');
+      await assertCapsuleControls(page, 'web', row.id);
+    });
+
     test('a wrapping/overflow regression at this viewport fails automatically', async ({ page }) => {
       // Synthetic clip violation scoped to this matrix row: a fixed-width
       // element must not overflow the viewport-sized clip container.
@@ -86,6 +93,37 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expectNoUnexpectedOverflow(page.locator('#clip'), optsFor(PATTERN_SESSION_ITEM, 'web', row.id));
     });
   });
+}
+
+// ── Terminal capsule — the Session's primary input surface ─────────────────
+
+/**
+ * `pattern.terminal-capsule` was the one pattern with no matrix row. It appeared
+ * exactly once under `e2e/`, in a self-test of the assertion helper that runs
+ * against synthetic DOM, so its contract — including the `overflow` strategy —
+ * had never been checked against a real screen. Adding the capsule to the
+ * fixture is what made these assertions possible.
+ */
+async function assertCapsuleControls(
+  page: import('@playwright/test').Page,
+  experience: Experience,
+  viewportId: string,
+): Promise<void> {
+  await expect(page.getByTestId('terminal-capsule')).toBeVisible();
+
+  const band = page.getByTestId('capsule-input-actions');
+  await expect(band).toBeVisible();
+  await expectTokenHeight(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+  await expectSingleLine(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+  await expectNoUnexpectedOverflow(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+
+  const controls = band.locator('button');
+  expect(await controls.count()).toBeGreaterThan(0);
+  for (let i = 0; i < (await controls.count()); i += 1) {
+    const control = controls.nth(i);
+    await expect(control).toBeVisible();
+    await expectTokenHeight(control, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+  }
 }
 
 // ── App experience (Mobile Web proxy, interaction/app.md) ──────────────────
@@ -132,6 +170,19 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       for (let i = 0; i < 6; i += 1) {
         await expectTouchTarget(rows.nth(i), optsFor(PATTERN_SESSION_ITEM, 'app', row.id));
         await expectNoUnexpectedOverflow(rows.nth(i), optsFor(PATTERN_SESSION_ITEM, 'app', row.id));
+      }
+    });
+
+    test('terminal capsule controls meet the App touch target', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      await assertCapsuleControls(page, 'app', row.id);
+
+      // Unlike the workspace bar — which floats over the terminal and settles for
+      // touchTarget.compact, 28px (#730) — the capsule is the App's primary input
+      // surface and is held to the 44px chrome floor.
+      const controls = page.getByTestId('capsule-input-actions').locator('button');
+      for (let i = 0; i < (await controls.count()); i += 1) {
+        await expectTouchTarget(controls.nth(i), optsFor(PATTERN_TERMINAL_CAPSULE, 'app', row.id));
       }
     });
   });
