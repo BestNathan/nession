@@ -55,15 +55,29 @@ impl CommandBroker {
     }
 
     /// Register an agent's control connection sender.
+    ///
+    /// Re-registering an agent that is already known is a **transport update,
+    /// not a state reset** — it only swaps the sender. The websocket loop calls
+    /// this on every inbound agent message (see `server/websocket.rs`), so
+    /// discarding `pending_commands` here would cancel every in-flight command
+    /// and resolve its waiter with `RecvError`, which callers report as
+    /// "Agent disconnected" for work the agent may already have completed
+    /// (#743). In-flight commands belong to the agent, not to the connection
+    /// carrying them; only [`Self::unregister_agent`] ends them.
     pub async fn register_agent(&self, agent_id: &str, sender: WsMessageSender) {
         let mut agents = self.agents.write().await;
-        agents.insert(
-            agent_id.to_string(),
-            AgentControl {
-                sender,
-                pending_commands: HashMap::new(),
-            },
-        );
+        match agents.get_mut(agent_id) {
+            Some(existing) => existing.sender = sender,
+            None => {
+                agents.insert(
+                    agent_id.to_string(),
+                    AgentControl {
+                        sender,
+                        pending_commands: HashMap::new(),
+                    },
+                );
+            }
+        }
         debug!("CommandBroker: registered agent {}", agent_id);
     }
 
@@ -179,5 +193,65 @@ impl CommandBroker {
             );
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Regression #743: the agent WebSocket loop calls `register_agent` on
+    /// **every** inbound agent message (see `server/websocket.rs`), so a
+    /// re-registration can land while commands are in flight. It is a transport
+    /// update, not a state reset: taking the pending map with it resolves every
+    /// waiting handler with `RecvError`, and the session-create handler renders
+    /// that as "Agent disconnected" — for a command the agent may already have
+    /// executed.
+    #[tokio::test]
+    async fn re_registering_an_agent_keeps_its_pending_commands() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker.register_agent("a1", sender).await;
+
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+
+        // An unrelated message from the same agent re-registers its sender.
+        let (sender_again, _keepalive_again) = WsMessageSender::new();
+        broker.register_agent("a1", sender_again).await;
+
+        assert!(
+            broker
+                .resolve_command("a1", "req-1", json!({ "success": true }))
+                .await,
+            "the agent's response must still find the waiter registered for it"
+        );
+
+        let response = waiter
+            .await
+            .expect("re-registering a sender must not cancel an in-flight command");
+        assert_eq!(response["success"], json!(true));
+    }
+
+    /// The other half of the same contract: an agent that actually disconnects
+    /// must still fail its in-flight commands rather than leave them hanging.
+    #[tokio::test]
+    async fn unregistering_an_agent_still_drops_its_pending_commands() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker.register_agent("a1", sender).await;
+
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+
+        broker.unregister_agent("a1").await;
+
+        assert!(
+            waiter.await.is_err(),
+            "a genuinely disconnected agent must resolve its waiters with an error"
+        );
     }
 }
