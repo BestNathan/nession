@@ -1,7 +1,8 @@
 {
   "$description": "App experience density. Remapped under [data-experience=app] in generated web.css.",
   "control": {
-    "sm": { "value": "36px" },
+    "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control size may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm — that reintroduces sub-44px tap targets.",
+    "sm": { "value": "44px" },
     "md": { "value": "44px" },
     "lg": { "value": "52px" }
   },

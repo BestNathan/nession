@@ -1,7 +1,7 @@
 // generated — do not edit
 
 export const control = {
-  sm: 36,
+  sm: 44,
   md: 44,
   lg: 52,
 } as const;
