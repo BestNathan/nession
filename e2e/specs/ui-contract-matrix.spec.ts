@@ -177,6 +177,15 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await page.goto('/#/fixture/app');
       await assertCapsuleControls(page, 'app', row.id);
 
+      // The App capsule is field-first: the field takes its own full-width row and
+      // the controls sit beneath it. That layout is why `control.sm` may equal
+      // `control.md` on App without costing the field any width — if App ever
+      // moved to the single-row layout, shrinking controls there would start to
+      // trade against the field, and the reasoning behind the token would need
+      // revisiting. Pinned because the token's justification rests on it.
+      await expect(page.getByTestId('capsule-input-row')).toHaveAttribute('data-field-first', 'app');
+      await expect(page.getByTestId('capsule-input-field')).toHaveAttribute('data-input-width', 'full');
+
       // Unlike the workspace bar — which floats over the terminal and settles for
       // touchTarget.compact, 28px (#730) — the capsule is the App's primary input
       // surface and is held to the 44px chrome floor.
