@@ -7,7 +7,7 @@ import { useAppSpatialIndex } from '@/app/app-spatial/useAppSpatialIndex';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
@@ -32,7 +32,7 @@ export interface SessionFirstWorkspaceProps {
   selectedAgent: Agent | undefined;
   domain: DomainState | null;
   surface: Surface;
-  tool: WorkspaceToolId;
+  tool: CapabilityId;
   fileOps: FileOps | null;
   onCreate: () => void;
   onRefresh: () => void;
@@ -40,7 +40,7 @@ export interface SessionFirstWorkspaceProps {
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
-  onToolChange: (tool: WorkspaceToolId) => void;
+  onToolChange: (tool: CapabilityId) => void;
   onOpenAgent: () => void;
   isWide: boolean;
   showList: boolean;

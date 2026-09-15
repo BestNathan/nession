@@ -1,14 +1,11 @@
 import { Settings2 } from 'lucide-react';
-import type { WorkspaceTool } from '../toolTypes';
+import type { WorkspaceViewBinding } from '../workspaceContext';
 import { AppToolScroll } from '../AppToolScroll';
 import { SessionDetails } from '@/features/sessions/components/SessionDetails';
 
-export const sessionTool: WorkspaceTool = {
+export const sessionView: WorkspaceViewBinding = {
   id: 'session',
-  label: 'Session',
   icon: Settings2,
-  order: 20,
-  availability: () => true,
   layout: {
     web: ({ ctx }) => (ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null),
     app: ({ ctx }) =>

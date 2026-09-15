@@ -72,29 +72,6 @@ impl RawTerminal {
         terminal::size().context("terminal::size failed")
     }
 
-    /// Poll for an input event with a timeout. Returns `Ok(None)` on timeout.
-    /// This is a thin wrapper around `crossterm::event::poll` that converts
-    /// the `io::Error` to `anyhow`.
-    #[allow(dead_code)]
-    pub fn poll_input(timeout: std::time::Duration) -> Result<bool> {
-        term_poll(timeout).context("crossterm poll failed")
-    }
-
-    /// Read a single input event (blocking).
-    #[allow(dead_code)]
-    pub fn read_input() -> Result<Event> {
-        term_read().context("crossterm read failed")
-    }
-
-    /// Write raw bytes to stdout. Used for forwarding agent output.
-    #[allow(dead_code)]
-    pub fn write_output(data: &[u8]) -> Result<()> {
-        let mut stdout = io::stdout();
-        stdout.write_all(data).context("stdout write_all failed")?;
-        stdout.flush().context("stdout flush failed")?;
-        Ok(())
-    }
-
     /// Manually deactivate the guard. This runs the cleanup now so that the
     /// subsequent `Drop` becomes a no-op. Useful if you need to restore the
     /// terminal before dropping the guard (e.g. to print a final message on

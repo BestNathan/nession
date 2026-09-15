@@ -10,19 +10,28 @@ export const capsuleFieldTypeClass =
 export const capsuleFieldPadClass =
   'px-[length:var(--composer-field-inset-x)] py-[length:var(--composer-field-inset-y)]';
 
-/** Primary actions (Send) — full touch/control band. */
+/**
+ * Every capsule control — one size, no primary/secondary split.
+ *
+ * There used to be a `capsuleSecondaryIconButtonClass` alongside this one,
+ * documented as "smaller band so the field keeps width". It was applied in the
+ * field-first layout and never in the single-row layout that actually trades
+ * against the field, so it bought no width anywhere.
+ *
+ * It also contradicted the contract, which names `control.md` as the band for
+ * both experiences (`pattern.terminal-capsule`). Nothing caught that, because
+ * on App `control.sm` and `control.md` are both 44px — the contract records
+ * the token *and* the resolved px, and the matrix only measures the px. Any
+ * future divergence reopens the sub-44px tap target silently. One class, named
+ * by the contract, is the whole fix.
+ */
 export const capsuleIconButtonClass =
   "h-[length:var(--control-md)] w-[length:var(--control-md)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]";
-
-/** Secondary toolbar icons — smaller band so the field keeps width. */
-export const capsuleSecondaryIconButtonClass =
-  "h-[length:var(--control-sm)] w-[length:var(--control-sm)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-sm)]";
 
 export const capsuleControlRowClass =
   'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--composer-control-gap)]';
 
 /** Dialog layer above composer popovers (--composer-popover-zindex is 100). */
-export const capsuleDialogOverlayClass = 'z-[110]';
 export const capsuleDialogContentClass = 'z-[110]';
 
 export const capsuleCommandsPanelClass =
@@ -64,9 +73,6 @@ export const capsuleShellPillRadiusClass = 'rounded-[var(--composer-shell-pill-r
 /** Inner (interactive) shell: full-width, clips children to the capsule corners. */
 export const capsuleShellInnerClass =
   'pointer-events-auto w-full overflow-hidden';
-
-export const capsuleShellInnerSizeClass =
-  'pointer-events-auto w-full max-w-[min(100%,var(--composer-shell-max-width))] overflow-hidden';
 
 export const capsuleShellWebOuterClass =
   'inset-x-[length:var(--composer-shell-margin-x)] flex flex-col items-stretch pointer-events-none';
@@ -151,12 +157,6 @@ export const capsuleCommandsScrollClass =
 
 export const capsuleCommandsMoreClass =
   'shrink-0';
-
-export const capsuleDropdownMinWidthClass =
-  'min-w-[length:var(--composer-dropdown-min-width)]';
-
-export const capsuleDropdownItemClass =
-  'cursor-pointer font-mono text-[length:var(--composer-font-size)]';
 
 export const capsuleDialogStackClass = 'flex flex-col gap-[length:var(--composer-dialog-gap)]';
 

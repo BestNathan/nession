@@ -27,11 +27,6 @@ export function detectWebGLSupport(): boolean {
   return cachedWebGLSupport;
 }
 
-/** @internal Test-only reset for detectWebGLSupport memoization. */
-export function resetWebGLSupportCacheForTests(): void {
-  cachedWebGLSupport = null;
-}
-
 let cachedWebGLSupport: boolean | null = null;
 
 function probeWebGLSupport(): boolean {

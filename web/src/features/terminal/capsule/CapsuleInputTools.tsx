@@ -4,9 +4,7 @@ import { CapsuleInputActionButtons } from '@/features/terminal/capsule/CapsuleIn
 import {
   capsuleControlRowClass,
   capsuleIconButtonClass,
-  capsuleSecondaryIconButtonClass,
 } from '@/features/terminal/capsule/capsuleStyles';
-import { cn } from '@/lib/utils';
 import { Plus } from 'lucide-react';
 import { CapabilityDisclosureMenu } from '@/features/capabilities/components/CapabilityDisclosureMenu';
 import { CapsuleCapability } from '@/features/terminal/capsule/components/CapsuleCapability';
@@ -34,7 +32,8 @@ interface CapsuleInputActionsProps {
   onSend: () => void;
   onPaste: () => void;
   onCopy: () => void;
-  compactSecondary?: boolean;
+  /** Tooltips intercept touch on mobile — app surfaces rely on aria-label instead. */
+  showTooltips?: boolean;
 }
 
 /**
@@ -81,7 +80,6 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
 
 /**
  * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
- * App uses compact secondary icons so the field keeps horizontal space.
  */
 export function CapsuleInputTrailingActions({
   capability,
@@ -99,12 +97,8 @@ export function CapsuleInputTrailingActions({
   onSend,
   onPaste,
   onCopy,
-  compactSecondary = false,
+  showTooltips = true,
 }: Omit<CapsuleInputActionsProps, 'leading'>) {
-  const secondaryIconClass = compactSecondary
-    ? capsuleSecondaryIconButtonClass
-    : capsuleIconButtonClass;
-
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
       {capability ? <CapsuleCapability capability={capability} /> : null}
@@ -121,7 +115,7 @@ export function CapsuleInputTrailingActions({
         }}
         disabled={disabled}
         onSelect={onSelectHistory}
-        triggerClassName={cn(secondaryIconClass, 'rounded-lg')}
+        triggerClassName="rounded-lg"
       />
       {showCommandsButton ? (
         <CapsuleCommandsPopover
@@ -144,8 +138,7 @@ export function CapsuleInputTrailingActions({
         onSend={onSend}
         onPaste={onPaste}
         onCopy={onCopy}
-        secondaryIconClass={secondaryIconClass}
-        showTooltips={!compactSecondary}
+        showTooltips={showTooltips}
       />
     </div>
   );

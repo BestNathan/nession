@@ -28,6 +28,17 @@ function renderWebCapsule(onLayoutChange?: never) {
   return render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
 }
 
+function renderAppCapsule() {
+  return render(
+    <TerminalCapsule
+      experience="app"
+      mode="input"
+      onModeChange={vi.fn()}
+      sendText={vi.fn()}
+    />,
+  );
+}
+
 describe('InputComposer', () => {
   it('shows History + Send on the right by default (no paste/copy/commands)', () => {
     renderWebCapsule();
@@ -119,17 +130,38 @@ describe('InputComposer', () => {
     expect(input.className).toMatch(/composer-font-size/);
   });
 
-  it('uses compact secondary controls on app', () => {
-    render(
-      <TerminalCapsule
-        experience="app"
-        mode="input"
-        onModeChange={vi.fn()}
-        sendText={vi.fn()}
-      />,
+  it('renders every capsule control at the control token, never a smaller band', () => {
+    // Regression: App's secondary controls rendered at `control-sm` while
+    // `pattern.terminal-capsule` names `control.md` as the band for both
+    // experiences. No px assertion could see it — on App both tokens are 44px —
+    // so the invariant is asserted on the token the class names.
+    renderAppCapsule();
+    for (const testId of [
+      'capsule-history-trigger',
+      'capsule-paste',
+      'capsule-copy',
+      'capsule-send',
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toMatch(/control-md/);
+      expect(control.className).not.toMatch(/control-sm/);
+    }
+  });
+
+  it('drops tooltips on app, where they would intercept touch', () => {
+    renderAppCapsule();
+    expect(screen.getByTestId('capsule-send')).not.toHaveAttribute(
+      'data-slot',
+      'tooltip-trigger',
     );
-    expect(screen.getByTestId('capsule-history-trigger').className).toMatch(/control-sm/);
-    expect(screen.getByTestId('capsule-send').className).toMatch(/control-md/);
+  });
+
+  it('keeps tooltips on web, where a pointer can hover', () => {
+    renderWebCapsule();
+    expect(screen.getByTestId('capsule-send')).toHaveAttribute(
+      'data-slot',
+      'tooltip-trigger',
+    );
   });
 
   it('switches to stacked layout for multi-line without dropping focus', async () => {

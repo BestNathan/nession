@@ -10,13 +10,11 @@ import { CapsuleProvider } from '@/features/terminal/capsule/state/CapsuleProvid
 import { useComposerMeasure } from '@/features/terminal/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/features/terminal/capsule/state/useCapsuleState';
 import {
-  experienceFromVariant,
   layoutFromLineCount,
   type CapsuleCapabilityDisclosure,
   type CapsuleCapabilityPresence,
   type CapsuleExperience,
   type CapsuleMode,
-  type CapsuleVariant,
 } from '@/features/terminal/capsule/types';
 import { useCapsuleLayoutFlip } from '@/features/terminal/capsule/useCapsuleLayoutFlip';
 import { useCapsuleDockClearance } from '@/features/terminal/capsule/hooks/useCapsuleDockClearance';
@@ -24,8 +22,6 @@ import { useCapsuleDockClearance } from '@/features/terminal/capsule/hooks/useCa
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
   disabled?: boolean;
-  /** @deprecated Use experience */
-  variant?: CapsuleVariant;
   experience?: CapsuleExperience;
   mode?: CapsuleMode;
   onModeChange?: (mode: CapsuleMode) => void;
@@ -38,15 +34,13 @@ export interface TerminalCapsuleProps {
 export function TerminalCapsule({
   sendText,
   disabled = false,
-  variant,
-  experience,
+  experience = 'web',
   mode = 'input',
   onModeChange,
   capability,
   capabilityDisclosure,
 }: TerminalCapsuleProps) {
-  const resolvedExperience =
-    experience ?? (variant ? experienceFromVariant(variant) : 'web');
+  const resolvedExperience = experience;
   const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
   const isApp = resolvedExperience === 'app';
   const activeMode = isApp ? mode : 'input';

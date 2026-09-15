@@ -1815,30 +1815,6 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-    /// Start a test server on an ephemeral port and return a handle for
-    /// shutdown. Note: the bound address uses port 0, so this helper is
-    /// only useful for tests that don't need to connect (e.g. verifying
-    /// server construction and shutdown).
-    #[allow(dead_code)]
-    async fn start_test_server() -> (SocketAddr, ServerHandle) {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let (_resize_tx, _resize_rx) = mpsc::unbounded_channel::<(String, u16, u16)>();
-        let server = AgentServer::new(
-            "127.0.0.1:0",
-            "test-agent",
-            None,
-            "/tmp".to_string(),
-            tmp.path().to_string_lossy().as_ref(),
-            AttachMode::Plain,
-            _resize_tx,
-        )
-        .expect("server creation should succeed");
-        // Leak the TempDir so the sandbox root persists for the server lifetime.
-        Box::leak(Box::new(tmp));
-        let (handle, addr) = server.start().await.expect("start should succeed");
-        (addr, handle)
-    }
-
     /// Start a test server (OS picks a free port). Returns the real bound
     /// address and a shutdown handle.
     async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle) {

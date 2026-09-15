@@ -12,7 +12,7 @@ are allowed; reverse imports are a lint error (`nession/no-reverse-imports`,
 
 | Layer | Physical home (`web/src/`) | Owns | May import |
 |---|---|---|---|
-| **app** | `app/` | composition root: the single session-first shell (`SessionFirstShell`), sidebar/workspace chrome, `app-spatial/`, `workspace/tools/`, fixture screens, app-composition hooks (`useAppConnection`, `useDashboard`, `useProbePolling`, deep-link restore), `LoginPage` | features, core, shared |
+| **app** | `app/` | composition root: the single session-first shell (`SessionFirstShell`), sidebar/workspace chrome, `app-spatial/`, `workspace/capabilities.ts` + `workspace/views/`, fixture screens, app-composition hooks (`useAppConnection`, `useDashboard`, `useProbePolling`, deep-link restore), `LoginPage` | features, core, shared |
 | **features** | `features/<feature>/` | domain capability plugins + feature UI/hooks/model (`terminal`, `explorer`, `files`, `sessions`, `agents`, `env`, `commands`, `server`, `claude-code`) | core, shared |
 | **core** | `core/`, `runtime/`, `services/` | React-free terminal runtime, session-runtime ownership, WebSocket client | shared |
 | **shared** | `shared/`, `components/ui/`, `lib/`, `atoms/` | generic hooks (`shared/hooks/`), shadcn primitives, pure helpers, shared atoms | — |
@@ -35,7 +35,8 @@ src/
 │   ├── useSessionFirstShellState.ts # shell state composer
 │   ├── patterns/            # SessionHeader, SessionListHeader, AppToolHeader, …
 │   ├── app-spatial/         # mobile 3-page pager (Sessions ← Terminal → Workspace)
-│   ├── workspace/           # WorkspaceShell + tools/{files,session,agent,envFiles,claudeCode}
+│   ├── workspace/           # WorkspaceShell, capabilities.ts, viewBindings.ts,
+│   │                        #   workspaceContext.ts, views/{files,session,agent,env,claudeCode}
 │   ├── fixture/             # deterministic screens for /fixture visual tests
 │   ├── useAppConnection.ts / useDashboard.ts / useDashboardFilter.ts /
 │   │   useDashboardModals.ts / useProbePolling.ts / useRealtimeUpdates.ts /
@@ -107,9 +108,11 @@ Rules follow #649 (per-feature READMEs hold the detailed table):
   and installed on every `WebSocketService` connection.
 - **`extensions/registry`**: UI slots (e.g. `agent-detail`) contributed by
   extensions such as claude-code; consumed by feature components.
-- **Workspace tools**: `app/workspace/tools/` registers the tool set for a
-  session workspace; features contribute descriptors (types in
-  `app/workspace/toolTypes.ts`).
+- **Workspace capabilities**: `app/workspace/capabilities.ts` registers what the
+  Workspace can show and when each is available; `app/workspace/viewBindings.ts`
+  registers how each is drawn (`app/workspace/views/`). A capability's name and
+  state come from its provider, never from its view — see
+  `docs/design/workspace.md`, "Contribution model".
 - **Fixture screens**: `app/fixture/` powers the `/fixture*` routes used by
   e2e visual baselines.
 

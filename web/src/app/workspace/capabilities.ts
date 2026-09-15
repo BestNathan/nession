@@ -3,29 +3,76 @@ import {
   type CapabilityContext,
   type CapabilityDefinition,
   type CapabilityResolution,
+  type CapabilityId,
   type CapabilityScope,
   type CapabilityState,
 } from '@/features/capabilities';
-import {
-  adaptWorkspaceTool,
-  legacyWorkspaceViewId,
-  workspaceCapabilityContext,
-} from './capabilityAdapter';
-import type { WorkspaceContext, WorkspaceToolId } from './toolTypes';
-import { WORKSPACE_TOOLS } from './tools';
+import type { WorkspaceContext } from './workspaceContext';
 
-const LEGACY_ADAPTER_TOOL_IDS = new Set<WorkspaceToolId>([
-  'files',
-  'session',
-  'agent',
-  'env',
-]);
+export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
+  return {
+    sessionId: ctx.session?.session_id,
+    locationId: ctx.agent?.agent_id ?? ctx.session?.agent_id,
+    surface: 'workspace',
+    facts: ctx.facts,
+  };
+}
 
-function scopeFromContext(context: CapabilityContext): CapabilityScope {
+function resolveScope(
+  context: CapabilityContext,
+  workspaceContext: WorkspaceContext,
+): CapabilityScope {
   return {
     workspaceId: context.workspaceId,
-    locationId: context.locationId,
-    sessionId: context.sessionId,
+    locationId:
+      context.locationId ?? workspaceContext.agent?.agent_id ?? workspaceContext.session?.agent_id,
+    sessionId: context.sessionId ?? workspaceContext.session?.session_id,
+  };
+}
+
+/**
+ * The Workspace's own capabilities.
+ *
+ * Each one states what it is and when it is available; none of them states where
+ * it appears. Direct chrome, disclosure and absence are decided downstream by the
+ * presence policy and the presentation model, so a capability cannot buy itself a
+ * slot by being registered.
+ */
+interface WorkspaceCapabilityProvider {
+  id: CapabilityId;
+  title: string;
+  /** Whether the environment can offer this capability at all. */
+  available: (ctx: WorkspaceContext) => boolean;
+}
+
+/**
+ * In registration order. The order is a deterministic tie-break between equally
+ * present capabilities — it is not priority, and it grants nothing.
+ */
+const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
+  { id: 'files', title: 'Files', available: (ctx) => ctx.fileOps !== null },
+  { id: 'session', title: 'Session', available: () => true },
+  { id: 'agent', title: 'Agent', available: () => true },
+  { id: 'env', title: 'Env', available: () => true },
+];
+
+const CLAUDE_CODE_PROVIDER: WorkspaceCapabilityProvider = {
+  id: 'claude-code',
+  title: 'Claude Code',
+  available: () => true,
+};
+
+function providerFor(
+  provider: WorkspaceCapabilityProvider,
+  workspaceContext: WorkspaceContext,
+): CapabilityDefinition {
+  return {
+    id: provider.id,
+    title: provider.title,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: provider.available(workspaceContext) ? 'available' : 'unavailable',
+    }),
   };
 }
 
@@ -48,80 +95,48 @@ function isClaudeCodeCommand(command: string): boolean {
 }
 
 /**
- * First direct Workspace capability provider.
- *
- * Runtime detection belongs to the surface that owns the signal: the agent
- * reports the session's foreground command, the app layer records what it has
- * seen, and this provider turns those facts into state.
+ * The one provider whose state comes from observation rather than environment:
+ * the agent reports the session's foreground command, the app layer records what
+ * it has seen, and this turns those facts into a state.
  */
-const claudeCodeCapability: CapabilityDefinition = {
-  id: 'claude-code',
-  title: 'Claude Code',
-  resolve: (context) => {
-    const current = context.facts?.sessionForegroundCommand;
-    const observed = context.facts?.sessionObservedCommands ?? [];
+function claudeCodeProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: CLAUDE_CODE_PROVIDER.id,
+    title: CLAUDE_CODE_PROVIDER.title,
+    resolve: (context) => {
+      const current = context.facts?.sessionForegroundCommand;
+      const observed = context.facts?.sessionObservedCommands ?? [];
 
-    let state: CapabilityState;
-    if (!context.sessionId) {
-      state = 'unavailable';
-    } else if (current && isClaudeCodeCommand(current)) {
-      state = 'active';
-    } else if (observed.some(isClaudeCodeCommand)) {
-      state = 'relevant';
-    } else {
-      state = 'available';
-    }
+      let state: CapabilityState;
+      if (!context.sessionId) {
+        state = 'unavailable';
+      } else if (current && isClaudeCodeCommand(current)) {
+        state = 'active';
+      } else if (observed.some(isClaudeCodeCommand)) {
+        state = 'relevant';
+      } else {
+        state = 'available';
+      }
 
-    return {
-      scope: scopeFromContext(context),
-      state,
-      views: [
-        {
-          id: legacyWorkspaceViewId('claude-code'),
-          label: 'Claude Code',
-        },
-      ],
-    };
-  },
-};
-
-/**
- * Transitional registry for the four legacy WorkspaceTool-backed capabilities.
- * Claude Code is intentionally excluded so the migration keeps a real direct
- * provider path alongside the compatibility adapter.
- */
-export function createLegacyWorkspaceCapabilityRegistry(
-  workspaceContext: WorkspaceContext,
-): CapabilityRegistry {
-  const registry = new CapabilityRegistry();
-
-  for (const tool of WORKSPACE_TOOLS) {
-    if (!LEGACY_ADAPTER_TOOL_IDS.has(tool.id)) {
-      continue;
-    }
-    registry.register(adaptWorkspaceTool(tool, workspaceContext));
-  }
-
-  return registry;
-}
-
-export function resolveLegacyWorkspaceCapabilities(
-  workspaceContext: WorkspaceContext,
-): CapabilityResolution {
-  return createLegacyWorkspaceCapabilityRegistry(workspaceContext).resolveAll(
-    workspaceCapabilityContext(workspaceContext),
-  );
+      return { scope: resolveScope(context, workspaceContext), state };
+    },
+  };
 }
 
 /**
- * Shipping Workspace capability registry. Presentation consumes this semantic
- * resolution instead of treating the legacy view registry as navigation.
+ * Shipping Workspace capability registry: every capability the Workspace can
+ * show, registered once, none of them through a compatibility path.
  */
 export function createWorkspaceCapabilityRegistry(
   workspaceContext: WorkspaceContext,
 ): CapabilityRegistry {
-  const registry = createLegacyWorkspaceCapabilityRegistry(workspaceContext);
-  registry.register(claudeCodeCapability);
+  const registry = new CapabilityRegistry();
+
+  for (const provider of WORKSPACE_CAPABILITY_PROVIDERS) {
+    registry.register(providerFor(provider, workspaceContext));
+  }
+  registry.register(claudeCodeProvider(workspaceContext));
+
   return registry;
 }
 
