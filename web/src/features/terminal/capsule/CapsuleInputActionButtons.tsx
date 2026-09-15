@@ -11,7 +11,6 @@ interface CapsuleInputActionButtonsProps {
   onSend: () => void;
   onPaste: () => void;
   onCopy: () => void;
-  secondaryIconClass?: string;
   /** Tooltips intercept touch on mobile — app surfaces rely on aria-label instead. */
   showTooltips?: boolean;
 }
@@ -45,7 +44,6 @@ export function CapsuleInputActionButtons({
   onSend,
   onPaste,
   onCopy,
-  secondaryIconClass = capsuleIconButtonClass,
   showTooltips = true,
 }: CapsuleInputActionButtonsProps) {
   const canSend = !disabled && Boolean(inputValue.trim());
@@ -65,7 +63,7 @@ export function CapsuleInputActionButtons({
                 disabled={disabled}
                 data-testid="capsule-paste"
                 aria-label="Paste"
-                className={secondaryIconClass}
+                className={capsuleIconButtonClass}
                 onClick={onPaste}
               >
                 <ClipboardPaste />
@@ -83,7 +81,7 @@ export function CapsuleInputActionButtons({
                 disabled={disabled || !inputValue}
                 data-testid="capsule-copy"
                 aria-label="Copy"
-                className={secondaryIconClass}
+                className={capsuleIconButtonClass}
                 onClick={() => {
                   void onCopy();
                 }}

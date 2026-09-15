@@ -114,7 +114,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
                 onCopy={() => {
                   void copyInput();
                 }}
-                compactSecondary={isApp}
+                showTooltips={!isApp}
               />
             </div>
           </div>
@@ -142,7 +142,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
               onCopy={() => {
                 void copyInput();
               }}
-              compactSecondary={false}
+              showTooltips={!isApp}
             />
           </div>
         )}
