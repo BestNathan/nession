@@ -14,7 +14,7 @@ import {
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
 import { fixtureFileOps } from './fixtureFileOps';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
@@ -32,7 +32,7 @@ export function FixtureApp() {
   // Surface derives from the pager position — page 2 is the workspace,
   // every other position is the terminal page.
   const surface: Surface = spatialIndex === 2 ? 'workspace' : 'terminal';
-  const [tool, setTool] = useState<WorkspaceToolId>('files');
+  const [tool, setTool] = useState<CapabilityId>('files');
 
   const selectedId = FIXTURE_SELECTED_ID;
   const selectedSession =

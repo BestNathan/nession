@@ -13,7 +13,7 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import type { FileEntry } from '@/features/files';
-import type { WorkspaceContext } from '../toolTypes';
+import type { WorkspaceContext } from '../workspaceContext';
 
 interface SelectedFile { path: string; filename: string; size: number; }
 

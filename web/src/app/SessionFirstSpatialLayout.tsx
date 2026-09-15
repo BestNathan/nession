@@ -9,7 +9,7 @@ import {
 } from '@/app/SessionFirstSidebar';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
@@ -21,11 +21,11 @@ interface MainShared {
   selectedAgent: Agent | undefined;
   agents: Agent[];
   domain: DomainState | null;
-  tool: WorkspaceToolId;
+  tool: CapabilityId;
   fileOps: FileOps | null;
   connectionStatus: ConnectionState;
   onSurfaceChange: (surface: Surface) => void;
-  onToolChange: (tool: WorkspaceToolId) => void;
+  onToolChange: (tool: CapabilityId) => void;
   onOpenAgent: () => void;
 }
 

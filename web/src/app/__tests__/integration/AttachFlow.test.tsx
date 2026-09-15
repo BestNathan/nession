@@ -75,7 +75,7 @@ vi.mock('@/app/useProbePolling', () => ({
 vi.mock('@/app/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
-vi.mock('@/app/workspace/tools/filesWeb', () => ({
+vi.mock('@/app/workspace/views/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));

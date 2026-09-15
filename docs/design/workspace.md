@@ -72,20 +72,29 @@ An extension should contribute semantic information rather than dictate global l
 ```ts
 interface WorkspaceCapability {
   id: CapabilityId
-  availability(ctx: WorkspaceContext): CapabilityState
-  summary?(ctx: WorkspaceContext): CapabilitySummary
-  actions?(ctx: WorkspaceContext): CapabilityAction[]
-  view?(ctx: WorkspaceContext): CapabilityView
+  title: string
+  resolve(ctx: CapabilityContext): { scope: CapabilityScope; state: CapabilityState }
 }
 ```
 
 The exact TypeScript/Rust API is an implementation concern. The product contract is more important:
 
-- extensions provide capability, state, actions, and optional deeper views;
+- extensions provide capability and state, plus the views that draw them;
 - Nession decides where and how they appear;
 - placement depends on context and capability state;
 - Web and App may render the same capability differently while preserving meaning;
 - adding an extension must not require redesigning the global shell.
+
+Concretely, the two halves are separate and neither may absorb the other:
+
+- a **capability provider** states what the capability is (its id, its title) and
+  when it is available — never where it goes;
+- a **view binding** states how to draw it, per experience — never its name,
+  its availability, or its rank.
+
+A binding that names itself or ranks itself would let a view buy presence by
+being registered, which is the failure mode this split exists to prevent. A
+provider that carries layout would do the same from the other side.
 
 ## Session-level versus Workspace-level presence
 

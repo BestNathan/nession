@@ -1,13 +1,14 @@
+import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/features/files';
-import type { CapabilityFacts } from '@/features/capabilities';
+import type { CapabilityFacts, CapabilityId } from '@/features/capabilities';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Agent, Session } from '@/types';
 import { AppToolHeader } from '@/app/patterns/AppToolHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
-import { WORKSPACE_TOOLS } from '@/app/workspace/tools';
-import type { Experience, WorkspaceToolId } from '@/app/workspace/toolTypes';
+import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
+import type { Experience, WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 export interface WorkspacePanelProps {
   selectedSession: Session;
@@ -15,12 +16,12 @@ export interface WorkspacePanelProps {
   agents: Agent[];
   domain: DomainState;
   surface: Surface;
-  tool: WorkspaceToolId;
+  tool: CapabilityId;
   fileOps: FileOps | null;
   experience: Experience;
   facts: CapabilityFacts | undefined;
   onSurfaceChange: (surface: Surface) => void;
-  onToolChange: (tool: WorkspaceToolId) => void;
+  onToolChange: (tool: CapabilityId) => void;
 }
 
 export function WorkspacePanel({
@@ -36,7 +37,38 @@ export function WorkspacePanel({
   onSurfaceChange,
   onToolChange,
 }: WorkspacePanelProps) {
-  const activeLabel = WORKSPACE_TOOLS.find((item) => item.id === tool)?.label ?? 'Workspace';
+  const ctx: WorkspaceContext = useMemo(
+    () => ({
+      session: selectedSession,
+      agent: selectedAgent,
+      agents,
+      domain,
+      fileOps,
+      experience,
+      onToolChange,
+      facts,
+    }),
+    [
+      selectedSession,
+      selectedAgent,
+      agents,
+      domain,
+      fileOps,
+      experience,
+      onToolChange,
+      facts,
+    ],
+  );
+
+  // The header names the capability the user opened. Names live in the
+  // capability layer alongside availability, so chrome reads them from there
+  // rather than from a table kept next to the views.
+  const activeLabel = useMemo(
+    () =>
+      resolveWorkspaceCapabilities(ctx).snapshots.find((snapshot) => snapshot.id === tool)?.title ??
+      'Workspace',
+    [ctx, tool],
+  );
 
   return (
     <div
@@ -51,19 +83,7 @@ export function WorkspacePanel({
           onBack={() => onSurfaceChange('terminal')}
         />
       ) : null}
-      <WorkspaceShell
-        ctx={{
-          session: selectedSession,
-          agent: selectedAgent,
-          agents,
-          domain,
-          fileOps,
-          experience,
-          onToolChange,
-          facts,
-        }}
-        activeCapabilityId={tool}
-      />
+      <WorkspaceShell ctx={ctx} activeCapabilityId={tool} />
     </div>
   );
 }

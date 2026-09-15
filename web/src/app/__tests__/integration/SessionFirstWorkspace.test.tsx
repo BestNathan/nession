@@ -9,7 +9,7 @@ import {
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Agent, Session } from '@/types';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { WorkspaceToolId } from '@/app/workspace/toolTypes';
+import type { CapabilityId } from '@/features/capabilities';
 
 const agent: Agent = {
   agent_id: 'a1',
@@ -42,12 +42,12 @@ vi.mock('@/app/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
 
-vi.mock('@/app/workspace/tools/filesWeb', () => ({
+vi.mock('@/app/workspace/views/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 
-vi.mock('@/app/workspace/tools/filesApp', () => ({
+vi.mock('@/app/workspace/views/filesApp', () => ({
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 
@@ -95,7 +95,7 @@ function baseProps(
 
 function AppNavigationHarness() {
   const [surface, setSurface] = useState<Surface>('terminal');
-  const [tool, setTool] = useState<WorkspaceToolId>('files');
+  const [tool, setTool] = useState<CapabilityId>('files');
 
   return (
     <SessionFirstWorkspace
