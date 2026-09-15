@@ -4136,6 +4136,58 @@ mod tests {
             .is_empty());
     }
 
+    /// Regression #743: the agent WebSocket loop re-registers the agent's
+    /// sender on **every** inbound agent message (`server/websocket.rs`), so
+    /// that can happen while a command is in flight. It is a transport update
+    /// and must not cancel the command — otherwise the client is told
+    /// "Agent disconnected" for a session the agent actually created, and the
+    /// real response is discarded when it arrives.
+    #[tokio::test]
+    async fn session_create_survives_an_intervening_agent_message() {
+        let mut h = handler_with_online_agent().await;
+
+        let (sender, mut rx) = WsMessageSender::new();
+        h.command_broker.register_agent("a1", sender).await;
+
+        let broker = Arc::clone(&h.command_broker);
+        let create_fut = h.handle_message(proto_msg(
+            "client.session.create",
+            json!({ "agent_id": "a1", "name": "regression-743" }),
+        ));
+        let agent_fut = async move {
+            let text = rx
+                .recv()
+                .await
+                .expect("agent should receive session.create")
+                .to_text()
+                .unwrap()
+                .to_string();
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let request_id = parsed["payload"]["request_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // An unrelated inbound message from the same agent arrives first;
+            // the websocket loop re-registers the sender for it.
+            let (sender_again, _keepalive) = WsMessageSender::new();
+            broker.register_agent("a1", sender_again).await;
+
+            broker
+                .resolve_command("a1", &request_id, json!({ "success": true }))
+                .await;
+        };
+        let (action, ()) = tokio::join!(create_fut, agent_fut);
+        let reply = parse_reply(action.unwrap());
+
+        assert_eq!(
+            reply["payload"]["success"],
+            json!(true),
+            "an intervening agent message must not turn a completed create into a reported failure"
+        );
+        assert_eq!(reply["payload"]["session_id"], json!("a1:regression-743"));
+    }
+
     // ---- parse_agent_sessions ----
     #[test]
     fn parse_agent_sessions_reads_the_foreground_command() {
