@@ -38,6 +38,9 @@
       "muted-foreground": {
         "ref": "primitive.light.neutral.text-muted"
       },
+      "text-secondary": {
+        "ref": "primitive.light.neutral.text-secondary"
+      },
       "accent": {
         "ref": "primitive.light.neutral.fill"
       },
@@ -159,6 +162,9 @@
       },
       "muted-foreground": {
         "ref": "primitive.dark.neutral.text-muted"
+      },
+      "text-secondary": {
+        "ref": "primitive.dark.neutral.text-secondary"
       },
       "accent": {
         "ref": "primitive.dark.neutral.fill"

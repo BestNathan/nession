@@ -252,8 +252,11 @@ describe('SessionFirstShell', () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
     const footer = screen.getByTestId('session-first-sidebar-footer');
+    // The floor is the foot's own token, so the inset still wins on a device
+    // that has one and the padding stays on the design system's scale where it
+    // does not.
     expect(footer.className).toMatch(
-      /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
+      /pb-\[max\(var\(--shell-foot-pad-y\),env\(safe-area-inset-bottom\)\)\]/,
     );
     expect(footer.className).toMatch(/shell-space|var\(--shell-space/);
   });

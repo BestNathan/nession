@@ -107,7 +107,11 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
            which meant the work surface never actually shared the frame. */
         <div
           data-testid="session-first-sidebar-column"
-          className="flex min-h-0 w-[min(20rem,90vw)] shrink-0 border-r"
+          /* No border: the sidebar carries the chrome surface and the work
+             region sits on the canvas, so the background shift is the
+             separator (visual-language.md P7 — background shift before
+             border). The mockup draws no rule here either. */
+          className="flex min-h-0 w-[min(var(--shell-sidebar-width),90vw)] shrink-0"
         >
           <SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />
         </div>

@@ -55,7 +55,63 @@
       "ref": "experience.web.control.lg"
     },
     "railWidth": {
-      "value": "52px"
+      "value": "50px"
+    },
+    "sidebarWidth": {
+      "$description": "Expanded sidebar column. The mockup draws 246px; the shell's grid is `246px 1fr`.",
+      "value": "246px"
+    },
+    "sessionRowPadY": {
+      "$description": "Session row vertical padding. The mockup draws 7px, tighter than `shell.space-2` (8px) because the row's two lines already carry leading; horizontal padding is `shell.space-2`.",
+      "value": "7px"
+    },
+    "sessionRowRadius": {
+      "$description": "Sidebar list row corner radius, shared by session rows and agent/node rows. The mockup rounds the row so the selected `--n-raised` fill reads as a chip rather than a band.",
+      "value": "7px"
+    },
+    "nodeRowPadY": {
+      "$description": "Agent/node row vertical padding. The mockup draws 6px — tighter than a session row's 7px, because a node row carries one line where a session row carries two.",
+      "value": "6px"
+    },
+    "nodeFontSize": {
+      "$description": "Agent/node row text. Monospace at 11.5px: a node name is infrastructure identity, and `visual-language.md` gives monospace the code/host identity role rather than using it as decoration.",
+      "value": "11.5px"
+    },
+    "sessionRowTitleFontSize": {
+      "$description": "Session name. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
+      "value": "12.5px"
+    },
+    "sessionRowMetaFontSize": {
+      "$description": "Session metadata (agent / recency). Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
+      "value": "10px"
+    },
+    "footPadY": {
+      "$description": "Sidebar foot vertical padding. The mockup draws 9px; horizontal is `shell.space-3` (12px), which is what the mockup draws too.",
+      "value": "9px"
+    },
+    "footGap": {
+      "$description": "Sidebar foot gap between the status dot, its text and the controls.",
+      "value": "7px"
+    },
+    "statusDotSize": {
+      "$description": "The sidebar's status mark, shared by the foot's service dot, the collapsed rail's and the agent/node rows — one object in three places. Small on purpose: the mockup's comment on the foot is 'Healthy stays quiet; degraded may gain emphasis', so a steady state is a 5px mark beside quiet text rather than a badge.",
+      "value": "5px"
+    },
+    "footFontSize": {
+      "$description": "Sidebar foot text. Monospace, matching the session metadata it sits under.",
+      "value": "10.5px"
+    },
+    "sectionHeadFontSize": {
+      "$description": "Sidebar section label (Agents / Sessions). Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
+      "value": "11px"
+    },
+    "sectionHeadPadBottom": {
+      "$description": "Sidebar section label bottom padding. The mockup draws 7px, tighter than the sides so the label sits with the rows it names rather than floating between sections.",
+      "value": "7px"
+    },
+    "sectionSepMargin": {
+      "$description": "Inset separator between sidebar sections. The mockup draws `margin: 8px`, so the rule does not run edge to edge — it reads as a division inside the column, not as another panel edge.",
+      "value": "8px"
     }
   },
   "focus": {

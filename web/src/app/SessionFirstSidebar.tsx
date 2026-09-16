@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { SessionList } from '@/features/sessions/components/SessionList';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
+import { SidebarSectionSeparator } from '@/app/patterns/SidebarSectionHead';
 import { SidebarRail } from '@/app/patterns/SidebarRail';
 import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
 import { shellIconButtonClass } from '@/app/shellStyles';
@@ -93,9 +94,9 @@ export function SessionFirstSidebar({
       <aside
         data-testid="session-first-sidebar"
         data-collapsed="true"
-        /* No border here: the column wrapper draws it, and a second one would
-           put the rail 1px over its 52px budget. */
-        className="flex h-full shrink-0 flex-col"
+        /* No border anywhere in the collapsed state: the column wrapper no
+           longer draws one, and the rail sits inside `shell.railWidth` exactly. */
+        className="bg-sidebar flex h-full shrink-0 flex-col"
       >
         <SidebarRail
           connectionStatus={connectionStatus}
@@ -108,9 +109,13 @@ export function SessionFirstSidebar({
   return (
     <aside
       data-testid="session-first-sidebar"
-      className={cn('flex h-full w-full shrink-0 flex-col', className)}
+      className={cn('bg-sidebar flex h-full w-full shrink-0 flex-col', className)}
     >
       <SidebarAgents agents={agents} activeAgentId={activeAgentId} />
+      {/* Inset rule, not a full-bleed border: the mockup draws `margin: 8px`,
+          so the sections read as divisions inside one column rather than as
+          separate panels. */}
+      <SidebarSectionSeparator />
       <SessionListHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -125,20 +130,6 @@ export function SessionFirstSidebar({
         createDisabled={createDisabled}
         onRefresh={onRefresh}
         loadingSessions={loadingSessions}
-        collapseControl={
-          collapsible ? (
-            <button
-              type="button"
-              data-testid="sidebar-collapse"
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar"
-              onClick={() => setCollapsed(true)}
-              className={cn(shellIconButtonClass, 'rounded-md hover:bg-accent hover:text-accent-foreground')}
-            >
-              <PanelLeftClose className="size-[length:var(--icon-md)]" aria-hidden />
-            </button>
-          ) : null
-        }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <SessionList
@@ -156,9 +147,29 @@ export function SessionFirstSidebar({
       </div>
       <div
         data-testid="session-first-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
       >
-        <SessionFirstSidebarFooter domain={domain} />
+        <SessionFirstSidebarFooter
+          domain={domain}
+          connectionStatus={connectionStatus}
+          nodeCount={agents.length}
+        />
+        {/* The collapse control lives in the foot, not in the list header. In
+            the header it took a row of its own, right-aligned, with an empty
+            left half — it read as an icon floating in a gap. The mockup puts
+            it here, opposite the service line. */}
+        {collapsible ? (
+          <button
+            type="button"
+            data-testid="sidebar-collapse"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            onClick={() => setCollapsed(true)}
+            className={cn(shellIconButtonClass, 'rounded-md hover:bg-accent hover:text-accent-foreground')}
+          >
+            <PanelLeftClose className="size-[length:var(--icon-md)]" aria-hidden />
+          </button>
+        ) : null}
       </div>
     </aside>
   );

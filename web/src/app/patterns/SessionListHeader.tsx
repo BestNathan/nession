@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ArrowDown, ArrowUp, Filter, Plus } from 'lucide-react';
 import { SearchBar } from '@/features/sessions/components/SearchBar';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,7 @@ import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
+import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
 export interface SessionListHeaderProps {
@@ -22,9 +23,6 @@ export interface SessionListHeaderProps {
   createDisabled: boolean;
   onRefresh: () => void;
   loadingSessions: boolean;
-  /** Optional slot for the sidebar's collapse control, so it sits with the
-   *  other list controls rather than floating in the section on its own. */
-  collapseControl?: ReactNode;
 }
 
 const STATUS_FILTERS: {
@@ -79,7 +77,6 @@ export function SessionListHeader({
   createDisabled,
   onRefresh,
   loadingSessions,
-  collapseControl,
 }: SessionListHeaderProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -90,7 +87,8 @@ export function SessionListHeader({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] border-b p-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] px-[var(--shell-space-2)] pb-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+      <SidebarSectionHead label="Sessions" />
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -116,9 +114,6 @@ export function SessionListHeader({
         <Plus className="size-4" />
         New Session
       </Button>
-      {collapseControl ? (
-        <div className="flex items-center justify-end">{collapseControl}</div>
-      ) : null}
       <div className="flex items-center justify-between gap-2">
         <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
           <CollapsibleTrigger
