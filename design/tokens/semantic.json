@@ -69,7 +69,7 @@
         "ref": "primitive.light.neutral.line"
       },
       "input": {
-        "ref": "primitive.light.neutral.line-strong"
+        "ref": "primitive.light.neutral.boundary"
       },
       "ring": {
         "ref": "primitive.light.neutral.text-muted"
