@@ -308,6 +308,22 @@
     "editorGutterWidth": {
       "$description": "Line-number column. Fixed so numbers align regardless of digit count.",
       "value": "34px"
+    },
+    "editorPadY": {
+      "$description": "Code surface vertical padding. The mockup's 14px, top and bottom, so the first line is not flush against the header.",
+      "value": "14px"
+    },
+    "editorGutterPadEnd": {
+      "$description": "Space between the line numbers and the code. The mockup's 14px — wide enough that a number and the first glyph do not read as one token.",
+      "value": "14px"
+    },
+    "editorHeadFontSize": {
+      "$description": "The file path above the code. Muted and below `text-xs`: it names what is open, it is not a title competing with the work.",
+      "value": "11.5px"
+    },
+    "editorHeadPadX": {
+      "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` — the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",
+      "value": "18px"
     }
   }
 }
