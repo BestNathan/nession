@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * Frozen wall clock for canonical fixture routes. Must stay after fixture
@@ -17,6 +17,40 @@ export const FIXTURE_SCREENSHOT = {
 /** Install a fixed clock before navigation so formatRelativeTime is stable. */
 export async function freezeFixtureClock(page: Page): Promise<void> {
   await page.clock.install({ time: FIXTURE_FROZEN_TIME });
+}
+
+/**
+ * Open a file in the fixture's Files view, by driving the tree.
+ *
+ * The canonical Workspace screens used to be captured with nothing selected, so
+ * the viewer never appeared in a baseline — and after the editor convergence it
+ * meant the theme and metrics of the code surface were in no golden image at
+ * all. The visual gate had nothing to fail on for changes to them, which is how
+ * a clock-driven dark theme survived in a light-only product.
+ *
+ * Driving the tree is how a user opens a file, and the fixture needs no other
+ * route: giving it one would put a test concern into the product's
+ * `WorkspaceContext`, and `fixtureCapabilityFacts` is explicit that fixture
+ * route parameters express capability *resolution inputs*, never resolved
+ * state.
+ *
+ * `web/src/App.tsx` is the target because it is not markdown — a `.md` opens in
+ * the preview, and the code surface is what this is here to cover.
+ *
+ * Each level is awaited before the next click: the tree fills from the
+ * fixture's async `listDir`, so clicking a child before its parent has rendered
+ * finds nothing.
+ */
+export async function openFixtureFile(page: Page): Promise<void> {
+  for (const dir of ['web', 'src']) {
+    const row = page.getByRole('treeitem', { name: dir });
+    await row.waitFor({ state: 'visible', timeout: 10_000 });
+    await row.click();
+  }
+  const file = page.getByRole('treeitem', { name: 'App.tsx' });
+  await file.waitFor({ state: 'visible', timeout: 10_000 });
+  await file.click();
+  await expect(page.getByTestId('codemirror-editor')).toBeVisible({ timeout: 10_000 });
 }
 
 export async function gotoFixtureShell(page: Page): Promise<void> {
