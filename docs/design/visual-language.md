@@ -222,7 +222,19 @@ Examples:
 
 The TerminalCapsule is the primary example of a control that should feel sophisticated without becoming busy.
 
-Its resting state should have a stable silhouette and few visible controls. `+`, shortcuts, capability identity, or secondary actions should appear progressively. When a capability becomes active, Nession can acknowledge it with precise, lightweight presence rather than immediately opening a large panel.
+Its resting state should have a stable silhouette and few visible controls. `+`, shortcuts, capability identity, or secondary actions should appear progressively. When a capability becomes active, Nession can acknowledge it with precise, lightweight presence rather than immediately opening a large panel — as of #748 that acknowledgement is carried inside the `+` expansion rather than on the resting capsule.
+
+**Several floating surfaces may coexist, and they must read as one group.** The
+anti-pattern list below warns against "multiple floating controls competing with
+the TerminalCapsule", and the answer is not to keep the count at one — the shell
+now also floats a surface switcher, a `+` expansion, a Workspace dock and an App
+band. The answer is that **every floating surface takes the same treatment**: no
+decorative border, one shared elevation language (a 1px shadow ring plus two
+shadow layers). Surfaces that share a height language read as layers of one
+system; surfaces that each invent their own shadow read as rivals. Adding a
+floating surface therefore means adopting the shared treatment, not designing a
+new one — and a floating surface that needs a *different* height to make sense is
+evidence that it should not be floating.
 
 Workspace follows the same rule at a broader depth: rich capability does not justify a rich permanent navigation bar.
 

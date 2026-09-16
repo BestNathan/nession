@@ -75,10 +75,11 @@ Web presentation should follow the same semantics:
 - unavailable capabilities remain hidden;
 - available capabilities may be discoverable in Workspace or explicit expansion;
 - relevant capabilities can gain contextual presence;
-- active capabilities can gain lightweight Session presence and contextual capsule actions;
+- active capabilities can gain lightweight Session presence, expressed inside the capsule's `+` expansion, plus contextual actions;
 - deeper views are opened explicitly.
 
-For example, when Claude Code is detected as active in the current Session, Nession may show a small Claude Code presence near the interaction layer and expose session-scoped actions/history/state without replacing the Terminal by default.
+For example, when Claude Code is detected as active in the current Session, Nession may mark it in the capsule's
+`+` expansion and expose session-scoped actions/history/state without replacing the Terminal by default.
 
 ## Workspace capability navigation
 

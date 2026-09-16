@@ -115,7 +115,21 @@ App should prefer native spatial and push/pop interaction:
 - system/back navigation returns through capability detail before leaving Workspace;
 - nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
-### Touch floor (recorded decision, #730)
+### Web: the capability dock
+
+Capability navigation on Web is a **bottom-centred dock** of rounded icon targets,
+with a dot marking the open one. It is a `+`-less closed set only in the sense that
+the *visible* set is small — `+` remains the explicit expansion, so the dock does
+not grow when an extension registers (see the anti-patterns above).
+
+**No shell band above the capability area.** `workspace.md` is explicit that a
+capability's own layout belongs to the capability — Files' master/detail *"belongs
+to Files"* — so a band above every capability is the *"second application shell"*
+this document forbids at the top. Context is carried by the tree's root row
+instead: the tree starts at `nession`, so the root row states what the user is
+looking at without a chrome band restating it.
+
+### Touch floor (recorded decision, #730, extended by #748)
 
 The App band is a compact pill floating over the terminal, and it declares its own
 touch floor — `experience.app.touchTarget.compact` (28px) — instead of the 44px
@@ -130,6 +144,18 @@ further fails CI. What it does not claim is comfort — 28px is below the platfo
 guideline, and that cost is accepted in exchange for the terminal keeping its
 space. If the pill ever gains a touch-first role, the token moves back to `min`
 and the implementation has to grow with it.
+
+**#748 extended the App band to two layers.** The band carries capability entries
+*and* the TerminalCapsule; **when the capsule expands, the band hides.** Hiding —
+not shifting, not shrinking — is what "yielding" means here: a partially visible
+band competes with the expanded capsule for the same thumb reach and reads as two
+half-controls rather than one. The 28px floor governs the capability layer; the
+capsule keeps its own sizing from `terminal-capsule.md`.
+
+The narrowest supported App viewport is `app.narrow-phone` (375×812, from
+`design/contracts/viewports.json`). The two-layer stack is verified there, because
+that is where it has the least room and where a band that merely shrinks would
+first become unusable.
 
 ## Files and other capability-specific layouts
 
