@@ -1,87 +1,249 @@
 {
-  "$description": "Semantic aliases of primitives. Light/dark maps set CSS variables that domain tokens reference. Deliberately absent: success and info — healthy is neutral (visual-language.md P6), and informational text uses muted-foreground.",
+  "$description": "Semantic aliases of primitives. Light/dark maps set CSS variables that domain tokens reference. Deliberately absent: success and info \u2014 healthy is neutral (visual-language.md P6), and informational text uses muted-foreground.",
   "themes": {
     "light": {
-      "background": { "ref": "primitive.light.neutral.ground" },
-      "foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "card": { "ref": "primitive.light.neutral.ground" },
-      "card-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "popover": { "ref": "primitive.light.neutral.ground" },
-      "popover-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "primary": { "ref": "primitive.light.neutral.text-primary" },
-      "primary-foreground": { "ref": "primitive.light.neutral.ground" },
-      "secondary": { "ref": "primitive.light.neutral.fill" },
-      "secondary-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "muted": { "ref": "primitive.light.neutral.fill" },
-      "muted-foreground": { "ref": "primitive.light.neutral.text-muted" },
-      "accent": { "ref": "primitive.light.neutral.fill" },
-      "accent-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "destructive": { "ref": "primitive.light.state.danger" },
-      "destructive-foreground": { "ref": "primitive.light.neutral.ground" },
-      "danger": { "ref": "semantic.destructive" },
-      "warning": { "ref": "primitive.light.state.warning" },
-      "warning-foreground": { "ref": "primitive.light.neutral.ground" },
-      "border": { "ref": "primitive.light.neutral.line" },
-      "input": { "ref": "primitive.light.neutral.line-strong" },
-      "ring": { "ref": "primitive.light.neutral.text-muted" },
-      "radius": { "ref": "primitive.radius" },
-      "radius-capsule": { "value": "calc(var(--radius) * 2.2)" },
-      "chart-1": { "ref": "primitive.light.neutral.text-primary" },
-      "chart-2": { "ref": "primitive.light.neutral.text-secondary" },
-      "chart-3": { "ref": "primitive.light.neutral.text-muted" },
-      "chart-4": { "ref": "primitive.light.neutral.line-strong" },
-      "chart-5": { "ref": "primitive.light.neutral.line" },
-      "sidebar": { "ref": "primitive.light.neutral.surface" },
-      "sidebar-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "sidebar-primary": { "ref": "primitive.light.neutral.text-primary" },
-      "sidebar-primary-foreground": { "ref": "primitive.light.neutral.ground" },
-      "sidebar-accent": { "ref": "primitive.light.neutral.fill" },
-      "sidebar-accent-foreground": { "ref": "primitive.light.neutral.text-primary" },
-      "sidebar-border": { "ref": "primitive.light.neutral.line" },
-      "sidebar-ring": { "ref": "primitive.light.neutral.text-muted" },
-      "overlay": { "ref": "primitive.black" },
-      "inverse": { "ref": "primitive.black" }
+      "background": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "card": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "card-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "popover": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "popover-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "primary": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "primary-foreground": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "secondary": {
+        "ref": "primitive.light.neutral.fill"
+      },
+      "secondary-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "muted": {
+        "ref": "primitive.light.neutral.fill"
+      },
+      "muted-foreground": {
+        "ref": "primitive.light.neutral.text-muted"
+      },
+      "accent": {
+        "ref": "primitive.light.neutral.fill"
+      },
+      "accent-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "destructive": {
+        "ref": "primitive.light.state.danger"
+      },
+      "destructive-foreground": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "danger": {
+        "ref": "semantic.destructive"
+      },
+      "warning": {
+        "ref": "primitive.light.state.warning"
+      },
+      "warning-foreground": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "border": {
+        "ref": "primitive.light.neutral.line"
+      },
+      "input": {
+        "ref": "primitive.light.neutral.line-strong"
+      },
+      "ring": {
+        "ref": "primitive.light.neutral.text-muted"
+      },
+      "radius": {
+        "ref": "primitive.radius"
+      },
+      "radius-capsule": {
+        "value": "calc(var(--radius) * 2.2)"
+      },
+      "elevation-floating": {
+        "value": "0 0 0 1px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%)"
+      },
+      "chart-1": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "chart-2": {
+        "ref": "primitive.light.neutral.text-secondary"
+      },
+      "chart-3": {
+        "ref": "primitive.light.neutral.text-muted"
+      },
+      "chart-4": {
+        "ref": "primitive.light.neutral.line-strong"
+      },
+      "chart-5": {
+        "ref": "primitive.light.neutral.line"
+      },
+      "sidebar": {
+        "ref": "primitive.light.neutral.surface"
+      },
+      "sidebar-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "sidebar-primary": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "sidebar-primary-foreground": {
+        "ref": "primitive.light.neutral.ground"
+      },
+      "sidebar-accent": {
+        "ref": "primitive.light.neutral.fill"
+      },
+      "sidebar-accent-foreground": {
+        "ref": "primitive.light.neutral.text-primary"
+      },
+      "sidebar-border": {
+        "ref": "primitive.light.neutral.line"
+      },
+      "sidebar-ring": {
+        "ref": "primitive.light.neutral.text-muted"
+      },
+      "overlay": {
+        "ref": "primitive.black"
+      },
+      "inverse": {
+        "ref": "primitive.black"
+      }
     },
     "dark": {
-      "background": { "ref": "primitive.dark.neutral.ground" },
-      "foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "card": { "ref": "primitive.dark.neutral.ground" },
-      "card-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "popover": { "ref": "primitive.dark.neutral.ground" },
-      "popover-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "primary": { "ref": "primitive.dark.neutral.text-primary" },
-      "primary-foreground": { "ref": "primitive.dark.neutral.ground" },
-      "secondary": { "ref": "primitive.dark.neutral.fill" },
-      "secondary-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "muted": { "ref": "primitive.dark.neutral.fill" },
-      "muted-foreground": { "ref": "primitive.dark.neutral.text-muted" },
-      "accent": { "ref": "primitive.dark.neutral.fill" },
-      "accent-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "destructive": { "ref": "primitive.dark.state.danger" },
-      "destructive-foreground": { "ref": "primitive.dark.neutral.ground" },
-      "danger": { "ref": "semantic.destructive" },
-      "warning": { "ref": "primitive.dark.state.warning" },
-      "warning-foreground": { "ref": "primitive.dark.neutral.ground" },
-      "border": { "ref": "primitive.dark.neutral.line" },
-      "input": { "ref": "primitive.dark.neutral.line-strong" },
-      "ring": { "ref": "primitive.dark.neutral.text-muted" },
-      "radius": { "ref": "primitive.radius" },
-      "radius-capsule": { "value": "calc(var(--radius) * 2.2)" },
-      "chart-1": { "ref": "primitive.dark.neutral.text-primary" },
-      "chart-2": { "ref": "primitive.dark.neutral.text-secondary" },
-      "chart-3": { "ref": "primitive.dark.neutral.text-muted" },
-      "chart-4": { "ref": "primitive.dark.neutral.line-strong" },
-      "chart-5": { "ref": "primitive.dark.neutral.line" },
-      "sidebar": { "ref": "primitive.dark.neutral.surface" },
-      "sidebar-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "sidebar-primary": { "ref": "primitive.dark.neutral.text-primary" },
-      "sidebar-primary-foreground": { "ref": "primitive.dark.neutral.ground" },
-      "sidebar-accent": { "ref": "primitive.dark.neutral.fill" },
-      "sidebar-accent-foreground": { "ref": "primitive.dark.neutral.text-primary" },
-      "sidebar-border": { "ref": "primitive.dark.neutral.line" },
-      "sidebar-ring": { "ref": "primitive.dark.neutral.text-muted" },
-      "overlay": { "ref": "primitive.black" },
-      "inverse": { "ref": "primitive.black" }
+      "background": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "card": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "card-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "popover": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "popover-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "primary": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "primary-foreground": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "secondary": {
+        "ref": "primitive.dark.neutral.fill"
+      },
+      "secondary-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "muted": {
+        "ref": "primitive.dark.neutral.fill"
+      },
+      "muted-foreground": {
+        "ref": "primitive.dark.neutral.text-muted"
+      },
+      "accent": {
+        "ref": "primitive.dark.neutral.fill"
+      },
+      "accent-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "destructive": {
+        "ref": "primitive.dark.state.danger"
+      },
+      "destructive-foreground": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "danger": {
+        "ref": "semantic.destructive"
+      },
+      "warning": {
+        "ref": "primitive.dark.state.warning"
+      },
+      "warning-foreground": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "border": {
+        "ref": "primitive.dark.neutral.line"
+      },
+      "input": {
+        "ref": "primitive.dark.neutral.line-strong"
+      },
+      "ring": {
+        "ref": "primitive.dark.neutral.text-muted"
+      },
+      "radius": {
+        "ref": "primitive.radius"
+      },
+      "radius-capsule": {
+        "value": "calc(var(--radius) * 2.2)"
+      },
+      "elevation-floating": {
+        "value": "0 0 0 1px oklch(1 0 0 / 8%), 0 1px 2px oklch(0 0 0 / 30%), 0 8px 24px oklch(0 0 0 / 40%)"
+      },
+      "chart-1": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "chart-2": {
+        "ref": "primitive.dark.neutral.text-secondary"
+      },
+      "chart-3": {
+        "ref": "primitive.dark.neutral.text-muted"
+      },
+      "chart-4": {
+        "ref": "primitive.dark.neutral.line-strong"
+      },
+      "chart-5": {
+        "ref": "primitive.dark.neutral.line"
+      },
+      "sidebar": {
+        "ref": "primitive.dark.neutral.surface"
+      },
+      "sidebar-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "sidebar-primary": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "sidebar-primary-foreground": {
+        "ref": "primitive.dark.neutral.ground"
+      },
+      "sidebar-accent": {
+        "ref": "primitive.dark.neutral.fill"
+      },
+      "sidebar-accent-foreground": {
+        "ref": "primitive.dark.neutral.text-primary"
+      },
+      "sidebar-border": {
+        "ref": "primitive.dark.neutral.line"
+      },
+      "sidebar-ring": {
+        "ref": "primitive.dark.neutral.text-muted"
+      },
+      "overlay": {
+        "ref": "primitive.black"
+      },
+      "inverse": {
+        "ref": "primitive.black"
+      }
     }
   }
 }

@@ -25,6 +25,7 @@
   --ring: oklch(0.549 0.013 265);
   --radius: 0.625rem;
   --radius-capsule: calc(var(--radius) * 2.2);
+  --elevation-floating: 0 0 0 1px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%);
   --chart-1: oklch(0.265 0.006 265);
   --chart-2: oklch(0.456 0.01 265);
   --chart-3: oklch(0.549 0.013 265);
@@ -162,6 +163,7 @@
   --ring: oklch(0.625 0.015 265);
   --radius: 0.625rem;
   --radius-capsule: calc(var(--radius) * 2.2);
+  --elevation-floating: 0 0 0 1px oklch(1 0 0 / 8%), 0 1px 2px oklch(0 0 0 / 30%), 0 8px 24px oklch(0 0 0 / 40%);
   --chart-1: oklch(0.93 0.006 265);
   --chart-2: oklch(0.755 0.012 265);
   --chart-3: oklch(0.625 0.015 265);

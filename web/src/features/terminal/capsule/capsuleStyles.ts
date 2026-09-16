@@ -55,9 +55,12 @@ export const capsuleCommandsPanelListClass =
 export const capsuleCommandsDismissLayerClass =
   'absolute inset-x-0 top-0 z-10 cursor-default';
 
-/** Floating control surface — elevation only, no border (visual-language §3, terminal-capsule § Surface treatment). */
+/** Floating control surface — the shared elevation, no border (visual-language.md
+ *  "several floating surfaces ... must read as one group", terminal-capsule.md
+ *  § Surface treatment). Every Nession-owned floating surface uses this token;
+ *  a surface that needs its own shadow is evidence it should not be floating. */
 export const capsuleFloatingSurfaceClass =
-  'bg-[color:var(--terminal-capsule-surface)] text-foreground shadow-md backdrop-blur-md';
+  'bg-[color:var(--terminal-capsule-surface)] text-foreground shadow-[var(--elevation-floating)] backdrop-blur-md';
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 

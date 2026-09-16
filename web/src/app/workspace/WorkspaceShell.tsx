@@ -102,7 +102,7 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
         >
           <nav
             aria-label="Workspace capabilities"
-            className="pointer-events-auto flex items-center gap-1 rounded-full border border-border/60 bg-background px-1.5 py-1.5 shadow-lg"
+            className="pointer-events-auto flex items-center gap-1 rounded-full bg-background px-1.5 py-1.5 shadow-[var(--elevation-floating)]"
           >
             {directItems.map((item) => {
               const binding = bindingFor(item)!;
