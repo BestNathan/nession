@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Filter, Plus } from 'lucide-react';
 import { SearchBar } from '@/features/sessions/components/SearchBar';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,9 @@ export interface SessionListHeaderProps {
   createDisabled: boolean;
   onRefresh: () => void;
   loadingSessions: boolean;
+  /** Optional slot for the sidebar's collapse control, so it sits with the
+   *  other list controls rather than floating in the section on its own. */
+  collapseControl?: ReactNode;
 }
 
 const STATUS_FILTERS: {
@@ -76,6 +79,7 @@ export function SessionListHeader({
   createDisabled,
   onRefresh,
   loadingSessions,
+  collapseControl,
 }: SessionListHeaderProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -112,6 +116,9 @@ export function SessionListHeader({
         <Plus className="size-4" />
         New Session
       </Button>
+      {collapseControl ? (
+        <div className="flex items-center justify-end">{collapseControl}</div>
+      ) : null}
       <div className="flex items-center justify-between gap-2">
         <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
           <CollapsibleTrigger

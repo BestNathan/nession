@@ -108,6 +108,7 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
+            onCloseDrawer={state.openDetail}
           />
         )}
       </div>

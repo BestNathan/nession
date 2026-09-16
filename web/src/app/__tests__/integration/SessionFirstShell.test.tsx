@@ -259,12 +259,15 @@ describe('SessionFirstShell', () => {
     expect(footer.className).toMatch(/shell-space|var\(--shell-space/);
   });
 
-  it('lists sessions in the drawer without an Agent card grid', async () => {
+  it('lists sessions in the sidebar column, without an Agent card grid', () => {
+    // Wide is two columns now, so the rows are present without opening anything.
+    // The Agents section reports infrastructure; it is still not a card grid and
+    // Sessions are still not filed under their Agent.
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    expect(screen.queryByTestId('session-item-row')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
+    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
     expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 

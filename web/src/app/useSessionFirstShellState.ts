@@ -125,5 +125,6 @@ export function useSessionFirstShellState() {
     showList,
     showDetail,
     openList,
+    openDetail,
   };
 }

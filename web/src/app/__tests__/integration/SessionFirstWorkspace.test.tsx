@@ -87,8 +87,9 @@ function baseProps(
     isWide: true,
     showList: true,
     showDetail: true,
+    onCloseDrawer: vi.fn(),
     onBackToSessions: vi.fn(),
-    
+
     ...overrides,
   };
 }

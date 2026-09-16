@@ -19,9 +19,13 @@ describe('FixtureShell', () => {
     expect(screen.queryByTestId('connection-status')).not.toBeInTheDocument();
   });
 
-  it('renders the sessions drawer deterministically', () => {
+  it('renders the sessions sidebar column deterministically', () => {
+    // Above `lg` the sidebar is a column, not an overlay drawer (#748): the
+    // drawer-open state this fixture used to force is not one the shipped shell
+    // has at this width, so the canonical screen moved with the shell.
     render(<FixtureShell />);
-    expect(screen.getByTestId('session-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-drawer')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('session-item-row')).toHaveLength(6);
   });
 

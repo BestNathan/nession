@@ -6,8 +6,6 @@ import {
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
 import { mapDomainState } from '@/features/sessions/model/domainState';
-import { SessionDrawer } from '@/app/SessionDrawer';
-import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
 import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
 
 /**
@@ -15,8 +13,11 @@ import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
  * session-first composition rendered with deterministic data and a
  * static terminal. No network, no auth. Also the Phase 6 baseline source.
  *
- * The sessions drawer renders open by default — the drawer-open state is
- * part of the deterministic baseline (screenshot golden image).
+ * Above `lg` the shell is two columns, so the canonical wide screen shows the
+ * sidebar in its own column. It used to render a forced-open overlay drawer on
+ * top of the content, which is a state the shipped shell no longer has at this
+ * width — the baseline moves with it rather than preserving a screen no user
+ * can reach (docs/design/migration.md).
  */
 export function FixtureShell() {
   const selectedId = FIXTURE_SELECTED_ID;
@@ -36,28 +37,6 @@ export function FixtureShell() {
       })
     : null;
 
-  const sidebarProps = {
-    agents: FIXTURE_AGENTS,
-    filteredSessions: FIXTURE_SESSIONS,
-    staleAgents: [],
-    selectedId,
-    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-    loadingSessions: false,
-    searchQuery: '',
-    setSearchQuery: () => {},
-    statusFilter: 'all' as const,
-    setStatusFilter: () => {},
-    sortField: 'name' as const,
-    sortDirection: 'desc' as const,
-    toggleSort: () => {},
-    isSearchActive: false,
-    onCreate: () => {},
-    onRefresh: () => {},
-    onSelect: () => {},
-    onConfigure: () => {},
-    onKill: () => {},
-  };
-
   return (
     <div
       data-testid="session-first-shell"
@@ -65,11 +44,6 @@ export function FixtureShell() {
       className="session-first-shell flex h-[100dvh] flex-col bg-background"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <SessionDrawer
-          open
-          onClose={() => {}}
-          sidebar={<SessionFirstSidebar {...sidebarProps} />}
-        />
         <SessionFirstWorkspace
           agents={FIXTURE_AGENTS}
           filteredSessions={FIXTURE_SESSIONS}
@@ -99,6 +73,7 @@ export function FixtureShell() {
           onSurfaceChange={() => {}}
           onToolChange={() => {}}
           onOpenAgent={() => {}}
+          onCloseDrawer={() => {}}
           isWide
           showList
           showDetail
