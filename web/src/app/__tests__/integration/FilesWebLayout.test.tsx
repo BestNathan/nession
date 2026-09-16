@@ -54,7 +54,7 @@ describe('FilesWebLayout (web layout)', () => {
 
   it('shows the select-a-file hint before any file is opened', () => {
     render(<FilesWebLayout ctx={makeCtx(makeFileOps())} />);
-    expect(screen.getByText('Select a file')).toBeInTheDocument();
+    expect(screen.getByText('Select a file to view it.')).toBeInTheDocument();
   });
 
   it('opens a file in the detail pane and closes it', async () => {
@@ -63,7 +63,7 @@ describe('FilesWebLayout (web layout)', () => {
     await user.click(await screen.findByText('f.txt'));
     expect(screen.getAllByText('f.txt').length).toBeGreaterThanOrEqual(2);
     await user.click(screen.getByLabelText('Close file'));
-    expect(screen.getByText('Select a file')).toBeInTheDocument();
+    expect(screen.getByText('Select a file to view it.')).toBeInTheDocument();
   });
 
   it('clears the selection when fileOps detaches then reattaches', async () => {
@@ -76,7 +76,7 @@ describe('FilesWebLayout (web layout)', () => {
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
 
     rerender(<FilesWebLayout ctx={makeCtx(makeFileOps())} />);
-    expect(screen.getByText('Select a file')).toBeInTheDocument();
+    expect(screen.getByText('Select a file to view it.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
   });
 });

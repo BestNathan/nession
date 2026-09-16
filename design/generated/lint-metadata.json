@@ -3,23 +3,22 @@
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "success",
-      "agent-online"
+      "agent-online",
+      "muted-foreground"
     ]
   },
   "green-400": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "success",
-      "agent-online"
+      "agent-online",
+      "muted-foreground"
     ]
   },
   "emerald-500": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "success",
       "session-active"
     ]
   },
@@ -81,49 +80,51 @@
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "location-remote",
+      "muted-foreground"
     ]
   },
   "blue-400": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "location-remote",
+      "muted-foreground"
     ]
   },
   "blue-300": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "muted-foreground"
     ]
   },
   "blue-800": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "muted-foreground"
     ]
   },
   "blue-700": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "muted-foreground"
     ]
   },
   "blue-100": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "muted-foreground"
     ]
   },
   "blue-200": {
     "layer": "primitive",
     "allowedInComponent": false,
     "suggestions": [
-      "info"
+      "muted-foreground"
     ]
   },
   "gray-400": {

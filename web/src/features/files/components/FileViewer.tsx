@@ -209,18 +209,18 @@ function FileViewerContent({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {showSuggestion && (
-        <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-info/10 border-info/30 text-info-foreground">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b bg-muted border-border text-muted-foreground">
           <Info className="h-3.5 w-3.5 shrink-0" />
           <span>This file looks like Markdown</span>
           <button
             onClick={onSuggestionPreview}
-            className="ml-auto px-2 py-0.5 rounded text-xs bg-info hover:bg-info/80 text-info-foreground"
+            className="ml-auto px-2 py-0.5 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/80"
           >
             Preview
           </button>
           <button
             onClick={onSuggestionDismiss}
-            className="px-1 py-0.5 text-info hover:text-info-foreground"
+            className="px-1 py-0.5 text-muted-foreground hover:text-foreground"
             aria-label="Dismiss"
           >
             ✕

@@ -17,18 +17,23 @@ const THEME_SIZE_PREFIXES = [
   'shell-space-',
   'shell-icon-button-size',
   'focus-ring-',
-  'terminal-well-background',
-  'terminal-capsule-surface',
   'radius-capsule',
   'motion-composer',
   'motion-shell-',
   'touch-target-min',
 ];
 
+/**
+ * Tailwind palette tokens a component might reach for, mapped to the Nession
+ * vocabulary it should use instead. Keyed by Tailwind's own names because the
+ * lint sees class strings, not our token source. There is no `success` or
+ * `info` suggestion: healthy is neutral, and informational text is
+ * muted-foreground (docs/design/visual-language.md P6).
+ */
 const LINT_PRIMITIVES = {
-  'green-500': ['success', 'agent-online'],
-  'green-400': ['success', 'agent-online'],
-  'emerald-500': ['success', 'session-active'],
+  'green-500': ['agent-online', 'muted-foreground'],
+  'green-400': ['agent-online', 'muted-foreground'],
+  'emerald-500': ['session-active'],
   'amber-500': ['warning', 'file-modified'],
   'amber-400': ['warning'],
   'amber-600': ['warning'],
@@ -36,18 +41,44 @@ const LINT_PRIMITIVES = {
   'red-500': ['destructive', 'danger', 'agent-error', 'file-deleted'],
   'red-400': ['destructive', 'danger'],
   'red-600': ['destructive'],
-  'blue-500': ['info'],
-  'blue-400': ['info'],
-  'blue-300': ['info'],
-  'blue-800': ['info'],
-  'blue-700': ['info'],
-  'blue-100': ['info'],
-  'blue-200': ['info'],
+  'blue-500': ['location-remote', 'muted-foreground'],
+  'blue-400': ['location-remote', 'muted-foreground'],
+  'blue-300': ['muted-foreground'],
+  'blue-800': ['muted-foreground'],
+  'blue-700': ['muted-foreground'],
+  'blue-100': ['muted-foreground'],
+  'blue-200': ['muted-foreground'],
   'gray-400': ['muted-foreground', 'session-unknown'],
   'gray-500': ['muted-foreground'],
   black: ['overlay', 'inverse'],
   white: ['primary-foreground'],
 };
+
+/** xterm ITheme slot -> primitive.terminal key. */
+export const TERMINAL_THEME_SLOTS = [
+  ['background', 'background'],
+  ['foreground', 'foreground'],
+  ['cursor', 'cursor'],
+  ['cursorAccent', 'cursor-accent'],
+  ['selectionBackground', 'selection-background'],
+  ['selectionForeground', 'selection-foreground'],
+  ['black', 'ansi-black'],
+  ['red', 'ansi-red'],
+  ['green', 'ansi-green'],
+  ['yellow', 'ansi-yellow'],
+  ['blue', 'ansi-blue'],
+  ['magenta', 'ansi-magenta'],
+  ['cyan', 'ansi-cyan'],
+  ['white', 'ansi-white'],
+  ['brightBlack', 'ansi-bright-black'],
+  ['brightRed', 'ansi-bright-red'],
+  ['brightGreen', 'ansi-bright-green'],
+  ['brightYellow', 'ansi-bright-yellow'],
+  ['brightBlue', 'ansi-bright-blue'],
+  ['brightMagenta', 'ansi-bright-magenta'],
+  ['brightCyan', 'ansi-bright-cyan'],
+  ['brightWhite', 'ansi-bright-white'],
+];
 
 const EXPERIENCE_APP_CLASSES = [
   'touch-target-min',
@@ -107,7 +138,11 @@ export function resolveRef(node, tokens, seen = new Set(), theme = 'light') {
   }
   seen.add(ref);
 
-  let target = getPath(tokens, ref);
+  // `{theme}` lets a Domain leaf name a theme-scoped Primitive directly
+  // (`primitive.{theme}.location.local`) instead of routing through a
+  // pass-through Semantic alias whose CSS variable name would collide with
+  // the Domain leaf's own name.
+  let target = getPath(tokens, ref.replace('{theme}', theme));
   if (
     target === undefined &&
     ref.startsWith('semantic.') &&
@@ -290,6 +325,34 @@ export function generateAppTs(tokens) {
   return lines.join('\n');
 }
 
+/**
+ * The xterm theme, emitted as TS rather than CSS because xterm takes a JS
+ * object. No `import type { ITheme }` here: `design/` has no node_modules, so
+ * the type must be applied by the consumer, which is where it type-checks.
+ */
+export function generateTerminalTs(tokens) {
+  const terminal = tokens.primitive?.terminal ?? {};
+  const read = (key) => {
+    const node = terminal[key];
+    if (node === undefined) {
+      throw new Error(`missing ref: primitive.terminal.${key}`);
+    }
+    return resolveRef(node, tokens).value;
+  };
+
+  const lines = ['// generated — do not edit', ''];
+  lines.push(
+    `export const TERMINAL_MINIMUM_CONTRAST_RATIO = ${JSON.stringify(read('minimum-contrast-ratio'))};`,
+    '',
+    'export const TERMINAL_THEME = {',
+  );
+  for (const [slot, key] of TERMINAL_THEME_SLOTS) {
+    lines.push(`  ${slot}: ${JSON.stringify(read(key))},`);
+  }
+  lines.push('};', '');
+  return lines.join('\n');
+}
+
 function readJson(relativePath) {
   const path = join(TOKENS_DIR, relativePath);
   try {
@@ -318,6 +381,7 @@ function artifactsFrom(tokens) {
     'web.css': generateWebCss(tokens),
     'lint-metadata.json': `${JSON.stringify(generateLintMetadata(tokens), null, 2)}\n`,
     'app.ts': generateAppTs(tokens),
+    'terminal.ts': generateTerminalTs(tokens),
   };
 }
 

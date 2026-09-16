@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
+import {
+  NESSION_TERMINAL_THEME,
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+} from '@/core/terminal-runtime/ThemeManager';
+import {
+  DEFAULT_FONT,
+  DEFAULT_FONT_SIZE,
+} from '@/core/terminal-runtime/instance/TerminalInstance';
 import { TerminalSurface } from '@/features/terminal/TerminalSurface';
 
 const FIXTURE_BUFFER = [
@@ -36,13 +43,22 @@ const FIXTURE_BUFFER = [
  * render half-transparent and the baselines would capture a state no user
  * sees. Sends are inert anyway — `controller` is null, and
  * `TerminalSurface.capsuleSendText` routes through `controller?.handleInput`.
+ *
+ * The font stack and the contrast ratio come from the runtime rather than
+ * xterm's defaults for the same reason. A bare `new Terminal()` renders in
+ * `courier-new`, so the baseline would pin a typeface the product never uses
+ * — and cell metrics follow the font, so the terminal's cols/rows would be
+ * measured against the wrong one.
  */
 export function FixtureTerminal() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const term = new Terminal({
-      theme: CATPPUCCIN_MOCHA,
+      theme: NESSION_TERMINAL_THEME,
+      fontFamily: DEFAULT_FONT,
+      fontSize: DEFAULT_FONT_SIZE,
+      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
       convertEol: true,
       cursorBlink: false,
       disableStdin: true,

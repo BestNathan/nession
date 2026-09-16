@@ -8,6 +8,8 @@ import {
   generateWebCss,
   generateLintMetadata,
   generateAppTs,
+  generateTerminalTs,
+  TERMINAL_THEME_SLOTS,
 } from './generate-tokens.mjs';
 
 const fixture = {
@@ -19,6 +21,20 @@ const fixture = {
         950: { value: 'oklch(0.145 0 0)' },
       },
       green: { 500: { value: 'oklch(0.63 0.17 145)' } },
+    },
+    terminal: {
+      background: { value: '#ffffff' },
+      foreground: { value: '#24292f' },
+      cursor: { value: '#0969da' },
+      'cursor-accent': { value: '#ffffff' },
+      'selection-background': { value: '#0969da33' },
+      'selection-foreground': { value: '#24292f' },
+      'minimum-contrast-ratio': { value: 4.5 },
+      ...Object.fromEntries(
+        TERMINAL_THEME_SLOTS.filter(([, key]) => key.startsWith('ansi-')).map(
+          ([, key], i) => [key, { value: `#00000${i.toString(16)}` }],
+        ),
+      ),
     },
   },
   semantic: {
@@ -116,8 +132,9 @@ test('generateLintMetadata marks green-500 as a primitive forbidden in component
   const meta = generateLintMetadata(fixture);
   assert.equal(meta['green-500'].layer, 'primitive');
   assert.equal(meta['green-500'].allowedInComponent, false);
-  assert.ok(meta['green-500'].suggestions.includes('success'));
   assert.ok(meta['green-500'].suggestions.includes('agent-online'));
+  assert.ok(meta['green-500'].suggestions.includes('muted-foreground'));
+  assert.ok(!meta['green-500'].suggestions.includes('success'));
 });
 
 test('generateAppTs exports numeric touchTarget.min === 44', () => {
@@ -152,4 +169,42 @@ test('production web.css uses one composer body size on web and app', () => {
   assert.match(appBlock?.[1] ?? '', /--composer-quick-key-font-size: 1rem/);
   assert.match(appBlock?.[1] ?? '', /--composer-phys-key-font-size: 1rem/);
   assert.match(appBlock?.[1] ?? '', /--composer-caption-font-size: 1rem/);
+});
+
+test('generateTerminalTs fills every xterm ITheme colour slot', () => {
+  const src = generateTerminalTs(fixture);
+  for (const [slot] of TERMINAL_THEME_SLOTS) {
+    assert.match(src, new RegExp(`\\b${slot}: "#`), `missing slot ${slot}`);
+  }
+  assert.match(src, /TERMINAL_MINIMUM_CONTRAST_RATIO = 4\.5;/);
+});
+
+test('generateTerminalTs throws rather than emitting an undefined slot', () => {
+  const broken = structuredClone(fixture);
+  delete broken.primitive.terminal['ansi-bright-cyan'];
+  assert.throws(
+    () => generateTerminalTs(broken),
+    /missing ref: primitive\.terminal\.ansi-bright-cyan/,
+  );
+});
+
+// The terminal background is the Session canvas: the chrome's ground must equal
+// the terminal's ground or the surface edge reads as a seam. Both are literals
+// in primitive.json (oklch for chrome, hex for xterm), so pairing them here is
+// what keeps them from drifting apart.
+test('production terminal background equals the light chrome ground', () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const terminalTs = readFileSync(join(dir, '../generated/terminal.ts'), 'utf8');
+  const css = readFileSync(join(dir, '../generated/web.css'), 'utf8');
+  const background = terminalTs.match(/\bbackground: "(#[0-9a-fA-F]{6})"/)?.[1];
+  assert.equal(background?.toLowerCase(), '#ffffff');
+  assert.match(css, /:root \{[\s\S]*?--background: oklch\(1 0 0\);/);
+});
+
+test('production terminal.ts carries no Catppuccin Mocha leftover', () => {
+  const terminalTs = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../generated/terminal.ts'),
+    'utf8',
+  );
+  assert.doesNotMatch(terminalTs, /1e1e2e|cdd6f4|89b4fa/i);
 });

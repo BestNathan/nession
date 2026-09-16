@@ -33,8 +33,8 @@ test('token index exposes experience, domain, primitive and semantic aliases', (
   assert.ok(index.has('experience.web.row.md'));
   assert.ok(index.has('primitive.typography.size'));
   assert.ok(index.has('domain.agent.online'));
-  assert.ok(index.has('semantic.themes.light.success'));
-  assert.ok(index.has('semantic.success'), 'semantic alias resolves via light theme');
+  assert.ok(index.has('semantic.themes.light.warning'));
+  assert.ok(index.has('semantic.warning'), 'semantic alias resolves via light theme');
   assert.ok(!index.has('experience.web.touchTarget.min'), 'web has no touch-target token');
   assert.ok(!index.has('semantic.nope'));
 });
@@ -168,7 +168,7 @@ test('unknown token id fails with context', () => {
 
 test('non-px token in a height field fails', () => {
   const tree = baseTree();
-  tree.categories['list-row.json'].web.heightToken = 'semantic.success';
+  tree.categories['list-row.json'].web.heightToken = 'semantic.warning';
   const errors = errorsOf(tree);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /does not resolve to a px\/rem value/);

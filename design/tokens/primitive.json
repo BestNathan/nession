@@ -1,62 +1,88 @@
 {
-  "$description": "Primitive palette and radii. Product components must not consume these directly.",
-  "color": {
-    "white": { "value": "oklch(1 0 0)" },
-    "black": { "value": "oklch(0 0 0)" },
-    "white-alpha": {
-      "10": { "value": "oklch(1 0 0 / 10%)" },
-      "15": { "value": "oklch(1 0 0 / 15%)" },
-      "96": { "value": "oklch(1 0 0 / 96%)" }
+  "$description": "Primitive palette, terminal ANSI set, and radii. Product components must not consume these directly. Colours are oklch; terminal ANSI is sRGB because xterm consumes it as-is.",
+  "light": {
+    "neutral": {
+      "$description": "Cool-biased ramp (hue 265) so the warm location colour reads warm against it. Whisper-quiet near the ground, then a hard jump to text.",
+      "ground": { "value": "oklch(1 0 0)" },
+      "surface": { "value": "oklch(0.977 0.003 265)" },
+      "fill": { "value": "oklch(0.95 0.003 265)" },
+      "line": { "value": "oklch(0.927 0.003 265)" },
+      "line-strong": { "value": "oklch(0.88 0.003 265)" },
+      "text-disabled": { "value": "oklch(0.648 0.009 265)" },
+      "text-muted": { "value": "oklch(0.549 0.013 265)" },
+      "text-secondary": { "value": "oklch(0.456 0.01 265)" },
+      "text-primary": { "value": "oklch(0.265 0.006 265)" }
     },
-    "zinc": {
-      "50": { "value": "oklch(0.985 0 0)" },
-      "100": { "value": "oklch(0.97 0 0)" },
-      "200": { "value": "oklch(0.922 0 0)" },
-      "300": { "value": "oklch(0.87 0 0)" },
-      "400": { "value": "oklch(0.708 0 0)" },
-      "500": { "value": "oklch(0.556 0 0)" },
-      "600": { "value": "oklch(0.439 0 0)" },
-      "700": { "value": "oklch(0.371 0 0)" },
-      "800": { "value": "oklch(0.269 0 0)" },
-      "900": { "value": "oklch(0.205 0 0)" },
-      "950": { "value": "oklch(0.145 0 0)" }
+    "location": {
+      "$description": "The only chromatic axis. Matched lightness and chroma, opposite hues, so neither location outranks the other.",
+      "local": { "value": "oklch(0.56 0.13 55)" },
+      "remote": { "value": "oklch(0.55 0.129 255)" }
     },
-    "green": {
-      "400": { "value": "oklch(0.72 0.17 145)" },
-      "500": { "value": "oklch(0.63 0.17 145)" }
+    "action": {
+      "$description": "Hue 158 is the midpoint of the 55 <-> 255 short arc: the colour of crossing over.",
+      "value": "oklch(0.534 0.125 158)"
     },
-    "emerald": {
-      "500": { "value": "oklch(0.696 0.17 162.48)" }
-    },
-    "amber": {
-      "400": { "value": "oklch(0.828 0.189 84.429)" },
-      "500": { "value": "oklch(0.769 0.188 70.08)" },
-      "600": { "value": "oklch(0.666 0.179 58.318)" }
-    },
-    "yellow": {
-      "600": { "value": "oklch(0.681 0.162 75.834)" }
-    },
-    "red": {
-      "400": { "value": "oklch(0.704 0.191 22.216)" },
-      "500": { "value": "oklch(0.577 0.245 27.325)" },
-      "600": { "value": "oklch(0.577 0.245 27.325)" }
-    },
-    "blue": {
-      "100": { "value": "oklch(0.932 0.032 255.585)" },
-      "200": { "value": "oklch(0.882 0.059 254.128)" },
-      "300": { "value": "oklch(0.809 0.105 251.813)" },
-      "400": { "value": "oklch(0.707 0.165 254.624)" },
-      "500": { "value": "oklch(0.623 0.214 259.815)" },
-      "700": { "value": "oklch(0.488 0.243 264.376)" },
-      "800": { "value": "oklch(0.424 0.199 265.638)" }
-    },
-    "gray": {
-      "400": { "value": "oklch(0.707 0.022 261.325)" },
-      "500": { "value": "oklch(0.551 0.027 264.364)" }
-    },
-    "catppuccin": {
-      "mocha-base": { "value": "#1e1e2e" }
+    "state": {
+      "$description": "danger and warning only. There is deliberately no success colour: healthy is neutral (visual-language.md P6).",
+      "danger": { "value": "oklch(0.572 0.189 25)" },
+      "warning": { "value": "oklch(0.553 0.115 80)" }
     }
+  },
+  "dark": {
+    "$description": "Dark counterpart. The mapping exists so the token architecture is theme-complete; no dark UI ships yet, and these values are not part of the verified surface. Treated as unreviewed until a dark theme is an actual deliverable.",
+    "neutral": {
+      "ground": { "value": "oklch(0.15 0.008 265)" },
+      "surface": { "value": "oklch(0.205 0.011 265)" },
+      "fill": { "value": "oklch(0.245 0.013 265)" },
+      "line": { "value": "oklch(0.295 0.016 265)" },
+      "line-strong": { "value": "oklch(0.36 0.018 265)" },
+      "text-disabled": { "value": "oklch(0.48 0.016 265)" },
+      "text-muted": { "value": "oklch(0.625 0.015 265)" },
+      "text-secondary": { "value": "oklch(0.755 0.012 265)" },
+      "text-primary": { "value": "oklch(0.93 0.006 265)" }
+    },
+    "location": {
+      "local": { "value": "oklch(0.76 0.115 55)" },
+      "remote": { "value": "oklch(0.76 0.115 255)" }
+    },
+    "action": { "value": "oklch(0.8 0.125 158)" },
+    "state": {
+      "danger": { "value": "oklch(0.65 0.205 25)" },
+      "warning": { "value": "oklch(0.87 0.145 100)" }
+    }
+  },
+  "white": { "value": "oklch(1 0 0)" },
+  "black": { "value": "oklch(0 0 0)" },
+  "white-alpha": {
+    "10": { "value": "oklch(1 0 0 / 10%)" },
+    "15": { "value": "oklch(1 0 0 / 15%)" },
+    "96": { "value": "oklch(1 0 0 / 96%)" }
+  },
+  "terminal": {
+    "$description": "Nession's own 16-colour ANSI set, shared by both themes (the terminal is light-only for now). white/brightWhite are reverse-video background slots and deliberately do not clear AA as text — see docs/design/visual-language.md. Consumed by xterm via the generated terminal theme, not as CSS vars.",
+    "background": { "value": "#ffffff" },
+    "foreground": { "value": "#24292f" },
+    "minimum-contrast-ratio": { "value": 4.5 },
+    "cursor": { "value": "#0969da" },
+    "cursor-accent": { "value": "#ffffff" },
+    "selection-background": { "value": "#0969da33" },
+    "selection-foreground": { "value": "#24292f" },
+    "ansi-black": { "value": "#24292f" },
+    "ansi-red": { "value": "#cf222e" },
+    "ansi-green": { "value": "#1a7f37" },
+    "ansi-yellow": { "value": "#9a6700" },
+    "ansi-blue": { "value": "#0969da" },
+    "ansi-magenta": { "value": "#8250df" },
+    "ansi-cyan": { "value": "#1b7c83" },
+    "ansi-white": { "value": "#f6f8fa" },
+    "ansi-bright-black": { "value": "#57606a" },
+    "ansi-bright-red": { "value": "#a40e26" },
+    "ansi-bright-green": { "value": "#116329" },
+    "ansi-bright-yellow": { "value": "#7d4e00" },
+    "ansi-bright-blue": { "value": "#0550ae" },
+    "ansi-bright-magenta": { "value": "#6639ba" },
+    "ansi-bright-cyan": { "value": "#008295" },
+    "ansi-bright-white": { "value": "#ffffff" }
   },
   "radius": { "value": "0.625rem" },
   "typography": {

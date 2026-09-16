@@ -35,7 +35,7 @@ tmux sessions (per-node)
 ## Features
 
 - **Central registry** — agents register on connect and heartbeat; the server persists agents and sessions in SQLite.
-- **Web dashboard** — React + xterm.js UI to browse agents, create/kill sessions, and open a live terminal (Catppuccin Mocha theme).
+- **Web dashboard** — React + xterm.js UI to browse agents, create/kill sessions, and open a live terminal (light, on the same ground as the chrome).
 - **Interactive CLI** — attach to a session in a raw terminal, list agents/sessions, create and kill sessions.
 - **Two transports** — relay through the server or P2P directly to the agent.
 - **Container-ready** — multi-arch (amd64/arm64) Docker images and Kubernetes manifests (kustomize base + staging/production overlays).
