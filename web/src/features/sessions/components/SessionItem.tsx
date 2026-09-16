@@ -77,19 +77,19 @@ export function SessionItem({
             `white-space: nowrap` on both for the same reason. */}
         <span
           className={cn(
-            'truncate text-[12.5px] leading-5',
+            'truncate text-[length:var(--shell-session-row-title-font-size)] leading-5',
             selected ? 'font-medium text-foreground' : 'text-[color:var(--text-secondary)]',
           )}
         >
           {session.session_name}
         </span>
-        <span className="truncate font-mono text-[10px] leading-4 text-muted-foreground">
+        <span className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground">
           shell · {agentLabel} · {formatRelativeTime(session.last_activity)}
         </span>
         {domain.agent.copy !== null && (
           <span
             className={cn(
-              'truncate font-mono text-[10px] leading-4',
+              'truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4',
               agentCopyClass(domain.agent.channel),
             )}
           >

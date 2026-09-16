@@ -142,9 +142,13 @@ export function SessionFirstSidebar({
       </div>
       <div
         data-testid="session-first-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
       >
-        <SessionFirstSidebarFooter domain={domain} />
+        <SessionFirstSidebarFooter
+          domain={domain}
+          connectionStatus={connectionStatus}
+          nodeCount={agents.length}
+        />
         {/* The collapse control lives in the foot, not in the list header. In
             the header it took a row of its own, right-aligned, with an empty
             left half — it read as an icon floating in a gap. The mockup puts

@@ -91,6 +91,12 @@
   --shell-sidebar-width: 246px;
   --shell-session-row-pad-y: 7px;
   --shell-session-row-radius: 7px;
+  --shell-session-row-title-font-size: 12.5px;
+  --shell-session-row-meta-font-size: 10px;
+  --shell-foot-pad-y: 9px;
+  --shell-foot-gap: 7px;
+  --shell-foot-dot-size: 5px;
+  --shell-foot-font-size: 10.5px;
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
   --composer-font-size: 1rem;

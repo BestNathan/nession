@@ -68,6 +68,30 @@
     "sessionRowRadius": {
       "$description": "Session row corner radius. The mockup rounds the row so the selected `--n-raised` fill reads as a chip rather than a band.",
       "value": "7px"
+    },
+    "sessionRowTitleFontSize": {
+      "$description": "Session name. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
+      "value": "12.5px"
+    },
+    "sessionRowMetaFontSize": {
+      "$description": "Session metadata (agent / recency). Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
+      "value": "10px"
+    },
+    "footPadY": {
+      "$description": "Sidebar foot vertical padding. The mockup draws 9px; horizontal is `shell.space-3` (12px), which is what the mockup draws too.",
+      "value": "9px"
+    },
+    "footGap": {
+      "$description": "Sidebar foot gap between the status dot, its text and the controls.",
+      "value": "7px"
+    },
+    "footDotSize": {
+      "$description": "Sidebar foot service dot. Small on purpose: the mockup's comment is 'Healthy stays quiet; degraded may gain emphasis', so the steady state is a 5px mark beside muted text rather than a badge.",
+      "value": "5px"
+    },
+    "footFontSize": {
+      "$description": "Sidebar foot text. Monospace, matching the session metadata it sits under.",
+      "value": "10.5px"
     }
   },
   "focus": {
