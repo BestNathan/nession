@@ -8,7 +8,12 @@ const DESIGN_DIR = join(SCRIPT_DIR, '..');
 const TOKENS_DIR = join(DESIGN_DIR, 'tokens');
 const GENERATED_DIR = join(DESIGN_DIR, 'generated');
 
-const NON_COLOR_SEMANTIC = new Set(['radius', 'radius-capsule']);
+// Semantic names that carry something other than a colour, so they must not be
+// bridged into Tailwind's colour namespace. `elevation-floating` is a shadow:
+// every floating surface takes it (visual-language.md, "several floating
+// surfaces ... must read as one group"), and it sits on the semantic layer
+// because a dark theme needs a different shadow, not a different shape.
+const NON_COLOR_SEMANTIC = new Set(['radius', 'radius-capsule', 'elevation-floating']);
 
 const THEME_SIZE_PREFIXES = [
   'control-',

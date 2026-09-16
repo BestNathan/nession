@@ -153,17 +153,24 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     }
   });
 
-  test('web: a healthy session header keeps infrastructure context quiet', async ({ page }) => {
+  test('web: a healthy shell keeps infrastructure context quiet', async ({ page }) => {
     await page.goto('/#/fixture');
-    const header = page.getByTestId('session-header-line');
-    await expect(header).toBeVisible();
 
-    // Identity and non-gesture navigation are permanent; healthy infrastructure
-    // is not — a member that carries nothing actionable must not occupy space.
+    // Web has no Session header since #748. The shell is two columns; identity
+    // is the selected row, and the only floating control over the work surface
+    // is the surface capsule.
+    await expect(page.getByTestId('session-header-line')).toHaveCount(0);
+    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+    await expect(page.getByTestId('sidebar-agents')).toBeVisible();
+
+    // Healthy infrastructure is not permanent chrome — a member that carries
+    // nothing actionable must not occupy space.
     await expect(page.getByTestId('agent-context')).toHaveCount(0);
     await expect(page.getByTestId('connection-status')).toHaveCount(0);
     await expect(page.getByTestId('server-connection')).toHaveCount(0);
-    await expect(page.getByTestId('session-first-open-drawer')).toBeVisible();
+
+    // Workspace stays reachable without gestures: the floating capsule is the
+    // only visible route now, so its presence is what the contract protects.
     await expect(page.getByRole('tab', { name: 'Workspace' })).toBeVisible();
   });
 

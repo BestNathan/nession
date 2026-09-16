@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { TerminalCapsule } from '@/features/terminal/capsule/TerminalCapsule';
 
 describe('capsule capability presence', () => {
-  it('renders no capability chrome when nothing earned presence', () => {
+  it('renders no capability chrome at rest', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
 
     expect(screen.queryByTestId('capsule-capability')).not.toBeInTheDocument();
@@ -12,59 +12,27 @@ describe('capsule capability presence', () => {
     expect(screen.getByTestId('terminal-capsule')).toBeInTheDocument();
   });
 
-  it('renders the capability that earned presence, with its state', () => {
-    render(
+  it('never puts capability identity on the resting capsule, whatever the states are', () => {
+    // SC4. The revision (#748 / terminal-capsule.md 2026-09-16): capability state
+    // lives in `+`. The observable consequence is that an active capability
+    // changes nothing about the resting surface.
+    const { container: quiet } = render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
+
+    const { container: withActive } = render(
       <TerminalCapsule
         experience="web"
         sendText={vi.fn()}
-        capability={{
-          id: 'claude-code',
-          label: 'Claude Code',
-          state: 'active',
-          onActivate: vi.fn(),
+        capabilityDisclosure={{
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          onSelect: vi.fn(),
         }}
       />,
     );
 
-    const chip = screen.getByTestId('capsule-capability');
-    expect(chip).toHaveTextContent('Claude Code');
-    expect(chip).toHaveAttribute('data-capability-state', 'active');
-  });
-
-  it('activates the capability when pressed', async () => {
-    const onActivate = vi.fn();
-    render(
-      <TerminalCapsule
-        experience="web"
-        sendText={vi.fn()}
-        capability={{
-          id: 'claude-code',
-          label: 'Claude Code',
-          state: 'relevant',
-          onActivate,
-        }}
-      />,
-    );
-
-    await userEvent.click(screen.getByTestId('capsule-capability'));
-    expect(onActivate).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the capsule to a single capability contribution', () => {
-    render(
-      <TerminalCapsule
-        experience="web"
-        sendText={vi.fn()}
-        capability={{
-          id: 'claude-code',
-          label: 'Claude Code',
-          state: 'relevant',
-          onActivate: vi.fn(),
-        }}
-      />,
-    );
-
-    expect(screen.getAllByTestId('capsule-capability')).toHaveLength(1);
+    // The `+` control is an icon button with an accessible name and no text, so
+    // the resting capsule's visible text is identical in both cases.
+    expect(withActive.textContent).toBe(quiet.textContent);
+    expect(screen.queryAllByTestId('capsule-capability')).toHaveLength(0);
   });
 });
 
@@ -75,7 +43,7 @@ describe('capsule capability disclosure', () => {
     expect(screen.queryByTestId('capsule-capability-more')).not.toBeInTheDocument();
   });
 
-  it('offers capabilities that earned no chip, and activates the one chosen', async () => {
+  it('marks a perceived capability inside `+` and activates the one chosen', async () => {
     const onSelect = vi.fn();
     render(
       <TerminalCapsule
@@ -83,7 +51,7 @@ describe('capsule capability disclosure', () => {
         sendText={vi.fn()}
         capabilityDisclosure={{
           entries: [
-            { id: 'files', title: 'Files', state: 'available' },
+            { id: 'claude-code', title: 'Claude Code', state: 'active' },
             { id: 'env', title: 'Environment Files', state: 'available' },
           ],
           onSelect,
@@ -93,39 +61,19 @@ describe('capsule capability disclosure', () => {
 
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
 
-    const entry = await screen.findByTestId('capsule-capability-picker-env');
-    expect(entry).toHaveAttribute('data-capability-state', 'available');
+    // The state travels with the entry so the list can mark it — this is the
+    // one place a capability's state is allowed to show.
+    const active = await screen.findByTestId('capsule-capability-picker-claude-code');
+    expect(active).toHaveAttribute('data-capability-state', 'active');
+    const available = await screen.findByTestId('capsule-capability-picker-env');
+    expect(available).toHaveAttribute('data-capability-state', 'available');
+
     // Base UI holds the popup inert until its open transition settles.
     await waitFor(() => {
-      expect(entry).not.toHaveStyle({ pointerEvents: 'none' });
+      expect(available).not.toHaveStyle({ pointerEvents: 'none' });
     });
 
-    await userEvent.click(entry);
+    await userEvent.click(available);
     expect(onSelect).toHaveBeenCalledWith('env');
-  });
-
-  it('keeps the chip and the discovery entry independent', () => {
-    render(
-      <TerminalCapsule
-        experience="web"
-        sendText={vi.fn()}
-        capability={{
-          id: 'claude-code',
-          label: 'Claude Code',
-          state: 'active',
-          onActivate: vi.fn(),
-        }}
-        capabilityDisclosure={{
-          entries: [{ id: 'files', title: 'Files', state: 'available' }],
-          onSelect: vi.fn(),
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId('capsule-capability')).toHaveAttribute(
-      'data-capability-state',
-      'active',
-    );
-    expect(screen.getByTestId('capsule-capability-more')).toBeInTheDocument();
   });
 });

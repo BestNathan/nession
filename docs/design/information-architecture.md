@@ -80,7 +80,7 @@ IA consequences:
 - **Unavailable:** hidden; no dead navigation slot is required.
 - **Available:** may be discoverable in Workspace or an explicit capability picker when useful.
 - **Relevant:** can be promoted within Workspace and contextual actions.
-- **Active:** can gain lightweight presence directly in the current Session and interaction capsule.
+- **Active:** can gain lightweight presence in the current Session, expressed through the interaction capsule's `+` expansion rather than on its resting surface.
 
 Deeper capability surfaces are explicitly opened. They should not automatically replace the main work surface merely because a capability is active.
 

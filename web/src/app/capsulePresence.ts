@@ -4,12 +4,10 @@ import {
   type CapabilityDisclosureEntry,
   type CapabilityFacts,
   type CapabilityId,
-  type CapabilityPresence,
   type CapabilitySnapshot,
 } from '@/features/capabilities';
 import type {
   CapsuleCapabilityDisclosure,
-  CapsuleCapabilityPresence,
 } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { FileOps } from '@/features/files';
@@ -17,60 +15,22 @@ import type { Agent, Session } from '@/types';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 
-/** The capability the capsule may show — narrowed to the states that earn it. */
-export interface CapsuleCapabilitySelection {
-  id: CapabilityId;
-  label: string;
-  state: 'relevant' | 'active';
-}
-
-/** The capsule's partition of capability presence — one rule, capsule's own limit. */
+/** The capsule's partition of capability presence — one rule, capsule's own limit.
+ *
+ *  The limit is **zero**: the capsule has no direct slot. Capability state is
+ *  expressed inside the `+` expansion instead (terminal-capsule.md, decision of
+ *  2026-09-16 / #748), so every present capability is discoverable and the
+ *  resting capsule is identical whatever the capability states are.
+ */
 function capsuleDisclosure(snapshots: readonly CapabilitySnapshot[]) {
   const presences = resolveCapabilityPresences(snapshots, { surface: 'capsule' });
-  return resolveCapabilityDisclosure(presences, { directLimit: 1 });
-}
-
-function selectionFrom(
-  snapshots: readonly CapabilitySnapshot[],
-  direct: readonly CapabilityPresence[],
-): CapsuleCapabilitySelection | undefined {
-  const [selected] = direct;
-  if (!selected) {
-    return undefined;
-  }
-
-  const snapshot = snapshots.find((candidate) => candidate.id === selected.capabilityId);
-  if (!snapshot || (snapshot.state !== 'relevant' && snapshot.state !== 'active')) {
-    return undefined;
-  }
-
-  return { id: snapshot.id, label: snapshot.title, state: snapshot.state };
-}
-
-/**
- * Pick the single capability the capsule may show, if any.
- *
- * The capsule is not a toolbar: a registered capability earns nothing just by
- * existing (prose: terminal-capsule.md), and however many capabilities qualify,
- * the capsule shows at most one. Both come from the shared disclosure rule,
- * read with a limit of one — the capsule does not get its own discovery policy,
- * only its own number.
- *
- * Registration order is the only tie-break, so the choice stays deterministic
- * rather than depending on resolution order.
- */
-export function selectCapsuleCapability(
-  snapshots: readonly CapabilitySnapshot[],
-): CapsuleCapabilitySelection | undefined {
-  return selectionFrom(snapshots, capsuleDisclosure(snapshots).direct);
+  return resolveCapabilityDisclosure(presences, { directLimit: 0 });
 }
 
 /** Everything the capsule presence needs from the shell, plus its two actions. */
-/** What the capsule renders: the chip that earned presence, and the rest on demand. */
+/** What the capsule renders: no resting slot; every present capability is in `+`. */
 export interface CapsuleCapabilityContribution {
-  /** The capability that earned the capsule's chip, if any. At most one. */
-  capability?: CapsuleCapabilityPresence;
-  /** Visible capabilities with no chip — the capsule's discovery entry. */
+  /** Reachable capabilities, each carrying its state so `+` can mark it. */
   disclosure?: CapsuleCapabilityDisclosure;
 }
 
@@ -114,7 +74,6 @@ export function resolveCapsuleCapabilities(
   });
 
   const disclosure = capsuleDisclosure(snapshots);
-  const selected = selectionFrom(snapshots, disclosure.direct);
 
   const activate = (id: CapabilityId) => {
     input.onToolChange(id);
@@ -127,12 +86,6 @@ export function resolveCapsuleCapabilities(
   });
 
   return {
-    capability: selected
-      ? {
-        ...selected,
-        onActivate: () => activate(selected.id),
-      }
-      : undefined,
     disclosure: entries.length > 0 ? { entries, onSelect: activate } : undefined,
   };
 }

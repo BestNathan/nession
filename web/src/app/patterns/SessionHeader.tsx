@@ -1,31 +1,26 @@
-import { ChevronLeft, Menu, PanelRight } from 'lucide-react';
-import { AgentContext } from '@/features/agents/components/AgentContext';
+import { Menu, PanelRight } from 'lucide-react';
 import { ConnectionStatus as SessionConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
-import {
-  SurfaceSwitcher,
-  type Surface,
-} from '@/app/patterns/SurfaceSwitcher';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
-import type { ConnectionState } from '@/services/socket';
 
+// Re-exported for the six modules that import the surface type from here.
+import type { Surface } from '@/app/patterns/SurfaceSwitcher';
 export type { Surface };
 
+/**
+ * App-only since #748: the Web shell renders no header. Every prop here is one
+ * the App branch actually reads — the web-only ones (agent label, agent
+ * context, back-to-sessions, server micro-status) went with the branch rather
+ * than surviving as dead parameters.
+ */
 export interface SessionHeaderProps {
   sessionName: string;
-  agentLabel: string;
   state: DomainState;
-  surface: Surface;
-  onSurfaceChange: (surface: Surface) => void;
-  onOpenAgent: () => void;
-  onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
   onOpenWorkspace?: () => void;
-  serverStatus?: ConnectionState;
   /** App experience: no Terminal|Workspace switcher — the spatial model owns navigation. */
   experience?: CapsuleExperience;
 }
@@ -37,10 +32,7 @@ interface MenuButtonOptions {
   className: string;
 }
 
-/**
- * Shared ghost menu button for both header branches. Only the size differs
- * (app: 44px touch target, web: 36px) — everything else must not drift.
- */
+/** Ghost menu button for the App header's Sessions affordance. */
 function renderMenuButton({ label, testid, onClick, className }: MenuButtonOptions) {
   return (
     <Button
@@ -59,16 +51,10 @@ function renderMenuButton({ label, testid, onClick, className }: MenuButtonOptio
 
 export function SessionHeader({
   sessionName,
-  agentLabel,
   state,
-  surface,
-  onSurfaceChange,
-  onOpenAgent,
-  onBackToSessions,
   onOpenDrawer,
   onOpenWorkspace,
-  serverStatus,
-  experience = 'web',
+  experience = 'app',
 }: SessionHeaderProps) {
   const chrome = resolveSessionChrome(state);
   const title = (
@@ -110,59 +96,12 @@ export function SessionHeader({
       </header>
     );
   }
-  return (
-    <header
-      data-testid="session-header-line"
-      className="flex shrink-0 flex-col gap-1 px-[var(--shell-space-4)] py-[var(--shell-space-2)] max-lg:gap-1.5 max-lg:px-[var(--shell-space-3)]"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        {onOpenDrawer
-          ? renderMenuButton({
-              label: 'Open sessions',
-              testid: 'session-first-open-drawer',
-              onClick: onOpenDrawer,
-              className: shellIconButtonClass,
-            })
-          : null}
-        {onBackToSessions ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(shellIconButtonClass, 'lg:hidden')}
-            aria-label="Back to sessions"
-            data-testid="session-first-back-to-list"
-            onClick={() => onBackToSessions()}
-          >
-            <ChevronLeft className="size-5" />
-          </Button>
-        ) : null}
-        {title}
-      </div>
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
-          {chrome.agent !== 'quiet' ? (
-            <AgentContext agentLabel={agentLabel} state={state} onOpenAgent={onOpenAgent} />
-          ) : null}
-          {chrome.connection !== 'quiet' ? (
-            <SessionConnectionStatus state={state} includeAgent={false} />
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {serverStatus && serverStatus !== 'connected' ? (
-            <span
-              data-testid="server-connection"
-              className={cn(
-                'font-mono text-xs',
-                serverStatus === 'disconnected' ? 'text-agent-error' : 'text-muted-foreground',
-              )}
-            >
-              server: {serverStatus}
-            </span>
-          ) : null}
-          <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
-        </div>
-      </div>
-    </header>
-  );
+  // Web renders **no header at all** (#748, SC1). The shell is two columns; the
+  // header's duties moved rather than disappearing — Session identity to the
+  // selected row in the sidebar, agent reachability to that row's own metadata
+  // (which already carried it, making the header's AgentContext a duplicate),
+  // service and attachment state to the sidebar footer, and Workspace reach to
+  // the floating surface capsule. `surface-switcher.md`'s ordering rule is
+  // respected: the replacement shipped before this control was removed.
+  return null;
 }

@@ -117,10 +117,11 @@ unavailable -> available -> relevant -> active
 
 - unavailable/merely available capabilities should not create permanent Terminal chrome;
 - relevant capability may affect contextual actions;
-- active capability may gain lightweight presence around the capsule;
+- active capability may gain lightweight presence inside the capsule's `+` expansion, not on its resting surface;
 - deeper capability UI opens explicitly as an overlay/panel/sheet or through Workspace contextual depth.
 
-For example, Claude Code becoming active may change capsule presence/actions while the Terminal remains visible and usable.
+For example, Claude Code becoming active may change what the capsule's `+` expansion marks and offers, while the
+resting capsule and the Terminal remain visible and unchanged.
 
 ## Resize and typography
 

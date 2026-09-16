@@ -8,7 +8,7 @@ import {
 import { PanelLeft, PanelRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useEdgeSwipePager } from './useEdgeSwipePager';
+import { useSwipePager } from './useSwipePager';
 import { shellIconButtonClass } from '@/app/shellStyles';
 
 const FALLBACK_WIDTH_PX = 375;
@@ -70,11 +70,10 @@ export function AppSpatialShell({
   );
 
   const { dragOffset, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } =
-    useEdgeSwipePager({
+    useSwipePager({
       pageCount: 3,
       index,
       onIndexChange: handleIndexChange,
-      width,
     });
 
   const translateX = -index * width + dragOffset;

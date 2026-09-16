@@ -102,7 +102,7 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
         >
           <nav
             aria-label="Workspace capabilities"
-            className="pointer-events-auto flex items-center gap-1 rounded-full border border-border/60 bg-background px-1.5 py-1.5 shadow-lg"
+            className="pointer-events-auto flex items-center gap-1 rounded-full bg-background px-1.5 py-1.5 shadow-[var(--elevation-floating)]"
           >
             {directItems.map((item) => {
               const binding = bindingFor(item)!;
@@ -114,19 +114,30 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
                   id={`workspace-capability-${item.snapshot.id}`}
                   type="button"
                   aria-pressed={isActive}
+                  aria-label={item.snapshot.title}
+                  title={item.snapshot.title}
                   data-testid={`workspace-tool-${item.snapshot.id}`}
                   data-capability-state={item.snapshot.state}
                   data-capability-presence={item.presence.level}
                   onClick={() => ctx.onToolChange(item.snapshot.id)}
                   className={cn(
-                    'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+                    'relative flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
                     isActive
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'text-foreground'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  <Icon className="size-3.5" />
-                  {item.snapshot.title}
+                  <Icon className="size-[length:var(--icon-md)]" aria-hidden />
+                  {/* The open capability is marked by a dot, not by filling the
+                      target. It is always rendered so the row's geometry does
+                      not shift between states. */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'absolute bottom-0.5 size-1 rounded-full',
+                      isActive ? 'bg-foreground' : 'bg-transparent',
+                    )}
+                  />
                 </button>
               );
             })}
@@ -141,11 +152,11 @@ export function WorkspaceShell({ ctx, activeCapabilityId }: WorkspaceShellProps)
                   <button
                     type="button"
                     aria-label="More workspace capabilities"
+                    title="More workspace capabilities"
                     data-testid="workspace-capability-more"
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
+                    className="flex size-[length:var(--dock-target)] shrink-0 items-center justify-center rounded-[var(--radius-md)] text-muted-foreground transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground"
                   >
-                    <Plus className="size-3.5" />
-                    More
+                    <Plus className="size-[length:var(--icon-md)]" aria-hidden />
                   </button>
                 }
               />

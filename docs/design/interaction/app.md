@@ -41,13 +41,14 @@ Typical entry mechanisms include:
 - the primary input itself;
 - a `+` affordance for explicit expansion;
 - shortcuts / commands;
-- lightweight presence from an active contextual capability.
+- lightweight presence from an active contextual capability, reached through that expansion.
 
 The capsule must not become a permanent toolbar that accumulates every registered feature.
 
 ### Capability presence
 
-When a capability becomes active in the current Session, it may earn lightweight presence around the capsule rather than forcing navigation.
+When a capability becomes active in the current Session, it may earn lightweight presence inside the capsule's `+`
+expansion rather than forcing navigation. The resting capsule does not change.
 
 For example:
 
@@ -56,8 +57,8 @@ Terminal running a shell
     -> neutral capsule
 
 Claude Code becomes active
-    -> Claude Code presence may appear
-    -> contextual actions may become available from `+`
+    -> the resting capsule is unchanged
+    -> `+` marks Claude Code and makes its contextual actions available
     -> user may explicitly open a deeper Claude Code Session surface
 ```
 
@@ -97,7 +98,7 @@ App presentation should normally map it as follows:
 - `unavailable`: no presence;
 - `available`: optionally discoverable in Workspace / explicit expansion;
 - `relevant`: contextual Workspace or capsule affordance may appear;
-- `active`: lightweight Session presence plus optional deeper view.
+- `active`: marked in the `+` expansion, plus optional deeper view.
 
 Exact detection is implementation-specific.
 
