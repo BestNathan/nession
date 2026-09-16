@@ -7,16 +7,12 @@ import {
 } from '@/features/terminal/capsule/capsuleStyles';
 import { Plus } from 'lucide-react';
 import { CapabilityDisclosureMenu } from '@/features/capabilities/components/CapabilityDisclosureMenu';
-import { CapsuleCapability } from '@/features/terminal/capsule/components/CapsuleCapability';
 import type {
   CapsuleCapabilityDisclosure,
-  CapsuleCapabilityPresence,
 } from '@/features/terminal/capsule/types';
 
 interface CapsuleInputActionsProps {
   leading?: React.ReactNode;
-  /** Capability that earned capsule presence, if any. At most one. */
-  capability?: CapsuleCapabilityPresence;
   /** Capabilities that earned no chip, reachable through the disclosure entry. */
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
   historyOpen: boolean;
@@ -37,13 +33,13 @@ interface CapsuleInputActionsProps {
 }
 
 /**
- * The capsule's discovery entry.
+ * The capsule's capability entry — the only place capability state appears.
  *
- * A capability that is merely available earns no chip (prose:
- * terminal-capsule.md), but it must stay reachable — otherwise the only way to
- * a capability the session does not currently need would be to leave the
- * terminal. One muted control, and the list opens as a popover, so the band
- * stays a single line however many capabilities exist.
+ * The resting capsule carries no capability identity (#748, revising
+ * terminal-capsule.md's `active` row): every reachable capability is listed
+ * here, and the ones that are relevant or active are marked. One muted control,
+ * and the list opens as a popover, so the band stays a single line however many
+ * capabilities exist and whatever states they are in.
  */
 function CapsuleCapabilityMore({ disclosure }: { disclosure: CapsuleCapabilityDisclosure }) {
   return (
@@ -82,7 +78,6 @@ export function CapsuleInputLeading({ leading }: { leading?: React.ReactNode }) 
  * Trailing actions — always History + Send; Paste/Copy and Commands opt-in.
  */
 export function CapsuleInputTrailingActions({
-  capability,
   capabilityDisclosure,
   historyOpen,
   onHistoryOpenChange,
@@ -101,7 +96,6 @@ export function CapsuleInputTrailingActions({
 }: Omit<CapsuleInputActionsProps, 'leading'>) {
   return (
     <div data-testid="capsule-input-actions" className={capsuleControlRowClass}>
-      {capability ? <CapsuleCapability capability={capability} /> : null}
       {capabilityDisclosure && capabilityDisclosure.entries.length > 0 ? (
         <CapsuleCapabilityMore disclosure={capabilityDisclosure} />
       ) : null}
