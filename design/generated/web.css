@@ -163,6 +163,10 @@
   --workspace-editor-font-size: 12px;
   --workspace-editor-line-height: 1.75;
   --workspace-editor-gutter-width: 34px;
+  --workspace-editor-pad-y: 14px;
+  --workspace-editor-gutter-pad-end: 14px;
+  --workspace-editor-head-font-size: 11.5px;
+  --workspace-editor-head-pad-x: 18px;
 }
 
 .dark {

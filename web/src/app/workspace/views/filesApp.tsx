@@ -69,7 +69,10 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
           className="flex shrink-0 items-center gap-1 px-[var(--shell-space-2)] pt-[var(--shell-space-1)]"
         >
           <AppBackButton label="Back to files" testid="files-app-back" onClick={handleBackClick} />
-          <span className="min-w-0 truncate font-mono text-sm font-semibold">{selected.filename}</span>
+          {/* The path, to match the viewer's own header below it. Both name the
+              open file, so a filename here and a path there read as two
+              different files rather than one. */}
+          <span className="min-w-0 truncate font-mono text-sm font-semibold">{selected.path}</span>
         </div>
         <div className="min-h-0 flex-1">
           <FileViewer

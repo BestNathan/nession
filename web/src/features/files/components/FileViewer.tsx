@@ -35,6 +35,8 @@ export interface FileViewerProps {
 }
 
 interface FileViewerToolbarProps {
+  /** The full path, which is what the header shows. */
+  path: string;
   filename: string;
   isDirty: boolean;
   isText: boolean;
@@ -50,15 +52,19 @@ interface FileViewerToolbarProps {
 }
 
 function FileViewerToolbar({
-  filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
+  path, filename, isDirty, isText, isReadOnly, saving, isMarkdown, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
 }: FileViewerToolbarProps) {
   // Markdown files get a Preview/Raw mode toggle; Edit is only offered in raw mode.
   const showEditToggle = isText && !forceReadOnly && (!isMarkdown || viewMode === 'raw');
 
   return (
-    <div className="flex items-center justify-between px-2 py-1 border-b border-border/60 flex-shrink-0">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground truncate max-w-[200px]">{filename}</span>
+    <div className="flex flex-shrink-0 items-center justify-between gap-[var(--shell-space-2)] border-b border-border/60 px-[var(--workspace-editor-head-pad-x)] py-[var(--shell-space-1)]">
+      <div className="flex min-w-0 items-center gap-[var(--shell-space-2)] font-mono text-[length:var(--workspace-editor-head-font-size)] text-muted-foreground">
+        {/* The path, not the basename. The mockup's head reads
+            `web/src/core/terminal-runtime/ThemeManager.ts` — with a tree beside
+            it, a bare filename does not say which of several `index.css` is
+            open. */}
+        <span className="truncate">{path || filename}</span>
         {forceReadOnly && (
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">
             <Lock className="h-2.5 w-2.5" /> Read-only
@@ -288,6 +294,7 @@ export function FileViewer({ fileOps, path, filename, fileSize, onClose, onDirty
   return (
     <div className="flex flex-col h-full">
       <FileViewerToolbar
+        path={path}
         filename={filename}
         isDirty={isDirty}
         isText={isText}
