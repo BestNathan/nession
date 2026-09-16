@@ -1,206 +1,127 @@
 # Nession Web UI — Agent Guide
 
-Entry document for work under `web/`. Read this before changing React/UI code.
+Entry document for work under `web/`. Read this before changing React/Web code.
 
-**This file is not design source of truth.** Product direction and product decision rules live at the repository root; product model, IA, interaction, visual language, tokens, patterns, and measurable UI contracts live in repository design docs. Skills and prompts may point here; they must not invent a parallel product or design system.
+This file is intentionally small. It owns **Web engineering boundaries**, not the UI design system.
 
-Before proposing or implementing any user-facing Web change, read these two upstream constraints first:
+## UI / design-system work
 
-1. [`../VISION.md`](../VISION.md) — where Nession is going and what problem it exists to solve.
-2. [`../PRINCIPLE.md`](../PRINCIPLE.md) — the durable rules for product and UX decisions.
+For any task involving visual styling, layout, spacing, sizing, typography, surfaces, shadcn/ui, shared UI components, design tokens, product patterns, UI contracts, responsive behavior, or visual validation, **load and follow**:
 
-`VISION.md` defines product direction. `PRINCIPLE.md` defines how product decisions are made. `docs/design/*` translates those constraints into concrete product and UI models. Existing code does not override that precedence.
+[`../.claude/skills/nession-web-design/SKILL.md`](../.claude/skills/nession-web-design/SKILL.md)
 
-Root monorepo workflow (worktrees, CI, release): see repository root `CLAUDE.md`.
+Do not duplicate design-system rules in this file. The Skill owns the workflow for locating canonical design sources, consuming/extending tokens and components, shadcn integration, pattern boundaries, layout semantics, contracts, and UI validation.
+
+For repository-wide development workflow, worktrees, CI, release, and general test policy, see the root `CLAUDE.md` and the relevant repository skills.
 
 ---
 
 ## 1. Purpose
 
-Nession Web is the browser client for an **intelligent workspace spanning local and remote execution contexts**. Its current implementation connects to a Nession server, discovers Agents, attaches to tmux-backed Sessions, and works primarily in a Terminal surface with contextual Workspace capabilities.
+Nession Web is the browser client for an intelligent workspace spanning local and remote execution contexts. The current implementation connects to a Nession server, discovers Agents, attaches to tmux-backed Sessions, and exposes Terminal and Workspace capabilities.
 
-The current tmux/session implementation is not the permanent product boundary. Web should evolve toward the repository Vision and Principles rather than treating today's transport, shell chrome, or feature placement as product truth.
-
----
-
-## 2. Design truth (read in this order; do not duplicate them)
-
-| Concern | Canonical location |
-|---------|-------------------|
-| Product direction | [`VISION.md`](../VISION.md) |
-| Product principles | [`PRINCIPLE.md`](../PRINCIPLE.md) |
-| Design index | [`docs/design/README.md`](../docs/design/README.md) |
-| Product model | [`docs/design/product-model.md`](../docs/design/product-model.md) |
-| Information architecture | [`docs/design/information-architecture.md`](../docs/design/information-architecture.md) |
-| Web interaction | [`docs/design/interaction/web.md`](../docs/design/interaction/web.md) |
-| App interaction | [`docs/design/interaction/app.md`](../docs/design/interaction/app.md) |
-| Workspace | [`docs/design/workspace.md`](../docs/design/workspace.md) |
-| Tokens | [`docs/design/design-system/tokens.md`](../docs/design/design-system/tokens.md) · executable: [#467](https://github.com/BestNathan/nession/issues/467) |
-| Pattern prose | [`docs/design/design-system/patterns.md`](../docs/design/design-system/patterns.md) · [#470](https://github.com/BestNathan/nession/issues/470) |
-| UI contracts | [`docs/design/design-system/contracts.md`](../docs/design/design-system/contracts.md) · [#545](https://github.com/BestNathan/nession/issues/545) |
-| Validation (assert / matrix / visual) | [`docs/design/design-system/validation.md`](../docs/design/design-system/validation.md) · [#546](https://github.com/BestNathan/nession/issues/546)–[#548](https://github.com/BestNathan/nession/issues/548) |
-| Migration | [`docs/design/migration.md`](../docs/design/migration.md) |
-
-For product-facing work, apply this precedence:
-
-```text
-VISION.md
-    ↓
-PRINCIPLE.md
-    ↓
-docs/design/*
-    ↓
-feature design
-    ↓
-shipping implementation
-```
-
-When a lower-level design doc, executable contract, fixture, screenshot, or shipping component disagrees with Vision or Principles, treat the lower level as convergence debt rather than weakening the upstream constraint.
-
-**Existing architectural principle (from #544):** AI decides *what* to change; Nession UI architecture constrains *how* it may look and behave.
-
-**UI design-system workflow:** for any task that changes visual styling, layout, component selection, shadcn primitives, tokens, product patterns, UI contracts, responsive behavior, or visual validation, load [`.claude/skills/nession-web-design/SKILL.md`](../.claude/skills/nession-web-design/SKILL.md) before implementing. That skill explains how to consume, extend, and validate this design system; do not duplicate its workflow here.
+Do not infer permanent product boundaries from today's component tree or transport implementation. Product-facing UI decisions belong to the design hierarchy referenced by `nession-web-design`.
 
 ---
 
-## 3. Product constraints (principles only)
+## 2. Hard engineering constraints
 
-- **Work first:** organize the experience around what the user is doing, not around a catalog of tools, plugins, or infrastructure.
-- **Quiet by default:** a capability being implemented or installed does not entitle it to permanent UI.
-- **Contextual capability:** capability presence follows context (`unavailable → available → relevant → active`) and may gain stronger presence only as relevance/activity increases.
-- **Progressive disclosure:** show presence/state/smallest useful action first; deeper details, history, configuration, and advanced operations open explicitly.
-- **Nession owns experience:** extensions contribute capability/state/actions/views; Nession owns global placement, interaction, hierarchy, and visual language.
-- **Session-first current model:** Session is the primary active work object; Terminal is the current default live surface; Workspace is contextual depth; Agent/location is infrastructure context rather than the navigation parent.
-- **Workspace is not a feature lobby:** its visible resources/capabilities are context-driven rather than a permanent tool strip.
-- **App:** spatial model `Sessions ← Terminal → Workspace`, not a shrunk Web layout; gestures require visible alternatives.
-- **Independent state dimensions:** Agent/location connectivity, Session lifecycle, and attachment must not collapse into one generic status.
-- **Precision over decoration:** quality comes from spacing, type, hierarchy, motion, feedback, stable geometry, and consistent interaction rather than extra chrome.
-- **Tokens/contracts:** use the repository design-system layers; do not create a feature-local visual language or magic metric system.
-
----
-
-## 4. Hard engineering constraints
-
-### Layout of code
+### Code ownership and import direction
 
 | Rule | Detail |
 |------|--------|
 | Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
-| Components | `src/components/ui/` holds only shared shadcn primitives. Feature UI belongs in `features/<feature>/components/`; shell UI in `src/app/`. |
+| Components | `src/components/ui/` is shared generic UI infrastructure. Feature UI belongs in `features/<feature>/components/`; shell/composition UI belongs in `src/app/`. For design-system/component rules, use `nession-web-design`. |
 | Layers | Import direction app → features → core → shared (`nession/no-reverse-imports`). Full module map: `docs/architecture/web.md`. |
-| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented **inside its own feature** (`features/<feature>/<Name>Plugin.ts`), registered centrally in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`) — not in core `WebSocketService`. There is no `services/socket/plugins/` directory. |
-| Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` when needed for compatibility. |
-| CSS | Tailwind v4 via `@tailwindcss/vite`. **One** stylesheet: `src/index.css`. Component styles = Tailwind utilities only. |
+| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own feature (`features/<feature>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
+| Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
+| CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling stays colocated through the existing Tailwind/component model. Design values and styling policy are owned by `nession-web-design`. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
-
-### UI kit
-
-- Prefer **shadcn/ui** primitives in `src/components/ui/`. Add via CLI and commit generated files:
-  ```bash
-  cd web && npx shadcn@latest add <component-name> --yes
-  ```
-- Inventory / mapping: `.claude/skills/nession-development/references/shadcn-components.md`
-- Do not hand-roll tab strips, resize chrome, or destructive confirms when Tabs / Resizable / AlertDialog already cover the need.
-- Icon-only controls need Tooltip (or equivalent accessible name).
-
-### Theming
-
-- Chrome is light-only. Every value comes from `design/tokens/*.json` through `design/generated/web.css`; do not restate a palette in `index.css` or in a component.
-- **Terminal** takes its theme from `design/generated/terminal.ts` and sits on the same ground as the chrome — the two must agree or the capsule shows a seam. Do not hardcode an `ITheme` in `web/src`.
 
 ### Lint and React pitfalls
 
-- **`eslint-disable` is forbidden.** Fix types, deps, or structure properly. `npm run lint` uses `--max-warnings 0`.
-- **Event handlers:** never pass a function with optional parameters directly to `onClick` / `onChange`. Always wrap: `onClick={() => fn()}`.
-- **Effect / connection ordering:** child effects run before parent effects on first mount. Async connection hooks must initialize to an optimistic in-progress state (e.g. `'connecting'`), not `'disconnected'`, or children reject before connect starts. Under StrictMode (mount→cleanup→mount), do not reject in-flight promise waiters in cleanup — keep them on a ref and settle on the second mount.
+- **`eslint-disable` is forbidden.** Fix types, dependencies, or structure properly. `npm run lint` uses `--max-warnings 0`.
+- **Event handlers:** never pass a function with optional parameters directly to `onClick` / `onChange`. Wrap it: `onClick={() => fn()}`.
+- **Effect / connection ordering:** child effects run before parent effects on first mount. Async connection hooks must initialize to an optimistic in-progress state (for example `connecting`), not `disconnected`, or children can reject before connection startup.
+- Under StrictMode mount → cleanup → mount, do not reject in-flight promise waiters during the transient cleanup. Keep them on a ref and settle them from the surviving mount.
 
 ### WebSocket singleton
 
-`WebSocketService` is a browser-session singleton: request/response correlation, event pub/sub, auto-reconnect. Prefer an existing capability plugin over adding transport hacks in components — the shipping set is `FilesPlugin`, `SessionsPlugin`, `AgentsPlugin`, `EnvPlugin`, `CommandsPlugin`, `ServerPlugin`, `ClaudeCodePlugin` and `features/terminal/server.ts`.
+`WebSocketService` is a browser-session singleton responsible for request/response correlation, event pub/sub, and reconnect behavior.
+
+Prefer an existing capability plugin over adding transport logic inside components. Current capability implementations include Files, Sessions, Agents, Env, Commands, Server, Claude Code, and Terminal-specific server integration.
 
 ---
 
-## 5. Directory map (`web/src`)
+## 3. Directory map (`web/src`)
 
 ```text
 src/
-├── App.tsx / main.tsx     # Auth gate → SessionFirstShell | LoginPage; router entry
-├── index.css              # Sole global CSS (Tailwind + theme)
+├── App.tsx / main.tsx     # Auth gate and router entry
+├── index.css              # Global CSS / Tailwind entry
 ├── types.ts               # Shared TS types
-├── app/                   # App layer — the session-first shell + app hooks (app/public.ts)
-│   ├── SessionFirstShell / Workspace / Sidebar / Main / Terminal / …
-│   ├── patterns/, app-spatial/, workspace/ (+ tools/), fixture/
-│   ├── useAppConnection, useDashboard(+Filter/Modals), useProbePolling, …
-│   └── LoginPage.tsx
-├── features/              # Domain features — each = plugin + components/hooks (+ model)
-│   ├── terminal/ explorer/ files/ sessions/ agents/ env/ commands/ server/ claude-code/
-├── shared/                # Shared layer — hooks/ (generic React hooks)
-├── components/
-│   └── ui/                # shadcn primitives (generated + wrappers) — shared
-├── core/terminal-runtime/ # React-free terminal runtime (controller, transport, input)
+├── app/                   # App composition, shell, workspace, app-level hooks
+├── features/              # Domain features: plugin + components/hooks/model
+├── shared/                # Shared hooks and generic helpers
+├── components/ui/         # Shared generic UI infrastructure
+├── core/terminal-runtime/ # React-free terminal runtime
 ├── runtime/               # SessionRuntime ownership + attach state machines
-├── atoms/                 # Jotai atoms (connection, session, probe, …)
-├── services/              # WS client (socket/), attach prefs, deep link (core layer)
-├── lib/                   # Pure helpers (cn, encoding, language id, …)
+├── atoms/                 # Jotai atoms split by domain
+├── services/              # WS client and other core services
+├── lib/                   # Pure helpers
 ├── markdown/              # Markdown preview pipeline
-├── extensions/            # Extension registry (e.g. claude-code UI contributions)
+├── extensions/            # Extension registry / UI contributions
 └── test/                  # Vitest setup
 ```
-Layers: see `docs/architecture/web.md`. E2E Playwright lives in repo-root `e2e/`.
 
-E2E Playwright lives in repo-root `e2e/`, not under `web/`.
-
----
-
-## 6. UI building rules
-
-1. **Primitives vs patterns:** `components/ui/*` stay product-agnostic. Session / Workspace / Agent / capability semantics belong in feature/product patterns aligned with `docs/design/design-system/patterns/*`.
-2. Prefer composition of existing patterns over new one-off layout chrome, but do not preserve a pattern when the higher-level product model has intentionally changed.
-3. Web vs App differences must be **intentional** and eventually expressed in contracts (`web` / `app` blocks) — not scattered `if (isMobile)` styling with unexplained magic numbers.
-4. Preserve maximum current-work/Terminal viewport; chrome yields first.
-5. A registered extension must not automatically add permanent navigation. Derive presence from context and capability state.
-6. After functional UI changes, verify with Playwright (local stack + browser) before claiming done — unit/lint alone is insufficient for visual/interaction work.
+See `docs/architecture/web.md` for the complete layer model. E2E Playwright lives in repo-root `e2e/`, not under `web/`.
 
 ---
 
-## 7. State and data
+## 4. State and data
 
-- **Jotai** atoms under `src/atoms/` (and `src/features/terminal/state/`) split by domain (connection, session, layout, input, …). Prefer small atoms over mega-stores.
-- Session / attach / file flows go through app-composition hooks (`app/useDashboard`, `app/useAppConnection`) and feature hooks rather than embedding WS calls deep in presentational components.
-- Terminal attach supports **relay** (via server) and **P2P** (direct to agent). Respect existing `ConnectionManager` / transport boundaries.
-
----
-
-## 8. Testing and quality
-
-| Layer | Command / location | Notes |
-|-------|-------------------|--------|
-| Unit / component | `npm test` (Vitest) | Colocate `__tests__/unit` and `__tests__/integration` |
-| Coverage | `npm run coverage` | Thresholds in `vite.config.ts` (lines 80 / functions 72 / statements 78 / branches 65). Pre-push enforces web coverage when `web/**` changes. |
-| Typecheck | `npx tsc --noEmit` | Also part of `npm run build` |
-| Lint | `npm run lint` | `--max-warnings 0` |
-| E2E | `e2e/` Playwright | Login, session lifecycle, terminal I/O; CI workflow `e2e.yml` |
-| UI contracts | See `docs/design/design-system/validation.md` | Assertions → viewport matrix → focused visual baselines; update contracts/baselines together when intentional product behavior changes |
-
-Do not lower coverage thresholds or add broad excludes to “make CI green” without owner approval.
+- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/features/terminal/state/`. Prefer small domain atoms over mega-stores.
+- Session / attach / file flows go through app-composition and feature hooks rather than embedding WebSocket calls deep in presentational components.
+- Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
+- New feature capabilities should expose a feature-owned API/plugin boundary rather than leaking transport concerns into UI composition.
 
 ---
 
-## 9. Commands
+## 5. Testing and quality
+
+Use the repository commands rather than inventing local alternatives:
+
+| Layer | Command / location |
+|-------|-------------------|
+| Unit / component | `just web-test-unit` |
+| Integration | `just web-test-integration` |
+| Coverage | `just web-coverage` |
+| Typecheck + lint + generated design checks | `just web-lint` |
+| E2E | repo-root `e2e/` Playwright |
+
+For **UI/design-system validation**, including contract checks, browser verification, visual baselines, canonical viewports, and shadcn/token normalization, follow `nession-web-design` instead of duplicating that workflow here.
+
+Do not lower coverage thresholds, weaken assertions, add broad excludes, or suppress lint failures merely to make CI green.
+
+---
+
+## 6. Common commands
+
+From `web/`:
 
 ```bash
-cd web
-npm install          # after package.json changes
-npm run dev          # Vite :13000 — proxies /ws and /api → localhost:19090
-npm run build        # tsc + vite build → dist/
+npm install
+npm run dev
+npm run build
 npm run lint
 npm test
 npm run coverage
 npx tsc --noEmit
-npx shadcn@latest add <name> --yes
 ```
 
-Local full stack (from repo root, isolated HOME recommended — see root `CLAUDE.md`):
+From repository root, prefer `just` tasks when an equivalent task exists.
+
+Local full stack:
 
 ```bash
 HOME=/tmp/nession-demo cargo run -p nession-server
@@ -210,11 +131,11 @@ cd web && npm run dev
 
 ---
 
-## 10. Out of scope here
+## 7. Ownership map
 
-- Rust crates, Docker, Kubernetes, release/version bump → root `CLAUDE.md` and `.claude/skills/nession-cicd`
-- Product direction / product decision rules → root `VISION.md` / `PRINCIPLE.md`
-- Executable token JSON / codegen paths → #467 and `docs/design/design-system/tokens.md`
-- Contract file format and assertion helpers → #545–#548 and `contracts.md` / `validation.md`
+- Web engineering architecture / imports / state / transport boundaries → this file + `docs/architecture/web.md`
+- UI design system / tokens / shadcn / primitives / patterns / layout / contracts / visual validation → `.claude/skills/nession-web-design/SKILL.md`
+- Repository development workflow / worktrees / general testing → root `CLAUDE.md` + `.claude/skills/nession-development`
+- CI/CD / Docker / Kubernetes / release → `.claude/skills/nession-cicd`
 
-When unsure whether a change is “design” or “implementation,” start from `VISION.md` and `PRINCIPLE.md`, update/follow the relevant `docs/design/` owner, then change code.
+Keep this separation deliberate. If a UI design rule starts growing here, move it to the design skill or its canonical design source instead of creating another copy.
