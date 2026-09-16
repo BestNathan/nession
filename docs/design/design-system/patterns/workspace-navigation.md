@@ -129,6 +129,22 @@ this document forbids at the top. Context is carried by the tree's root row
 instead: the tree starts at `nession`, so the root row states what the user is
 looking at without a chrome band restating it.
 
+### Open inconsistency: where the App band actually floats
+
+This document (and #748 §6) describes the App band as a pill floating **over the
+terminal**. In the implementation the band is rendered by `WorkspaceShell`, which
+mounts on the Workspace page — so on App it floats over the *Workspace*, not the
+terminal.
+
+That matters beyond wording: #748 §7 asks for the band to hide when the capsule
+expands, and the capsule lives on the Terminal page. If the two are never on
+screen together, the rule has nothing to govern, and if the band is meant to
+float over the terminal, it is in the wrong container.
+
+Recorded rather than resolved — moving the band changes which page owns it and
+what the App's two-layer stack means, and that is a product call, not a
+consequence of the wording.
+
 ### Touch floor (recorded decision, #730, extended by #748)
 
 The App band is a compact pill floating over the terminal, and it declares its own
