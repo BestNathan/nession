@@ -21,12 +21,7 @@ test.describe('Session lifecycle', () => {
     // The sidebar "Create session" button is enabled only when at least one
     // agent is online. In CI, cargo build + agent startup + heartbeat can
     // take 30-60 seconds. Open the sessions drawer if the list is collapsed.
-    const create = page.getByTestId('session-first-create');
-    try {
-      await expect(create).toBeVisible({ timeout: 1_000 });
-    } catch {
-      await page.getByTestId('session-first-open-drawer').click();
-    }
+    // The sidebar is always present; there is no drawer opener to click (#748).
     const createButton = page.getByTestId('session-first-create');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
 
