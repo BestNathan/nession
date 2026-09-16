@@ -59,6 +59,8 @@ When a lower-level design doc, executable contract, fixture, screenshot, or ship
 
 **Existing architectural principle (from #544):** AI decides *what* to change; Nession UI architecture constrains *how* it may look and behave.
 
+**UI design-system workflow:** for any task that changes visual styling, layout, component selection, shadcn primitives, tokens, product patterns, UI contracts, responsive behavior, or visual validation, load [`.claude/skills/nession-web-design/SKILL.md`](../.claude/skills/nession-web-design/SKILL.md) before implementing. That skill explains how to consume, extend, and validate this design system; do not duplicate its workflow here.
+
 ---
 
 ## 3. Product constraints (principles only)
