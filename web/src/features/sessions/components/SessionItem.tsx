@@ -83,7 +83,10 @@ export function SessionItem({
         >
           {session.session_name}
         </span>
-        <span className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground">
+        <span
+          data-testid="session-item-meta"
+          className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
+        >
           shell · {agentLabel} · {formatRelativeTime(session.last_activity)}
         </span>
         {domain.agent.copy !== null && (
