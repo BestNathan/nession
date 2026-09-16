@@ -47,12 +47,16 @@ export async function openFixtureFile(page: Page): Promise<void> {
   // capability-internal flows. Which one is present is what tells them apart.
   const first = page.getByTestId('file-row-web');
   const isAppList = (await first.count()) > 0;
-  const trail = ['web', 'src', 'web/src/App.tsx'];
 
-  for (const step of trail) {
+  let opened = '';
+  for (const name of ['web', 'src', 'App.tsx']) {
+    opened = opened === '' ? name : `${opened}/${name}`;
+    // App keys rows by the entry's full path (`file-row-web/src`), the tree by
+    // the bare name — so accumulating the path is what makes one loop serve
+    // both rather than two hand-written sequences.
     const row = isAppList
-      ? page.getByTestId(`file-row-${step}`)
-      : page.getByRole('treeitem', { name: step.split('/').pop() ?? step });
+      ? page.getByTestId(`file-row-${opened}`)
+      : page.getByRole('treeitem', { name });
     await row.waitFor({ state: 'visible', timeout: 10_000 });
     await row.click();
   }
