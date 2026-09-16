@@ -43,7 +43,7 @@ tokens-gen:
 tokens-check:
     node design/scripts/generate-tokens.mjs --check
 
-# UI contract unit tests (node --test; tokens + contracts)
+# UI contract unit tests (node --test; tokens + contracts + inventory helpers)
 design-test:
     node --test design/scripts/*.test.mjs
 
@@ -52,6 +52,18 @@ contracts-gen:
 
 contracts-check:
     node design/scripts/resolve-contracts.mjs --check
+
+# Human-readable evidence report for #760. This is an audit view, not design truth.
+design-inventory:
+    node design/scripts/audit-design-system.mjs
+
+# Machine-readable form for follow-up analysis/tooling.
+design-inventory-json:
+    node design/scripts/audit-design-system.mjs --json
+
+# Deterministic inventory integrity check used by Web CI.
+design-inventory-check:
+    node design/scripts/audit-design-system.mjs --check
 
 check-design-tokens:
     ./scripts/check-design-tokens.sh
@@ -62,7 +74,7 @@ check-design-tokens-selftest:
 # ── Web ─────────────────────────────────────────────────────────────────────
 
 # Lint + type-check (fast, pre-commit)
-web-lint: tokens-check contracts-check
+web-lint: tokens-check contracts-check design-inventory-check
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 
