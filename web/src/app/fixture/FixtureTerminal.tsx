@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
+import {
+  NESSION_TERMINAL_THEME,
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+} from '@/core/terminal-runtime/ThemeManager';
+import {
+  DEFAULT_FONT,
+  DEFAULT_FONT_SIZE,
+} from '@/core/terminal-runtime/instance/TerminalInstance';
 import { TerminalSurface } from '@/features/terminal/TerminalSurface';
 
 const FIXTURE_BUFFER = [
@@ -36,20 +44,74 @@ const FIXTURE_BUFFER = [
  * render half-transparent and the baselines would capture a state no user
  * sees. Sends are inert anyway — `controller` is null, and
  * `TerminalSurface.capsuleSendText` routes through `controller?.handleInput`.
+ *
+ * The font stack and the contrast ratio come from the runtime rather than
+ * xterm's defaults for the same reason. A bare `new Terminal()` renders in
+ * `courier-new`, so the baseline would pin a typeface the product never uses
+ * — and cell metrics follow the font, so the terminal's cols/rows would be
+ * measured against the wrong one.
  */
 export function FixtureTerminal() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const host = ref.current;
+    if (!host) {
+      return;
+    }
     const term = new Terminal({
-      theme: CATPPUCCIN_MOCHA,
+      theme: NESSION_TERMINAL_THEME,
+      fontFamily: DEFAULT_FONT,
+      fontSize: DEFAULT_FONT_SIZE,
+      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
       convertEol: true,
       cursorBlink: false,
       disableStdin: true,
     });
-    term.open(ref.current as HTMLDivElement);
+
+    // Fitted, and re-fitted when the well resizes. Without this, xterm sits at
+    // its 80x24 default for the life of the page — so every terminal baseline
+    // pinned a small terminal in the corner of a much larger well instead of
+    // the surface the product actually shows, and the visual gate was
+    // protecting a screen no user sees.
+    //
+    // `FitAddon` is already a dependency. The product path uses
+    // `ResizeController` instead because it also has to publish cols/rows to the
+    // transport and debounce the PTY notification; a static fixture has no
+    // transport to notify.
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(host);
     term.write(FIXTURE_BUFFER);
-    return () => term.dispose();
+
+    // Guarded rather than caught: FitAddon throws below a 2x2 grid, and a
+    // zero-size host is a real state here (first paint, and every test that
+    // mounts the surface without laying it out).
+    //
+    // Deferred by a frame as well as guarded. `fit()` reads the cell metrics off
+    // xterm's render service, and that service has no dimensions until the
+    // renderer's first layout pass — measuring in the same tick as `open()`
+    // throws inside `Viewport.syncScrollArea`. `TerminalInstance` guards the
+    // same race on its own metrics accessor. The observer's own first fire
+    // lands in that window too, so every fit goes through this path.
+    let frame = 0;
+    const scheduleFit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (host.clientWidth > 0 && host.clientHeight > 0) {
+          fit.fit();
+        }
+      });
+    };
+    scheduleFit();
+    const observer = new ResizeObserver(scheduleFit);
+    observer.observe(host);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      term.dispose();
+    };
   }, []);
 
   return (

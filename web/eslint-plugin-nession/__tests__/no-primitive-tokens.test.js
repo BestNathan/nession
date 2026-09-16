@@ -18,7 +18,7 @@ const lintMetadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
 test('findPrimitiveInString flags green-500 with suggestions', () => {
   const hit = findPrimitiveInString('text-green-500', lintMetadata);
   assert.ok(hit);
-  assert.match(hit.message, /success/);
+  assert.match(hit.message, /agent-online/);
 });
 
 test('findPrimitiveInString allows semantic tokens', () => {
@@ -56,7 +56,7 @@ ruleTester.run('no-primitive-tokens', nessionPlugin.rules['no-primitive-tokens']
 });
 
 ruleTester.run('no-cross-experience-token', nessionPlugin.rules['no-cross-experience-token'], {
-  valid: [{ code: 'export const x = "text-success"' }],
+  valid: [{ code: 'export const x = "text-agent-online"' }],
   invalid: [
     {
       code: 'export const x = "touch-target-min"',

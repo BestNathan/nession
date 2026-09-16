@@ -37,9 +37,14 @@ describe('AppSpatialShell', () => {
     expect(screen.getByTestId('app-spatial-page-workspace')).toBeInTheDocument();
   });
 
-  it('does not render overlay navigation buttons by default', () => {
+  it('never puts Sessions/Workspace navigation on the terminal page', () => {
     renderShell({ index: 1 });
 
+    // Navigation belongs to the App header (`app-header-sessions` /
+    // `app-header-workspace`). The terminal page used to carry a duplicate
+    // pair of overlay icon buttons behind a `showHeaderActions` prop that no
+    // caller ever set — #748 §6 read them as a shipped feature. They are gone;
+    // this assertion is what stops them growing back onto the work surface.
     expect(screen.queryByTestId('app-spatial-open-sessions')).not.toBeInTheDocument();
     expect(screen.queryByTestId('app-spatial-open-workspace')).not.toBeInTheDocument();
   });

@@ -12,7 +12,6 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/features/capabilities';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';
-import type { ConnectionState } from '@/services/socket';
 
 type SidebarFields = Omit<SessionFirstSidebarProps, 'className' | 'onSelect'>;
 
@@ -23,10 +22,8 @@ interface MainShared {
   domain: DomainState | null;
   tool: CapabilityId;
   fileOps: FileOps | null;
-  connectionStatus: ConnectionState;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
-  onOpenAgent: () => void;
 }
 
 export function SessionFirstSpatialLayout(props: {

@@ -1,3 +1,5 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
 @import "../../design/generated/web.css";
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -11,8 +13,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', Menlo, Monaco, 'Courier New', monospace;
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-heading: var(--font-sans);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
@@ -151,22 +153,11 @@ html {
 
 /* Session-first ChatGPT shell (#492 V1) */
 .session-first-shell {
-  /* Lock chrome to light semantic tokens even if a parent adds .dark later */
+  /* Chrome is light-only; pin the scheme so form controls and scrollbars match
+     even if a parent adds .dark later. Token values come from
+     design/generated/web.css — do not restate them here, or the token source
+     stops being the single authority. */
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --border: oklch(0.922 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  /* xterm well + fake-terminal occlusion band — Catppuccin, not Zinc chrome */
-  --terminal-background: var(--terminal-well-background);
   background-color: var(--background);
   color: var(--foreground);
 }
@@ -176,12 +167,13 @@ html {
   outline-offset: var(--focus-ring-offset);
 }
 
-/* Terminal capsule — fake-terminal band (same bg as xterm; hides lines when pinned to bottom) */
+/* Terminal capsule — occlusion band. Same colour as the terminal itself (the
+   terminal sits on the canvas), so scrolled lines are hidden without a seam. */
 [data-terminal-capsule-host] {
   position: relative;
   flex: 1 1 0%;
   min-height: 0;
-  background: var(--terminal-well-background);
+  background: var(--terminal-background);
   isolation: isolate;
 }
 
@@ -212,7 +204,7 @@ html {
   bottom: 0;
   height: var(--terminal-content-bottom-inset, 0px);
   z-index: 5;
-  background: var(--terminal-well-background);
+  background: var(--terminal-background);
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */

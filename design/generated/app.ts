@@ -76,3 +76,4 @@ export const composer = {
 export const motion = {
   composer: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
+export const dockTarget = 28 as const;

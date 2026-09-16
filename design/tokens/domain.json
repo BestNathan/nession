@@ -1,7 +1,7 @@
 {
-  "$description": "Product domain colors. Refs semantic names so :root / .dark CSS variables switch with theme.",
+  "$description": "Product domain colors. Refs semantic names so :root / .dark CSS variables switch with theme. Healthy is neutral: agent.online is muted-foreground, not a green.",
   "agent": {
-    "online": { "ref": "semantic.success" },
+    "online": { "ref": "semantic.muted-foreground" },
     "connecting": { "ref": "semantic.muted-foreground" },
     "reconnecting": { "ref": "semantic.muted-foreground" },
     "offline": { "ref": "semantic.muted-foreground" },
@@ -18,23 +18,27 @@
     "detached": { "ref": "semantic.muted-foreground" },
     "failed": { "ref": "semantic.danger" }
   },
+  "location": {
+    "local": { "ref": "primitive.{theme}.location.local" },
+    "remote": { "ref": "primitive.{theme}.location.remote" }
+  },
+  "action": { "ref": "primitive.{theme}.action" },
   "terminal": {
     "background": { "ref": "semantic.background" },
     "foreground": { "ref": "semantic.foreground" },
     "selection": { "ref": "semantic.ring" },
     "cursor": { "ref": "semantic.ring" },
-    "wellBackground": { "ref": "primitive.color.catppuccin.mocha-base" },
-    "capsuleSurface": { "ref": "primitive.color.white-alpha.96" }
+    "capsuleSurface": { "ref": "primitive.white-alpha.96" }
   },
   "workspace": {
     "background": { "ref": "semantic.background" },
     "surface": { "ref": "semantic.card" },
-    "navigation": { "ref": "semantic.muted" }
+    "navigation": { "ref": "semantic.surface" }
   },
   "file": {
     "selected": { "ref": "semantic.accent" },
     "modified": { "ref": "semantic.warning" },
-    "created": { "ref": "semantic.success" },
+    "created": { "ref": "semantic.action" },
     "deleted": { "ref": "semantic.danger" }
   },
   "editor": {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
 import { SessionDrawer } from '@/app/SessionDrawer';
@@ -41,9 +41,10 @@ export interface SessionFirstWorkspaceProps {
   onKill: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
-  onOpenAgent: () => void;
   isWide: boolean;
   showList: boolean;
+  /** Mobile: leave the list overlay and return to the session detail. */
+  onCloseDrawer: () => void;
   showDetail: boolean;
   onBackToSessions?: () => void;
   /**
@@ -60,12 +61,11 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide,
-    showList, onBackToSessions, terminal,
+    onConfigure, onKill, onSurfaceChange, onToolChange, isWide,
+    showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
   const useSpatial = !isWide && selectedId !== null;
-  const [showDrawer, setShowDrawer] = useState(false);
   const { spatialIndex, onIndexChange, onSpatialSelect } = useAppSpatialIndex({
     selectedId,
     surface,
@@ -75,15 +75,15 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   });
 
   const sidebarProps = {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId,
+    agents, filteredSessions, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onConfigure, onKill,
   };
 
   const mainShared = {
-    selectedSession, selectedAgent, agents, domain, tool, fileOps, connectionStatus,
-    onSurfaceChange, onToolChange, onOpenAgent,
+    selectedSession, selectedAgent, agents, domain, tool, fileOps,
+    onSurfaceChange, onToolChange,
   };
 
   if (useSpatial) {
@@ -100,29 +100,48 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
 
   return (
     <div className="relative flex min-h-0 flex-1">
-      <SessionDrawer
-        open={!isWide ? showList : showDrawer}
-        onClose={() => setShowDrawer(false)}
-        sidebar={
-          <SessionFirstSidebar
-            {...sidebarProps}
-            onSelect={(session) => {
-              setShowDrawer(false);
-              onSelect(session);
-            }}
-            onConfigure={(session) => {
-              setShowDrawer(false);
-              onConfigure(session);
-            }}
-          />
-        }
-      />
+      {isWide ? (
+        /* Two columns above `lg` (the breakpoint the contract schema's enum
+           permits and `useSessionFirstMobileNav` already uses). The sidebar is a
+           real column here — it used to be an overlay drawer at every width,
+           which meant the work surface never actually shared the frame. */
+        <div
+          data-testid="session-first-sidebar-column"
+          /* No border: the sidebar carries the chrome surface and the work
+             region sits on the canvas, so the background shift is the
+             separator (visual-language.md P7 — background shift before
+             border). The mockup draws no rule here either. */
+          className="flex min-h-0 w-[min(var(--shell-sidebar-width),90vw)] shrink-0"
+        >
+          <SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />
+        </div>
+      ) : (
+        /* Below `lg` the sidebar is still an overlay: there is no room for a
+           column that the work surface would have to share. */
+        <SessionDrawer
+          open={showList}
+          onClose={() => onCloseDrawer()}
+          sidebar={
+            <SessionFirstSidebar
+              {...sidebarProps}
+              collapsible={false}
+              onSelect={(session) => {
+                onCloseDrawer();
+                onSelect(session);
+              }}
+              onConfigure={(session) => {
+                onCloseDrawer();
+                onConfigure(session);
+              }}
+            />
+          }
+        />
+      )}
       <main className="flex min-h-0 flex-1 flex-col">
         <SessionFirstMain
           {...mainShared}
           surface={surface}
-          onBackToSessions={onBackToSessions}
-          onOpenDrawer={() => setShowDrawer(true)}
+          onOpenDrawer={() => onBackToSessions?.()}
           terminal={terminal}
         />
       </main>

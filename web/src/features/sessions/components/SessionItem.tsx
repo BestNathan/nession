@@ -55,30 +55,47 @@ export function SessionItem({
     <div
       data-testid="session-item-row"
       data-selected={selected}
+      /* Selection is the surface and nothing else. The mockup fills the row
+         with `--n-raised` and draws no other cue, and visual-language.md
+         forbids stacking background + border + shadow + accent for one
+         selection — the accent bar that used to sit here was the second cue. */
       className={cn(
-        'group relative flex items-start gap-1 px-[var(--shell-space-3)] py-[var(--shell-space-2)] transition-colors hover:bg-muted/40',
+        'group relative flex items-start gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-session-row-pad-y)] transition-colors',
+        selected ? 'bg-muted' : 'hover:bg-muted/60',
       )}
     >
-      {selected ? (
-        <span
-          data-testid="session-item-selected-bar"
-          className="absolute bottom-1 left-0 top-1 rounded-r-sm w-0.5 bg-primary"
-          aria-hidden="true"
-        />
-      ) : null}
       <button
         type="button"
         data-testid={`session-item-${session.session_id}`}
         aria-current={selected ? 'true' : undefined}
-        className="flex min-w-0 flex-1 flex-col gap-0.5 py-1 text-left text-sm"
+        className="flex min-w-0 flex-1 flex-col text-left"
         onClick={() => onSelect(session)}
       >
-        <span className="font-medium">{session.session_name}</span>
-        <span className="text-muted-foreground text-xs">
+        {/* Both lines truncate rather than wrap. At the mockup's 246px the meta
+            line is wider than the column, and a wrapped "ago" reads as a layout
+            bug rather than a second line of information; the mockup sets
+            `white-space: nowrap` on both for the same reason. */}
+        <span
+          className={cn(
+            'truncate text-[length:var(--shell-session-row-title-font-size)] leading-5',
+            selected ? 'font-medium text-foreground' : 'text-[color:var(--text-secondary)]',
+          )}
+        >
+          {session.session_name}
+        </span>
+        <span
+          data-testid="session-item-meta"
+          className="truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4 text-muted-foreground"
+        >
           shell · {agentLabel} · {formatRelativeTime(session.last_activity)}
         </span>
         {domain.agent.copy !== null && (
-          <span className={cn('text-xs', agentCopyClass(domain.agent.channel))}>
+          <span
+            className={cn(
+              'truncate font-mono text-[length:var(--shell-session-row-meta-font-size)] leading-4',
+              agentCopyClass(domain.agent.channel),
+            )}
+          >
             {domain.agent.copy}
           </span>
         )}

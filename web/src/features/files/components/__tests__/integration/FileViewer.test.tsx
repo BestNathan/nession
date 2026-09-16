@@ -195,7 +195,10 @@ echo "hello world"
     render(<FileViewer fileOps={ops} path="/test/script" filename="script" onClose={onClose} />);
 
     await waitFor(() => {
-      expect(screen.getByText('script')).toBeInTheDocument();
+      // The viewer header names the file by path, not basename (mockup's
+      // `.editor-head`), so these assert the path. That the file loaded is the
+      // point; which of the two strings carries it is incidental.
+      expect(screen.getByText('/test/script')).toBeInTheDocument();
     });
     expect(screen.queryByText(/looks like Markdown/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
@@ -221,7 +224,7 @@ CMD ["node", "index.js"]
     render(<FileViewer fileOps={ops} path="/test/Dockerfile" filename="Dockerfile" onClose={onClose} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Dockerfile')).toBeInTheDocument();
+      expect(screen.getByText('/test/Dockerfile')).toBeInTheDocument();
     });
     expect(screen.queryByText(/looks like Markdown/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();

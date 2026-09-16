@@ -39,7 +39,7 @@ export function SessionFirstTerminal({
     >
       {!sessionId ? (
         <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-          Select a session
+          Select a session to open its terminal.
         </div>
       ) : (
         <TerminalSurface

@@ -17,18 +17,19 @@ For the current implementation, Terminal is the dominant work surface of an acti
 The default active Session should read approximately as:
 
 ```text
-┌───────────────────────────────────────────────────────────────┐
-│ quiet Session / connectivity context              [context]  │
-│                                                               │
-│                                                               │
-│                     TERMINAL / CURRENT WORK                   │
-│                                                               │
-│                                                               │
-│                [ contextual interaction capsule ]             │
-└───────────────────────────────────────────────────────────────┘
+┌──────────────┬────────────────────────────────────────────────┐
+│ Agents       │                                                │
+│ Sessions     │            TERMINAL / CURRENT WORK             │
+│ ────────────  │                                    [▤][⊞]     │
+│ connected ·3 │                                                │
+│              │                                                │
+│              │         [ contextual interaction capsule ]     │
+└──────────────┴────────────────────────────────────────────────┘
 ```
 
 The drawing intentionally does not prescribe a permanent Session sidebar, permanent `Terminal | Workspace` switcher, or permanent Workspace tool bar. Those may be current implementation mechanisms, but they are not composition invariants.
+
+**Current implementation (2026-09-16, #748).** The shell is two columns — a sidebar and the work surface — with **no permanent top band**. Session navigation, infrastructure identity and service status live in the sidebar; the surface switcher floats at the work surface's top-right. The `[context]` slot the earlier drawing showed at top-right is gone with the header: the same information is reachable in the sidebar, which is where the composition invariant puts it (chrome stays close to the edges and does not consume a band the work surface could use).
 
 Relationships:
 
@@ -61,7 +62,8 @@ Top chrome should communicate only what the current work needs: Session identity
 Rules:
 
 - avoid multiple stacked toolbars for the same region;
-- avoid persistent product branding inside the active work shell when it adds no task value;
+- avoid persistent product branding inside the active work shell when it adds no task value — the Web shell ships with **no product wordmark**, and adding one is a product decision, not a styling choice;
+- a permanent top band must earn its height; the current Web shell has none, and Session identity is carried by the selected row in the sidebar's Sessions section;
 - healthy state is represented quietly rather than as a row of badges;
 - Workspace access may be visible, but the exact widget is not a product invariant;
 - a capability should not add permanent top chrome merely because it is installed.
@@ -199,7 +201,9 @@ On large screens:
 
 ## 12. Current contracts and canonical screenshots
 
-Existing `design/contracts/*`, fixture screens, and visual-regression baselines encode the previously approved Session-first implementation. They remain useful evidence and migration protection, but some still encode assumptions from that shell. The Workspace tool bar has since converged on contextual presentation; the SurfaceSwitcher was reviewed and its permanence kept deliberately (see [surface-switcher.md](design-system/patterns/surface-switcher.md)).
+Existing `design/contracts/*`, fixture screens, and visual-regression baselines encode the previously approved Session-first implementation. They remain useful evidence and migration protection, but some still encode assumptions from that shell. The Workspace tool bar has since converged on contextual presentation, and the SurfaceSwitcher's permanence was reviewed again and **reversed** (#748): it is now a floating icon capsule and the permanent Session header is gone (see [surface-switcher.md](design-system/patterns/surface-switcher.md)).
+
+That reversal is an instance of the rule this section exists to enforce: the previous review's conclusion was a decision with a named condition attached — replace the control only after shipping an alternative that keeps Workspace reachable — and the condition was met, so the conclusion moved.
 
 After this product convergence, those assumptions must be reviewed against [`PRINCIPLE.md`](../../PRINCIPLE.md).
 

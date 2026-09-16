@@ -154,7 +154,7 @@ tmux sessions (per-node)
 
 ### Key Design Decisions
 
-- **Web UI theming:** shadcn/ui default dark theme (Zinc/neutral palette). Terminal keeps Catppuccin Mocha independent of UI theme.
+- **Web UI theming:** light-only, from `design/tokens/*.json` via `design/generated/web.css` — never restate palette values in `index.css`. Location (local warm / remote cool) is the only chromatic axis; local sessions are colourless. The terminal consumes the same source as `design/generated/terminal.ts`, so its background *is* the canvas.
 - **WebSocket singleton:** `WebSocketService` is a global singleton for the browser session — request/response correlation, event pub/sub, auto-reconnect.
 - **CSS:** Tailwind v4 via `@tailwindcss/vite`. Only one CSS file (`index.css`). All component styles are Tailwind utilities.
 - **shadcn components:** Individual primitives in `components/ui/`, added via CLI, version-controlled. See the shadcn component mapping below for what's installed and what to use for new features.

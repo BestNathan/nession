@@ -4,6 +4,13 @@
 
 SessionHeader is optional compact chrome for the **active Session**. It provides identity, navigation, or continuity-critical state only when those signals are useful to the current work.
 
+> **Current implementation (2026-09-16, #748): the Web shell renders no SessionHeader at all.** Its duties moved
+> rather than disappearing — Session identity to the selected row in the sidebar's Sessions section, location to
+> the marked node in the Agents section, service status and ⌘K to the sidebar footer. This is the "optional" in
+> the first sentence being exercised, not the pattern being deleted: the anatomy, presence rules and acceptance
+> criteria below still govern any header that is rendered. One consequence is accepted knowingly — with the
+> sidebar collapsed to a rail, nothing on screen shows the Session name.
+
 > Existing contract: `design/contracts/patterns/session-header.json` ([contracts.md](../contracts.md)). Any contract that requires permanently visible healthy metadata should be reviewed as implementation convergence debt.
 
 ## Purpose
@@ -34,7 +41,7 @@ Possible parts:
 | Workspace affordance | Visible path to Workspace contextual depth |
 | Agent/location context | Optional infrastructure identity when it helps disambiguate or recover work |
 | ConnectionStatus | Optional compact continuity state when relevant |
-| SurfaceSwitcher | The Web implementation of Terminal ↔ Workspace access, shipped permanently while it is the only visible route (decision recorded in [surface-switcher.md](surface-switcher.md)) |
+| Workspace affordance | The Web implementation of Terminal ↔ Workspace access. As of #748 this is a floating icon capsule on the work surface, **not** a header part — see [surface-switcher.md](surface-switcher.md) |
 
 Not every part is rendered in every state or viewport.
 
@@ -67,7 +74,7 @@ A Session title should not silently turn into a generic "Disconnected" state tha
 | | Web | App |
 |--|-----|-----|
 | Session navigation | May already be visible, collapsible, or on demand; header affordance is conditional | Visible non-gesture Sessions affordance required somewhere around the work surface |
-| Workspace access | SurfaceSwitcher, permanently — it is the only visible non-gesture route today | Visible non-gesture Workspace affordance + swipe-left |
+| Workspace access | Floating surface capsule on the work surface — still the only visible non-gesture route, but no longer header chrome | Visible non-gesture Workspace affordance + swipe-left |
 | Infrastructure context | Show only when useful/relevant | Same semantic rule, adapted to limited space |
 | Height | Compact; may disappear/minimize when redundant | Safe-area aware; touch targets must remain accessible |
 
@@ -111,6 +118,6 @@ Use stable alignment, concise copy, consistent hit areas, and predictable state 
 - [ ] Sessions and Workspace remain explicitly reachable; App does not depend on gestures alone.
 - [ ] Healthy infrastructure context is allowed to recede or disappear when redundant.
 - [ ] Degraded state names the affected dimension rather than collapsing status.
-- [ ] Workspace stays reachable without gestures on both experiences; on Web the SurfaceSwitcher is currently what provides that, and removing it requires a shipped replacement.
+- [ ] Workspace stays reachable without gestures on both experiences; on Web the floating surface capsule is what provides that, and removing or relocating it requires a shipped replacement (the ordering rule in [surface-switcher.md](surface-switcher.md)).
 - [ ] Capability growth does not imply SessionHeader growth.
 - [ ] Header chrome yields before the current work surface yields.

@@ -18,7 +18,7 @@ test.describe('Web compact 1024×768', () => {
     await page.goto('/#/fixture');
 
     await expect(page.getByTestId('session-first-shell')).toBeVisible();
-    await expect(page.getByTestId('session-drawer')).toBeVisible();
+    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
     await expect(page.getByTestId('terminal-well')).toBeVisible();
     await expect(page.getByTestId('fixture-terminal')).toBeVisible();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);

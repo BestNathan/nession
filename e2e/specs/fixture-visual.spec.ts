@@ -8,6 +8,7 @@ import {
   gotoFixtureApp,
   gotoFixtureShell,
   gotoFixtureWorkspace,
+  openFixtureFile,
   waitForFixtureTerminal,
 } from '../helpers/fixtureVisual';
 
@@ -22,7 +23,11 @@ test.describe('Web 1440×900', () => {
 
   test('Active Terminal', async ({ page }) => {
     await gotoFixtureShell(page);
-    await expect(page.getByTestId('session-drawer')).toBeVisible();
+    // Above `lg` the sidebar is a column, not an overlay drawer (#748). The
+    // drawer-open screen this used to pin is not one the shipped shell has at
+    // this width, so the canonical screenshot moves with the shell.
+    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+    await expect(page.getByTestId('session-drawer')).toHaveCount(0);
     await waitForFixtureTerminal(page);
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
@@ -35,8 +40,25 @@ test.describe('Web 1440×900', () => {
   test('Workspace / Files', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await expect(page.getByTestId('files-web-layout')).toBeVisible();
+    // Open a file, so the viewer and the code surface are in the baseline
+    // rather than an empty state that covers neither.
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('web-workspace.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // The Files view *before* anything is opened. `Workspace / Files` above opens
+  // a file so the viewer is in its screenshot, which means this state — the
+  // tree and the empty detail pane — stopped being captured by anything. Two
+  // states, two screenshots: an empty pane is not evidence about a filled one.
+  test('Workspace / Files, nothing open', async ({ page }) => {
+    await gotoFixtureWorkspace(page);
+    await expect(page.getByTestId('files-web-layout')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-workspace-unopened.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
@@ -59,6 +81,7 @@ test.describe('Web compact 1024×768', () => {
   test('Workspace / Files', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await expect(page.getByTestId('files-web-layout')).toBeVisible();
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('web-compact-workspace.png', {
       fullPage: true,
@@ -97,8 +120,28 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-layout')).toBeVisible();
+    // App pushes the viewer over the tree, so this captures the pushed editor
+    // — which no baseline covered either.
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('app-workspace.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // The App's Files **list**, which is the whole screen before a file is pushed
+  // over it. `Workspace / Files` above captures the pushed editor, so the list
+  // itself — section header, rows, metas — was in no baseline.
+  test('Files list', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await page.getByTestId('app-header-workspace').first().click();
+    await expect(page.getByTestId('files-app-list')).toBeVisible();
+    // The directory counts arrive one `listDir` at a time, so the screenshot
+    // waits for the last row's meta rather than racing it.
+    await expect(page.getByTestId('file-row-web')).toContainText('1 file', { timeout: 10_000 });
+
+    await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

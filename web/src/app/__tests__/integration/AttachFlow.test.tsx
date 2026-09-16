@@ -245,7 +245,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
 
   it('opens the dialog for a first attach; confirming persists a profile and attaches', async () => {
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
     // The REAL dialog fetches attach info on open; Attach enables once it lands.
     const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
@@ -269,7 +268,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
   it('attaches through the saved profile without ever opening the dialog', async () => {
     seedProfile();
     const { store } = renderShell('/', { seedProbeCache: true });
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
     await waitFor(() => {
       expect(store.get(sessionIdAtom)).toBe(sess.session_id);
@@ -284,7 +282,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
   it('opens the dialog for a stale profile and never auto-attaches', async () => {
     seedProfile({ fingerprint: 'stale-fp' });
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
     // Profile failed validation (fingerprint mismatch) → the dialog reopens.
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
@@ -300,7 +297,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
   it('configure Save persists the new mode without attaching', async () => {
     seedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
     const saveBtn = await screen.findByRole('button', { name: /^Save$/ });
     await waitFor(() => expect(saveBtn).toBeEnabled());
@@ -329,7 +325,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     seedProfile({ mode: 'p2p' });
     const before = storedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -348,7 +343,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     seedProfile({ mode: 'p2p', selectedUrl: 'ws://a/ws' });
     const before = storedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -397,7 +391,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     const { store } = renderShell('/', { seedProbeCache: true });
     store.set(sessionIdAtom, sess.session_id);
     store.set(terminalSessionStateAtom, 'attached');
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
     // Healthy attached terminal: the row click must NOT re-enter the profile
     // fast path (a re-attach would bump the route epoch and tear down the live
@@ -413,7 +406,6 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     const { store } = renderShell('/', { seedProbeCache: true });
     store.set(sessionIdAtom, sess.session_id);
     store.set(terminalSessionStateAtom, 'failed');
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
     // A failed terminal: recovery stays an explicit user action — the dialog
     // opens for re-confirmation instead of a silent auto-attach.

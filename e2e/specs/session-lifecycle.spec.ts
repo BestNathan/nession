@@ -21,12 +21,7 @@ test.describe('Session lifecycle', () => {
     // The sidebar "Create session" button is enabled only when at least one
     // agent is online. In CI, cargo build + agent startup + heartbeat can
     // take 30-60 seconds. Open the sessions drawer if the list is collapsed.
-    const create = page.getByTestId('session-first-create');
-    try {
-      await expect(create).toBeVisible({ timeout: 1_000 });
-    } catch {
-      await page.getByTestId('session-first-open-drawer').click();
-    }
+    // The sidebar is always present; there is no drawer opener to click (#748).
     const createButton = page.getByTestId('session-first-create');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
 
@@ -59,9 +54,15 @@ test.describe('Session lifecycle', () => {
     await expect(sessionRow).toBeVisible({ timeout: 15_000 });
     await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
-    // Meta line format: "shell · {agentLabel} · {relative time}"
+    // Meta line format: "shell · {agentLabel} · {relative time}".
+    //
+    // Selected by testid, not by class. This used to be
+    // `span.text-xs.text-muted-foreground`, which is a selector on how the line
+    // is *styled* — so any design change to the row breaks a test about its
+    // content, and the failure reads as a missing element rather than as a
+    // renamed class.
     await expect(
-      sessionRow.locator('span.text-xs.text-muted-foreground'),
+      sessionRow.getByTestId('session-item-meta'),
     ).toContainText(`shell · ${agentLabel} ·`, { timeout: 5_000 });
 
     // ── Kill session ──

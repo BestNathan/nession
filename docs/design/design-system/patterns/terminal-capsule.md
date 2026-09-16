@@ -6,6 +6,18 @@ The TerminalCapsule is Nession's lightweight contextual interaction surface over
 
 It is designed to let the user express intent without turning the Terminal into a dashboard. The capsule is conversational first, extensible second, and always subordinate to the work happening in the Terminal.
 
+> **Decision (2026-09-16, #748): capability state is expressed inside the `+` expansion, not on the resting capsule.**
+> The resting state is identical whether or not a capability is active; the `+` expansion is the single place
+> capability presence appears, marking the capabilities that are relevant or active. This **revises** the `active`
+> row of the capability table below, which previously permitted presence "directly on or next to the capsule".
+> The revision is deliberate, not compliance: the shipped implementation rendered that presence and was
+> compliant with the old table. The owner's judgement was that a chip on the resting capsule reads as clutter;
+> the capsule's job at rest is intent, and capability state is a secondary question the user asks explicitly.
+>
+> Five other documents encode the superseded assumption, and all were updated in the same change —
+> `interaction/web.md`, `interaction/app.md`, `terminal-surface.md`, `surface-switcher.md`,
+> `information-architecture.md`. Leaving any of them would let the next reader cite one to restore the chip.
+
 > **Contract:** `design/contracts/patterns/terminal-capsule.json` — measurable layout rules ([contracts.md](../contracts.md)).
 
 ## Purpose
@@ -15,8 +27,8 @@ The capsule provides one quiet place for high-level interaction with the current
 - conversational / natural-language intent;
 - direct terminal input where appropriate;
 - commands and shortcuts;
-- explicit `+` expansion for secondary actions;
-- lightweight presence and actions from capabilities that are relevant or active now.
+- explicit `+` expansion for secondary actions and for capability state;
+- lightweight presence and actions from capabilities that are relevant or active now, expressed through that expansion.
 
 The capsule is **not** a permanent toolbar or a feature catalog. A registered capability does not receive a button simply because it exists.
 
@@ -24,9 +36,9 @@ The capsule is **not** a permanent toolbar or a feature catalog. A registered ca
 
 The capsule implements three root Principles directly:
 
-1. **Show only what matters now.** The resting state stays minimal.
-2. **Let capabilities emerge from context.** Relevant/active capabilities may gain presence.
-3. **Prefer progressive disclosure.** The first layer shows intent and presence; deeper controls open explicitly.
+1. **Show only what matters now.** The resting state stays minimal — and identical across capability states.
+2. **Let capabilities emerge from context.** Relevant/active capabilities gain presence in the `+` expansion, which the user opens deliberately.
+3. **Prefer progressive disclosure.** The first layer shows intent; presence and deeper controls open explicitly.
 
 ## Anatomy
 
@@ -35,7 +47,7 @@ The capsule implements three root Principles directly:
 │  xterm / current workload                                   │
 │                                                            │
 │        ┌─ TerminalCapsule ───────────────────────────┐      │
-│        │ [+] [capability presence?] [ input ... ] [send] │      │
+│        │ [+] [ input ... ]                        [send] │      │
 │        └─────────────────────────────────────────────┘      │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -46,8 +58,8 @@ The exact ordering is experience-specific. The semantic regions are:
 |------|------|
 | Capsule shell | Quiet floating surface anchored to the current Session |
 | Primary input | Conversational / intent input; the main interaction |
-| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions; lists the capabilities that earned no presence, so one control covers a growing set |
-| Capability presence | Optional identity/state for a capability that has earned relevance or is active |
+| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions, **and the single place capability state is expressed**. Lists the reachable capabilities and marks the ones that are relevant or active, so one control covers a growing set and the resting capsule never grows with it |
+| Capability presence | Identity/state for a capability that has earned relevance or is active, rendered **inside the `+` expansion** as a leading marker plus full-contrast text — never on the resting capsule |
 | Primary action | Send / execute current intent |
 | Secondary actions | Contextual commands, paste/copy, physical keys, history, and extension-provided actions |
 
@@ -63,10 +75,13 @@ Capsule behavior:
 
 | Capability state | Capsule behavior |
 |------------------|------------------|
-| `unavailable` | No presence |
-| `available` | No resting presence; reachable through the capsule's `+` discovery entry, which lists them without taking a slot |
-| `relevant` | May appear as a contextual action or lightweight hint |
-| `active` | May gain lightweight identity/state directly on or next to the capsule |
+| `unavailable` | Hidden; not listed in the `+` expansion |
+| `available` | Listed in the capsule's `+` expansion, unmarked, without taking a slot on the resting capsule |
+| `relevant` | Listed in `+` and marked, and may appear as a contextual action |
+| `active` | Listed in `+` and marked with its lightweight identity/state; may expose deeper state on request |
+
+The resting capsule is byte-for-byte the same in all four states. Capability state changes only what the `+`
+expansion contains.
 
 The capsule should not render a row of installed extensions.
 
@@ -77,9 +92,9 @@ Shell only
   -> neutral capsule
 
 Claude Code becomes active in this Session
-  -> Claude Code presence appears subtly
-  -> `+` exposes Claude Code actions relevant to this Session
-  -> tapping presence/action may open a deeper Session-scoped capability surface
+  -> the resting capsule is unchanged
+  -> `+` now marks Claude Code and exposes its actions for this Session
+  -> tapping that entry may open a deeper Session-scoped capability surface
   -> closing the surface returns to the same Terminal
 ```
 
@@ -91,10 +106,10 @@ The capsule should reveal complexity in layers:
 
 ```text
 resting capsule
-    ↓ user types / capability becomes relevant
-intent + lightweight presence
+    ↓ user types
+intent
     ↓ explicit + / capability action
-contextual action surface
+contextual action surface, with marked capability state
     ↓ explicit deeper request
 capability-specific panel / overlay / pushed view
 ```
@@ -137,7 +152,7 @@ Derived from [`PRINCIPLE.md`](../../../../PRINCIPLE.md) and [visual-language.md]
 
 - The current work remains visually dominant.
 - The capsule is refined and clearly interactive, but it must not outshine Terminal output in the resting state.
-- Active capability presence is intentionally lightweight until the user asks for more.
+- Active capability presence is intentionally lightweight and lives behind `+` until the user asks for more.
 
 ### Quality through precision
 
@@ -155,7 +170,7 @@ Minimal does not mean bare or unfinished.
 ### Information hierarchy
 
 - **Primary:** user's current intent/input.
-- **Secondary:** send/execute and an active capability's lightweight presence.
+- **Secondary:** send/execute, and the `+` expansion through which an active capability's presence is reached.
 - **Tertiary:** history, copy/paste, commands, shortcuts, and other actions revealed contextually.
 
 ### Surface treatment

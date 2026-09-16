@@ -56,7 +56,7 @@ export function SessionList({
     }
     return (
       <div className="flex h-full items-center justify-center p-4 text-muted-foreground text-sm">
-        No sessions
+        No sessions yet. Select New Session to get started.
       </div>
     );
   }

@@ -5,11 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PanelLeft, PanelRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { useEdgeSwipePager } from './useEdgeSwipePager';
-import { shellIconButtonClass } from '@/app/shellStyles';
+import { useSwipePager } from './useSwipePager';
 
 const FALLBACK_WIDTH_PX = 375;
 
@@ -21,8 +17,6 @@ export interface AppSpatialShellProps {
   workspace: ReactNode;
   index: SpatialPageIndex;
   onIndexChange: (index: SpatialPageIndex) => void;
-  /** Overlay Sessions/Workspace buttons on the terminal page */
-  showHeaderActions?: boolean;
 }
 
 export function AppSpatialShell({
@@ -31,7 +25,6 @@ export function AppSpatialShell({
   workspace,
   index,
   onIndexChange,
-  showHeaderActions = false,
 }: AppSpatialShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(FALLBACK_WIDTH_PX);
@@ -70,11 +63,10 @@ export function AppSpatialShell({
   );
 
   const { dragOffset, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } =
-    useEdgeSwipePager({
+    useSwipePager({
       pageCount: 3,
       index,
       onIndexChange: handleIndexChange,
-      width,
     });
 
   const translateX = -index * width + dragOffset;
@@ -113,32 +105,6 @@ export function AppSpatialShell({
             style={{ width }}
           >
             {terminal}
-            {showHeaderActions ? (
-              <>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={cn('absolute top-2 left-2 z-10', shellIconButtonClass)}
-                  aria-label="Sessions"
-                  data-testid="app-spatial-open-sessions"
-                  onClick={() => onIndexChange(0)}
-                >
-                  <PanelLeft className="size-5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={cn('absolute top-2 right-2 z-10', shellIconButtonClass)}
-                  aria-label="Workspace"
-                  data-testid="app-spatial-open-workspace"
-                  onClick={() => onIndexChange(2)}
-                >
-                  <PanelRight className="size-5" />
-                </Button>
-              </>
-            ) : null}
           </div>
           <div
             data-testid="app-spatial-page-workspace"

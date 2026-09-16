@@ -86,7 +86,10 @@ describe('FilesAppLayout', () => {
     await user.click(await screen.findByText('visual-language.md'));
     expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
     expect(screen.getByTestId('files-app-nav')).toBeInTheDocument();
-    expect(screen.getAllByText('visual-language.md').length).toBeGreaterThanOrEqual(2);
+    // The path, in both the App sub-header and the viewer's own header — the
+    // tree row beside them shows only the basename, so this string is what
+    // proves the viewer opened the row that was clicked.
+    expect(screen.getAllByText('docs/visual-language.md').length).toBeGreaterThanOrEqual(2);
     await user.click(screen.getByLabelText('Close file'));
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
   });

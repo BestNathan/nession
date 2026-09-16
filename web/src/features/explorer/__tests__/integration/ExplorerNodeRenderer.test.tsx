@@ -40,11 +40,11 @@ describe('ExplorerNodeRenderer', () => {
     );
 
     expect(screen.getByText('src')).toBeInTheDocument();
-    expect(document.querySelector('.text-info')).toBeInTheDocument();
+    expect(document.querySelector('.text-muted-foreground')).toBeInTheDocument();
     expect(screen.getByText('MOCK')).toBeInTheDocument();
   });
 
-  it('renders file row with name and metadata columns', () => {
+  it('renders the file row as a name, with no size or time column', () => {
     render(
       <ExplorerNodeRenderer
         node={FILE_NODE}
@@ -56,7 +56,12 @@ describe('ExplorerNodeRenderer', () => {
     );
 
     expect(screen.getByText('main.ts')).toBeInTheDocument();
-    expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+    // The row used to carry size and modified-time as two fixed 72px columns.
+    // The mockup's tree is 208px, where those two are 144 of it — the name
+    // would truncate first, which is backwards — and the mockup draws neither.
+    // Asserting the absence keeps them from growing back into the narrow tree.
+    expect(screen.queryByText('2.0 KB')).not.toBeInTheDocument();
+    expect(screen.queryByText(/ago$/)).not.toBeInTheDocument();
   });
 
   it('shows context menu items on right-click', async () => {

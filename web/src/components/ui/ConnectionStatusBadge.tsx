@@ -12,7 +12,7 @@ const STATUS_CONFIG: Record<ConnectionState, { color: string; text: string }> = 
   disconnected: { color: 'bg-destructive', text: 'Disconnected' },
   connecting: { color: 'bg-warning', text: 'Connecting...' },
   reconnecting: { color: 'bg-warning', text: 'Reconnecting...' },
-  connected: { color: 'bg-success', text: 'Connected' },
+  connected: { color: 'bg-muted-foreground', text: 'Connected' },
 };
 
 export function ConnectionStatusBadge({ status, showPulse = true, className }: ConnectionStatusBadgeProps) {

@@ -12,7 +12,7 @@ export interface TerminalSurfaceProps {
   controller: TerminalController | null;
   /** Address route switch in progress — subtle veil over viewport. */
   isSwitching?: boolean;
-  /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
+  /** What the capsule may show: every reachable capability, marked by state, in `+`. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
 }
 
@@ -63,7 +63,6 @@ export function TerminalSurface({
         onModeChange={capsuleExperience === 'app' ? setCapsuleMode : undefined}
         sendText={capsuleSendText}
         disabled={inputDisabled}
-        capability={capsuleCapabilities?.capability}
         capabilityDisclosure={capsuleCapabilities?.disclosure}
       />
     </div>

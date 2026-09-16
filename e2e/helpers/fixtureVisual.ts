@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * Frozen wall clock for canonical fixture routes. Must stay after fixture
@@ -17,6 +17,50 @@ export const FIXTURE_SCREENSHOT = {
 /** Install a fixed clock before navigation so formatRelativeTime is stable. */
 export async function freezeFixtureClock(page: Page): Promise<void> {
   await page.clock.install({ time: FIXTURE_FROZEN_TIME });
+}
+
+/**
+ * Open a file in the fixture's Files view, by driving the tree.
+ *
+ * The canonical Workspace screens used to be captured with nothing selected, so
+ * the viewer never appeared in a baseline — and after the editor convergence it
+ * meant the theme and metrics of the code surface were in no golden image at
+ * all. The visual gate had nothing to fail on for changes to them, which is how
+ * a clock-driven dark theme survived in a light-only product.
+ *
+ * Driving the tree is how a user opens a file, and the fixture needs no other
+ * route: giving it one would put a test concern into the product's
+ * `WorkspaceContext`, and `fixtureCapabilityFacts` is explicit that fixture
+ * route parameters express capability *resolution inputs*, never resolved
+ * state.
+ *
+ * `web/src/App.tsx` is the target because it is not markdown — a `.md` opens in
+ * the preview, and the code surface is what this is here to cover.
+ *
+ * Each level is awaited before the next click: the tree fills from the
+ * fixture's async `listDir`, so clicking a child before its parent has rendered
+ * finds nothing.
+ */
+export async function openFixtureFile(page: Page): Promise<void> {
+  // Two shapes, one destination. Web renders a tree of `treeitem`s; App renders
+  // a sectioned list whose rows are `file-row-*`, per `app.md`'s
+  // capability-internal flows. Which one is present is what tells them apart.
+  const first = page.getByTestId('file-row-web');
+  const isAppList = (await first.count()) > 0;
+
+  let opened = '';
+  for (const name of ['web', 'src', 'App.tsx']) {
+    opened = opened === '' ? name : `${opened}/${name}`;
+    // App keys rows by the entry's full path (`file-row-web/src`), the tree by
+    // the bare name — so accumulating the path is what makes one loop serve
+    // both rather than two hand-written sequences.
+    const row = isAppList
+      ? page.getByTestId(`file-row-${opened}`)
+      : page.getByRole('treeitem', { name });
+    await row.waitFor({ state: 'visible', timeout: 10_000 });
+    await row.click();
+  }
+  await expect(page.getByTestId('codemirror-editor')).toBeVisible({ timeout: 10_000 });
 }
 
 export async function gotoFixtureShell(page: Page): Promise<void> {

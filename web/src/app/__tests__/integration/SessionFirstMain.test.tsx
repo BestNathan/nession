@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import type { DomainState } from '@/features/sessions/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -54,9 +53,6 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        onBackToSessions={vi.fn()}
-        connectionStatus="connected"
       />,
     );
 
@@ -79,8 +75,6 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        connectionStatus="connected"
         terminal={<div data-testid="fixture-terminal" />}
       />,
     );
@@ -101,8 +95,6 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        connectionStatus="connected"
       />,
     );
 
@@ -121,8 +113,6 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        connectionStatus="connected"
       />,
     );
     expect(screen.getByTestId('surface-switcher')).toBeInTheDocument();
@@ -138,15 +128,13 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        connectionStatus="connected"
         experience="app"
       />,
     );
     expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
   });
 
-  it('shows the resting top row and empty state when no session is selected', () => {
+  it('shows the empty state when no session is selected', () => {
     render(
       <SessionFirstMain
         selectedSession={null}
@@ -158,44 +146,20 @@ describe('SessionFirstMain', () => {
         fileOps={null}
         onSurfaceChange={vi.fn()}
         onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
         onOpenDrawer={vi.fn()}
-        connectionStatus="connected"
       />,
     );
 
-    expect(screen.getByTestId('session-resting-header')).toBeInTheDocument();
-    expect(screen.getByTestId('session-first-open-drawer')).toBeInTheDocument();
-    expect(screen.getByTestId('server-connection')).toHaveTextContent(
-      'server: connected',
-    );
+    // Web renders no header at all now (#748): the identity, drawer and
+    // server-status members that used to sit above the work area are gone, and
+    // their homes are the sidebar. What remains here is the work area itself.
+    expect(screen.queryByTestId('session-header-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-resting-header')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('server-connection')).not.toBeInTheDocument();
     expect(screen.getByTestId('session-empty-state')).toHaveTextContent(
       'Select a session to start working',
     );
     expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
   });
 
-  it('opens the sessions drawer from the resting top row button', async () => {
-    const onOpenDrawer = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <SessionFirstMain
-        selectedSession={null}
-        selectedAgent={undefined}
-        agents={[]}
-        domain={null}
-        surface="terminal"
-        tool="files"
-        fileOps={null}
-        onSurfaceChange={vi.fn()}
-        onToolChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        onOpenDrawer={onOpenDrawer}
-        connectionStatus="connected"
-      />,
-    );
-
-    await user.click(screen.getByTestId('session-first-open-drawer'));
-    expect(onOpenDrawer).toHaveBeenCalledTimes(1);
-  });
 });

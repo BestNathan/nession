@@ -38,18 +38,14 @@ async function waitForTerminal(page: import('@playwright/test').Page): Promise<v
 }
 
 /**
- * The session-first shell collapses its sessions list into the left drawer
- * unless a wide two-pane list is showing. Open the drawer when the list is
- * not visible so list actions (create / select) are reachable.
+ * Wait until the Sessions list is actionable.
+ *
+ * The sidebar is a column above `lg` and the open drawer below it, so it is
+ * always present and there is nothing to open first — the header's drawer
+ * opener went with the header (#748).
  */
 async function ensureSessionsList(page: import('@playwright/test').Page): Promise<void> {
-  const create = page.getByTestId('session-first-create');
-  try {
-    await expect(create).toBeVisible({ timeout: 1_000 });
-  } catch {
-    await page.getByTestId('session-first-open-drawer').click();
-    await expect(create).toBeVisible({ timeout: 10_000 });
-  }
+  await expect(page.getByTestId('session-first-create')).toBeVisible({ timeout: 10_000 });
 }
 
 /** Create a session via the UI and return its name. */

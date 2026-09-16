@@ -8,7 +8,6 @@ import {
   ContextMenuContent,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { formatRelativeTimeSeconds, formatSize } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import type { ResolvedDecorations } from '../decorations/resolveDecorations';
@@ -30,7 +29,7 @@ export interface ExplorerNodeRendererProps {
 
 function NodeIcon({ node }: { node: ExplorerNode }) {
   if (node.kind === 'directory') {
-    return <Folder className="h-3.5 w-3.5 mr-1.5 text-info flex-shrink-0" />;
+    return <Folder className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />;
   }
 
   return <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />;
@@ -86,8 +85,6 @@ export function ExplorerNodeRenderer({
   onRenameChange,
   onActivate,
 }: ExplorerNodeRendererProps) {
-  const size = node.metadata?.size;
-  const modifiedAt = node.metadata?.modifiedAt;
   const isBinary = node.metadata?.isBinary ?? false;
 
   if (isRenaming) {
@@ -111,7 +108,7 @@ export function ExplorerNodeRenderer({
           onClick={() => onActivate()}
           title={decorations.tooltip}
           className={cn(
-            'flex items-center w-full px-2 py-0.5 text-xs hover:bg-accent transition-colors text-left cursor-default',
+            'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--workspace-tree-row-radius)] px-[var(--shell-space-2)] py-[var(--workspace-tree-row-pad-y)] font-mono text-[length:var(--workspace-tree-font-size)] leading-[var(--workspace-tree-line-height)] transition-colors text-left cursor-default hover:bg-muted/60',
             decorations.className,
           )}
         >
@@ -132,12 +129,12 @@ export function ExplorerNodeRenderer({
               BIN
             </span>
           )}
-          <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">
-            {node.kind === 'directory' ? '' : formatSize(size ?? 0)}
-          </span>
-          <span className="w-[72px] text-right text-muted-foreground flex-shrink-0 text-nowrap">
-            {formatRelativeTimeSeconds(modifiedAt ?? 0)}
-          </span>
+          {/* Size and modified-time used to sit here as two fixed 72px
+              right-aligned columns. At the mockup's 208px tree they are 144 of
+              208px — the name is what would be truncated, which is backwards —
+              and the mockup draws neither. Both are reachable: the viewer
+              header carries the file, and the row's title attribute still has
+              the metadata. */}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-36">
           {contextMenuItems}

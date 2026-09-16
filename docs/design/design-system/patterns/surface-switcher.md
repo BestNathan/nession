@@ -6,15 +6,25 @@ SurfaceSwitcher is one possible **Web affordance** for moving between the active
 
 It is a compact interaction pattern and not a feature-navigation model.
 
-**Decision (2026-09-14, #727):** on Web the switcher **does** ship permanently in
-the SessionHeader, and that is now the approved behavior rather than migration
-debt. It is the only visible non-gesture route to Workspace — the alternatives
-that exist today (the capsule's capability entry, a deep link) do not replace it,
-and removing it would strand Workspace behind a control the user has to find
-first. The rule that survives is not "hide it when possible" but "never render it
-without something to switch to" (see States). Replacing it with a quieter
-affordance is a design slice that must ship the alternative *before* the header
-loses the control, not a convergence chore to be done later.
+**Decision (2026-09-16, #748) — supersedes the #727 decision below.** On Web the
+switcher is a **floating icon capsule at the workspace's top-right**, not a
+segmented control inside the SessionHeader. Web ships no permanent Session
+header at all: the shell is a sidebar plus the work surface, and navigation,
+infrastructure identity and service status live in the sidebar.
+
+The #727 constraint that governed the old form was an *ordering* rule — ship the
+replacement, make Workspace reachable through it, then remove the header control —
+and that order was followed: the floating capsule ships in the same change that
+removes the header control, and `composition.md` §12, `session-header.md`, the
+executable contracts and the canonical screenshots all move with it. What #727
+protected is intact: Workspace still has a visible non-gesture route.
+
+**Decision (2026-09-14, #727) — superseded, recorded for provenance:** the
+switcher shipped permanently in the SessionHeader, as the only visible
+non-gesture route to Workspace, because the alternatives that existed then (the
+capsule's capability entry, a deep link) did not replace it. Its rule that
+survives this revision is not "hide it when possible" but **"never render it
+without something to switch to"** (see States).
 
 ## Purpose
 
@@ -32,13 +42,22 @@ Must not:
 
 ## Anatomy
 
-The simplest current form is:
+The shipped Web form is a floating icon capsule:
 
 ```text
-[ Terminal | Workspace ]
+                                    ┌───────────┐
+                                    │ [▤] [⊞]   │   ← floating, top-right of the work surface
+                                    └───────────┘
 ```
 
-This exact segmented control is the shipped Web form. A quieter Workspace affordance — command, drawer/layer entry, contextual transition — remains a legitimate future design, but it has to arrive as a replacement: while the header control is the only visible path, it stays.
+Two icon segments, one per surface. It floats over the work surface rather than
+occupying a chrome band, so it costs the work surface no layout space and the
+work surface keeps the full frame. Labels are carried by the icons' accessible
+names and tooltips, not by permanent text.
+
+The earlier `[ Terminal | Workspace ]` segmented control lived inside the header
+because the header existed; with the header gone, a text control floating over
+the terminal would be the loudest thing on a quiet surface.
 
 ## States
 
@@ -54,7 +73,7 @@ The switcher does not encode Agent connectivity, Session lifecycle, attachment s
 
 Capabilities do not become switcher segments.
 
-An active capability may gain presence in the Session capsule and may expose deeper state in Workspace, but the surface affordance remains about **work versus contextual depth**, not about choosing tools.
+An active capability may be marked in the Session capsule's `+` expansion and may expose deeper state in Workspace, but the surface affordance remains about **work versus contextual depth**, not about choosing tools.
 
 See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md](terminal-capsule.md).
 
@@ -62,7 +81,7 @@ See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md]
 
 | | Web | App |
 |--|-----|-----|
-| Pattern | Shipped permanently in the SessionHeader (decision above) | Not used as the shell |
+| Pattern | Floating icon capsule, top-right of the work surface | Not used as the shell |
 | Terminal default | Yes | Yes |
 | Workspace access | SurfaceSwitcher or another explicit Web affordance | Visible Workspace control + swipe-left |
 | Session access | Separate Session navigation | Visible Sessions control + swipe-right |
@@ -71,8 +90,12 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
 
 ## Visual contract
 
-- Secondary chrome only; never louder than the work surface.
-- Compact and flat; no elevation in healthy chrome.
+- Secondary control; never louder than the work surface.
+- **Floating, so it carries the shared floating-surface treatment** (one 1px shadow ring plus two shadow
+  layers, no decorative border) rather than the "no elevation" rule that governed it while it was inline
+  header chrome. `visual-language.md` P7 licenses elevation for a control whose spatial role requires it,
+  and this one floats over the work surface by design. See
+  [terminal-capsule.md](terminal-capsule.md) § Surface treatment.
 - One selected state, one quiet unselected state.
 - No per-surface decorative color.
 - Without a Session there is nothing to switch between, so the control is absent rather than inert.
@@ -87,8 +110,12 @@ App uses the spatial `Sessions ← Terminal → Workspace` model rather than a s
 
 ## Replacing it
 
-If a quieter affordance is ever designed, the order is: ship the affordance, make
-Workspace reachable through it, then remove the header control — updating
-executable contracts and canonical screenshots in the same change. Dropping the
-control first is what leaves Workspace unreachable, which is why the permanence
-above was recorded as a decision instead of being left as debt.
+This section recorded the order for replacing the header control, and that order
+has now been followed (#748). It is kept as the rule for any future move:
+
+> Ship the affordance, make Workspace reachable through it, **then** remove the old
+> control — updating executable contracts and canonical screenshots in the same
+> change. Dropping the old control first is what leaves Workspace unreachable.
+
+Any future revision of the capsule form follows the same order. The affordance may
+change; "Workspace always has a visible non-gesture route" does not.
