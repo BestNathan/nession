@@ -42,14 +42,20 @@ export async function freezeFixtureClock(page: Page): Promise<void> {
  * finds nothing.
  */
 export async function openFixtureFile(page: Page): Promise<void> {
-  for (const dir of ['web', 'src']) {
-    const row = page.getByRole('treeitem', { name: dir });
+  // Two shapes, one destination. Web renders a tree of `treeitem`s; App renders
+  // a sectioned list whose rows are `file-row-*`, per `app.md`'s
+  // capability-internal flows. Which one is present is what tells them apart.
+  const first = page.getByTestId('file-row-web');
+  const isAppList = (await first.count()) > 0;
+  const trail = ['web', 'src', 'web/src/App.tsx'];
+
+  for (const step of trail) {
+    const row = isAppList
+      ? page.getByTestId(`file-row-${step}`)
+      : page.getByRole('treeitem', { name: step.split('/').pop() ?? step });
     await row.waitFor({ state: 'visible', timeout: 10_000 });
     await row.click();
   }
-  const file = page.getByRole('treeitem', { name: 'App.tsx' });
-  await file.waitFor({ state: 'visible', timeout: 10_000 });
-  await file.click();
   await expect(page.getByTestId('codemirror-editor')).toBeVisible({ timeout: 10_000 });
 }
 
