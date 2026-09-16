@@ -137,6 +137,7 @@
   --motion-composer: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   --motion-shell-duration: 180ms;
   --motion-shell-ease: cubic-bezier(0.2, 0, 0, 1);
+  --dock-target: 32px;
 }
 
 .dark {
@@ -406,4 +407,5 @@
   --composer-shell-inset: 0.75rem;
   --composer-shell-safe-area: env(safe-area-inset-bottom, 0px);
   --motion-composer: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  --dock-target: 28px;
 }

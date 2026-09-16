@@ -13,7 +13,10 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
   await page.goto('/#/fixture');
 
   await expect(page.getByTestId('session-first-shell')).toBeVisible();
-  await expect(page.getByTestId('session-header-line')).toBeVisible();
+  // Web has no Session header at all since #748: the canonical wide screen is
+  // two columns, and Session identity is the selected row in the sidebar.
+  await expect(page.getByTestId('session-header-line')).toHaveCount(0);
+  await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
   await expect(page.getByTestId('session-first-main-content')).toBeVisible();
   await expect(page.getByTestId('terminal-well')).toBeVisible();
   await expect(page.getByTestId('fixture-terminal')).toBeVisible();
@@ -24,7 +27,8 @@ test('canonical Active Terminal fixture renders the terminal-native shell', asyn
   await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 
   // Healthy canonical state: identity + navigation only. Infrastructure
-  // members appear as they degrade (see SessionHeader contextual presence).
+  // members appear as they degrade. Agent reachability lives on the affected
+  // Session row; attachment state on the sidebar footer.
   await expect(page.getByTestId('agent-context')).toHaveCount(0);
   await expect(page.getByTestId('connection-status')).toHaveCount(0);
   await expect(page.getByTestId('server-connection')).toHaveCount(0);

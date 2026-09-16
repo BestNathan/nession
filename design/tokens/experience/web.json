@@ -213,5 +213,9 @@
     "shellEase": {
       "value": "cubic-bezier(0.2, 0, 0, 1)"
     }
+  },
+  "dockTarget": {
+    "$description": "Web dock targets: pointer input, so the control-md band applies.",
+    "value": "32px"
   }
 }
