@@ -41,6 +41,9 @@
       "text-secondary": {
         "ref": "primitive.light.neutral.text-secondary"
       },
+      "surface": {
+        "ref": "primitive.light.neutral.surface"
+      },
       "accent": {
         "ref": "primitive.light.neutral.fill"
       },
@@ -165,6 +168,9 @@
       },
       "text-secondary": {
         "ref": "primitive.dark.neutral.text-secondary"
+      },
+      "surface": {
+        "ref": "primitive.dark.neutral.surface"
       },
       "accent": {
         "ref": "primitive.dark.neutral.fill"

@@ -273,5 +273,41 @@
   "dockTarget": {
     "$description": "Web dock targets: pointer input, so the control-md band applies.",
     "value": "32px"
+  },
+  "workspace": {
+    "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px — a navigation column sized to its content, not a fraction of the pane — with the editor taking the rest.",
+    "treeWidth": {
+      "value": "208px"
+    },
+    "treeFontSize": {
+      "$description": "Tree text. Monospace at 11px: a path is workload identity, and the mockup sets the whole tree in mono rather than only the filenames.",
+      "value": "11px"
+    },
+    "treeRowRadius": {
+      "value": "5px"
+    },
+    "treeLineHeight": {
+      "$description": "Tree line box. Looser than the text size implies, which is what lets the row's own vertical padding stay at 1px and still scan as a list.",
+      "value": "1.85"
+    },
+    "treeRowPadY": {
+      "$description": "Tree row vertical padding. 1px, because `lineHeight: 1.85` already carries the row's breathing room — padding and leading together would double it.",
+      "value": "1px"
+    },
+    "treeIndentStep": {
+      "$description": "Indent per tree depth. The mockup's levels are 20/33/46px from a 7px row inset, i.e. 13px a step.",
+      "value": "13px"
+    },
+    "editorFontSize": {
+      "value": "12px"
+    },
+    "editorLineHeight": {
+      "$description": "Code line box. The mockup's 1.75, looser than the tree's 1.85 ratio at a larger size — line numbers have to line up with their line.",
+      "value": "1.75"
+    },
+    "editorGutterWidth": {
+      "$description": "Line-number column. Fixed so numbers align regardless of digit count.",
+      "value": "34px"
+    }
   }
 }

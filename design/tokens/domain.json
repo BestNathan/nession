@@ -33,7 +33,7 @@
   "workspace": {
     "background": { "ref": "semantic.background" },
     "surface": { "ref": "semantic.card" },
-    "navigation": { "ref": "semantic.muted" }
+    "navigation": { "ref": "semantic.surface" }
   },
   "file": {
     "selected": { "ref": "semantic.accent" },

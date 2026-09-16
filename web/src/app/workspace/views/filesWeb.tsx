@@ -21,8 +21,17 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
   }
   return (
     <div data-testid="file-workspace" className="h-full min-h-0 overflow-hidden">
-      <div data-testid="files-web-layout" className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] overflow-hidden">
-        <div className="min-h-0 overflow-hidden border-r border-border/60">
+      {/* A fixed navigation column and a fluid editor, not two fractions. The
+          mockup draws the tree at 208px because it is sized to its content —
+          paths — and a `1fr 2fr` split hands it a third of the pane whatever it
+          holds. No border either: the tree carries `workspace.navigation` (the
+          chrome surface) and the editor keeps the canvas, so the background
+          shift is the separator, as in the shell (visual-language.md P7). */}
+      <div
+        data-testid="files-web-layout"
+        className="grid h-full min-h-0 grid-cols-[var(--workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
+      >
+        <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <FileBrowser
             fileOps={ctx.fileOps}
             onFileClick={(entry: FileEntry) => setSelected({ path: entry.path, filename: entry.name, size: entry.size })}
