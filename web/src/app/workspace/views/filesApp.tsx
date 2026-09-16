@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileBrowser } from '@/features/files/components/FileBrowser';
+import { FileList } from '@/features/files/components/FileList';
 import { FileViewer } from '@/features/files/components/FileViewer';
 import { AppBackButton } from '@/app/patterns/AppBackButton';
 import {
@@ -109,10 +109,7 @@ export function FilesAppLayout({ ctx }: { ctx: WorkspaceContext }) {
   }
   return (
     <div className="h-full min-h-0 overflow-hidden" data-testid="files-app-layout">
-      <FileBrowser
-        fileOps={ctx.fileOps}
-        onFileClick={handleFileClick}
-      />
+      <FileList fileOps={ctx.fileOps} onFileClick={handleFileClick} />
     </div>
   );
 }
