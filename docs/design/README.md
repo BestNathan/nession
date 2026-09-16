@@ -67,6 +67,7 @@ The key downstream interpretation of the Principles is:
 | [design-system/patterns.md](design-system/patterns.md) | Canonical implementation contract | Reusable product/UI patterns and contextual capability composition |
 | [design-system/contracts.md](design-system/contracts.md) | Canonical executable-contract architecture | Measurable consequences of approved pattern decisions; downstream from product semantics |
 | [design-system/validation.md](design-system/validation.md) | Canonical validation | Context/viewport assertions and focused visual regression for current approved contracts |
+| [design-system/inventory.md](design-system/inventory.md) | Audit / evidence | Repeatable coverage audit for token consumers, typography, layout repetition, shadcn/component boundaries, and validation gaps; never overrides canonical owners |
 | [migration.md](migration.md) | Migration | Transitional implementation plan; never overrides the canonical product model |
 | [styling-convergence.md](styling-convergence.md) | Historical migration record | Completed styling/token convergence rationale and ownership lessons; not current product structure |
 
