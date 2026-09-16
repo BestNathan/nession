@@ -251,7 +251,6 @@ describe('SessionFirstShell', () => {
   it('applies safe-area padding to sidebar footer', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     const footer = screen.getByTestId('session-first-sidebar-footer');
     expect(footer.className).toMatch(
       /pb-\[max\(0\.5rem,env\(safe-area-inset-bottom\)\)\]/,
@@ -274,9 +273,9 @@ describe('SessionFirstShell', () => {
   it('selects a session, defaults to Terminal, then switches Workspace capabilities from More', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    expect(screen.getByRole('heading', { name: 'Fix terminal reconnect' })).toBeInTheDocument();
+    // No header heading any more — Session identity is the selected row.
+    expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
 
@@ -338,14 +337,12 @@ describe('SessionFirstShell', () => {
     };
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     expect(screen.getByTestId('session-first-create')).toBeDisabled();
   });
 
   it('opens env files from workspace dock when a session is selected', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
     await clickDisclosedCapability('Env');
@@ -372,7 +369,6 @@ describe('SessionFirstShell', () => {
   it('opens attach dialog when a session is selected', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
   });
@@ -380,7 +376,6 @@ describe('SessionFirstShell', () => {
   it('writes sessionIdAtom when attach is confirmed', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     await userEvent.click(screen.getByTestId('attach-confirm'));
     await waitFor(() => {
@@ -391,7 +386,6 @@ describe('SessionFirstShell', () => {
   it('routes the configure action to a configure-intent dialog whose Save persists without attaching', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
     expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('attach-dialog-intent')).toHaveTextContent('configure');
@@ -417,22 +411,13 @@ describe('SessionFirstShell', () => {
   it('calls openDetail when a session is selected', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(mobileNav.openDetail).toHaveBeenCalled();
   });
 
-  it('shows back control that returns to the session list on mobile detail', async () => {
-    mobileNav.isWide = true;
-    mobileNav.showList = false;
-    mobileNav.showDetail = true;
-    deepLink.sessionIdFromUrl = sess.session_id;
-    renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
-    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
-    await userEvent.click(screen.getByTestId('session-first-back-to-list'));
-    expect(mobileNav.openList).toHaveBeenCalled();
-  });
+  // The Web back-to-list control is gone with the header (#748). Web never
+  // needed one: at wide the sidebar is a column, and below `lg` a selected
+  // Session hands off to the App spatial shell, which carries its own nav.
 
   it('mounts AppSpatialShell on mobile when a session is selected (no XOR back)', async () => {
     mobileNav.isWide = false;
@@ -452,7 +437,6 @@ describe('SessionFirstShell', () => {
     mobileNav.showDetail = true;
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    await userEvent.click(screen.getByTestId('session-first-open-drawer'));
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
   });

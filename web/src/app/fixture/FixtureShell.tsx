@@ -72,7 +72,6 @@ export function FixtureShell() {
           onKill={() => {}}
           onSurfaceChange={() => {}}
           onToolChange={() => {}}
-          onOpenAgent={() => {}}
           onCloseDrawer={() => {}}
           isWide
           showList

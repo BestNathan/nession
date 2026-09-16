@@ -10,6 +10,7 @@ import { shellIconButtonClass } from '@/app/shellStyles';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
+import type { DomainState } from '@/features/sessions/model/domainState';
 
 export interface SessionFirstSidebarProps {
   className?: string;
@@ -28,6 +29,8 @@ export interface SessionFirstSidebarProps {
   toggleSort: (field: SortField) => void;
   isSearchActive: boolean;
   connectionStatus: ConnectionState;
+  /** The active Session's domain state, for the footer's status line. */
+  domain: DomainState | null;
   /** False when the sidebar is an overlay drawer, where collapsing is meaningless. */
   collapsible?: boolean;
   onCreate: () => void;
@@ -68,6 +71,7 @@ export function SessionFirstSidebar({
   toggleSort,
   isSearchActive,
   connectionStatus,
+  domain,
   collapsible = true,
   onCreate,
   onRefresh,
@@ -154,7 +158,7 @@ export function SessionFirstSidebar({
         data-testid="session-first-sidebar-footer"
         className="flex shrink-0 items-center justify-between gap-2 border-t px-[var(--shell-space-2)] py-[var(--shell-space-2)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <SessionFirstSidebarFooter />
+        <SessionFirstSidebarFooter domain={domain} />
       </div>
     </aside>
   );

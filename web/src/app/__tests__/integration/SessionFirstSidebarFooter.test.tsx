@@ -8,7 +8,7 @@ vi.mock('@/features/server/components/ServerInfoMenu', () => ({
 
 describe('SessionFirstSidebarFooter', () => {
   it('shows the server info row directly (no overflow menu, no legacy switch)', () => {
-    render(<SessionFirstSidebarFooter />);
+    render(<SessionFirstSidebarFooter domain={null} />);
     expect(screen.getByTestId('server-info-menu')).toBeInTheDocument();
     expect(screen.queryByTestId('session-first-overflow')).not.toBeInTheDocument();
     expect(screen.queryByTestId('use-legacy-dashboard')).not.toBeInTheDocument();

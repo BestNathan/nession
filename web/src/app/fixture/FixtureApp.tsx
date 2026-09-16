@@ -67,6 +67,7 @@ export function FixtureApp() {
     toggleSort: () => {},
     isSearchActive: false,
     connectionStatus: 'connected' as const,
+    domain,
     onCreate: () => {},
     onRefresh: () => {},
     onConfigure: () => {},

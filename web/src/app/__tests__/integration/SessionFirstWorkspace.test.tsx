@@ -83,7 +83,6 @@ function baseProps(
     onKill: vi.fn(),
     onSurfaceChange: vi.fn(),
     onToolChange: vi.fn(),
-    onOpenAgent: vi.fn(),
     isWide: true,
     showList: true,
     showDetail: true,
@@ -201,7 +200,10 @@ describe('SessionFirstWorkspace spatial shell', () => {
       />,
     );
     expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Fix terminal reconnect' })).toBeInTheDocument();
+    // Desktop is two columns: the Session's identity is its row in the sidebar,
+    // not a heading above the work area (the header is gone — #748).
+    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
   });
 
   it('open-workspace header action calls onSurfaceChange(workspace)', async () => {

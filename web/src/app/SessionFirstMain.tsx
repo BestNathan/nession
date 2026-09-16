@@ -12,7 +12,6 @@ import { SurfaceSwitcher } from '@/app/patterns/SurfaceSwitcher';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
-import type { ConnectionState } from '@/services/socket';
 
 export interface SessionFirstMainProps {
   selectedSession: Session | null;
@@ -24,11 +23,8 @@ export interface SessionFirstMainProps {
   fileOps: FileOps | null;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
-  onOpenAgent: () => void;
-  onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
   onOpenWorkspace?: () => void;
-  connectionStatus: ConnectionState;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -49,11 +45,8 @@ export function SessionFirstMain({
   fileOps,
   onSurfaceChange,
   onToolChange,
-  onOpenAgent,
-  onBackToSessions,
   onOpenDrawer,
   onOpenWorkspace,
-  connectionStatus,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -75,12 +68,8 @@ export function SessionFirstMain({
     <>
       <SessionMainHeader
         session={selectedSession}
-        agent={selectedAgent}
         domain={domain}
-        connectionStatus={connectionStatus}
         experience={experience}
-        onOpenAgent={onOpenAgent}
-        onBackToSessions={onBackToSessions}
         onOpenDrawer={onOpenDrawer}
         onOpenWorkspace={onOpenWorkspace}
       />

@@ -56,6 +56,7 @@ function props(overrides: Partial<SessionFirstSidebarProps> = {}): SessionFirstS
     toggleSort: vi.fn(),
     isSearchActive: false,
     connectionStatus: 'connected',
+    domain: null,
     onCreate: vi.fn(),
     onRefresh: vi.fn(),
     onSelect: vi.fn(),

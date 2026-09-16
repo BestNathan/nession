@@ -41,7 +41,6 @@ export interface SessionFirstWorkspaceProps {
   onKill: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
-  onOpenAgent: () => void;
   isWide: boolean;
   showList: boolean;
   /** Mobile: leave the list overlay and return to the session detail. */
@@ -62,7 +61,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenAgent, isWide,
+    onConfigure, onKill, onSurfaceChange, onToolChange, isWide,
     showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
@@ -76,15 +75,15 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   });
 
   const sidebarProps = {
-    agents, filteredSessions, staleAgents, selectedId, clientSessionId, connectionStatus,
+    agents, filteredSessions, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onConfigure, onKill,
   };
 
   const mainShared = {
-    selectedSession, selectedAgent, agents, domain, tool, fileOps, connectionStatus,
-    onSurfaceChange, onToolChange, onOpenAgent,
+    selectedSession, selectedAgent, agents, domain, tool, fileOps,
+    onSurfaceChange, onToolChange,
   };
 
   if (useSpatial) {
@@ -138,7 +137,6 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
         <SessionFirstMain
           {...mainShared}
           surface={surface}
-          onBackToSessions={onBackToSessions}
           onOpenDrawer={() => onBackToSessions?.()}
           terminal={terminal}
         />

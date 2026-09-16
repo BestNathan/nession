@@ -100,10 +100,6 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
             onKill={(s) => data.setSessionToKill(s)}
             onSurfaceChange={state.setSurface}
             onToolChange={state.setTool}
-            onOpenAgent={() => {
-              state.setSurface('workspace');
-              state.setTool('agent');
-            }}
             isWide={state.isWide}
             showList={state.showList}
             showDetail={state.showDetail}
