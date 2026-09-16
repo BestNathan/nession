@@ -21,8 +21,6 @@ function renderHeader(domain: DomainState, extra: Partial<Parameters<typeof Sess
       sessionName="Fix terminal reconnect"
       agentLabel="devbox-01"
       state={domain}
-      surface="terminal"
-      onSurfaceChange={vi.fn()}
       onOpenAgent={vi.fn()}
       {...extra}
     />,
@@ -33,9 +31,8 @@ describe('SessionHeader contextual presence', () => {
   it('keeps healthy infrastructure context out of the header', () => {
     renderHeader(state());
 
-    // Identity and navigation stay; only the redundant infrastructure goes quiet.
+    // Identity stays; only the redundant infrastructure goes quiet.
     expect(screen.getByText('Fix terminal reconnect')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toBeInTheDocument();
     expect(screen.queryByTestId('agent-context')).not.toBeInTheDocument();
     expect(screen.queryByTestId('connection-status')).not.toBeInTheDocument();
   });

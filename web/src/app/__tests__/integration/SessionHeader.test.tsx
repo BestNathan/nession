@@ -15,15 +15,12 @@ const offline: DomainState = {
 };
 
 describe('SessionHeader', () => {
-  it('shows session identity and navigation, and keeps healthy infrastructure quiet', async () => {
-    const onSurface = vi.fn();
+  it('shows session identity and keeps healthy infrastructure quiet', () => {
     render(
       <SessionHeader
         sessionName="Fix terminal reconnect"
         agentLabel="devbox-01"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={onSurface}
         onOpenAgent={vi.fn()}
       />,
     );
@@ -31,24 +28,25 @@ describe('SessionHeader', () => {
     expect(screen.getByTestId('session-header-line')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-context')).not.toBeInTheDocument();
     expect(screen.queryByText('Agent offline')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    expect(onSurface).toHaveBeenCalledWith('workspace');
   });
 
-  it('omits the surface switcher in the app experience', () => {
-    render(
-      <SessionHeader
-        sessionName="s"
-        agentLabel="host"
-        state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
-        onOpenAgent={vi.fn()}
-        experience="app"
-      />,
-    );
-    expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+  it('no longer hosts the surface switcher, in either experience', () => {
+    // It left the header for a floating capsule over the work surface (#748),
+    // so neither branch renders it now — that is not an experience difference.
+    for (const experience of ['web', 'app'] as const) {
+      const view = render(
+        <SessionHeader
+          sessionName="s"
+          agentLabel="host"
+          state={healthy}
+          onOpenAgent={vi.fn()}
+          experience={experience}
+        />,
+      );
+      expect(screen.queryByTestId('surface-switcher')).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it('makes AgentContext prominent when offline', () => {
@@ -57,8 +55,6 @@ describe('SessionHeader', () => {
         sessionName="s"
         agentLabel="devbox-01"
         state={offline}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
       />,
     );
@@ -71,8 +67,6 @@ describe('SessionHeader', () => {
         sessionName="demo"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
         onBackToSessions={vi.fn()}
       />,
@@ -89,8 +83,6 @@ describe('SessionHeader', () => {
         sessionName="s"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
         onOpenDrawer={onOpenDrawer}
       />,
@@ -105,8 +97,6 @@ describe('SessionHeader', () => {
         sessionName="s"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
         serverStatus="connected"
       />,
@@ -120,8 +110,6 @@ describe('SessionHeader', () => {
         sessionName="s"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
         serverStatus="disconnected"
       />,
@@ -136,8 +124,6 @@ describe('SessionHeader', () => {
         sessionName="s"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
       />,
     );
@@ -151,8 +137,6 @@ describe('SessionHeader', () => {
         sessionName="demo"
         agentLabel="host"
         state={healthy}
-        surface="terminal"
-        onSurfaceChange={vi.fn()}
         onOpenAgent={vi.fn()}
         onBackToSessions={vi.fn()}
       />,

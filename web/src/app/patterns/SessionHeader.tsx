@@ -1,10 +1,6 @@
 import { ChevronLeft, Menu, PanelRight } from 'lucide-react';
 import { AgentContext } from '@/features/agents/components/AgentContext';
 import { ConnectionStatus as SessionConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
-import {
-  SurfaceSwitcher,
-  type Surface,
-} from '@/app/patterns/SurfaceSwitcher';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { shellIconButtonClass } from '@/app/shellStyles';
@@ -13,14 +9,14 @@ import type { DomainState } from '@/features/sessions/model/domainState';
 import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
 import type { ConnectionState } from '@/services/socket';
 
+// Re-exported for the six modules that import the surface type from here.
+import type { Surface } from '@/app/patterns/SurfaceSwitcher';
 export type { Surface };
 
 export interface SessionHeaderProps {
   sessionName: string;
   agentLabel: string;
   state: DomainState;
-  surface: Surface;
-  onSurfaceChange: (surface: Surface) => void;
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
@@ -61,8 +57,6 @@ export function SessionHeader({
   sessionName,
   agentLabel,
   state,
-  surface,
-  onSurfaceChange,
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
@@ -160,7 +154,6 @@ export function SessionHeader({
               server: {serverStatus}
             </span>
           ) : null}
-          <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
         </div>
       </div>
     </header>

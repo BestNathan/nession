@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { agentDisplayName } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { DomainState } from '@/features/sessions/model/domainState';
-import { SessionHeader, type Surface } from '@/app/patterns/SessionHeader';
+import { SessionHeader } from '@/app/patterns/SessionHeader';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
@@ -13,10 +13,8 @@ export interface SessionMainHeaderProps {
   session: Session | null;
   agent: Agent | undefined;
   domain: DomainState | null;
-  surface: Surface;
   connectionStatus: ConnectionState;
   experience: Experience;
-  onSurfaceChange: (surface: Surface) => void;
   onOpenAgent: () => void;
   onBackToSessions?: () => void;
   onOpenDrawer?: () => void;
@@ -31,10 +29,8 @@ export function SessionMainHeader({
   session,
   agent,
   domain,
-  surface,
   connectionStatus,
   experience,
-  onSurfaceChange,
   onOpenAgent,
   onBackToSessions,
   onOpenDrawer,
@@ -49,8 +45,6 @@ export function SessionMainHeader({
         agent ? agentDisplayName(agent) : session.agent_id
       }
       state={domain}
-      surface={surface}
-      onSurfaceChange={onSurfaceChange}
       onOpenAgent={onOpenAgent}
       onBackToSessions={onBackToSessions}
       onOpenDrawer={onOpenDrawer}

@@ -8,6 +8,7 @@ import type { CapabilityId } from '@/features/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
+import { SurfaceSwitcher } from '@/app/patterns/SurfaceSwitcher';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
@@ -76,10 +77,8 @@ export function SessionFirstMain({
         session={selectedSession}
         agent={selectedAgent}
         domain={domain}
-        surface={surface}
         connectionStatus={connectionStatus}
         experience={experience}
-        onSurfaceChange={onSurfaceChange}
         onOpenAgent={onOpenAgent}
         onBackToSessions={onBackToSessions}
         onOpenDrawer={onOpenDrawer}
@@ -88,6 +87,14 @@ export function SessionFirstMain({
       <div
         data-testid="session-first-main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
+        {/* Web only: App reaches Workspace through its own spatial model and
+            asserts the absence of this control. Floats, so it costs the work
+            surface no layout space. */}
+        {hasSession && experience === 'web' ? (
+          <div className="pointer-events-none absolute right-[var(--shell-space-3)] top-[var(--shell-space-3)] z-20">
+            <SurfaceSwitcher surface={surface} onSurfaceChange={onSurfaceChange} />
+          </div>
+        ) : null}
         {!hasSession ? (
           <div
             data-testid="session-empty-state"
