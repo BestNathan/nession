@@ -103,8 +103,8 @@ When a lower-level design doc, executable contract, fixture, screenshot, or ship
 
 ### Theming
 
-- Chrome UI follows the shadcn dark Zinc/neutral theme.
-- **Terminal** keeps Catppuccin Mocha via terminal theme code — independent of chrome theme. Do not restyle xterm to match Zinc.
+- Chrome is light-only. Every value comes from `design/tokens/*.json` through `design/generated/web.css`; do not restate a palette in `index.css` or in a component.
+- **Terminal** takes its theme from `design/generated/terminal.ts` and sits on the same ground as the chrome — the two must agree or the capsule shows a seam. Do not hardcode an `ITheme` in `web/src`.
 
 ### Lint and React pitfalls
 

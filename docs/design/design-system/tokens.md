@@ -48,6 +48,10 @@ attachment.attaching
 attachment.detached
 attachment.failed
 
+location.local
+location.remote
+action
+
 terminal.background
 terminal.foreground
 terminal.selection
@@ -108,6 +112,8 @@ This prevents the design system from turning every capability state into decorat
 - Light/dark themes resolve Semantic tokens to Primitive values; product UI consumes Semantic / Domain / Experience.
 - Product patterns and extension views should prefer shared Semantic meaning before adding new Domain vocabulary.
 - Do not create token names for one-off layout decisions simply to avoid writing composition rules.
+- `location.*` and `action` ref the theme-scoped Primitive directly (`primitive.{theme}.…`) rather than routing through a pass-through Semantic alias. A pass-through would emit `--location-local: var(--location-local)` — a self-reference that computes to nothing. The `{theme}` placeholder is what keeps a Domain leaf theme-resolvable when no Semantic role sits between it and the Primitive.
+- There is no `success` and no `info`. Healthy is neutral (visual-language.md P6) and informational text uses `muted-foreground`; see [visual-language.md](../visual-language.md) § Where the values come from. Adding either back is a product decision, not a palette tweak.
 - Do not encode permanent-navigation assumptions in tokens (`workspace.toolTab.active`, `agentSidebar.width`, etc.) unless the underlying product relationship is truly stable and canonical.
 - CSS is an output/consumer, not the product source of truth. App may not consume CSS at all.
 

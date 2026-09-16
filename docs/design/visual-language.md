@@ -88,6 +88,55 @@ A quiet component with excellent details is preferable to a visually busy compon
 
 Unused space belongs to the work, not to decoration or expanding chrome. On larger screens, extra space should generally increase breathing room or work-surface capacity rather than widen navigation.
 
+## Where the values come from
+
+P1–P10 say what should dominate and what should recede. They do not say which grey. This section is the bridge: the intent above, resolved into the values in [`design/tokens/`](../../design/tokens/) — primitive palette, terminal ANSI, radii.
+
+Two rules generate the palette:
+
+1. **Location is the only chromatic axis.** Everything else is neutral. Local sessions are *colourless*: a user working only on their own machine sees no accent colour at all, because the boundary has not been crossed. `location.local` (warm, hue 55) and `location.remote` (cool, hue 255) share chroma and sit within the JND of each other in lightness, so neither location outranks the other. This implements [workspace.md](workspace.md)'s "making the active or affected location clear only when that distinction matters".
+2. **Colour appears only where P8 licenses it** — state or action — and the neutral ramp carries everything else. It is built to be whisper-quiet near the ground and then jump hard to text, so separation comes from a background shift rather than a border (P2, P7).
+
+Measured against both grounds a foreground can sit on:
+
+| Token | Value | on canvas `#FFFFFF` | on chrome `#F6F7F9` |
+|-------|-------|--------------------|---------------------|
+| `neutral.ground` | `#FFFFFF` | — | 1.07:1 |
+| `neutral.surface` | `#F6F7F9` | 1.07:1 | — |
+| `neutral.fill` | `#EDEEF0` | 1.16:1 | 1.08:1 |
+| `neutral.line` | `#E6E7E9` | 1.24:1 | 1.16:1 |
+| `neutral.line-strong` | `#D6D7D9` | 1.44:1 | 1.34:1 |
+| `neutral.text-disabled` | `#8C8F94` | 3.26:1 | 3.05:1 |
+| `neutral.text-muted` | `#6D7179` | 4.87:1 | 4.56:1 |
+| `neutral.text-secondary` | `#54575D` | 7.25:1 | 6.79:1 |
+| `neutral.text-primary` | `#242528` | 15.31:1 | 14.32:1 |
+| `location.local` | `#AD5C15` | 4.86:1 | 4.55:1 |
+| `location.remote` | `#3872BB` | 4.87:1 | 4.56:1 |
+| `action` | `#008250` | 4.88:1 | 4.57:1 |
+| `state.danger` | `#D0383A` | 4.87:1 | 4.56:1 |
+| `state.warning` | `#956900` | 4.87:1 | 4.55:1 |
+
+**The chrome is the binding constraint, not the canvas.** It is the darker ground, so a colour that clears AA on white can still fail on the sidebar — which is where most metadata text actually lives. Every value above is solved against both. `text-disabled` takes the 3:1 floor of a perceivable UI boundary; WCAG 1.4.3 exempts inactive controls from the AA text requirement, and it is not a licence to make them invisible.
+
+**`success` is not a colour.** Healthy infrastructure is identity/context, not an achievement badge (P6). `agent.online`, `attachment.attached` and connection-reachable states are neutral: they are the steady state, and the steady state does not get to be loud. `state.danger` and `state.warning` exist because they threaten continuity.
+
+**`action` is the colour of acting** — the result of a deliberate user action (`file.created`), and an action affordance such as a link. Its hue is derived rather than picked: 158 is the midpoint of the short arc between the two location hues (55 → 255), so the colour of acting is literally the colour of crossing over.
+
+**Colour is never the only carrier.** Location must always appear with its name or a named icon, never as a bare swatch (WCAG 1.4.1).
+
+### The terminal
+
+The terminal sits on the same ground as the chrome. `composition.md` §4 and this document both say *Terminal is not a card* — and a dark rectangle set into a light page is exactly a card, so the terminal's background is the canvas, by construction rather than by convention. Its ANSI set is Nession's own, in [`design/tokens/primitive.json`](../../design/tokens/primitive.json) under `terminal`, emitted as `design/generated/terminal.ts` because xterm takes an object rather than CSS.
+
+Two properties of that set are deliberate and must not be "fixed":
+
+- **`white` and `brightWhite` do not clear AA as text.** They are reverse-video *background* slots. In a light terminal the foreground role is carried by `foreground`; darkening them to satisfy a text check would break reverse video.
+- **`minimumContrastRatio` is 4.5.** Identity never repaints terminal output — ANSI red/green/yellow are semantic to the user's own commands and to `ls --color` — but a light ground makes the light end of the 256-colour cube unreadable, and that cube is not ours to change. xterm adjusts a foreground that fails the ratio; this is a deliberate trade of palette exactness for reachability.
+
+### Enforcement
+
+These are not prose promises. `design/scripts/token-contrast.test.mjs` computes every pair above from the token source and fails the build below AA; `design/scripts/no-inherited-palette.test.mjs` fails if a chroma-free grey ramp or a foreign palette name reappears in the token source, or if Catppuccin survives anywhere in `web/src`. Both run under `just design-test` in CI.
+
 ## Typography hierarchy
 
 Typography roles are semantic and relative.
