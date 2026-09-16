@@ -40,7 +40,7 @@ describe('ExplorerNodeRenderer', () => {
     );
 
     expect(screen.getByText('src')).toBeInTheDocument();
-    expect(document.querySelector('.text-info')).toBeInTheDocument();
+    expect(document.querySelector('.text-muted-foreground')).toBeInTheDocument();
     expect(screen.getByText('MOCK')).toBeInTheDocument();
   });
 

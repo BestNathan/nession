@@ -30,7 +30,7 @@ export interface ExplorerNodeRendererProps {
 
 function NodeIcon({ node }: { node: ExplorerNode }) {
   if (node.kind === 'directory') {
-    return <Folder className="h-3.5 w-3.5 mr-1.5 text-info flex-shrink-0" />;
+    return <Folder className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />;
   }
 
   return <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />;

@@ -1,33 +1,26 @@
 import type { Terminal, ITheme } from '@xterm/xterm';
+import {
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+  TERMINAL_THEME,
+} from '../../../../design/generated/terminal';
 
-export const CATPPUCCIN_MOCHA: ITheme = {
-  background: '#1e1e2e',
-  foreground: '#cdd6f4',
-  cursor: '#f5e0dc',
-  selectionBackground: '#585b7066',
-  black: '#45475a',
-  red: '#f38ba8',
-  green: '#a6e3a1',
-  yellow: '#f9e2af',
-  blue: '#89b4fa',
-  magenta: '#f5c2e7',
-  cyan: '#94e2d5',
-  white: '#bac2de',
-  brightBlack: '#585b70',
-  brightRed: '#f38ba8',
-  brightGreen: '#a6e3a1',
-  brightYellow: '#f9e2af',
-  brightBlue: '#89b4fa',
-  brightMagenta: '#f5c2e7',
-  brightCyan: '#94e2d5',
-  brightWhite: '#a6adc8',
-};
+export { TERMINAL_MINIMUM_CONTRAST_RATIO };
+
+/**
+ * Nession's terminal palette, from the token source
+ * (`design/tokens/primitive.json` → `design/generated/terminal.ts`).
+ *
+ * The terminal sits on the same ground as the chrome, so the two must agree
+ * or the capsule shows a seam where it overlaps the terminal. Deriving both
+ * from one token source is what keeps them in step.
+ */
+export const NESSION_TERMINAL_THEME: ITheme = TERMINAL_THEME;
 
 export class ThemeManager {
   private current: ITheme;
 
   constructor(private term: Terminal, theme?: ITheme) {
-    this.current = { ...CATPPUCCIN_MOCHA, ...theme };
+    this.current = { ...NESSION_TERMINAL_THEME, ...theme };
     this.apply();
   }
 
@@ -37,7 +30,7 @@ export class ThemeManager {
   }
 
   resetToDefault(): void {
-    this.current = { ...CATPPUCCIN_MOCHA };
+    this.current = { ...NESSION_TERMINAL_THEME };
     this.apply();
   }
 

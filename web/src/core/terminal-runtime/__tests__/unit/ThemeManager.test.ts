@@ -8,12 +8,12 @@ const CUSTOM_THEME: ITheme = {
 };
 
 describe('ThemeManager', () => {
-  it('applies the default Catppuccin Mocha theme on construction', () => {
+  it('applies the Nession light terminal theme on construction', () => {
     const term = new Terminal();
     const manager = new ThemeManager(term);
     const theme = manager.getTheme();
-    expect(theme.background).toBe('#1e1e2e');
-    expect(theme.foreground).toBe('#cdd6f4');
+    expect(theme.background).toBe('#ffffff');
+    expect(theme.foreground).toBe('#24292f');
     term.dispose();
   });
 
@@ -30,16 +30,17 @@ describe('ThemeManager', () => {
     manager.setTheme({ background: '#111111' });
     const theme = manager.getTheme();
     expect(theme.background).toBe('#111111');
-    expect(theme.foreground).toBe('#cdd6f4');
+    expect(theme.foreground).toBe('#24292f');
     term.dispose();
   });
 
-  it('resetToDefault restores Catppuccin Mocha', () => {
+  it('resetToDefault restores the Nession light terminal theme', () => {
     const term = new Terminal();
     const manager = new ThemeManager(term, CUSTOM_THEME);
     manager.resetToDefault();
     const theme = manager.getTheme();
-    expect(theme.background).toBe('#1e1e2e');
+    expect(theme.background).toBe('#ffffff');
+    expect(theme.foreground).toBe('#24292f');
     term.dispose();
   });
 
@@ -50,6 +51,34 @@ describe('ThemeManager', () => {
     const t2 = manager.getTheme();
     expect(t1).not.toBe(t2);
     expect(t1).toEqual(t2);
+    term.dispose();
+  });
+
+  it('carries a full ANSI set so 16-colour output is not half-themed', () => {
+    const term = new Terminal();
+    const manager = new ThemeManager(term);
+    const theme = manager.getTheme();
+    const slots = [
+      'black',
+      'red',
+      'green',
+      'yellow',
+      'blue',
+      'magenta',
+      'cyan',
+      'white',
+      'brightBlack',
+      'brightRed',
+      'brightGreen',
+      'brightYellow',
+      'brightBlue',
+      'brightMagenta',
+      'brightCyan',
+      'brightWhite',
+    ] as const;
+    for (const slot of slots) {
+      expect(theme[slot], `${slot} must be set`).toMatch(/^#[0-9a-f]{6}$/i);
+    }
     term.dispose();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { CATPPUCCIN_MOCHA } from '@/core/terminal-runtime/ThemeManager';
+import { NESSION_TERMINAL_THEME } from '@/core/terminal-runtime/ThemeManager';
 import { TerminalSurface } from '@/features/terminal/TerminalSurface';
 
 const FIXTURE_BUFFER = [
@@ -42,7 +42,7 @@ export function FixtureTerminal() {
 
   useEffect(() => {
     const term = new Terminal({
-      theme: CATPPUCCIN_MOCHA,
+      theme: NESSION_TERMINAL_THEME,
       convertEol: true,
       cursorBlink: false,
       disableStdin: true,

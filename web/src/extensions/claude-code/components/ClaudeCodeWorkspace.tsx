@@ -129,7 +129,7 @@ function FileList({
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className="mb-1 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">
             {category.name}
           </h2>
           <div className="space-y-0.5">
