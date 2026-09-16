@@ -119,6 +119,23 @@ test('every text token clears AA on both the canvas and the chrome', () => {
   assert.deepEqual(failures, [], `contrast below AA:\n  ${failures.join('\n  ')}`);
 });
 
+test('the input boundary clears the 3:1 perceivable-boundary floor on both grounds', () => {
+  // `border.input` is the only cue that says a field is a field — the fill is
+  // the same ground — so it owes the 3:1 that `visual-language.md` already
+  // applies to `text-disabled` as "a perceivable UI boundary" (WCAG 1.4.11).
+  //
+  // It used to be `line-strong` at 1.34:1 on the chrome. That was not a near
+  // miss to nudge: the whole neutral ramp stops at 1.43:1, and the next step up
+  // is a *text* grey. Reaching the floor needs a dedicated step, which is why
+  // `neutral.boundary` exists rather than `line-strong` being darkened — the
+  // ramp's quiet greys are still wanted for every other line on screen.
+  const rgb = toRgb(value('neutral.boundary'));
+  for (const [name, ground] of GROUNDS) {
+    const ratio = contrast(rgb, toRgb(ground));
+    assert.ok(ratio >= DISABLED_FLOOR, `neutral.boundary on ${name} is ${ratio.toFixed(2)}:1`);
+  }
+});
+
 test('text-disabled holds its 3:1 floor without pretending to be readable', () => {
   const rgb = toRgb(value('neutral.text-disabled'));
   for (const [name, ground] of GROUNDS) {
