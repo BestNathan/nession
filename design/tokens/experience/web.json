@@ -55,7 +55,19 @@
       "ref": "experience.web.control.lg"
     },
     "railWidth": {
-      "value": "52px"
+      "value": "50px"
+    },
+    "sidebarWidth": {
+      "$description": "Expanded sidebar column. The mockup draws 246px; the shell's grid is `246px 1fr`.",
+      "value": "246px"
+    },
+    "sessionRowPadY": {
+      "$description": "Session row vertical padding. The mockup draws 7px, tighter than `shell.space-2` (8px) because the row's two lines already carry leading; horizontal padding is `shell.space-2`.",
+      "value": "7px"
+    },
+    "sessionRowRadius": {
+      "$description": "Session row corner radius. The mockup rounds the row so the selected `--n-raised` fill reads as a chip rather than a band.",
+      "value": "7px"
     }
   },
   "focus": {
