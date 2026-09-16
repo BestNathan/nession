@@ -14,9 +14,9 @@ interface XtermMountElement extends HTMLElement {
   xtermInstance?: Terminal;
 }
 
-const DEFAULT_FONT =
+export const DEFAULT_FONT =
   "'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace";
-const DEFAULT_FONT_SIZE = 14;
+export const DEFAULT_FONT_SIZE = 14;
 
 /**
  * Start fetching the terminal face at module load rather than at first paint.

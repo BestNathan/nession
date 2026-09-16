@@ -32,7 +32,7 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           {selected ? (
             <FileViewer key={selected.path} fileOps={ctx.fileOps} path={selected.path} filename={selected.filename} fileSize={selected.size} onClose={() => setSelected(null)} />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a file</div>
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a file to view it.</div>
           )}
         </div>
       </div>

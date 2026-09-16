@@ -88,6 +88,15 @@ A quiet component with excellent details is preferable to a visually busy compon
 
 Unused space belongs to the work, not to decoration or expanding chrome. On larger screens, extra space should generally increase breathing room or work-surface capacity rather than widen navigation.
 
+### Empty states
+
+An empty screen is an invitation to act, not a status report. "No sessions" describes the absence and stops; the user still has to work out what to do about it.
+
+- Say what the user can do, in the interface's voice — not a person's.
+- Reuse the action's own name, so the word on the empty screen is the word on the control. Session creation is called **New Session** everywhere.
+- Sentence case, active voice, no apology, no vagueness.
+- A *search* that found nothing is a different case: it reports what happened ("No sessions match your search") rather than inviting an action, because the action is to change the query.
+
 ## Where the values come from
 
 P1–P10 say what should dominate and what should recede. They do not say which grey. This section is the bridge: the intent above, resolved into the values in [`design/tokens/`](../../design/tokens/) — primitive palette, terminal ANSI, radii.

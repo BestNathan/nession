@@ -97,7 +97,7 @@ describe('SessionFirstTerminal', () => {
   it('shows a muted empty state when no session is selected', () => {
     renderTerminal(false);
     const root = screen.getByTestId('session-first-terminal');
-    expect(root).toHaveTextContent('Select a session');
+    expect(root).toHaveTextContent('Select a session to open its terminal.');
     expect(screen.queryByTestId('session-first-terminal-pane')).not.toBeInTheDocument();
   });
 
