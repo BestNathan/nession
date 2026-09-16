@@ -1,19 +1,17 @@
 import { useCallback, useRef, useState, type TouchEvent } from 'react';
-import { EDGE_BAND_PX, SWIPE_COMMIT_PX } from './edgeBand';
+import { SWIPE_COMMIT_PX } from './gesture';
 
-export interface UseEdgeSwipePagerArgs {
+export interface UseSwipePagerArgs {
   pageCount: number;
   index: number;
   onIndexChange: (index: number) => void;
-  width: number;
 }
 
-export function useEdgeSwipePager({
+export function useSwipePager({
   pageCount,
   index,
   onIndexChange,
-  width,
-}: UseEdgeSwipePagerArgs): {
+}: UseSwipePagerArgs): {
   dragOffset: number;
   isDragging: boolean;
   onTouchStart: (e: TouchEvent) => void;
@@ -45,31 +43,22 @@ export function useEdgeSwipePager({
     setIsDragging(false);
   }, []);
 
-  const onTouchStart = useCallback(
-    (e: TouchEvent) => {
-      const touch = e.touches[0];
-      if (!touch) {
-        return;
-      }
+  // A drag may start anywhere in the surface. What keeps a vertical scroll
+  // from turning a page is the axis lock in `onTouchMove`, not a start gate.
+  const onTouchStart = useCallback((e: TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) {
+      return;
+    }
 
-      const x = touch.clientX;
-      const inLeftEdge = x <= EDGE_BAND_PX;
-      const inRightEdge = x >= width - EDGE_BAND_PX;
-      if (!inLeftEdge && !inRightEdge) {
-        activeRef.current = false;
-        return;
-      }
-
-      activeRef.current = true;
-      cancelledRef.current = false;
-      startXRef.current = x;
-      startYRef.current = touch.clientY;
-      dragOffsetRef.current = 0;
-      setDragOffset(0);
-      setIsDragging(true);
-    },
-    [width],
-  );
+    activeRef.current = true;
+    cancelledRef.current = false;
+    startXRef.current = touch.clientX;
+    startYRef.current = touch.clientY;
+    dragOffsetRef.current = 0;
+    setDragOffset(0);
+    setIsDragging(true);
+  }, []);
 
   const onTouchMove = useCallback((e: TouchEvent) => {
     if (!activeRef.current || cancelledRef.current) {
