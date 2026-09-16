@@ -8,6 +8,7 @@ import {
   gotoFixtureApp,
   gotoFixtureShell,
   gotoFixtureWorkspace,
+  openFixtureFile,
   waitForFixtureTerminal,
 } from '../helpers/fixtureVisual';
 
@@ -39,6 +40,9 @@ test.describe('Web 1440×900', () => {
   test('Workspace / Files', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await expect(page.getByTestId('files-web-layout')).toBeVisible();
+    // Open a file, so the viewer and the code surface are in the baseline
+    // rather than an empty state that covers neither.
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('web-workspace.png', {
       fullPage: true,
@@ -63,6 +67,7 @@ test.describe('Web compact 1024×768', () => {
   test('Workspace / Files', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await expect(page.getByTestId('files-web-layout')).toBeVisible();
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('web-compact-workspace.png', {
       fullPage: true,
@@ -101,6 +106,9 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-layout')).toBeVisible();
+    // App pushes the viewer over the tree, so this captures the pushed editor
+    // — which no baseline covered either.
+    await openFixtureFile(page);
 
     await expect(page).toHaveScreenshot('app-workspace.png', {
       fullPage: true,
