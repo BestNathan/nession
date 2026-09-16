@@ -6,6 +6,7 @@ import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
+import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
 export interface SessionListHeaderProps {
@@ -86,7 +87,8 @@ export function SessionListHeader({
   };
 
   return (
-    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] border-b p-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+    <div className="flex shrink-0 flex-col gap-[var(--shell-space-2)] px-[var(--shell-space-2)] pb-[var(--shell-space-2)] max-lg:gap-[var(--shell-space-3)]">
+      <SidebarSectionHead label="Sessions" />
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}

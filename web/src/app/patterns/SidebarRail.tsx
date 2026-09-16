@@ -85,7 +85,7 @@ export function SidebarRail({ connectionStatus, onExpand }: SidebarRailProps) {
         role="img"
         aria-label={`Server ${connectionStatus}`}
         className={cn(
-          'size-[length:var(--shell-foot-dot-size)] rounded-full',
+          'size-[length:var(--shell-status-dot-size)] rounded-full',
           shellMotionClass,
           healthy ? 'bg-[var(--action)]' : 'bg-destructive',
         )}

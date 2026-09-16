@@ -70,7 +70,7 @@ export function SessionFirstSidebarFooter({
         data-testid="sidebar-foot-dot"
         aria-hidden="true"
         className={cn(
-          'size-[length:var(--shell-foot-dot-size)] shrink-0 rounded-full',
+          'size-[length:var(--shell-status-dot-size)] shrink-0 rounded-full',
           healthy ? 'bg-[var(--action)]' : 'bg-destructive',
         )}
       />

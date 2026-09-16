@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { SessionList } from '@/features/sessions/components/SessionList';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
+import { SidebarSectionSeparator } from '@/app/patterns/SidebarSectionHead';
 import { SidebarRail } from '@/app/patterns/SidebarRail';
 import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
 import { shellIconButtonClass } from '@/app/shellStyles';
@@ -111,6 +112,10 @@ export function SessionFirstSidebar({
       className={cn('bg-sidebar flex h-full w-full shrink-0 flex-col', className)}
     >
       <SidebarAgents agents={agents} activeAgentId={activeAgentId} />
+      {/* Inset rule, not a full-bleed border: the mockup draws `margin: 8px`,
+          so the sections read as divisions inside one column rather than as
+          separate panels. */}
+      <SidebarSectionSeparator />
       <SessionListHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}

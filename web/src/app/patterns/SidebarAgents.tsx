@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { agentDisplayName } from '@/lib/format';
+import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { Agent } from '@/types';
 
 export interface SidebarAgentsProps {
@@ -35,9 +36,9 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
     <section
       data-testid="sidebar-agents"
       aria-label="Agents"
-      className="flex shrink-0 flex-col gap-1 border-b px-[var(--shell-space-2)] py-[var(--shell-space-2)]"
+      className="flex shrink-0 flex-col px-[var(--shell-space-2)]"
     >
-      <h2 className="px-1 text-xs font-semibold text-muted-foreground">Agents</h2>
+      <SidebarSectionHead label="Agents" />
       <ul className="flex flex-col">
         {agents.map((agent) => {
           const active = agent.agent_id === activeAgentId;
@@ -49,8 +50,8 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
               data-agent-active={active ? 'true' : undefined}
               title={`${agentDisplayName(agent)} — ${online ? 'online' : agent.status}`}
               className={cn(
-                'flex w-full items-center gap-2 rounded-md px-1 py-1 text-xs',
-                active ? 'text-foreground' : 'text-muted-foreground',
+                'flex w-full items-center gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-node-row-pad-y)] font-mono text-[length:var(--shell-node-font-size)]',
+                active ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
               )}
             >
                 {/* The active-node marker. It is a *shape* today, not a colour:
@@ -60,8 +61,8 @@ export function SidebarAgents({ agents, activeAgentId }: SidebarAgentsProps) {
                 <span
                   aria-hidden
                   className={cn(
-                    'size-1.5 shrink-0 rounded-full',
-                    active ? 'bg-foreground' : 'bg-muted-foreground/40',
+                    'size-[length:var(--shell-status-dot-size)] shrink-0 rounded-full',
+                    active ? 'bg-foreground' : 'bg-border',
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">{agentDisplayName(agent)}</span>
