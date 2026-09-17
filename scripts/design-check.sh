@@ -17,9 +17,9 @@
 #
 # Division of ownership, so that neither half can drift on its own:
 #
-#   this script     — WHICH checks constitute the design gate
-#   justfile        — WHAT command implements each one
-#   eslint.config.js — WHICH rules count as design rules
+#   this script        — WHICH checks constitute the design gate
+#   justfile           — WHAT command implements each one
+#   web/eslint.config.js — WHICH rules count as design rules
 #
 # The design rules are therefore not enumerated here either: `just web-eslint`
 # runs the repo config, so web/eslint.config.js is the single place a design

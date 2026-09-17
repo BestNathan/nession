@@ -55,6 +55,11 @@ function px(value: number): number {
 }
 
 test.describe('third-party renderer boundary (CodeMirror)', () => {
+  // The same viewport fixture-visual.spec.ts opens the Workspace at, so the
+  // tree-then-editor path this shares with it is exercised under identical
+  // conditions rather than under Playwright's default.
+  test.use({ viewport: { width: 1440, height: 900 } });
+
   test('the rendered editor takes its metrics from the design tokens', async ({ page }) => {
     await gotoFixtureWorkspace(page);
     await openFixtureFile(page);

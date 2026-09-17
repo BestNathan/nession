@@ -82,15 +82,11 @@ design-check:
 design-check-list:
     ./scripts/design-check.sh --list
 
-# ESLint over web/src. The design rules are not listed separately anywhere —
-# they live in web/eslint.config.js, and both this and `design-check` inherit
-# whatever it declares.
+# ESLint over web/src — design rules ride on the repo config (see design-check.sh)
 web-eslint:
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
 
-# Fault fixtures for the design rules: proves each rule still *fails* on the
-# input it claims to catch. A rule whose fixture stops failing has silently
-# stopped protecting (three had, before #759).
+# Fault fixtures: prove each design rule still FAILS on what it claims to catch
 design-rule-fixtures:
     node --test web/eslint-plugin-nession/__tests__/*.test.js
 
