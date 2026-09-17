@@ -10,6 +10,10 @@ import nessionPlugin from '../index.js';
 // `@/` alias both returned the layer of the target and the mismatch check
 // short-circuited. Every cross-layer import here uses `@/`, so nothing was ever
 // reported. The fixtures below are what make its silence mean something.
+//
+// #788 then found the second half of the same failure: the rule visited only
+// `ImportDeclaration`, so the identical edge written as `export … from` was
+// never examined. Both gaps are one thing — coverage narrower than the claim.
 const ruleTester = new RuleTester({
   parser: tseslint.parser,
   parserOptions: { ecmaVersion: 2020, sourceType: 'module', ecmaFeatures: { jsx: true } },
@@ -122,4 +126,84 @@ test('a fully-erased type import is out of scope — it creates no runtime edge'
   // `import { type X }` is a VALUE import statement — it emits a module
   // reference, so it stays in scope. Only the fully-erased form is exempt.
   assert.equal(reportFor('value').length, 1, 'a value import must still be reported');
+});
+
+// #788. The rule had only an ImportDeclaration visitor, so a wrong-direction
+// re-export — the same runtime edge by a different keyword — passed silently.
+// These are the fixtures that make the new visitors' silence mean something.
+test('a re-export is the same runtime edge as an import', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      // Legal directions behave exactly as the import form does.
+      { code: "export { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
+      { code: "export { probe } from '@/services/socket';", filename: '/p/web/src/features/files/F.tsx' },
+      // A local re-export references no other module. The binding has to exist
+      // for the parser to accept the statement at all.
+      {
+        code: 'const localThing = 1;\nexport { localThing };',
+        filename: '/p/web/src/components/ui/probe.tsx',
+      },
+      // External packages are not this rule's business.
+      { code: "export * from 'react';", filename: '/p/web/src/components/ui/probe.tsx' },
+    ],
+    invalid: [
+      {
+        // The shape #788 was filed for: a shared primitive re-exporting product
+        // code, which pulls the feature into the bundle just as `import` would.
+        code: "export { SessionItem } from '@/features/sessions/components/SessionItem';",
+        filename: '/p/web/src/components/ui/probe.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // `export *` carries a whole module graph — an edge like any other.
+        code: "export * from '@/features/terminal';",
+        filename: '/p/web/src/services/socket/probe.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
+// Driven directly for the same reason as the import case above: `export type`
+// does not parse in the legacy RuleTester's plain-ESM mode.
+test('a fully-erased type re-export is out of scope, and a local export is not an edge', () => {
+  const rule = nessionPlugin.rules['no-reverse-imports'];
+
+  function reportFor(visitorName, node) {
+    const reported = [];
+    const visitors = rule.create({
+      getFilename: () => '/p/web/src/components/ui/probe.tsx',
+      report: (d) => reported.push(d),
+    });
+    visitors[visitorName](node);
+    return reported;
+  }
+
+  const source = { value: '@/features/terminal' };
+
+  assert.equal(
+    reportFor('ExportNamedDeclaration', { source, exportKind: 'type', specifiers: [] }).length,
+    0,
+    'export type { X } from must be exempt',
+  );
+  assert.equal(
+    reportFor('ExportNamedDeclaration', { source, exportKind: 'value', specifiers: [] }).length,
+    1,
+    'a value re-export must still be reported',
+  );
+  assert.equal(
+    reportFor('ExportAllDeclaration', { source, exportKind: 'type' }).length,
+    0,
+    'export type * from must be exempt',
+  );
+  assert.equal(
+    reportFor('ExportAllDeclaration', { source, exportKind: 'value' }).length,
+    1,
+    'export * from must still be reported',
+  );
+  assert.equal(
+    reportFor('ExportNamedDeclaration', { source: null, exportKind: 'value', specifiers: [] }).length,
+    0,
+    'a local export { x } references no module',
+  );
 });

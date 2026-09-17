@@ -27,6 +27,15 @@
  * reported nothing at all. Every cross-layer import in this repo uses `@/`, so
  * it never fired once in its life. A source layer is a property of where the
  * code lives and must never be read from what the code imports.
+ *
+ * ── What counts as an edge (#788) ───────────────────────────────────────────
+ *
+ * A re-export is the same runtime edge as an import: `export { x } from '…'`
+ * pulls the module into the bundle exactly as `import` does, so
+ * `components/ui` re-exporting a feature is the same violation as importing it.
+ * The rule had only an `ImportDeclaration` visitor, so that form passed. All
+ * three statements now share one check — and a local `export { x }` with no
+ * `from` clause is skipped, since it references no other module.
  */
 
 // Import direction map: which layers can import which
@@ -94,6 +103,49 @@ function getTargetLayer(importPath) {
   return 'unknown';
 }
 
+/**
+ * Report `node` when the module edge from the current file to `importPath`
+ * points back up the layer order.
+ *
+ * Shared by all three statement forms so their alias handling and skip
+ * conditions cannot drift apart — the divergence between visitors is how the
+ * coverage gap in #788 survived: one check, one place.
+ */
+function checkRuntimeEdge(context, node, importPath, currentFilePath) {
+  // A non-literal or absent source names no module we can resolve: a computed
+  // dynamic import, or a local `export { x }`.
+  if (typeof importPath !== 'string') {
+    return;
+  }
+
+  // Skip external packages (no @/ prefix and not relative)
+  if (!importPath.startsWith('@/') && !importPath.startsWith('.')) {
+    return;
+  }
+
+  const sourceLayer = getSourceLayer(currentFilePath);
+  const targetLayer = getTargetLayer(importPath);
+
+  // Skip if we can't determine layers
+  if (sourceLayer === 'unknown' || targetLayer === 'unknown') {
+    return;
+  }
+
+  // Check if the edge is allowed
+  const allowedTargets = ALLOWED_IMPORTS[sourceLayer] || [];
+  if (!allowedTargets.includes(targetLayer) && sourceLayer !== targetLayer) {
+    context.report({
+      node,
+      messageId: 'reverseImport',
+      data: {
+        sourceLayer,
+        targetLayer,
+        allowed: allowedTargets.join(', '),
+      },
+    });
+  }
+}
+
 export default {
   meta: {
     type: 'problem',
@@ -115,39 +167,28 @@ export default {
 
     return {
       ImportDeclaration(node) {
-        const importPath = node.source.value;
-
-        // Skip external packages (no @/ prefix and not relative)
-        if (!importPath.startsWith('@/') && !importPath.startsWith('.')) {
-          return;
-        }
-
         // Erased at build time — no runtime edge, so no direction to enforce.
         if (node.importKind === 'type') {
           return;
         }
+        checkRuntimeEdge(context, node, node.source?.value, currentFilePath);
+      },
 
-        const sourceLayer = getSourceLayer(currentFilePath);
-        const targetLayer = getTargetLayer(importPath);
-
-        // Skip if we can't determine layers
-        if (sourceLayer === 'unknown' || targetLayer === 'unknown') {
+      // `export { x } from '…'` and `export { x }`. `source` is null in the
+      // second form, which references no other module.
+      ExportNamedDeclaration(node) {
+        if (!node.source || node.exportKind === 'type') {
           return;
         }
+        checkRuntimeEdge(context, node, node.source.value, currentFilePath);
+      },
 
-        // Check if import is allowed
-        const allowedTargets = ALLOWED_IMPORTS[sourceLayer] || [];
-        if (!allowedTargets.includes(targetLayer) && sourceLayer !== targetLayer) {
-          context.report({
-            node,
-            messageId: 'reverseImport',
-            data: {
-              sourceLayer,
-              targetLayer,
-              allowed: allowedTargets.join(', '),
-            },
-          });
+      // `export * from '…'` / `export * as ns from '…'` — always has a source.
+      ExportAllDeclaration(node) {
+        if (node.exportKind === 'type') {
+          return;
         }
+        checkRuntimeEdge(context, node, node.source?.value, currentFilePath);
       },
     };
   },
