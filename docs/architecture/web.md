@@ -15,11 +15,26 @@ are allowed; reverse imports are a lint error (`nession/no-reverse-imports`,
 | **app** | `app/` | composition root: the single session-first shell (`SessionFirstShell`), sidebar/workspace chrome, `app-spatial/`, `workspace/capabilities.ts` + `workspace/views/`, fixture screens, app-composition hooks (`useAppConnection`, `useDashboard`, `useProbePolling`, deep-link restore), `LoginPage` | features, core, shared |
 | **features** | `features/<feature>/` | domain capability plugins + feature UI/hooks/model (`terminal`, `explorer`, `files`, `sessions`, `agents`, `env`, `commands`, `server`, `claude-code`) | core, shared |
 | **core** | `core/`, `runtime/`, `services/` | React-free terminal runtime, session-runtime ownership, WebSocket client | shared |
-| **shared** | `shared/`, `components/ui/`, `lib/`, `atoms/` | generic hooks (`shared/hooks/`), shadcn primitives, pure helpers, shared atoms | — |
+| **shared** | `shared/`, `components/ui/`, `lib/`, `atoms/`, `markdown/` | generic hooks (`shared/hooks/`), shadcn primitives, pure helpers, shared atoms, the markdown preview pipeline | — |
 
 `extensions/` (extension registry + `claude-code` UI contributions) sits
 outside the layer ladder: it is imported by app and feature code through the
-registry contract and is not importable *by* the layers it composes into.
+registry contract and composes the feature it extends. The rule models it as a
+rung of its own (`extensions`) rather than folding it into `features`, so that
+`extensions → features` is allowed while `core → extensions` stays forbidden.
+The mutual `features ↔ extensions` allowance is deliberate.
+
+`markdown/` is `shared`. Its consumers are `features/files` *and*
+`lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
+The resulting `markdown ↔ lib` cycle is deliberate — both files document it;
+general language detection needs markdown's ranked signals, and markdown cannot
+host the general extension/basename tables without importing them back.
+
+> Every directory under `web/src/` is either mapped in the rule's
+> `LEGACY_TO_LAYER` or listed in `NON_LAYER_DIRS` with a reason, and a fixture
+> asserts that against the real directory listing. An unclassified directory
+> resolves to `unknown`, which the rule skips — so it would look covered while
+> going unchecked in both directions (#793).
 
 ### Module map
 
@@ -63,8 +78,9 @@ src/
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
 ├── lib/                     # pure helpers (cn, format, encoding, session-first-free utils)
 ├── atoms/                   # shared jotai atoms (connection, session, probe)
-├── extensions/              # registry + extension contributions
-└── markdown/, test/         # markdown pipeline, vitest setup
+├── extensions/              # registry + extension contributions (own rung)
+├── markdown/                # markdown pipeline (shared)
+└── test/                    # vitest setup + shared mocks (not a layer)
 ```
 
 ## Feature layout & ownership
