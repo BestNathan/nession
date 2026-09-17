@@ -46,8 +46,15 @@
 
 // Import direction map: which layers can import which
 const ALLOWED_IMPORTS = {
-  'app': ['features', 'extensions', 'core', 'shared'],
+  'app': ['product', 'features', 'extensions', 'core', 'shared'],
   'features': ['extensions', 'core', 'shared'],
+  // `product` is #801's first target layer: a module that means something in
+  // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
+  // than one that merely implements something. It sits below `app` (the shell
+  // composes it) and above the infrastructure. `core` is listed because it is
+  // the pre-Phase-5 name for `platform` — when that rename lands this becomes
+  // `['platform', 'shared']` and nothing else about the layer changes.
+  'product': ['core', 'shared'],
   // `extensions/` is a rung of its own, not a feature. The mutual allowance
   // with `features` is deliberate and documented in docs/architecture/web.md:
   // the registry is consumed by app and feature code, and an extension composes
@@ -89,6 +96,11 @@ const LEGACY_TO_LAYER = {
   'app': 'app',
   // Outside the ladder proper; see ALLOWED_IMPORTS.extensions.
   'extensions': 'extensions',
+  // #801's target layer, being filled one extraction at a time. Only the
+  // Product Patterns live here so far; the concepts they belong to
+  // (`features/sessions`, `features/terminal`, …) are still where they were.
+  // The migration state is tracked in docs/architecture/web.md.
+  'product': 'product',
 };
 
 // Directories under `src/` that are deliberately not layers. Everything else

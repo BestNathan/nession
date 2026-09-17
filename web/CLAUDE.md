@@ -32,7 +32,7 @@ Do not infer permanent product boundaries from today's component tree or transpo
 |------|--------|
 | Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
 | Components | Shared generic UI infrastructure lives in `src/components/ui/`; feature UI belongs in `features/<feature>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
-| Layers | Import direction app → features → core → shared (`nession/no-reverse-imports`). Full module map: `docs/architecture/web.md`. |
+| Layers | Target vocabulary (#801): `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`. The older `app → features → core → shared` ladder is the **migration state**, not the target. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and current→target mapping: `docs/architecture/web.md`. |
 | WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own feature (`features/<feature>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling follows the existing component model. UI styling policy and design values live in `nession-web-design`. |
@@ -61,6 +61,8 @@ src/
 ├── index.css              # Global CSS / Tailwind entry
 ├── types.ts               # Shared TS types
 ├── app/                   # App composition, shell, workspace, app-level hooks
+├── product/               # Nession product concepts + their Product Patterns
+│                          #   (target owner; see the migration map in web.md)
 ├── features/              # Domain features: plugin + components/hooks/model
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure

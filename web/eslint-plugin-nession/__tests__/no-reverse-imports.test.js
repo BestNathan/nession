@@ -292,6 +292,61 @@ test('a relative specifier is resolved against the importing file', () => {
   });
 });
 
+// #801's first target layer. `product` is a module that means something in
+// Nession's product vocabulary rather than one that merely implements
+// something: `app` composes it, and the generic primitives it composes must not
+// reach back into it. Which concepts have moved and which have not is the
+// migration map in `docs/architecture/web.md` — not this table, which states
+// the destination.
+test('the product layer sits below app and above the primitives', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      // app composes product.
+      {
+        code: "import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';",
+        filename: '/p/web/src/app/SessionFirstMain.tsx',
+      },
+      // product composes primitives and shared helpers.
+      {
+        code: "import { Tabs } from '@/components/ui/tabs';",
+        filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
+      },
+      {
+        code: "import { cn } from '@/lib/utils';",
+        filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
+      },
+      // same layer is always fine.
+      {
+        code: "import { SessionItem } from '@/product/session/patterns/SessionItem';",
+        filename: '/p/web/src/product/session/patterns/SessionList.tsx',
+      },
+    ],
+    invalid: [
+      {
+        // A generic primitive may not know what a Workspace is.
+        code: "import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';",
+        filename: '/p/web/src/components/ui/probe.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // product may not reach up into the shell that composes it.
+        code: "import { shellIconButtonClass } from '@/app/shellStyles';",
+        filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // Nor keep depending on the pre-#801 feature it was extracted from.
+        // This is the constraint that makes the migration non-trivial: a
+        // pattern can only move once whatever it needs has moved with it, or
+        // the concept moves whole.
+        code: "import { mapDomainState } from '@/features/sessions/model/domainState';",
+        filename: '/p/web/src/product/session/patterns/SessionList.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
 // Modules directly under `src/` are on real edges, and a directory-shaped lookup
 // returns `unknown` for them — so both spellings of an edge to them were
 // unchecked. `types.ts` is `shared` (every layer may reach it); `App.tsx` is the

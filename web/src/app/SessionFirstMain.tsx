@@ -8,7 +8,7 @@ import type { CapabilityId } from '@/features/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
-import { SurfaceSwitcher } from '@/app/patterns/SurfaceSwitcher';
+import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
