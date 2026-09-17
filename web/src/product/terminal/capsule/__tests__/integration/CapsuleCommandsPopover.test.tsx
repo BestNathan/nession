@@ -8,7 +8,7 @@ import {
   LEFT_KEYS,
 } from '@/product/terminal/capsule/physKeys';
 
-vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
+vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),

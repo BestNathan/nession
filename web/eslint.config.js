@@ -98,7 +98,7 @@ export default tseslint.config(
 
   // ── Complex components with many sub-components and hooks ────────────
   {
-    files: ['src/features/files/components/FileBrowser.tsx'],
+    files: ['src/capabilities/files/components/FileBrowser.tsx'],
     rules: {
       'max-lines-per-function': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
     },

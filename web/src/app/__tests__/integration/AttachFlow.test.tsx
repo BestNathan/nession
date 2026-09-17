@@ -8,7 +8,7 @@ import { sessionIdAtom } from '@/atoms/session';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
 import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
-import { envApi } from '@/features/env';
+import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';
 
@@ -79,7 +79,7 @@ vi.mock('@/app/workspace/views/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/features/env/components/EnvManager', () => ({
+vi.mock('@/capabilities/env/components/EnvManager', () => ({
   EnvManager: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
@@ -118,7 +118,7 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
-vi.mock('@/features/env', () => ({
+vi.mock('@/capabilities/env', () => ({
   envApi: { listEnvFiles: vi.fn() },
 }));
 

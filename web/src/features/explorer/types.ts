@@ -1,4 +1,4 @@
-import type { FileEntry } from '@/features/files';
+import type { FileEntry } from '@/capabilities/files';
 
 import type { ExplorerExtension } from './commands/types';
 import type { ExplorerDataProvider } from './providers/types';

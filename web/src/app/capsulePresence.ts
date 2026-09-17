@@ -10,7 +10,7 @@ import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
-import type { FileOps } from '@/features/files';
+import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';

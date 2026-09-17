@@ -12,7 +12,7 @@ const { createSessionMock, listEnvFilesMock } = vi.hoisted(() => ({
 vi.mock('@/product/session', () => ({
   sessionsApi: { createSession: createSessionMock },
 }));
-vi.mock('@/features/env', () => ({
+vi.mock('@/capabilities/env', () => ({
   envApi: { listEnvFiles: listEnvFilesMock },
 }));
 

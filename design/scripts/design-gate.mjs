@@ -61,8 +61,8 @@ const FULL_COMMANDS = [
   },
   {
     id: 'codemirror-renderer-boundary',
-    command: 'cd web && npx vitest run src/features/files/components/__tests__/integration/CodeMirrorDesignBoundary.test.tsx --project integration',
-    owner: 'web/src/features/files/model/editorTheme.ts',
+    command: 'cd web && npx vitest run src/capabilities/files/components/__tests__/integration/CodeMirrorDesignBoundary.test.tsx --project integration',
+    owner: 'web/src/capabilities/files/model/editorTheme.ts',
     expected: 'Nession editor tokens reach CodeMirror\'s injected renderer styles',
     repair: 'fix the CodeMirror EditorView.theme adapter, then verify the rendered style boundary',
   },
@@ -87,7 +87,7 @@ const BROWSER_COMMANDS = [
     // actually makes.
     id: 'codemirror-rendered-metrics',
     command: 'cd e2e && npx playwright test specs/design-renderer-boundary.spec.ts',
-    owner: 'web/src/features/files/model/editorTheme.ts',
+    owner: 'web/src/capabilities/files/model/editorTheme.ts',
     expected: "CodeMirror's rendered metrics match the workspace editor tokens rather than its own defaults",
     repair: "the token did not reach the rendered result — move the decision into EditorView.theme; a utility class loses to CodeMirror's injected theme",
   },

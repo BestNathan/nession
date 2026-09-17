@@ -31,15 +31,15 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
     valid: [
       // app may reach everything below it.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
-      { code: "import { x } from '@/features/files/model/x';", filename: '/p/web/src/app/LoginPage.tsx' },
+      { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/app/LoginPage.tsx' },
       // features may reach core and shared.
-      { code: "import { x } from '@/services/socket';", filename: '/p/web/src/features/files/F.tsx' },
-      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/features/files/F.tsx' },
+      { code: "import { x } from '@/services/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
+      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // core may reach shared.
       { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/services/socket/probe.ts' },
       // same-layer is always fine.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/components/ui/probe.tsx' },
-      { code: "import { x } from '@/features/files/model/x';", filename: '/p/web/src/features/files/F.tsx' },
+      { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // External packages are not this rule's business.
       { code: "import * as React from 'react';", filename: '/p/web/src/components/ui/probe.tsx' },
     ],
@@ -89,11 +89,11 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
         filename: '/p/web/src/services/__tests__/integration/websocket.test.ts',
       },
       {
-        code: "import { createFilesApi } from '@/features/files';",
+        code: "import { createFilesApi } from '@/capabilities/files';",
         filename: '/p/web/src/runtime/__tests__/unit/SessionRuntime.test.ts',
       },
       {
-        code: "import { x } from '@/features/files/model/x';",
+        code: "import { x } from '@/capabilities/files/model/x';",
         filename: '/p/web/src/shared/hooks/thing.test.tsx',
       },
     ],
@@ -101,7 +101,7 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
     // so the exemption is about the file's role, not its folder.
     invalid: [
       {
-        code: "import { createFilesApi } from '@/features/files';",
+        code: "import { createFilesApi } from '@/capabilities/files';",
         filename: '/p/web/src/runtime/SessionRuntime.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -143,7 +143,7 @@ test('a re-export is the same runtime edge as an import', () => {
     valid: [
       // Legal directions behave exactly as the import form does.
       { code: "export { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
-      { code: "export { probe } from '@/services/socket';", filename: '/p/web/src/features/files/F.tsx' },
+      { code: "export { probe } from '@/services/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // A local re-export references no other module. The binding has to exist
       // for the parser to accept the statement at all.
       {
@@ -221,7 +221,7 @@ test('a fully-erased type re-export is out of scope, and a local export is not a
 test('a dynamic import is the same runtime edge as a static one', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
-      { code: "import('@/lib/encoding');", filename: '/p/web/src/features/files/F.tsx' },
+      { code: "import('@/lib/encoding');", filename: '/p/web/src/capabilities/files/F.tsx' },
       { code: "import('react');", filename: '/p/web/src/components/ui/probe.tsx' },
     ],
     invalid: [
@@ -284,7 +284,7 @@ test('a relative specifier is resolved against the importing file', () => {
       {
         // `shared` may not reach a feature either, and the path climbs two
         // levels — the resolution, not the spelling, is what is under test.
-        code: "import { x } from '../features/files';",
+        code: "import { x } from '../capabilities/files';",
         filename: '/p/web/src/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },

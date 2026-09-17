@@ -23,13 +23,23 @@ the design system, the source layout and the lint gate all use one language.
 ### Dependency direction
 
 ```text
-app  ──────────────▶ product | capabilities | platform | shared | components/ui
-product  ──────────▶ extensions | platform | shared | components/ui
-capabilities  ─────▶ product | platform | shared | components/ui
+app  ──────────────▶ product | capabilities | extensions | platform | shared | components/ui
+product  ──────────▶ capabilities | extensions | platform | shared | components/ui
+capabilities  ─────▶ platform | shared | components/ui
 platform  ──────────▶ shared | components/ui
 shared  ───────────▶ components/ui
 components/ui  ────▶ —
 ```
+
+`product → capabilities` is **one-way**, and that is measured rather than
+assumed. Six real value imports go that way — the Terminal capsule surfaces the
+quick-command capability, the Session attach dialog offers env files — and none
+come back. PRINCIPLE #3 is what says the direction is right: "capabilities
+should naturally gain presence when they become relevant to the current
+context" describes a capability appearing *inside* a product context, not a
+product appearing inside a capability. If a capability ever needs a Product
+Pattern, that is the same decision `features ↔ extensions` already records, and
+it should be made then rather than pre-granted here.
 
 Same-layer imports are allowed; anything against the arrows above is a reverse
 import and a lint error (`nession/no-reverse-imports`,
@@ -61,7 +71,7 @@ the honest answer to "where does this go today" until the row moves.
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
 | `features/server` | **undecided** — see below | 3 |
 | `features/capabilities` | `product/capability/` | 4 |
-| `features/{files,env,commands,claude-code}` | `capabilities/<name>/` | 4 |
+| `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
 | `features/explorer` | undecided — a reusable framework, not a capability | 5 |
 | `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
 | `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
@@ -146,7 +156,7 @@ and composes the feature it extends. The rule models it as a rung of its own
 forbidden. The mutual `features ↔ extensions` allowance is deliberate. Phase 4
 absorbs it into `capabilities/*/contribution.ts`.
 
-`markdown/` is `shared`. Its consumers are `features/files` *and*
+`markdown/` is `shared`. Its consumers are `capabilities/files` *and*
 `lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
 The resulting `markdown ↔ lib` cycle is deliberate — both files document it;
 general language detection needs markdown's ranked signals, and markdown cannot
@@ -208,7 +218,7 @@ src/
 ## Feature layout & ownership
 
 Each feature mirrors the same skeleton (see `features/{sessions,agents}/README.md`
-for the exemplars and `features/files/README.md` for the original):
+for the exemplars and `capabilities/files/README.md` for the original):
 
 ```text
 features/<feature>/

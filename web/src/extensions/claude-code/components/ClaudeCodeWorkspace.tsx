@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { claudeCodeApi } from '@/features/claude-code';
+import { claudeCodeApi } from '@/capabilities/claude-code';
 import type {
   ClaudeCodeListResponse,
   ClaudeCodeReadResponse,
-} from '@/features/claude-code/types';
+} from '@/capabilities/claude-code/types';
 import { cn } from '@/lib/utils';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 

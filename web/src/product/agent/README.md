@@ -41,7 +41,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 (`agent · session · attachment`) and read their state through the **sessions
 feature** public surface (`features/sessions/model/domainState` types +
 `components/ConnectionStatus`) — the channel vocabulary is session-workspace
-state, so sessions owns it. Mirrors the `features/files → features/explorer`
+state, so sessions owns it. Mirrors the `capabilities/files → features/explorer`
 direction. The agent channel derivation itself (`agent.status` +
 staleness → channel) stays in `domainState`; moving it here would invert the
 dependency for session list rows.
