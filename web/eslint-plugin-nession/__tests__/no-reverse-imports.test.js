@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
 import nessionPlugin from '../index.js';
+import { LEGACY_TO_LAYER, NON_LAYER_DIRS } from '../rules/no-reverse-imports.js';
 
 // #783. This rule is the mechanical half of the layer direction `web/CLAUDE.md`
 // states, and it had never fired: `getSourceLayer` read the *import path* to
@@ -245,4 +248,40 @@ test('a computed dynamic import names nothing and is left alone', () => {
   // about the specifier and not about the visitor being inert.
   visitors.ImportExpression({ source: { type: 'Literal', value: '@/features/terminal' } });
   assert.equal(reported.length, 1, 'a literal source is still an edge');
+});
+
+// #793. The rule resolves a directory to a layer through a table, and anything
+// absent from it becomes `unknown` — which `checkRuntimeEdge` skips. An
+// unmapped directory is therefore indistinguishable from a legal one, in both
+// directions, while looking perfectly covered. `markdown/` and `extensions/`
+// sat in that bucket.
+//
+// This is the assertion that makes the table's completeness a checked property
+// of the repo rather than something the next person has to remember.
+test('every src/ directory is classified — mapped, or deliberately not a layer', () => {
+  const srcDir = fileURLToPath(new URL('../../src', import.meta.url));
+  const dirs = readdirSync(srcDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  const unclassified = dirs.filter(
+    (dir) => !(dir in LEGACY_TO_LAYER) && !(dir in NON_LAYER_DIRS),
+  );
+  assert.deepEqual(
+    unclassified,
+    [],
+    `src/ ${unclassified.join(', ')} has no layer. Add it to LEGACY_TO_LAYER `
+      + '(plus ALLOWED_IMPORTS if it is a new layer), or to NON_LAYER_DIRS with a '
+      + 'reason. Leaving it out means every edge touching it is silently skipped '
+      + 'while appearing covered — that is #793.',
+  );
+
+  // The other direction: an exemption for a directory that no longer exists is
+  // stale documentation pretending to be a decision.
+  const stale = Object.keys(NON_LAYER_DIRS).filter((dir) => !dirs.includes(dir));
+  assert.deepEqual(
+    stale,
+    [],
+    `NON_LAYER_DIRS names directories that do not exist: ${stale.join(', ')}`,
+  );
 });
