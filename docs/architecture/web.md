@@ -52,6 +52,7 @@ the honest answer to "where does this go today" until the row moves.
 |---|---|---|
 | `app/` shell, composition, chrome | `app/` | — (stays) |
 | `app/experiences/app/` — App experience: spatial shell, gestures, page index | **done** | 2 |
+| `app/experiences/web/` — Web experience: the frame, list column vs overlay | **done** | 2 |
 | `app/workspace/` | `app/` | 2 |
 | `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
 | `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
