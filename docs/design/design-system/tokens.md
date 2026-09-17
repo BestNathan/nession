@@ -149,6 +149,28 @@ And avoid treating the chain above as a requirement to visibly render `agent.onl
 
 Tokens make an approved composition consistent; they do not approve the composition.
 
+### The two experiences are asymmetric
+
+`emitAppExperienceRemap` writes **every** app leaf into `[data-experience="app"]`,
+while web leaves are written to `:root`. The two sets are therefore not mirror
+images:
+
+- a token **only App** defines (`experience.app.touchTarget.min`,
+  `experience.app.composer.shellInset`, …) resolves to **nothing** outside the App
+  experience — the declaration is dropped and the layout collapses silently;
+- a token **only Web** defines (`experience.web.shell.*`, `experience.web.workspace.*`)
+  sits at `:root` and therefore resolves in **both** experiences;
+- a **shared** token (`experience.*.control.md`) is emitted at `:root` and
+  overridden in the app block, so it is safe in either.
+
+So "Web code used an App token" is a real defect and the mirror is not. Because
+this is invisible at runtime, `nession/no-cross-experience-token` enforces it
+statically: an App-only custom property may only be referenced from a class
+binding whose name marks it App-scoped (`capsuleShellAppOuterClass` beside
+`capsuleShellWebOuterClass`). Whether an element renders on Web is a runtime
+property of the component tree; the binding name is the author's statement of it,
+and it is the only part a static check can read.
+
 ## Source of truth
 
 ```text
