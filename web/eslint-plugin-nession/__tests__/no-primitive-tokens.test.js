@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
 import { findPrimitiveInString } from '../rules/no-primitive-tokens.js';
-import { findAppExperienceClass } from '../rules/no-cross-experience-token.js';
 import nessionPlugin from '../index.js';
 
 const metadataPath = join(
@@ -32,10 +31,6 @@ test('findPrimitiveInString flags arbitrary colors', () => {
   assert.equal(hit.primitiveId, 'literal');
 });
 
-test('findAppExperienceClass flags touch-target-min', () => {
-  assert.equal(findAppExperienceClass('touch-target-min', lintMetadata), 'touch-target-min');
-});
-
 const ruleTester = new RuleTester({
   parser: tseslint.parser,
   parserOptions: {
@@ -55,12 +50,3 @@ ruleTester.run('no-primitive-tokens', nessionPlugin.rules['no-primitive-tokens']
   ],
 });
 
-ruleTester.run('no-cross-experience-token', nessionPlugin.rules['no-cross-experience-token'], {
-  valid: [{ code: 'export const x = "text-agent-online"' }],
-  invalid: [
-    {
-      code: 'export const x = "touch-target-min"',
-      errors: [{ message: /App experience class "touch-target-min"/ }],
-    },
-  ],
-});

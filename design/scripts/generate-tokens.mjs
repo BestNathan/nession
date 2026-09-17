@@ -85,12 +85,27 @@ export const TERMINAL_THEME_SLOTS = [
   ['brightWhite', 'ansi-bright-white'],
 ];
 
-const EXPERIENCE_APP_CLASSES = [
-  'touch-target-min',
-  'control-app-sm',
-  'control-app-md',
-  'control-app-lg',
-];
+/**
+ * Custom properties the App experience defines and Web does not.
+ *
+ * `emitAppExperienceRemap` writes *every* app leaf into `[data-experience="app"]`
+ * while web leaves go to `:root`, so the two experiences are asymmetric: a token
+ * only App defines resolves to nothing outside the App experience, whereas a
+ * web-only token sits at `:root` and resolves in both. Referencing an App-only
+ * token from code that renders on Web is therefore a silent layout failure
+ * rather than an error.
+ *
+ * Derived, never hand-listed. The literal this replaces named
+ * `control-app-sm|md|lg` and `touch-target-min` — a naming scheme this pipeline
+ * never emitted — so `no-cross-experience-token` could not match any input and
+ * had silently stopped protecting anything (#771).
+ */
+export function appOnlyVars(tokens) {
+  const app = flattenLeaves(tokens.experience?.app ?? {});
+  const web = flattenLeaves(tokens.experience?.web ?? {});
+  const webNames = new Set(web.map(({ path }) => toKebab(path)));
+  return app.map(({ path }) => toKebab(path)).filter((name) => !webNames.has(name));
+}
 
 function isLeaf(node) {
   return Boolean(node) && typeof node === 'object' && ('ref' in node || 'value' in node);
@@ -270,7 +285,7 @@ export function generateWebCss(tokens) {
   ].join('\n');
 }
 
-export function generateLintMetadata(_tokens) {
+export function generateLintMetadata(tokens) {
   const meta = {};
   for (const [id, suggestions] of Object.entries(LINT_PRIMITIVES)) {
     meta[id] = {
@@ -279,7 +294,7 @@ export function generateLintMetadata(_tokens) {
       suggestions: [...suggestions],
     };
   }
-  meta.experienceAppClasses = [...EXPERIENCE_APP_CLASSES];
+  meta.experienceAppVars = appOnlyVars(tokens);
   return meta;
 }
 
