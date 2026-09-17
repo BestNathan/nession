@@ -50,6 +50,7 @@
     }
   },
   "composer": {
+    "$owner": "pattern.terminal-capsule",
     "fontSize": {
       "ref": "primitive.typography.size"
     },

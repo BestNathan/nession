@@ -164,6 +164,7 @@ Rules:
 - metadata never outweighs the thing it describes;
 - monospace communicates code/terminal identity, not decoration;
 - Web and App share semantic roles while Experience tokens may change sizes/hit areas;
+- the first four roles are stated in the token layer as `typography.{primary,secondary,metadata,code}` (see [tokens.md](design-system/tokens.md#typography-roles)) — a role names the text's job, so use the role rather than a component-local size;
 - terminal glyph rendering remains owned by the terminal surface rather than chrome typography.
 
 ## Surface hierarchy

@@ -12,17 +12,123 @@ Tokens encode reusable visual/state values. They do **not** define information a
 
 ## Layer stack
 
+There are **two axes**, not one ladder. Reading Experience as "the layer under
+Domain" is the misreading this diagram used to invite: it makes every Web-only
+number look like it belongs to Experience, and Experience then absorbs
+pattern metrics until it means "CSS values for the browser".
+
 ```text
-Primitive
-    ↓
-Semantic
+Meaning axis                    Platform axis
+Primitive                       Primitive / Semantic
+    ↓                                ↓
+Semantic                        Experience (Web / App)
     ↓
 Domain
-    ↓
-Experience (Web / App)
-    ↓
-Pattern / component
+
+Pattern consumes the relevant meaning + the relevant platform vocabulary.
 ```
+
+Domain answers **what a thing is**. Experience answers **how a platform
+expresses it** — density, touch/pointer behavior, safe areas, control sizing.
+
+So a value is not Experience-owned merely because it differs per platform or
+because only one platform consumes it. `experience.web.workspace.treeWidth` is
+a *file-workspace* decision that happens to be expressed on Web; calling it
+"Experience" would be true of its housing and false of its owner.
+
+### When a value's owner is narrower than Experience
+
+A value whose meaning belongs to one pattern or composition says so, in the
+token source, with the same `$`-annotation convention as `$description`:
+
+```json
+"composer": {
+  "$owner": "pattern.terminal-capsule",
+  "fontSize": { "ref": "primitive.typography.size" }
+}
+```
+
+`$owner` inherits down its group, so it is stated once per family or, when a
+family is genuinely mixed, on the individual leaf. **An absent `$owner` means
+generic platform vocabulary**, not "unknown" — that is the default, and most of
+`control` / `icon` / `focus` / `motion` is exactly that.
+
+The annotation is deliberately inert: it changes no generated artifact, adds no
+token layer, and no consumer reads it. Its job is to make ownership *legible and
+checkable* — the inventory reports it as evidence, and `$owner` must name a real
+`patterns/*.md` doc, so a typo fails rather than reading as a decision. Using a
+pattern that has no doc yet is the signal to write the doc, not to skip the
+annotation.
+
+Do not add a pass-through `PatternToken` layer to express this. The value stays
+where it is; only its ownership is recorded.
+
+### The current families, classified
+
+Read from production consumers, not from the values. Counts are Web leaves
+(`experience/app.json` mirrors the same families).
+
+| Family | Leaves | Owner | Evidence |
+|---|---|---|---|
+| `composer` | 45 | `pattern.terminal-capsule` | every consumer is under `features/terminal/capsule/` |
+| `workspace` | 13 | `pattern.file-workspace` | tree + editor metrics; consumers are the explorer renderers and the file viewer/editor |
+| `shell.sessionRowPadY` / `TitleFontSize` / `MetaFontSize` | 3 | `pattern.session-item` | consumed only by `features/sessions/components/SessionItem.tsx` |
+| `shell` (the rest) | 18 | **shell composition** | the shell's own chrome. `shell.space-*` is generic spacing; `shell.railWidth` / `foot*` size the shell, which is the composition root rather than a pattern — no `$owner`, and none is warranted |
+| `control`, `icon`, `focus`, `motion` | 10 | **generic platform** | consumers span `app/`, `app/workspace/`, `app/patterns/` and the capsule, which is what "generic" means here |
+| `row` | 3 | generic platform | zero consumers, already classified `reserved` |
+
+`shell.sessionRowRadius` is deliberately **not** annotated: it is genuinely
+shared (session rows, agent nodes, and file rows all consume it), so it is not a
+session-item metric that happens to be reused. Its name is narrower than its
+use, which is a naming question for whoever next touches those rows — not an
+ownership one, and not a reason to move a value.
+
+### Typography roles
+
+[visual-language.md](../visual-language.md) defines five chrome text roles. Until
+#774 they existed only as prose: the token layer named sizes per component
+(`sessionRowTitleFontSize`, `nodeFontSize`, `footFontSize`, …), so the same job
+had a different name everywhere it appeared.
+
+`experience.web.typography.{primary,secondary,metadata,code}.size` is that
+vocabulary in the token layer. A component token says which role it is and
+derives the size from it:
+
+```json
+"sessionRowTitleFontSize": { "ref": "experience.web.typography.primary.size" }
+```
+
+**A role owns size only.** Family and weight are cross-cutting — `font-medium`
+appears under every role, and monospace carries both metadata
+(`sessionRowMetaFontSize`) and primary (`nodeFontSize`) — so folding them into a
+role would misstate the evidence. Line-height stays with the block that owns it
+(`workspace.treeLineHeight`), not with the size role.
+
+Because a role's consumers are reached through the ref graph, the inventory
+reports them (`downstream` + `effectiveConsumers`) rather than anyone grepping
+for `--typography-*`. A role that reaches no production file fails a test — the
+requirement's own failure mode is "new semantic roles that nothing consumes".
+
+The pilot migration moved five tokens onto roles and **changed no value**:
+`design/generated/web.css` gained four role variables and no existing variable
+moved. `|value|` in the token source is now stated once per role instead of once
+per component.
+
+#### Near-duplicates this surfaced and deliberately did *not* collapse
+
+Three tokens do a role's job at a different size. Converging them is a visual
+decision, not a token one, so they were left where they are:
+
+| Token | Value | Role value | Why it is not obviously the role |
+|---|---|---|---|
+| `shell.footFontSize` | 10.5px | 10px | its own description says "matching the session metadata it sits under" — the stated intent and the value already disagree |
+| `shell.nodeFontSize` | 11.5px | 12.5px | monospace; "a node name is infrastructure identity" may earn its own role |
+| `workspace.editorHeadFontSize` | 11.5px | 10px | "it names what is open, it is not a title" — reads as metadata |
+
+These three are the evidence that the fragmentation was real. Separately, 20
+font sizes in production are still raw literals — `text-[10px]` (15),
+`text-[11px]` (3), `text-[9px]` (2), across seven files — and those bypass the
+token layer entirely. They are the next migration, not this one.
 
 Product UI must not consume Primitive palette values directly.
 

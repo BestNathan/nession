@@ -1,5 +1,32 @@
 {
   "$description": "Web experience density. Emitted as CSS variables in generated web.css.",
+  "typography": {
+    "$description": "Chrome typography roles (visual-language.md 'Typography hierarchy'). A role names the text's job, not the component it appears in — which is what lets the same job be one value instead of one value per component. A role owns SIZE only: family (mono vs sans) and weight are orthogonal, and the evidence says so — `font-medium` appears under every role, and mono is used for both metadata and primary. Line-height stays with the block that owns it (`workspace.treeLineHeight`), not with the size role.",
+    "primary": {
+      "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
+      "size": {
+        "value": "12.5px"
+      }
+    },
+    "secondary": {
+      "$description": "Supporting but fully readable. Section headings, tree rows.",
+      "size": {
+        "value": "11px"
+      }
+    },
+    "metadata": {
+      "$description": "Quiet. Agent/location, recency, status details — never outweighs the thing it describes.",
+      "size": {
+        "value": "10px"
+      }
+    },
+    "code": {
+      "$description": "Workload-specific. Code, paths, commands. The terminal keeps its own glyph rendering; this is the chrome-side code surface.",
+      "size": {
+        "value": "12px"
+      }
+    }
+  },
   "control": {
     "sm": {
       "value": "28px"
@@ -62,6 +89,7 @@
       "value": "246px"
     },
     "sessionRowPadY": {
+      "$owner": "pattern.session-item",
       "$description": "Session row vertical padding. The mockup draws 7px, tighter than `shell.space-2` (8px) because the row's two lines already carry leading; horizontal padding is `shell.space-2`.",
       "value": "7px"
     },
@@ -78,12 +106,14 @@
       "value": "11.5px"
     },
     "sessionRowTitleFontSize": {
-      "$description": "Session name. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
-      "value": "12.5px"
+      "$owner": "pattern.session-item",
+      "$description": "Session name — the sidebar's primary role. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
+      "ref": "experience.web.typography.primary.size"
     },
     "sessionRowMetaFontSize": {
-      "$description": "Session metadata (agent / recency). Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
-      "value": "10px"
+      "$owner": "pattern.session-item",
+      "$description": "Session metadata (agent / recency) — the metadata role. Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
+      "ref": "experience.web.typography.metadata.size"
     },
     "footPadY": {
       "$description": "Sidebar foot vertical padding. The mockup draws 9px; horizontal is `shell.space-3` (12px), which is what the mockup draws too.",
@@ -102,8 +132,8 @@
       "value": "10.5px"
     },
     "sectionHeadFontSize": {
-      "$description": "Sidebar section label (Agents / Sessions). Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
-      "value": "11px"
+      "$description": "Sidebar section label (Agents / Sessions) — the secondary role. Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
+      "ref": "experience.web.typography.secondary.size"
     },
     "sectionHeadPadBottom": {
       "$description": "Sidebar section label bottom padding. The mockup draws 7px, tighter than the sides so the label sits with the rows it names rather than floating between sections.",
@@ -123,6 +153,7 @@
     }
   },
   "composer": {
+    "$owner": "pattern.terminal-capsule",
     "fontSize": {
       "ref": "primitive.typography.size"
     },
@@ -275,13 +306,14 @@
     "value": "32px"
   },
   "workspace": {
+    "$owner": "pattern.file-workspace",
     "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px — a navigation column sized to its content, not a fraction of the pane — with the editor taking the rest.",
     "treeWidth": {
       "value": "208px"
     },
     "treeFontSize": {
-      "$description": "Tree text. Monospace at 11px: a path is workload identity, and the mockup sets the whole tree in mono rather than only the filenames.",
-      "value": "11px"
+      "$description": "Tree text — the secondary role. Monospace: a path is workload identity, and the mockup sets the whole tree in mono rather than only the filenames.",
+      "ref": "experience.web.typography.secondary.size"
     },
     "treeRowRadius": {
       "value": "5px"
@@ -299,7 +331,8 @@
       "value": "13px"
     },
     "editorFontSize": {
-      "value": "12px"
+      "$description": "The code surface — the code role. Terminal glyph rendering stays with the terminal; this is chrome-side code text.",
+      "ref": "experience.web.typography.code.size"
     },
     "editorLineHeight": {
       "$description": "Code line box. The mockup's 1.75, looser than the tree's 1.85 ratio at a larger size — line numbers have to line up with their line.",
