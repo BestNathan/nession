@@ -29,7 +29,7 @@ just design-inventory
 # Full machine-readable graph
 just design-inventory-json
 
-# Deterministic integrity check (also wired into web-lint)
+# Deterministic integrity check (also a layer of the canonical design gate)
 just design-inventory-check
 ```
 
@@ -278,7 +278,7 @@ The rule remains:
 
 > One design fact has one canonical owner. Downstream checks prove consequences; they do not restate the same truth independently in lint, contract JSON, and screenshots.
 
-#760's inventory/check should feed #759's future unified design gate rather than being reimplemented again in hooks and CI.
+The inventory check is one layer of the canonical design gate (`just design-check`, `design/scripts/design-gate.mjs`). Hooks and CI select a gate profile; neither reimplements this scanner, and `web-lint` no longer carries it.
 
 ## Third-party renderers
 
@@ -299,7 +299,7 @@ canonical token
 2. **Reserved-token review:** review zero-effective-consumer Domain/Experience families and decide reserved / obsolete / wire consumer; never bulk-delete by count.
 3. **Layout primitive:** evaluate one relationship at a time; if evidence is only generic flex+gap, make no abstraction.
 4. **Component boundary:** keep wrappers thin; move product semantics upward if `components/ui` starts depending on product/service policy.
-5. **#759 integration:** reuse this scanner/inventory implementation inside the one canonical design gate.
+5. **Canonical gate integration:** this scanner runs as the gate's inventory layer; keep it there rather than adding a second entrypoint.
 
 ## Non-goals
 
@@ -313,7 +313,7 @@ canonical token
 
 ## Maintenance
 
-Run the inventory when changing tokens, `components/ui`, shared typography, reusable layout composition, or contracts. CI runs the integrity form through `web-lint`.
+Run the inventory when changing tokens, `components/ui`, shared typography, reusable layout composition, or contracts. CI runs the integrity form through `just design-check` — the canonical gate — not through `web-lint`, which is ordinary Web lint and type-check.
 
 When a zero-consumer item appears, ask:
 
