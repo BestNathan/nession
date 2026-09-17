@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/features/files';
 import type { CapabilityFacts, CapabilityId } from '@/features/capabilities';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 import { AppToolHeader } from '@/app/patterns/AppToolHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';

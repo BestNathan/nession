@@ -9,7 +9,7 @@ const { createSessionMock, listEnvFilesMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   listEnvFilesMock: vi.fn(),
 }));
-vi.mock('@/features/sessions', () => ({
+vi.mock('@/product/session', () => ({
   sessionsApi: { createSession: createSessionMock },
 }));
 vi.mock('@/features/env', () => ({
@@ -28,9 +28,9 @@ vi.mock('@/components/ui/dialog', () => ({
 
 // Now import the component (after the mocks are set up)
 // We need to dynamically import because the mocks must be in place first
-let CreateSessionDialogModule: typeof import('@/features/sessions/components/CreateSessionDialog');
+let CreateSessionDialogModule: typeof import('@/product/session/components/CreateSessionDialog');
 beforeEach(async () => {
-  CreateSessionDialogModule = await import('@/features/sessions/components/CreateSessionDialog');
+  CreateSessionDialogModule = await import('@/product/session/components/CreateSessionDialog');
   createSessionMock.mockReset();
   createSessionMock.mockResolvedValue({ success: true });
   listEnvFilesMock.mockReset();

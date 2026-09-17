@@ -12,7 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Session } from '@/types';
-import { sessionsApi } from '@/features/sessions';
+import { sessionsApi } from '@/product/session';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
 
 interface KillConfirmDialogProps {

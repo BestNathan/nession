@@ -3,7 +3,7 @@ import { SessionFirstSpatialLayout } from '@/app/experiences/app/SessionFirstSpa
 import { useAppSpatialIndex } from '@/app/experiences/app/useAppSpatialIndex';
 import { SessionFirstWebLayout } from '@/app/experiences/web/SessionFirstWebLayout';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/features/capabilities';
 import type { FileOps } from '@/features/files';

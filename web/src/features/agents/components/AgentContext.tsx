@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import type { AgentChannel, DomainState } from '@/features/sessions/model/domainState';
+import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 
 function agentCopyClass(channel: AgentChannel): string {
   switch (channel) {

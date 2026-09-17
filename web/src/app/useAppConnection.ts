@@ -4,7 +4,7 @@ import { WebSocketService } from '../services/socket';
 import type { ConnectionState } from '../services/socket/types';
 import type { AuthResponse } from '../types';
 import { agentsApi } from '@/features/agents';
-import { sessionsApi } from '@/features/sessions';
+import { sessionsApi } from '@/product/session';
 import { serverApi } from '@/features/server';
 import { envApi } from '@/features/env';
 import { commandsApi } from '@/features/commands';

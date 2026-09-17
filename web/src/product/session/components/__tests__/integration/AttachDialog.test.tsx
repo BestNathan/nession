@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
-import { AttachDialog } from '@/features/sessions/components/AttachDialog';
+import { AttachDialog } from '@/product/session/components/AttachDialog';
 import { envApi } from '@/features/env';
-import { sessionsApi } from '@/features/sessions';
+import { sessionsApi } from '@/product/session';
 import type { Session, AttachInfo } from '@/types';
 import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/atoms/probe';
 import { attachInfoAtom } from '@/atoms/session';
@@ -14,7 +14,7 @@ vi.mock('@/features/env', () => ({
   envApi: { listEnvFiles: vi.fn() },
 }));
 
-vi.mock('@/features/sessions', () => ({
+vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
 

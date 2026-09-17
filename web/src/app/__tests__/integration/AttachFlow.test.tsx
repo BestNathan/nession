@@ -9,7 +9,7 @@ import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
 import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
 import { envApi } from '@/features/env';
-import { sessionsApi } from '@/features/sessions';
+import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';
 
 const agent: Agent = {
@@ -84,11 +84,11 @@ vi.mock('@/features/env/components/EnvManager', () => ({
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
 }));
-vi.mock('@/features/sessions/components/CreateSessionDialog', () => ({
+vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="create-session-dialog" /> : null,
 }));
-vi.mock('@/features/sessions/components/KillConfirmDialog', () => ({
+vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
@@ -115,7 +115,7 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 }));
 // Data sources behind the REAL AttachDialog and the profile resolver: the
 // attach-info request and the env-file list never touch the socket singleton.
-vi.mock('@/features/sessions', () => ({
+vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
 vi.mock('@/features/env', () => ({

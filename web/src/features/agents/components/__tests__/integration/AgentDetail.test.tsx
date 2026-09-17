@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { renderSlot } from '@/extensions/registry';
 import { AgentDetail } from '@/features/agents/components/AgentDetail';
-import { SessionDetails } from '@/features/sessions/components/SessionDetails';
+import { SessionDetails } from '@/product/session/components/SessionDetails';
 import claudeCodeExtension from '@/extensions/claude-code';
 import type { Agent, Session } from '@/types';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 
 vi.mock('@/extensions/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/extensions/registry')>();

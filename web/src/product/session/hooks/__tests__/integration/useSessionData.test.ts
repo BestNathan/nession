@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
-import { useSessionData } from '@/features/sessions/hooks/useSessionData';
+import { useSessionData } from '@/product/session/hooks/useSessionData';
 import type { Session } from '@/types';
 
 vi.mock('sonner', () => ({
@@ -14,7 +14,7 @@ const sessionsApiMock = vi.hoisted(() => ({
   fetchSessions: vi.fn(),
 }));
 
-vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
+vi.mock('@/product/session', () => ({ sessionsApi: sessionsApiMock }));
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {

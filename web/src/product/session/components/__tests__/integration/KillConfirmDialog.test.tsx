@@ -7,13 +7,13 @@ import type { Session } from '@/types';
 const { killSessionMock } = vi.hoisted(() => ({
   killSessionMock: vi.fn(),
 }));
-vi.mock('@/features/sessions', () => ({
+vi.mock('@/product/session', () => ({
   sessionsApi: { killSession: killSessionMock },
 }));
 
-let KillConfirmDialogModule: typeof import('@/features/sessions/components/KillConfirmDialog');
+let KillConfirmDialogModule: typeof import('@/product/session/components/KillConfirmDialog');
 beforeEach(async () => {
-  KillConfirmDialogModule = await import('@/features/sessions/components/KillConfirmDialog');
+  KillConfirmDialogModule = await import('@/product/session/components/KillConfirmDialog');
   killSessionMock.mockReset();
   killSessionMock.mockResolvedValue({ success: true });
 });

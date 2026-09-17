@@ -3,7 +3,7 @@ import {
   AppSpatialShell,
   type SpatialPageIndex,
 } from '@/app/experiences/app/AppSpatialShell';
-import { mapDomainState } from '@/features/sessions/model/domainState';
+import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
   FIXTURE_AGENTS,

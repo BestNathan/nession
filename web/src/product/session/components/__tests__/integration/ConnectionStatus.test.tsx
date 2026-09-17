@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { ConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import type { DomainState } from '@/product/session/model/domainState';
 
 const state: DomainState = {
   agent: { channel: 'offline', copy: 'Agent offline' },

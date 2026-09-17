@@ -44,17 +44,33 @@
  * fifth form appearing should be a deliberate omission rather than an oversight.
  */
 
+// #801 migration allowance — the one this file's comments elsewhere promise.
+//
+// `features/` is the pre-#801 layout, drained one concept at a time into
+// `product/` / `capabilities/` / `platform/`. A concept that has moved and one
+// that has not still depend on each other: now that `sessions` is
+// `product/session`, `features/agents` reaches into it. Without an allowance no
+// module could move until every module could — the big-bang #801 forbids.
+//
+// Deliberately narrow. It opens exactly one pair of directions, so everything
+// else about `features` is still enforced: `components/ui` reaching into a
+// feature remains an error, and so does `shared → features`. Removed when
+// `features/` no longer exists (Phase 7), at which point these two constants go
+// and the layers are related by the table below alone.
+const MIGRATION_FROM = 'features';
+const MIGRATION_INTO = ['product'];
+
 // Import direction map: which layers can import which
 const ALLOWED_IMPORTS = {
   'app': ['product', 'features', 'extensions', 'core', 'shared'],
-  'features': ['extensions', 'core', 'shared'],
+  'features': ['extensions', 'core', 'shared', ...MIGRATION_INTO],
   // `product` is #801's first target layer: a module that means something in
   // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
   // than one that merely implements something. It sits below `app` (the shell
   // composes it) and above the infrastructure. `core` is listed because it is
   // the pre-Phase-5 name for `platform` — when that rename lands this becomes
   // `['platform', 'shared']` and nothing else about the layer changes.
-  'product': ['core', 'shared'],
+  'product': ['core', 'shared', MIGRATION_FROM],
   // `extensions/` is a rung of its own, not a feature. The mutual allowance
   // with `features` is deliberate and documented in docs/architecture/web.md:
   // the registry is consumed by app and feature code, and an extension composes
