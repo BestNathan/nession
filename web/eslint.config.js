@@ -27,6 +27,7 @@ export default tseslint.config(
       'nession/no-capsule-magic-metrics': 'error',
       'nession/no-sf-overlay-vars': 'error',
       'nession/no-reverse-imports': 'error', // Enforce layered architecture import direction
+      'nession/no-ui-product-imports': 'error', // components/ui stays generic (see the rule's header)
 
       // ── Code quality limits ──────────────────────────────────────────
       complexity:    ['error', 20],
