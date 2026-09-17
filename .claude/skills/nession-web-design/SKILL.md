@@ -163,8 +163,7 @@ When adding/changing token source:
 
 ```bash
 just tokens-gen
-just tokens-check
-just design-test
+just design-check full
 ```
 
 Commit source and generated output together when generation changes tracked artifacts.
@@ -241,7 +240,7 @@ Do not trade away focus behavior, keyboard navigation, touch target requirements
 
 ### 4. Validate after normalization
 
-At minimum run the transitional design checks described below. For an actual visual or interaction change, also verify the rendered result in the browser.
+Run the canonical design gate described below. For an actual visual or interaction change, also require the browser profile/E2E verification before claiming completion.
 
 ## Primitive vs pattern
 
@@ -323,8 +322,7 @@ If a stable product pattern needs measurable layout guarantees, express those co
 
 ```bash
 just contracts-gen
-just contracts-check
-just design-test
+just design-check full
 ```
 
 Never weaken or delete a contract merely because current code fails it. First determine whether implementation drifted or the upstream design intentionally changed.
@@ -344,33 +342,32 @@ If a third-party library requires a literal/API-specific representation, derive 
 
 ## Validation workflow
 
-Issue #759 is intended to provide one canonical design gate for manual use, hooks, and CI. **Until that unified entrypoint exists**, use the current checks as a transitional workflow rather than treating this list as another permanent source of truth.
-
-### Fast/static checks
-
-From the repository root:
+`just design-check` is the **single executable design-system gate**. Manual/Agent work, local hooks, and CI call the same implementation and only choose a cost profile; they must not maintain separate rule lists.
 
 ```bash
-just design-test
-just web-lint
+just design-check fast     # fast static profile; pre-commit
+just design-check full     # canonical completion profile; manual / pre-push / Quality Gate
+just design-check browser  # structured Playwright contract + viewport-matrix profile; E2E CI
 ```
 
-These cover token/contract generation checks, executable design tests, ESLint rules, and TypeScript checks already wired by the repository.
+The default `just design-check` is the full profile.
 
-Run relevant Web tests for changed behavior:
+The gate owns mechanically enforceable design-system consequences including generated token/contract integrity, inventory/reference integrity, design-rule fixtures, primitive/shadcn normalization checks, semantic token identity where encoded, and focused third-party-renderer verification. A failing gate is evidence to locate the canonical owner; do not bypass it with an allowlist or a second CI-only rule implementation.
+
+Run relevant Web behavior tests while iterating:
 
 ```bash
 just web-test-unit
 just web-test-integration
 ```
 
-Use the smallest relevant test first while iterating; run the repository-required gate before claiming completion.
+Use the smallest relevant test first while iterating, then run `just design-check full` before claiming completion.
 
 ### Browser verification
 
 For visual, layout, interaction, responsive, Terminal, Workspace, or third-party-renderer changes, static/unit checks are not sufficient.
 
-Run the local stack according to `nession-development`, then verify with Playwright/browser tooling at the relevant canonical viewports and product states.
+The browser profile is wired into the repository E2E workflow and runs the canonical structured UI-contract assertions and viewport matrix. Follow `nession-development` for the repository's browser/E2E execution rules rather than inventing a separate local stack path.
 
 Check the rendered behavior that matters to the contract, for example:
 
@@ -425,7 +422,7 @@ Forbidden repairs:
 3. If missing, add with shadcn CLI.
 4. Normalize generated styles to Nession tokens/Experience semantics.
 5. Keep feature semantics in the caller/pattern.
-6. Run design checks and browser verification.
+6. Run `just design-check full`; require browser/E2E verification when the change affects rendered behavior.
 
 ### "This feature needs a 34px control"
 
@@ -459,8 +456,8 @@ Before claiming a UI/design-system change complete:
 - [ ] Any new layout primitive is justified by repeated stable semantics, not convenience alone.
 - [ ] Stable measurable behavior is represented by the appropriate contract rather than duplicated test constants.
 - [ ] Generated design artifacts are synchronized.
-- [ ] Transitional design checks pass (`just design-test`, `just web-lint`, relevant Web tests).
-- [ ] A real visual/interaction change was verified in the browser/Playwright, not only by lint/unit tests.
+- [ ] `just design-check full` passes.
+- [ ] A real visual/interaction change has the required `design-check browser` / E2E verification, not only lint/unit tests.
 - [ ] If an upstream design decision changed, pattern/docs/contracts/baselines were converged together.
 
 ## Relationship to other skills
