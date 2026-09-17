@@ -86,30 +86,39 @@ if [ -n "$STAGED_TMUX_CHECK" ]; then
   fi
 fi
 
-# ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
+# ── Design gate (#759) ──────────────────────────────────────────────────────
+# One canonical gate: token/contract/inventory sync, the design rule fixtures,
+# and the design rules over web/src. Neither this hook nor CI lists those
+# checks — both call scripts/design-check.sh (through `just`), which is what
+# keeps the three entry points identical. Listing them here is what drifted
+# before: a `design/tokens/*.json` edit matched neither the web nor the capsule
+# branch, so pre-commit ran no token check at all and a stale generated
+# artifact committed cleanly.
+#
+# `just web-lint` depends on the design gate and adds the web type-check, so a
+# web change gets both; a design-only change gets the gate.
+STAGED_DESIGN=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(design/|web/eslint-plugin-nession/)' || true)
 if [ -n "$STAGED_TSX" ]; then
-  echo -e "${YELLOW}→ just web-lint${NC}"
+  echo -e "${YELLOW}→ just web-lint${NC}  ${YELLOW}(design gate + tsc)${NC}"
   if just web-lint; then
     echo -e "${GREEN}✓ just web-lint${NC}"
   else
-    echo -e "${RED}✗ just web-lint${NC}"
+    echo -e "${RED}✗ just web-lint — see the design gate output above${NC}"
+    HAS_ERROR=1
+  fi
+elif [ -n "$STAGED_DESIGN" ]; then
+  echo -e "${YELLOW}→ just design-check${NC}"
+  if just design-check; then
+    echo -e "${GREEN}✓ just design-check${NC}"
+  else
+    echo -e "${RED}✗ just design-check — fix the owner named under each failing layer${NC}"
     HAS_ERROR=1
   fi
 fi
 
-# ── Capsule design-token gate (eslint rule + selftest on script change) ─────
-STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/features/terminal/capsule/.*\.(ts|tsx)$' || true)
-STAGED_TOKEN_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^design/tokens/' || true)
+# A change to the (now non-gate) capsule checker must still prove it detects
+# what it claims. Kept because the script stays runnable as a fast scoped tool.
 STAGED_TOKEN_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-design-tokens' || true)
-if [ -n "$STAGED_CAPSULE$STAGED_TOKEN_SRC$STAGED_TOKEN_CHECK" ]; then
-  echo -e "${YELLOW}→ check-design-tokens${NC}"
-  if ./scripts/check-design-tokens.sh; then
-    echo -e "${GREEN}✓ check-design-tokens${NC}"
-  else
-    echo -e "${RED}✗ check-design-tokens — use capsuleStyles + design/tokens/${NC}"
-    HAS_ERROR=1
-  fi
-fi
 if echo "$STAGED_TOKEN_CHECK" | grep -q selftest; then
   echo -e "${YELLOW}→ check-design-tokens-selftest${NC}"
   if ./scripts/check-design-tokens-selftest.sh; then

@@ -163,8 +163,7 @@ When adding/changing token source:
 
 ```bash
 just tokens-gen
-just tokens-check
-just design-test
+just design-check
 ```
 
 Commit source and generated output together when generation changes tracked artifacts.
@@ -241,7 +240,7 @@ Do not trade away focus behavior, keyboard navigation, touch target requirements
 
 ### 4. Validate after normalization
 
-At minimum run the transitional design checks described below. For an actual visual or interaction change, also verify the rendered result in the browser.
+At minimum run the canonical design gate described below (`just design-check`). For an actual visual or interaction change, also verify the rendered result in the browser.
 
 ## Primitive vs pattern
 
@@ -323,8 +322,7 @@ If a stable product pattern needs measurable layout guarantees, express those co
 
 ```bash
 just contracts-gen
-just contracts-check
-just design-test
+just design-check
 ```
 
 Never weaken or delete a contract merely because current code fails it. First determine whether implementation drifted or the upstream design intentionally changed.
@@ -344,18 +342,38 @@ If a third-party library requires a literal/API-specific representation, derive 
 
 ## Validation workflow
 
-Issue #759 is intended to provide one canonical design gate for manual use, hooks, and CI. **Until that unified entrypoint exists**, use the current checks as a transitional workflow rather than treating this list as another permanent source of truth.
-
-### Fast/static checks
-
-From the repository root:
+There is **one canonical design gate**, built by #759:
 
 ```bash
-just design-test
-just web-lint
+just design-check
 ```
 
-These cover token/contract generation checks, executable design tests, ESLint rules, and TypeScript checks already wired by the repository.
+The git hooks (pre-commit, pre-push) and CI run this same script — not their
+own copies of the checks. So running it locally tells you exactly what the
+gates will say, and there is no second list of design rules to keep in sync.
+
+It covers, cheapest layer first:
+
+| Layer | What it proves |
+|---|---|
+| token artifacts in sync | `design/generated/*` matches `design/tokens/*` |
+| contract resolution in sync | `design/generated/contracts.json` matches `design/contracts/*` |
+| design inventory integrity | the inventory still resolves deterministically |
+| design test suite | contrast floors, palette inheritance, generator/contract semantics |
+| rule fault fixtures | each design rule still **fails** on the input it claims to catch |
+| design rules over web/src | the rules applied to shipping code |
+
+Do not treat this table as a rule list to maintain by hand — it is a reading
+aid. `just design-check --list` prints the live layers, and each failing layer
+names its canonical `owner:` and a `repair:` direction.
+
+`just web-lint` depends on the gate and adds the web type-check; `just
+tokens-gen`, `just contracts-gen`, `just design-inventory` and `just
+design-rule-fixtures` remain available when you want one layer alone.
+
+### Web tests
+
+Run relevant Web tests for changed behavior:
 
 Run relevant Web tests for changed behavior:
 
@@ -459,7 +477,7 @@ Before claiming a UI/design-system change complete:
 - [ ] Any new layout primitive is justified by repeated stable semantics, not convenience alone.
 - [ ] Stable measurable behavior is represented by the appropriate contract rather than duplicated test constants.
 - [ ] Generated design artifacts are synchronized.
-- [ ] Transitional design checks pass (`just design-test`, `just web-lint`, relevant Web tests).
+- [ ] The canonical design gate passes (`just design-check`), plus the relevant Web tests.
 - [ ] A real visual/interaction change was verified in the browser/Playwright, not only by lint/unit tests.
 - [ ] If an upstream design decision changed, pattern/docs/contracts/baselines were converged together.
 

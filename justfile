@@ -68,14 +68,42 @@ design-inventory-check:
 check-design-tokens:
     ./scripts/check-design-tokens.sh
 
+# ── Canonical design gate (#759) ────────────────────────────────────────────
+# One implementation, three entry points: manual/Agent, git hooks, CI. Hooks
+# and CI call `design-check` rather than listing design steps themselves, so
+# the three cannot drift into three different rule sets. See the header of
+# scripts/design-check.sh for the layers and why they are shaped this way.
+
+# The gate. This is what a developer, an Agent, and CI all run.
+design-check:
+    ./scripts/design-check.sh
+
+# Print the gate's layers without running them.
+design-check-list:
+    ./scripts/design-check.sh --list
+
+# ESLint over web/src. The design rules are not listed separately anywhere —
+# they live in web/eslint.config.js, and both this and `design-check` inherit
+# whatever it declares.
+web-eslint:
+    cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
+
+# Fault fixtures for the design rules: proves each rule still *fails* on the
+# input it claims to catch. A rule whose fixture stops failing has silently
+# stopped protecting (three had, before #759).
+design-rule-fixtures:
+    node --test web/eslint-plugin-nession/__tests__/*.test.js
+
 check-design-tokens-selftest:
     ./scripts/check-design-tokens-selftest.sh
 
 # ── Web ─────────────────────────────────────────────────────────────────────
 
-# Lint + type-check (fast, pre-commit)
-web-lint: tokens-check contracts-check design-inventory-check
-    cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
+# Lint + type-check (fast, pre-commit).
+# Depends on design-check rather than repeating its steps: token/contract/
+# inventory sync and the ESLint pass are the design gate's job, and `eslint .`
+# runs the same config either way. Type-checking is web-specific and stays here.
+web-lint: design-check
     cd web && npx tsc --noEmit
 
 # All web tests (unit + integration)

@@ -144,7 +144,7 @@ Two properties of that set are deliberate and must not be "fixed":
 
 ### Enforcement
 
-These are not prose promises. `design/scripts/token-contrast.test.mjs` computes every pair above from the token source and fails the build below AA; `design/scripts/no-inherited-palette.test.mjs` fails if a chroma-free grey ramp or a foreign palette name reappears in the token source, or if Catppuccin survives anywhere in `web/src`. Both run under `just design-test` in CI.
+These are not prose promises. `design/scripts/token-contrast.test.mjs` computes every pair above from the token source and fails the build below AA; `design/scripts/no-inherited-palette.test.mjs` fails if a chroma-free grey ramp or a foreign palette name reappears in the token source, or if Catppuccin survives anywhere in `web/src`. Both run under `just design-check` (the canonical design gate, #759) in the git hooks and in CI.
 
 ## Typography hierarchy
 
