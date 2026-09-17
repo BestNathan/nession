@@ -61,7 +61,7 @@ const FULL_COMMANDS = [
   },
   {
     id: 'codemirror-renderer-boundary',
-    command: 'cd web && npx vitest run src/features/files/components/__tests__/integration/CodeMirrorEditor.test.tsx --project integration',
+    command: 'cd web && npx vitest run src/features/files/components/__tests__/integration/CodeMirrorDesignBoundary.test.tsx --project integration',
     owner: 'web/src/features/files/model/editorTheme.ts',
     expected: 'Nession editor tokens reach CodeMirror\'s injected renderer styles',
     repair: 'fix the CodeMirror EditorView.theme adapter, then verify the rendered style boundary',
