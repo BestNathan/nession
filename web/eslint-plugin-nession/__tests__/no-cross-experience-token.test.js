@@ -17,7 +17,7 @@ const metadataPath = join(
 );
 const lintMetadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
 
-const CAPSULE = '/proj/web/src/features/terminal/capsule/capsuleStyles.ts';
+const CAPSULE = '/proj/web/src/product/terminal/capsule/capsuleStyles.ts';
 
 // The rule this replaces could not fire on any input: its token list was a
 // hand-written literal naming classes no generator emitted, and it compared

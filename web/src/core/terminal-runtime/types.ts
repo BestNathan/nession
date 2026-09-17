@@ -1,4 +1,4 @@
-import type { TerminalAgentApi } from '@/features/terminal';
+import type { TerminalAgentApi } from '@/product/terminal';
 import type { RelayServerTransport } from '@/runtime/relayServerConnection';
 
 /** Banner state surfaced to the React layer for UI rendering. */
@@ -9,7 +9,7 @@ export interface ConnectionOptions {
   mode: 'p2p' | 'relay';
   sessionName: string;
   sessionId: string;
-  /** P2P-mode agent terminal capability (see features/terminal). */
+  /** P2P-mode agent terminal capability (see product/terminal). */
   agentApi?: TerminalAgentApi;
   /** Relay-mode server connection handle (see relayServerHandle). */
   serverConnection?: RelayServerTransport;

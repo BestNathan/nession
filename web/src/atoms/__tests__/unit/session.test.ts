@@ -11,7 +11,7 @@ import {
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
 } from '@/atoms/session';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 
 const navigate = () => {};
 

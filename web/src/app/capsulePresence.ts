@@ -8,7 +8,7 @@ import {
 } from '@/features/capabilities';
 import type {
   CapsuleCapabilityDisclosure,
-} from '@/features/terminal/capsule/types';
+} from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/features/files';
 import type { Agent, Session } from '@/types';

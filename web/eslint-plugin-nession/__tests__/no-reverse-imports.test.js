@@ -58,14 +58,14 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
       },
       {
         // The cycle #783 found: core reaching a feature that consumes core.
-        code: "import { createTerminalAgentApi } from '@/features/terminal';",
+        code: "import { createTerminalAgentApi } from '@/product/terminal';",
         filename: '/p/web/src/runtime/SessionRuntime.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
       {
         // The one upward inversion in the tree.
         code: "import { capsulePresence } from '@/app/capsulePresence';",
-        filename: '/p/web/src/features/terminal/TerminalSurface.tsx',
+        filename: '/p/web/src/product/terminal/TerminalSurface.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
       {
@@ -85,7 +85,7 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
       {
         // A test wiring several layers to exercise something is doing its job;
         // it is not part of the shipped graph.
-        code: "import { terminalServerApi } from '@/features/terminal';",
+        code: "import { terminalServerApi } from '@/product/terminal';",
         filename: '/p/web/src/services/__tests__/integration/websocket.test.ts',
       },
       {
@@ -124,7 +124,7 @@ test('a fully-erased type import is out of scope — it creates no runtime edge'
     });
     visitors.ImportDeclaration({
       importKind,
-      source: { value: '@/features/terminal' },
+      source: { value: '@/product/terminal' },
     });
     return reported;
   }
@@ -163,7 +163,7 @@ test('a re-export is the same runtime edge as an import', () => {
       },
       {
         // `export *` carries a whole module graph — an edge like any other.
-        code: "export * from '@/features/terminal';",
+        code: "export * from '@/product/terminal';",
         filename: '/p/web/src/services/socket/probe.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -186,7 +186,7 @@ test('a fully-erased type re-export is out of scope, and a local export is not a
     return reported;
   }
 
-  const source = { value: '@/features/terminal' };
+  const source = { value: '@/product/terminal' };
 
   assert.equal(
     reportFor('ExportNamedDeclaration', { source, exportKind: 'type', specifiers: [] }).length,
@@ -226,7 +226,7 @@ test('a dynamic import is the same runtime edge as a static one', () => {
     ],
     invalid: [
       {
-        code: "import('@/features/terminal');",
+        code: "import('@/product/terminal');",
         filename: '/p/web/src/components/ui/probe.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -250,7 +250,7 @@ test('a computed dynamic import names nothing and is left alone', () => {
 
   // Same call with a resolvable literal must report, so the assertion above is
   // about the specifier and not about the visitor being inert.
-  visitors.ImportExpression({ source: { type: 'Literal', value: '@/features/terminal' } });
+  visitors.ImportExpression({ source: { type: 'Literal', value: '@/product/terminal' } });
   assert.equal(reported.length, 1, 'a literal source is still an edge');
 });
 
@@ -277,7 +277,7 @@ test('a relative specifier is resolved against the importing file', () => {
         errors: [{ messageId: 'reverseImport' }],
       },
       {
-        code: "import { x } from '../../features/terminal';",
+        code: "import { x } from '../../product/terminal';",
         filename: '/p/web/src/components/ui/probe.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },

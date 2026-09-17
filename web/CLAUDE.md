@@ -82,7 +82,7 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 ## 4. State and data
 
-- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/features/terminal/state/`. Prefer small domain atoms over mega-stores.
+- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores.
 - Session / attach / file flows go through app-composition and feature hooks rather than embedding WebSocket calls deep in presentational components.
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
 - New feature capabilities should expose a feature-owned API/plugin boundary rather than leaking transport concerns into UI composition.

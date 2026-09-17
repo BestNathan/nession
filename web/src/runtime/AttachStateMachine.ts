@@ -1,4 +1,4 @@
-import type { TerminalStatus } from '@/features/terminal/state/session';
+import type { TerminalStatus } from '@/product/terminal/state/session';
 
 export const P2P_MAX_RECONNECT = 10;
 export const ATTACH_TIMEOUT_MS = 10_000;

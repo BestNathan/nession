@@ -8,7 +8,7 @@ import { serverApi } from '@/features/server';
 import { envApi } from '@/features/env';
 import { commandsApi } from '@/features/commands';
 import { claudeCodeApi } from '@/features/claude-code';
-import { terminalServerApi } from '@/features/terminal';
+import { terminalServerApi } from '@/product/terminal';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import type { Agent, AuthResponse, Session } from '@/types';
 

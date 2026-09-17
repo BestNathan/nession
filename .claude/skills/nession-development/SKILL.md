@@ -698,7 +698,7 @@ List the files each issue will touch, then group:
 
 | Overlap | Arrangement |
 |---|---|
-| Disjoint (`web/src/features/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
+| Disjoint (`web/src/product/terminal/**` vs `crates/nession-agent/**`) | Parallel lanes, independent worktrees |
 | Same directory, different files | Sequential in one lane, rebase each on the previous |
 | Same file, same function | One branch |
 | One issue governs the other's verification (coverage excludes vs the refactor they measure) | Sequential, the governing issue **last** |

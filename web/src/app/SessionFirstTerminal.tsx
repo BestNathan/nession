@@ -1,8 +1,8 @@
 import { cn } from '@/lib/utils';
-import { SessionFirstTerminalPane } from '@/features/terminal/SessionFirstTerminalPane';
-import { TerminalSurface } from '@/features/terminal/TerminalSurface';
+import { SessionFirstTerminalPane } from '@/product/terminal/SessionFirstTerminalPane';
+import { TerminalSurface } from '@/product/terminal/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
-import { useTerminalOrchestration } from '@/features/terminal/useTerminalOrchestration';
+import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
 
 export interface SessionFirstTerminalProps {
   hidden: boolean;

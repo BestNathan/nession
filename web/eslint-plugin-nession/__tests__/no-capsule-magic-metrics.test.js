@@ -21,22 +21,22 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
     valid: [
       {
         code: 'export function Ok() { return <div className="text-[length:var(--composer-font-size)]" />; }',
-        filename: '/proj/web/src/features/terminal/capsule/Ok.tsx',
+        filename: '/proj/web/src/product/terminal/capsule/Ok.tsx',
       },
       {
         code: 'export const x = "h-8 text-xs";',
-        filename: '/proj/web/src/features/terminal/capsule/capsuleStyles.ts',
+        filename: '/proj/web/src/product/terminal/capsule/capsuleStyles.ts',
       },
     ],
     invalid: [
       {
         code: 'export function Probe() { return <div className="h-8 text-xs" />; }',
-        filename: '/proj/web/src/features/terminal/capsule/Probe.tsx',
+        filename: '/proj/web/src/product/terminal/capsule/Probe.tsx',
         errors: [{ messageId: 'violation' }, { messageId: 'violation' }],
       },
       {
         code: 'export function Probe() { return <PopoverContent sideOffset={8} />; }',
-        filename: '/proj/web/src/features/terminal/capsule/Probe.tsx',
+        filename: '/proj/web/src/product/terminal/capsule/Probe.tsx',
         errors: [{ messageId: 'sideOffset' }],
       },
     ],
@@ -46,7 +46,7 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
 test('capsuleStyles allowlist stays exempt', () => {
   const stylesPath = join(
     dirname(fileURLToPath(import.meta.url)),
-    '../../src/features/terminal/capsule/capsuleStyles.ts',
+    '../../src/product/terminal/capsule/capsuleStyles.ts',
   );
   const source = readFileSync(stylesPath, 'utf8');
   assert.doesNotMatch(source, /\bh-8\b|\btext-xs\b/);

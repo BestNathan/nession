@@ -3,14 +3,14 @@ import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
-import { bannerAtomFamily } from '@/features/terminal/state/ui';
+import { bannerAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/services/socket/types';
 
 const { wsListeners } = vi.hoisted(() => ({
   wsListeners: [] as Array<(state: ConnectionState) => void>,
 }));
 
-vi.mock('@/features/terminal/hooks/useP2PAttachTransport', () => ({
+vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
   useP2PAttachTransport: () => ({
     waitingForAddressPlan: false,
     agentTerminalApi: null,
@@ -18,10 +18,10 @@ vi.mock('@/features/terminal/hooks/useP2PAttachTransport', () => ({
     activeUrl: null,
   }),
 }));
-vi.mock('@/features/terminal/useSessionFirstTerminalAttach', () => ({
+vi.mock('@/product/terminal/useSessionFirstTerminalAttach', () => ({
   useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
-vi.mock('@/features/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
+vi.mock('@/product/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/shared/hooks/useWebSocket', () => ({
   // The new-core WebSocketService surface: useTerminalOrchestration wraps the
   // service in a relayServerHandle and subscribes to connection-state changes
@@ -46,12 +46,12 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
     onRelayResize: vi.fn(() => () => {}),
   }),
 }));
-vi.mock('@/features/terminal/SessionFirstTerminalPane', () => ({
+vi.mock('@/product/terminal/SessionFirstTerminalPane', () => ({
   SessionFirstTerminalPane: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="session-first-terminal-pane">{sessionId}</div>
   ),
 }));
-vi.mock('@/features/terminal/TerminalSurface', () => ({
+vi.mock('@/product/terminal/TerminalSurface', () => ({
   TerminalSurface: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="session-first-terminal-surface">{children}</div>
   ),

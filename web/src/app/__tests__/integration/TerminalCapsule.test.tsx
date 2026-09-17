@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TerminalCapsule } from '@/features/terminal/capsule/TerminalCapsule';
+import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
 vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
@@ -11,7 +11,7 @@ vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
   }),
 }));
 
-vi.mock('@/features/terminal/hooks/useCommandHistory', () => ({
+vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: () => ({
     addEntry: vi.fn(),
     history: [],
