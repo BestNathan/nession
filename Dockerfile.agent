@@ -24,6 +24,12 @@ WORKDIR /build
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ .
+# The Web theme lives outside `web/`: `src/index.css` imports it as
+# `../../design/generated/web.css`, which from this stage's `/build/src/`
+# resolves to `/design/` — a sibling of the workdir, not a child of it. A plain
+# `COPY design/ design/` would land at `/build/design/` and the build would
+# still fail, which is why the destination is absolute.
+COPY design/ /design/
 RUN npm run build
 
 # Stage 4: Build agent binary

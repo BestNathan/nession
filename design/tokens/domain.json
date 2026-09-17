@@ -38,7 +38,7 @@
   "file": {
     "selected": { "ref": "semantic.accent" },
     "modified": { "ref": "semantic.warning" },
-    "created": { "ref": "semantic.action" },
+    "created": { "ref": "domain.action" },
     "deleted": { "ref": "semantic.danger" }
   },
   "editor": {
