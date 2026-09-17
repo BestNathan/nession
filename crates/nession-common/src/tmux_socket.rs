@@ -198,8 +198,19 @@ mod tests {
         let _guard = ENV_MUTEX
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A directory that exists, not one this test merely names.
+        //
+        // `tempfile::tempdir()` honours `$TMPDIR`, and every test in this binary
+        // shares one process. Pointing TMPDIR at a path that does not exist
+        // therefore breaks any *other* test that calls `tempdir()` while this
+        // window is open — with `NotFound`, in a test that has nothing to do
+        // with tmux. `ENV_MUTEX` does not prevent that: it serialises the tests
+        // that choose to take it, while the exposure is the whole binary (#779).
+        //
+        // Created before the override so it lands under the real TMPDIR.
+        let elsewhere = tempfile::tempdir().expect("scratch dir for the TMPDIR window");
         let original = std::env::var("TMPDIR").ok();
-        std::env::set_var("TMPDIR", "/tmp/nession-some-other-tmpdir");
+        std::env::set_var("TMPDIR", elsewhere.path());
         let path = default_socket_path();
         match original {
             Some(ref value) => std::env::set_var("TMPDIR", value),
@@ -212,7 +223,10 @@ mod tests {
             rendered.starts_with("/tmp/nession-"),
             "TMPDIR must not move the default socket: {rendered}"
         );
-        assert!(!rendered.contains("some-other-tmpdir"));
+        assert!(
+            !path.starts_with(elsewhere.path()),
+            "the default socket must not follow $TMPDIR: {rendered}"
+        );
     }
 
     #[test]
