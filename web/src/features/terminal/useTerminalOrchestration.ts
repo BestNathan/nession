@@ -23,6 +23,7 @@ import {
   effectiveModeAtom,
   isSwitchingAtom,
 } from '@/atoms/connection';
+import { terminalServerApi } from '@/features/terminal';
 import { useTerminal } from '@/features/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/features/terminal/useSessionFirstTerminalAttach';
 import { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
@@ -193,7 +194,7 @@ export function useTerminalOrchestration({
   // One relay handle per service instance, shared by every relay consumer —
   // the runtime (begin/endRelay + state), the transport factory (relay I/O),
   // the banner, and disconnect cleanup. Rebuilt only when the service does.
-  const relayServer = useMemo(() => relayServerHandle(wsService), [wsService]);
+  const relayServer = useMemo(() => relayServerHandle(wsService, terminalServerApi), [wsService]);
   const { waitingForAddressPlan, agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,

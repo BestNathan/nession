@@ -1,13 +1,23 @@
 // web/src/atoms/session.ts
 import { atom } from 'jotai';
-import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '../types';
+import type { AttachInfo, EnvFileRef, Session, ProbedAddress, TerminalStatus } from '../types';
 import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import { p2pStateAtom, routeIntentEpochAtom } from './connection';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { probeResultsAtom } from './probe';
 import { resolveAutoP2pUrl } from '../lib/resolveAutoP2pUrl';
 
 // ── Base atoms ──────────────────────────────────────────────────
+
+/**
+ * Current terminal connection status — driven by the attach/disconnect/switch
+ * action atoms below and the state machine effect in the terminal feature.
+ *
+ * Owned here rather than by the terminal feature because these session atoms
+ * write it: the attach and disconnect actions set it directly. A feature may
+ * import `atoms/` (features → shared), but not the reverse, so a shared atom
+ * could not have lived in `features/` (#783).
+ */
+export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
 
 export const sessionIdAtom = atom('');
 export const sessionNameAtom = atom('');

@@ -23,7 +23,7 @@ describe('relayServerHandle', () => {
     // Bind the app-level terminal-server singleton to the service under test,
     // mirroring production (install at construction).
     const service = new WebSocketService('ws://server/ws', [terminalServerApi]);
-    const handle: RelayServerTransport = relayServerHandle(service);
+    const handle: RelayServerTransport = relayServerHandle(service, terminalServerApi);
 
     const connected = service.connect();
     const socket = MockWebSocket.instances[0];

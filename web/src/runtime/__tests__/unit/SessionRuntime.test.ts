@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createFilesApi } from '@/features/files';
+import { createTerminalAgentApi } from '@/features/terminal';
 import { SessionRuntime } from '@/runtime/SessionRuntime';
 import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/runtime/AttachStateMachine';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
@@ -75,6 +77,8 @@ function makeConfig(overrides: Partial<ConstructorParameters<typeof SessionRunti
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://a/ws', 'ws://b/ws'] },
     routeIntentEpoch: 0,
+    createFilesApi,
+    createTerminalAgentApi,
     ...overrides,
   };
 }
