@@ -43,7 +43,7 @@ tokens-gen:
 tokens-check:
     node design/scripts/generate-tokens.mjs --check
 
-# UI contract unit tests (node --test; tokens + contracts + inventory helpers)
+# UI contract unit tests (node --test; tokens + contracts + inventory + gate helpers)
 design-test:
     node --test design/scripts/*.test.mjs
 
@@ -61,9 +61,16 @@ design-inventory:
 design-inventory-json:
     node design/scripts/audit-design-system.mjs --json
 
-# Deterministic inventory integrity check used by Web CI.
+# Deterministic inventory integrity check. Kept as a focused helper; callers
+# that need enforcement should use the canonical design-check entrypoint below.
 design-inventory-check:
     node design/scripts/audit-design-system.mjs --check
+
+# #759 canonical design-system enforcement entrypoint. Profiles and their rule
+# lists are owned only by design/scripts/design-gate.mjs; hooks/CI must not copy
+# those rules locally.
+design-check profile="full":
+    node design/scripts/design-gate.mjs --profile {{profile}}
 
 check-design-tokens:
     ./scripts/check-design-tokens.sh
@@ -73,8 +80,9 @@ check-design-tokens-selftest:
 
 # ── Web ─────────────────────────────────────────────────────────────────────
 
-# Lint + type-check (fast, pre-commit)
-web-lint: tokens-check contracts-check design-inventory-check
+# Lint + type-check. Design source/generated integrity belongs to design-check;
+# this target remains ordinary Web engineering quality.
+web-lint:
     cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
     cd web && npx tsc --noEmit
 
