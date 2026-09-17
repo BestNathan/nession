@@ -157,10 +157,14 @@
       "primary-foreground"
     ]
   },
-  "experienceAppClasses": [
+  "experienceAppVars": [
     "touch-target-min",
-    "control-app-sm",
-    "control-app-md",
-    "control-app-lg"
+    "touch-target-compact",
+    "composer-quick-key-pad-x",
+    "composer-quick-key-gap",
+    "composer-commands-panel-max-height",
+    "composer-phys-key-arrow-width",
+    "composer-shell-inset",
+    "composer-shell-safe-area"
   ]
 }
