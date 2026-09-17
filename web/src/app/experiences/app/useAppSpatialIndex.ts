@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { SpatialPageIndex } from '@/app/app-spatial/AppSpatialShell';
+import type { SpatialPageIndex } from './AppSpatialShell';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { Session } from '@/types';
 

@@ -1,7 +1,7 @@
 import {
   AppSpatialShell,
   type SpatialPageIndex,
-} from '@/app/app-spatial/AppSpatialShell';
+} from './AppSpatialShell';
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import {
   SessionFirstSidebar,
