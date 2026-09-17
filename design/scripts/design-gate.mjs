@@ -123,7 +123,51 @@ export function checkSemanticTokenIdentity({ pattern, expectedToken, actualToken
 }
 
 const RAW_COLOR_RE = /(?:#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|oklab)\s*\()/g;
-const ARBITRARY_METRIC_RE = /\b(?:h|w|min-h|min-w|max-h|max-w|size|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|gap-x|gap-y|rounded|text|leading)-\[(?:-?\d+(?:\.\d+)?)(?:px|rem|em|vh|vw|%)?\]/g;
+const METRIC_PREFIX = '(?:h|w|min-h|min-w|max-h|max-w|size|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|gap-x|gap-y|rounded|text|leading)';
+const ARBITRARY_METRIC_RE = new RegExp(`\\b${METRIC_PREFIX}-\\[(?:-?\\d+(?:\\.\\d+)?)(?:px|rem|em|vh|vw|%)?\\]`, 'g');
+
+// A design token used inside an arbitrary value is the point of an arbitrary
+// value, so the check is not "no brackets" — it is "no bare literal inside the
+// brackets once the tokens are accounted for".
+const ARBITRARY_VALUE_RE = new RegExp(`\\b${METRIC_PREFIX}-\\[([^\\]]*)\\]`, 'g');
+const TOKEN_REFERENCE_RE = /var\(--[^)]*\)/g;
+const BARE_LENGTH_RE = /(?<![\w.-])-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)/;
+
+/**
+ * A literal a primitive wrote instead of naming a token.
+ *
+ * The first regex only sees `rounded-[7px]`, where the bracket holds nothing but
+ * a number. `rounded-[min(var(--radius-md),10px)]` slips past it — the nested
+ * form still *chooses* a 10px cap, and #774 asks for that to be caught.
+ *
+ * `calc()` is exempt, deliberately. Inside `calc()` the literal is arithmetic
+ * against an already-resolved dimension — `h-[calc(100%-1px)]` compensates for a
+ * border, `max-w-[calc(100%-2rem)]` insets a panel — and those are layout
+ * implementation, not the primitive's design vocabulary. Replacing them with
+ * tokens would be tokenising for its own sake, which #774 names as a non-goal.
+ * Picking `10px` over a token is a different act: the primitive is choosing a
+ * value, and that choice should have an owner.
+ */
+export function findNestedDesignLiterals(source) {
+  const found = [];
+  for (const match of source.matchAll(ARBITRARY_VALUE_RE)) {
+    const value = match[1];
+    if (!value || value.startsWith('calc(')) {
+      continue;
+    }
+    const withoutTokens = value.replace(TOKEN_REFERENCE_RE, '').trim();
+    // `h-[34px]` is the first rule's business. This one owns only what that
+    // regex cannot see, so the two partition the space instead of reporting the
+    // same class twice.
+    if (/^-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?$/.test(withoutTokens)) {
+      continue;
+    }
+    if (BARE_LENGTH_RE.test(withoutTokens)) {
+      found.push(match[0]);
+    }
+  }
+  return found;
+}
 
 export function scanPrimitiveSource(source, file = '<fixture>') {
   const violations = [];
@@ -145,6 +189,16 @@ export function scanPrimitiveSource(source, file = '<fixture>') {
       expected: 'an existing Semantic/Experience metric or an approved design-system extension',
       owner: 'design/tokens/experience/web.json',
       repair: 'replace the generated/raw metric with canonical vocabulary; generated shadcn code is not exempt',
+    });
+  }
+  for (const actual of findNestedDesignLiterals(source)) {
+    violations.push({
+      file,
+      rule: 'no-ui-primitive-nested-design-literal',
+      actual,
+      expected: 'a token-backed arbitrary value, e.g. min(var(--radius-md), var(--radius-lg))',
+      owner: 'design/tokens/primitive.json',
+      repair: 'name the token the literal stands for; a cap or floor is a design choice and needs an owner',
     });
   }
   return violations;

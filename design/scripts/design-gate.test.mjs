@@ -82,3 +82,39 @@ test('full is the manual default and profiles are explicit', () => {
   assert.equal(parseProfile(['--profile', 'fast']), 'fast');
   assert.equal(parseProfile(['--profile', 'browser']), 'browser');
 });
+
+// #774 SC7. The direct-metric regex needs the bracket to hold nothing but a
+// number, so a nested expression could pick a literal undisturbed — which is
+// how `rounded-[min(var(--radius-md),10px)]` shipped in four primitives. These
+// fixtures pin both halves: the nested literal fails, and a token-backed
+// dynamic expression stays legal, so the rule cannot be satisfied by banning
+// arbitrary values outright.
+test('shadcn boundary rejects a design literal nested in an arbitrary value', () => {
+  const rules = (source) =>
+    scanPrimitiveSource(source, 'web/src/components/ui/probe.tsx').map((v) => v.rule);
+
+  assert.deepEqual(
+    rules('export const c = "rounded-[min(var(--radius-md),10px)]";'),
+    ['no-ui-primitive-nested-design-literal'],
+  );
+  assert.deepEqual(
+    rules('export const c = "max-w-[calc(100%-2rem)]";'),
+    [],
+    'calc() is arithmetic against a resolved dimension, not a design choice',
+  );
+  assert.deepEqual(
+    rules('export const c = "rounded-[min(var(--radius-md),var(--radius-lg))]";'),
+    [],
+    'a token-backed dynamic expression is the point of an arbitrary value',
+  );
+  assert.deepEqual(
+    rules('export const c = "gap-[--spacing(var(--gap))]";'),
+    [],
+  );
+
+  // The two rules partition the space — `h-[34px]` is not reported twice.
+  assert.deepEqual(
+    rules('export const c = "h-[34px]";'),
+    ['no-ui-primitive-arbitrary-metric'],
+  );
+});
