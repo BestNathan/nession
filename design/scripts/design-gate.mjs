@@ -76,6 +76,21 @@ const BROWSER_COMMANDS = [
     expected: 'canonical browser surfaces satisfy resolved UI contracts across the viewport matrix',
     repair: 'fix the drifting implementation or the canonical contract owner; do not update baselines to hide a structured failure',
   },
+  {
+    // The full profile's `codemirror-renderer-boundary` proves the token reached
+    // CodeMirror's injected stylesheet. That is not the same claim as the token
+    // reaching the *rendered result*: a stylesheet can name a custom property
+    // that resolves to nothing, or match no element, or lose to a later rule,
+    // and the injected CSS still reads as correct. #757 was exactly that — the
+    // source looked right and the cascade decided otherwise. This entry
+    // measures computed styles on the running editor, which is the claim SC9
+    // actually makes.
+    id: 'codemirror-rendered-metrics',
+    command: 'cd e2e && npx playwright test specs/design-renderer-boundary.spec.ts',
+    owner: 'web/src/features/files/model/editorTheme.ts',
+    expected: "CodeMirror's rendered metrics match the workspace editor tokens rather than its own defaults",
+    repair: "the token did not reach the rendered result — move the decision into EditorView.theme; a utility class loses to CodeMirror's injected theme",
+  },
 ];
 
 export function formatViolation({ file, pattern, rule, actual, expected, owner, repair, note }) {
