@@ -97,7 +97,10 @@ fi
 #
 # `just web-lint` depends on the design gate and adds the web type-check, so a
 # web change gets both; a design-only change gets the gate.
-STAGED_DESIGN=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(design/|web/eslint-plugin-nession/)' || true)
+# `scripts/design-check.sh` is in the pattern on purpose: a change to the gate's
+# own implementation has to be run by the gate, or the one file that decides
+# what is checked is the one file nothing checks.
+STAGED_DESIGN=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(design/|web/eslint-plugin-nession/|scripts/design-check\.sh$)' || true)
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-lint${NC}  ${YELLOW}(design gate + tsc)${NC}"
   if just web-lint; then
