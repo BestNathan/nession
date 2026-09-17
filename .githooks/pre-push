@@ -39,6 +39,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
       echo -e "${YELLOW}→ new branch: no usable diff base, running full gate${NC}"
       HAS_RUST=1
       HAS_WEB=1
+      HAS_DESIGN=1
       continue
     fi
   fi
@@ -55,8 +56,9 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
     HAS_WEB=1
   fi
 
-  # Design tokens/contracts: JSON sources + generators under design/
-  if echo "$changed" | grep -qE '^design/'; then
+  # Design-system owners and enforcement infrastructure. The rule list itself
+  # lives only in design/scripts/design-gate.mjs; this is only change routing.
+  if echo "$changed" | grep -qE '^(design/|docs/design/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)'; then
     HAS_DESIGN=1
   fi
 done
@@ -96,7 +98,20 @@ if [ $HAS_RUST -eq 1 ]; then
   fi
 fi
 
-# ── Web ──────────────────────────────────────────────────────────────────────
+# ── Canonical design-system gate ────────────────────────────────────────────
+if [ $HAS_WEB -eq 1 ] || [ $HAS_DESIGN -eq 1 ]; then
+  echo ""
+  echo -e "${YELLOW}→ just design-check full${NC}"
+  if just design-check full; then
+    echo -e "${GREEN}✓ just design-check full${NC}"
+  else
+    echo -e "${RED}✗ just design-check full${NC}"
+    HAS_ERROR=1
+    FAILED_CHECKS+=("design-check full (canonical design-system gate)")
+  fi
+fi
+
+# ── Web behavior / coverage ─────────────────────────────────────────────────
 if [ $HAS_WEB -eq 1 ]; then
   echo ""
 
@@ -121,20 +136,6 @@ if [ $HAS_WEB -eq 1 ]; then
   fi
 fi
 
-# ── Design tokens/contracts ─────────────────────────────────────────────────
-if [ $HAS_DESIGN -eq 1 ]; then
-  echo ""
-
-  echo -e "${YELLOW}→ just design-test${NC}"
-  if just design-test; then
-    echo -e "${GREEN}✓ just design-test${NC}"
-  else
-    echo -e "${RED}✗ just design-test${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("design-test (node --test)")
-  fi
-fi
-
 echo ""
 
 if [ $HAS_ERROR -eq 1 ]; then
@@ -150,7 +151,7 @@ if [ $HAS_ERROR -eq 1 ]; then
   echo -e "    Rust tests fail  → cargo test -p <crate> -- <test_name> --nocapture"
   echo -e "    Coverage too low → cargo llvm-cov -p <crate> --html  (see uncovered lines)"
   echo -e "    Web tests fail   → cd web && npx vitest run -t '<test-name>'"
-  echo -e "    Design tests fail → node --test design/scripts/*.test.mjs"
+  echo -e "    Design gate fails → just design-check full  (follow owner/repair diagnostics)"
   echo -e "    Missing deps     → cd web && npm install"
   echo -e "    Missing tools    → cargo install cargo-llvm-cov; rustup component add llvm-tools-preview"
   echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

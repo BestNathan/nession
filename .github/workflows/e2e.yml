@@ -31,6 +31,7 @@ jobs:
       # ── Rust toolchain ────────────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: extractions/setup-just@v2
 
       # ── Node ──────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
@@ -63,6 +64,14 @@ jobs:
       # three `cargo run` invocations don't each pay the compile cost.
       # (cargo's flock still serialises them; this is just the first hit.)
       - run: cargo build -p nession-server -p nession-agent
+
+      # #759: browser contract enforcement uses the same canonical gate as
+      # manual work and hooks. The browser profile owns the contract/matrix
+      # subset; this workflow does not duplicate that list.
+      - name: Run canonical browser design gate
+        env:
+          CI: true
+        run: just design-check browser
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
