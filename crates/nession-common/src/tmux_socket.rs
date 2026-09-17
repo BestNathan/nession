@@ -75,17 +75,32 @@ fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
-/// Resolve the socket path from an optional configured value, the environment,
-/// then the default. See the module docs for the ordering rationale.
+/// Resolve the socket path, reading the process environment for the override.
+///
+/// This is the only place `$NESSION_TMUX_SOCKET` is read. The decision itself
+/// lives in [`resolve_socket_path_with_env`], a pure function of its arguments,
+/// so callers that want a specific environment state can say so instead of
+/// mutating the process — which is what tests need and what #796 was about.
 pub fn resolve_socket_path(configured: Option<&str>) -> PathBuf {
+    resolve_socket_path_with_env(
+        configured,
+        std::env::var(NESSION_TMUX_SOCKET_ENV).ok().as_deref(),
+    )
+}
+
+/// Resolve the socket path from explicit inputs: the configured value, then the
+/// environment override, then [`default_socket_path`]. See the module docs for
+/// the ordering rationale.
+///
+/// Pure — same arguments, same result, no process state. `None` means the
+/// variable is unset; `Some("")` and `Some("   ")` mean it is set but blank,
+/// which is treated as unset rather than as a socket named `""` in the CWD.
+pub fn resolve_socket_path_with_env(configured: Option<&str>, env: Option<&str>) -> PathBuf {
     if let Some(path) = configured.map(str::trim).filter(|p| !p.is_empty()) {
         return PathBuf::from(path);
     }
-    if let Ok(path) = std::env::var(NESSION_TMUX_SOCKET_ENV) {
-        let path = path.trim();
-        if !path.is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Some(path) = env.map(str::trim).filter(|p| !p.is_empty()) {
+        return PathBuf::from(path);
     }
     default_socket_path()
 }
@@ -155,19 +170,21 @@ fn restrict_dir_permissions(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    /// Serialise access to `NESSION_TMUX_SOCKET`. `set_var` / `remove_var` are
-    /// process-global and Rust runs tests in parallel, so without this one
-    /// test's mutation lands in the middle of another's read.
-    ///
-    /// **Reads take it too**, not just the mutations. A test whose reads are
-    /// only consistent while nobody is mid-mutation — two `resolve_socket_path`
-    /// calls inside one `assert_eq!`, say — is racing even though it writes
-    /// nothing; that is exactly how #796 failed. Tests that pass a non-blank
-    /// `Some(..)` are the exception: config short-circuits before the env is
-    /// consulted, so they read nothing shared and need no lock.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+    // There is deliberately no `ENV_MUTEX` here any more.
+    //
+    // It existed to serialise tests that read `NESSION_TMUX_SOCKET` against the
+    // tests that set it, and it only ever half-worked: it can only order the
+    // tests that choose to take it, while the exposure is the whole binary. It
+    // failed twice — #779 for `TMPDIR`, #796 for the socket variable, where a
+    // reader that skipped the lock had a mutation land between two reads inside
+    // one assertion.
+    //
+    // Resolution is now `resolve_socket_path_with_env(configured, env)`, a pure
+    // function, so every behavioural test states the environment it means rather
+    // than arranging the process to be in that state. Exactly one test below
+    // touches the ambient variable, to prove the wrapper reads it; one mutator
+    // and no ambient readers is not a race, and there is nothing left to lock.
 
     /// Saved value of `NESSION_TMUX_SOCKET`, put back when the test is done.
     ///
@@ -202,19 +219,21 @@ mod tests {
 
     #[test]
     fn default_socket_path_ignores_tmpdir() {
-        let _guard = ENV_MUTEX
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // This is the one test that still mutates process state, and it has to:
+        // the property under test is "the default does not follow $TMPDIR", and
+        // the only way to assert that is to set $TMPDIR. The alternative —
+        // reading the source — is not a test.
+        //
         // A directory that exists, not one this test merely names.
         //
         // `tempfile::tempdir()` honours `$TMPDIR`, and every test in this binary
         // shares one process. Pointing TMPDIR at a path that does not exist
         // therefore breaks any *other* test that calls `tempdir()` while this
         // window is open — with `NotFound`, in a test that has nothing to do
-        // with tmux. `ENV_MUTEX` does not prevent that: it serialises the tests
-        // that choose to take it, while the exposure is the whole binary (#779).
-        //
-        // Created before the override so it lands under the real TMPDIR.
+        // with tmux. No lock can prevent that: `tempfile` does not take one, and
+        // the exposure is the whole binary (#779). Pointing at a directory that
+        // *does* exist is what makes the window harmless; created before the
+        // override so it lands under the real TMPDIR.
         let elsewhere = tempfile::tempdir().expect("scratch dir for the TMPDIR window");
         let original = std::env::var("TMPDIR").ok();
         std::env::set_var("TMPDIR", elsewhere.path());
@@ -245,75 +264,93 @@ mod tests {
 
     #[test]
     fn configured_path_wins_over_env_and_default() {
-        // No env manipulation: a configured value must short-circuit before the
-        // env var is even consulted, which is exactly what this asserts.
-        let resolved = resolve_socket_path(Some("/tmp/nession-configured/tmux.sock"));
-        assert_eq!(resolved, PathBuf::from("/tmp/nession-configured/tmux.sock"));
+        // A configured value must short-circuit before the env is even
+        // consulted. Stated as arguments, so the assertion is about the
+        // ordering and not about what the test runner happened to export.
+        assert_eq!(
+            resolve_socket_path_with_env(
+                Some("/tmp/nession-configured/tmux.sock"),
+                Some("/tmp/nession-from-env/tmux.sock")
+            ),
+            PathBuf::from("/tmp/nession-configured/tmux.sock")
+        );
     }
 
     #[test]
     fn blank_configured_path_matches_an_absent_one() {
-        // Reads the env through `resolve_socket_path(None)`, so it takes the
-        // lock for the same reason the mutators do — and unlike them it has two
-        // reads inside one assertion, so a mutation landing between them makes
-        // them disagree. `default_is_used_when_neither_config_nor_env_is_set`
-        // removing the variable there is exactly that interleaving (#796).
-        let _guard = ENV_MUTEX
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // A key present but empty in TOML must behave as "not set" — never as a
-        // socket named "" in the process CWD. Compared against `None` rather
-        // than against the default, because the test runner exports
-        // NESSION_TMUX_SOCKET and `None` legitimately resolves to that.
-        assert_eq!(resolve_socket_path(Some("   ")), resolve_socket_path(None));
-        assert_eq!(resolve_socket_path(Some("")), resolve_socket_path(None));
+        // socket named "" in the process CWD.
+        for blank in ["", "   "] {
+            assert_eq!(
+                resolve_socket_path_with_env(Some(blank), Some("/tmp/nession-from-env/tmux.sock")),
+                resolve_socket_path_with_env(None, Some("/tmp/nession-from-env/tmux.sock")),
+                "configured {blank:?} must resolve exactly as an absent one",
+            );
+        }
     }
 
     #[test]
     fn env_var_is_used_when_config_is_absent() {
-        let _guard = ENV_MUTEX
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let restore = EnvRestore::capture();
-        std::env::set_var(NESSION_TMUX_SOCKET_ENV, "/tmp/nession-from-env/tmux.sock");
         assert_eq!(
-            resolve_socket_path(None),
+            resolve_socket_path_with_env(None, Some("/tmp/nession-from-env/tmux.sock")),
             PathBuf::from("/tmp/nession-from-env/tmux.sock")
         );
-        // Config still outranks it.
-        assert_eq!(
-            resolve_socket_path(Some("/tmp/nession-from-config/tmux.sock")),
-            PathBuf::from("/tmp/nession-from-config/tmux.sock")
-        );
-        restore.apply();
     }
 
     #[test]
     fn default_is_used_when_neither_config_nor_env_is_set() {
-        let _guard = ENV_MUTEX
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let restore = EnvRestore::capture();
-        std::env::remove_var(NESSION_TMUX_SOCKET_ENV);
-        assert_eq!(resolve_socket_path(None), default_socket_path());
-        restore.apply();
+        assert_eq!(
+            resolve_socket_path_with_env(None, None),
+            default_socket_path()
+        );
     }
 
     #[test]
     fn blank_env_var_falls_through_to_the_default() {
-        let _guard = ENV_MUTEX
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let restore = EnvRestore::capture();
-        std::env::set_var(NESSION_TMUX_SOCKET_ENV, "  ");
-        assert_eq!(resolve_socket_path(None), default_socket_path());
-        restore.apply();
+        for blank in ["", "   "] {
+            assert_eq!(
+                resolve_socket_path_with_env(None, Some(blank)),
+                default_socket_path(),
+                "a blank environment value {blank:?} must resolve as unset",
+            );
+        }
     }
 
     #[test]
     fn resolve_trims_the_configured_path() {
-        let resolved = resolve_socket_path(Some("  /tmp/nession-trim/tmux.sock  "));
-        assert_eq!(resolved, PathBuf::from("/tmp/nession-trim/tmux.sock"));
+        assert_eq!(
+            resolve_socket_path_with_env(Some("  /tmp/nession-trim/tmux.sock  "), None),
+            PathBuf::from("/tmp/nession-trim/tmux.sock")
+        );
+    }
+
+    #[test]
+    fn resolve_trims_the_env_path() {
+        assert_eq!(
+            resolve_socket_path_with_env(None, Some("  /tmp/nession-env-trim/tmux.sock  ")),
+            PathBuf::from("/tmp/nession-env-trim/tmux.sock")
+        );
+    }
+
+    #[test]
+    fn the_wrapper_reads_the_ambient_environment() {
+        // The only test in this binary that touches `NESSION_TMUX_SOCKET`. It
+        // exists because the tests above cover `resolve_socket_path_with_env`,
+        // which proves nothing about whether the *wrapper* passes the real
+        // environment through — and if it did not, every one of them would
+        // still pass while production resolved to the wrong socket.
+        let restore = EnvRestore::capture();
+        std::env::set_var(NESSION_TMUX_SOCKET_ENV, "/tmp/nession-wrapper/tmux.sock");
+        assert_eq!(
+            resolve_socket_path(None),
+            PathBuf::from("/tmp/nession-wrapper/tmux.sock")
+        );
+        // Config still outranks it through the wrapper.
+        assert_eq!(
+            resolve_socket_path(Some("/tmp/nession-configured/tmux.sock")),
+            PathBuf::from("/tmp/nession-configured/tmux.sock")
+        );
+        restore.apply();
     }
 
     #[test]
