@@ -42,6 +42,30 @@ That ordering matters. A plugin registering a view must not automatically create
 - Extension-specific components may exist inside an extension, but shared/global chrome still follows Nession patterns and visual language.
 - A primitive should not encode product policy such as `always show this tab`, `Agent is navigation parent`, or `one extension = one button`.
 
+### Which upstream geometry gets an owner
+
+shadcn primitives arrive with their own geometry. Replacing all of it is
+tokenising for its own sake; replacing none of it means every `shadcn add`
+re-imports a second design system. The line:
+
+| Gets a Nession owner | Stays upstream |
+|---|---|
+| the control's **height**, from the Experience control band (`Button.size.sm` → `--control-sm`) | padding and gap steps (`px-2.5`, `gap-1.5`) — accepted Tailwind scale |
+| the control's **corner radius**, from the radius token | icon sizes *inside* a control (`size-3.5` next to a 28px button) |
+| | steps with no band (`h-6` — 24px sits below `--control-sm`) |
+
+Driving height from the band is not cosmetic. The band is remapped per
+experience (`--control-md` is 32px on Web and 44px on App), so a primitive whose
+height comes from it inherits the App touch floor for free — which is what
+`experience/app.json` says the floor is for: *"no control size may sit below
+it"*. A hardcoded `h-8` bypasses that and renders a 32px control on a phone.
+
+A literal **inside** an arbitrary value counts as geometry too:
+`rounded-[min(var(--radius-md),10px)]` chooses a 10px cap and, before #774,
+nothing objected — the scanner only saw brackets holding nothing but a number.
+`calc()` is exempt: `h-[calc(100%-1px)]` is arithmetic against an
+already-resolved dimension, not a design choice.
+
 ## Product identity
 
 Do not fork Button, Input, Tabs, Sheet, or Menu into Nession-branded variants merely to create identity.
