@@ -162,3 +162,5 @@ echo -e "  ${DIM}Do not clear a failure by disabling a rule, widening a contract
 echo -e "  ${DIM}lowering a visual threshold. Fix the owner, or get the design changed.${NC}"
 echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 exit 1
+
+# Reference: the gate itself is covered by the pre-commit trigger (7b0217a0).
