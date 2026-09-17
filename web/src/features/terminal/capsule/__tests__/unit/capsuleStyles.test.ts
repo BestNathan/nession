@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   capsuleCommandsDismissLayerClass,
-  capsuleCommandsOverlayPanelClass,
+  capsuleCommandsAppOverlayPanelClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
@@ -39,8 +39,8 @@ describe('capsuleStyles', () => {
   });
 
   it('overlay panel is absolutely positioned over the terminal host', () => {
-    expect(capsuleCommandsOverlayPanelClass).toContain('absolute');
-    expect(capsuleCommandsOverlayPanelClass).toContain('z-[15]');
+    expect(capsuleCommandsAppOverlayPanelClass).toContain('absolute');
+    expect(capsuleCommandsAppOverlayPanelClass).toContain('z-[15]');
   });
 
   it('dismiss layer sits below capsule dock z-index', () => {

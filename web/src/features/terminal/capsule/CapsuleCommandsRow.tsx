@@ -7,8 +7,8 @@ import {
   capsuleCommandsMoreClass,
   capsuleCommandsRowClass,
   capsuleCommandsScrollClass,
-  capsuleQuickKeyButtonClass,
-  capsuleQuickKeyRowClass,
+  capsuleQuickKeyAppButtonClass,
+  capsuleQuickKeyAppRowClass,
 } from '@/features/terminal/capsule/capsuleStyles';
 import { cn } from '@/lib/utils';
 
@@ -40,7 +40,7 @@ export function CapsuleCommandsRow({
       ) : null}
       <div className={cn(capsuleCommandsRowClass, commandsOpen && 'justify-end')}>
         {!commandsOpen ? (
-          <div className={cn(capsuleCommandsScrollClass, capsuleQuickKeyRowClass)}>
+          <div className={cn(capsuleCommandsScrollClass, capsuleQuickKeyAppRowClass)}>
             {QUICK_MOBILE_KEYS.map((keyDef) => (
               <Button
                 key={keyDef.label}
@@ -49,7 +49,7 @@ export function CapsuleCommandsRow({
                 size="sm"
                 disabled={disabled}
                 data-testid={`capsule-quick-key-${keyDef.label}`}
-                className={capsuleQuickKeyButtonClass}
+                className={capsuleQuickKeyAppButtonClass}
                 onClick={() => handlePhysKey(keyDef.seq)}
                 onContextMenu={(event) => event.preventDefault()}
               >

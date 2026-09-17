@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { CapsuleCommandsDismissLayer } from '@/features/terminal/capsule/CapsuleCommandsDismissLayer';
 import { CapsuleCommandsPanel } from '@/features/terminal/capsule/CapsuleCommandsPanel';
 import { useCapsuleHostOverlayGeometry } from '@/features/terminal/capsule/hooks/useCapsuleHostOverlayGeometry';
-import { capsuleCommandsOverlayPanelClass } from '@/features/terminal/capsule/capsuleStyles';
+import { capsuleCommandsAppOverlayPanelClass } from '@/features/terminal/capsule/capsuleStyles';
 import { useCapsuleContext } from '@/features/terminal/capsule/state/useCapsuleContext';
 
 interface CapsuleCommandsHostOverlaysProps {
@@ -30,7 +30,7 @@ function CapsuleCommandsHostOverlays({ dockRef }: CapsuleCommandsHostOverlaysPro
       />
       <div
         data-testid="capsule-commands-overlay"
-        className={capsuleCommandsOverlayPanelClass}
+        className={capsuleCommandsAppOverlayPanelClass}
         style={{
           bottom: dockBottomPx,
           height: panelHeightPx,

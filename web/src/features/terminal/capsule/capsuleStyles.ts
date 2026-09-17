@@ -1,6 +1,25 @@
 /**
  * Capsule composer presentation classes — token vars only, no numeric Tailwind scale.
  * This file is the sole bridge from design tokens to Tailwind class strings in capsule/.
+ *
+ * ── Naming: the binding name states the experience ──────────────────────────
+ *
+ * A class that may only be applied under the App experience carries an `App`
+ * marker in its binding name; one that only applies on Web carries `Web` (or is
+ * the unmarked sibling of an App-marked pair):
+ *
+ *   capsuleShellWebOuterClass      → var(--composer-shell-margin-x)   (web-only)
+ *   capsuleShellAppOuterClass      → var(--composer-shell-inset)      (app-only)
+ *
+ * This is not decoration. The two experiences are asymmetric: `emitAppExperienceRemap`
+ * writes every app leaf into `[data-experience="app"]`, while web leaves go to
+ * `:root`. An app-only token therefore resolves to *nothing* outside the App
+ * experience — the declaration is dropped and the layout collapses silently —
+ * whereas a web-only token resolves in both. So an app-only token in a class
+ * that reaches Web is a real defect, and the marker is what lets
+ * `nession/no-cross-experience-token` decide that statically: whether an element
+ * renders on Web is a runtime property of the component tree, but the binding
+ * name is the author's own statement of it.
  */
 
 /** Shared by textarea + ghost overlay so glyphs stay locked. */
@@ -37,7 +56,7 @@ export const capsuleDialogContentClass = 'z-[110]';
 export const capsuleCommandsPanelClass =
   'flex h-full min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground';
 
-export const capsuleCommandsOverlayPanelClass =
+export const capsuleCommandsAppOverlayPanelClass =
   'pointer-events-auto absolute inset-x-[length:var(--composer-shell-inset)] z-[15] flex flex-col overflow-hidden rounded-t-xl border border-border/60 bg-popover text-popover-foreground shadow-lg';
 
 export const capsuleCommandsPanelKeysRegionClass =
@@ -124,7 +143,7 @@ export const capsuleHistoryItemClass =
 export const capsulePhysKeyButtonClass =
   'h-[length:var(--composer-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
-export const capsuleArrowKeyButtonClass =
+export const capsuleArrowKeyAppButtonClass =
   'h-[length:var(--composer-phys-key-height)] w-[var(--composer-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--composer-phys-key-font-size)]';
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--composer-phys-key-icon-size)]';
@@ -140,10 +159,10 @@ export const capsuleChainBarClass =
 export const capsuleMiniButtonClass =
   'h-[length:var(--composer-mini-control-height)] text-[length:var(--composer-caption-font-size)]';
 
-export const capsuleQuickKeyButtonClass =
+export const capsuleQuickKeyAppButtonClass =
   'shrink-0 rounded-[calc(var(--radius-capsule)/2)] px-[length:var(--composer-quick-key-pad-x)] font-mono text-[length:var(--composer-quick-key-font-size)] leading-none text-muted-foreground min-h-[length:var(--control-md)] min-w-[length:var(--control-sm)] hover:bg-accent/50 hover:text-foreground active:bg-accent/70 data-pressed:bg-accent/60';
 
-export const capsuleQuickKeyRowClass =
+export const capsuleQuickKeyAppRowClass =
   'gap-[length:var(--composer-quick-key-gap)]';
 
 export const capsuleModeToggleGroupClass =

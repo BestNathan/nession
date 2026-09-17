@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   capsulePhysKeyGridGapClass,
-  capsuleArrowKeyButtonClass,
+  capsuleArrowKeyAppButtonClass,
   capsulePhysKeyButtonClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyRowClass,
@@ -99,7 +99,7 @@ export function PhysKeyRow({
       <Button
         variant="ghost"
         size="sm"
-        className={isArrow ? capsuleArrowKeyButtonClass : capsulePhysKeyButtonClass}
+        className={isArrow ? capsuleArrowKeyAppButtonClass : capsulePhysKeyButtonClass}
         disabled={disabled}
         data-testid={`phys-key-${keyDef.label}`}
         onPointerDown={handlePointerDown}
