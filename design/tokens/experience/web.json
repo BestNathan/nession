@@ -62,6 +62,7 @@
       "value": "246px"
     },
     "sessionRowPadY": {
+      "$owner": "pattern.session-item",
       "$description": "Session row vertical padding. The mockup draws 7px, tighter than `shell.space-2` (8px) because the row's two lines already carry leading; horizontal padding is `shell.space-2`.",
       "value": "7px"
     },
@@ -78,10 +79,12 @@
       "value": "11.5px"
     },
     "sessionRowTitleFontSize": {
+      "$owner": "pattern.session-item",
       "$description": "Session name. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
       "value": "12.5px"
     },
     "sessionRowMetaFontSize": {
+      "$owner": "pattern.session-item",
       "$description": "Session metadata (agent / recency). Monospace and a full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules).",
       "value": "10px"
     },
@@ -123,6 +126,7 @@
     }
   },
   "composer": {
+    "$owner": "pattern.terminal-capsule",
     "fontSize": {
       "ref": "primitive.typography.size"
     },
@@ -275,6 +279,7 @@
     "value": "32px"
   },
   "workspace": {
+    "$owner": "pattern.file-workspace",
     "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px — a navigation column sized to its content, not a fraction of the pane — with the editor taking the rest.",
     "treeWidth": {
       "value": "208px"

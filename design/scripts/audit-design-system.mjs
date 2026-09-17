@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,20 +33,27 @@ function walkFiles(dir, predicate = () => true) {
   return out;
 }
 
-function flattenLeaves(node, prefix = [], inheritedDescription = null) {
+function flattenLeaves(node, prefix = [], inheritedDescription = null, inheritedOwner = null) {
   if (isLeaf(node)) {
     return [{
       path: prefix,
       node,
       description: node.$description ?? inheritedDescription ?? null,
+      owner: node.$owner ?? inheritedOwner ?? null,
     }];
   }
   if (!node || typeof node !== 'object') return [];
   const description = node.$description ?? inheritedDescription;
+  // `$owner` names the pattern or composition a value's *meaning* belongs to,
+  // when that is narrower than the experience layer itself. It inherits down
+  // the group exactly like `$description`, so it can be stated once on a group
+  // or on a single leaf, and an absent value means "generic platform vocabulary"
+  // rather than "unknown". See docs/design/design-system/tokens.md.
+  const owner = node.$owner ?? inheritedOwner;
   const leaves = [];
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('$')) continue;
-    leaves.push(...flattenLeaves(value, [...prefix, key], description));
+    leaves.push(...flattenLeaves(value, [...prefix, key], description, owner));
   }
   return leaves;
 }
@@ -171,10 +178,12 @@ function loadTokenRecords(root) {
         refs: [],
         downstream: [],
         productionConsumers: [],
+        owner: null,
       };
       const mode = logicalMode(layer, leaf.path);
       if (mode && !record.modes.includes(mode)) record.modes.push(mode);
       record.sourcePaths.push(`${relative(root, path)}#${leaf.path.join('.')}`);
+      if (leaf.owner) record.owner = leaf.owner;
       if (leaf.description && !record.descriptions.includes(leaf.description)) record.descriptions.push(leaf.description);
       if ('ref' in leaf.node) {
         for (const ref of normalizeRef(leaf.node.ref)) {
@@ -427,6 +436,7 @@ export function buildInventory(root = DEFAULT_ROOT) {
     scope: {
       productionSources: 'web/src (tests excluded)',
       note: 'Counts are lexical evidence. They identify ownership/coverage questions; they do not replace browser or contract validation.',
+      patternDocs: readPatternDocs(root),
     },
     tokens: auditTokens(root, sources),
     typography: auditTypography(root, sources),
@@ -434,6 +444,16 @@ export function buildInventory(root = DEFAULT_ROOT) {
     components: auditComponents(root, sources),
     validation: auditValidation(root),
   };
+}
+
+/** Pattern names a token `$owner` may name — read from the docs tree, not a literal list. */
+export function readPatternDocs(root) {
+  const dir = join(root, 'docs/design/design-system/patterns');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => `pattern.${name.slice(0, -3)}`)
+    .sort();
 }
 
 function summary(inventory) {
@@ -518,8 +538,33 @@ export function checkInventory(inventory) {
       errors.push(`zero-consumer token has no classification: ${record.id}`);
     }
   }
+  for (const problem of checkOwnership(inventory)) errors.push(problem);
   if (inventory.components.length === 0) errors.push('components/ui inventory is empty');
   return errors;
+}
+
+/**
+ * Every `$owner` in a token source must name a pattern that actually exists.
+ *
+ * The annotation is the whole mechanism by which a pattern-specific metric
+ * explains itself, so an owner that resolves to nothing is worse than no owner:
+ * it reads as a decision while being a typo. `$owner` is checked against the
+ * pattern docs rather than a hand-kept list of legal names, so adding a pattern
+ * doc is what makes a new owner legal.
+ */
+export function checkOwnership(inventory) {
+  const problems = [];
+  const known = new Set(inventory.scope?.patternDocs ?? []);
+  for (const record of inventory.tokens.records) {
+    if (!record.owner) continue;
+    if (!known.has(record.owner)) {
+      problems.push(
+        `unknown token owner: ${record.id} declares $owner "${record.owner}", ` +
+          `which is not a docs/design/design-system/patterns/*.md name`,
+      );
+    }
+  }
+  return problems;
 }
 
 function parseArgs(argv) {
