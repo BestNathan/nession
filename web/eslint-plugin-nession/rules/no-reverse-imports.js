@@ -70,7 +70,14 @@ const ALLOWED_IMPORTS = {
   // composes it) and above the infrastructure. `core` is listed because it is
   // the pre-Phase-5 name for `platform` — when that rename lands this becomes
   // `['platform', 'shared']` and nothing else about the layer changes.
-  'product': ['core', 'shared', MIGRATION_FROM],
+  // `extensions` is in this list because the registry *is* the contribution
+  // contract, not a peer to reach into: a Product Pattern rendering a slot
+  // (`AgentDetail` renders `agent-detail`) is PRINCIPLE #5 working as designed —
+  // Nession owns the structure, the contribution fills a hole in it. Reaching
+  // into a capability's internals is the inversion; asking the registry for a
+  // slot is not. Phase 4 has to keep that distinction when `extensions/` is
+  // absorbed into `capabilities/*/contribution.ts`.
+  'product': ['extensions', 'core', 'shared', MIGRATION_FROM],
   // `extensions/` is a rung of its own, not a feature. The mutual allowance
   // with `features` is deliberate and documented in docs/architecture/web.md:
   // the registry is consumed by app and feature code, and an extension composes

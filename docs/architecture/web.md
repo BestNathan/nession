@@ -24,7 +24,7 @@ the design system, the source layout and the lint gate all use one language.
 
 ```text
 app  ──────────────▶ product | capabilities | platform | shared | components/ui
-product  ──────────▶ platform | shared | components/ui
+product  ──────────▶ extensions | platform | shared | components/ui
 capabilities  ─────▶ product | platform | shared | components/ui
 platform  ──────────▶ shared | components/ui
 shared  ───────────▶ components/ui
@@ -57,7 +57,9 @@ the honest answer to "where does this go today" until the row moves.
 | `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
 | `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
-| `features/{terminal,agents,server}` | `product/<concept>/` | 3–4 |
+| `product/agent/` — the Agent concept | **done** | 3 |
+| `features/terminal` | `product/terminal/` | 3 |
+| `features/server` | **undecided** — see below | 3 |
 | `features/capabilities` | `product/capability/` | 4 |
 | `features/{files,env,commands,claude-code}` | `capabilities/<name>/` | 4 |
 | `features/explorer` | undecided — a reusable framework, not a capability | 5 |
@@ -120,6 +122,19 @@ Two other rules decide the ambiguous cases, both from #801's principles:
   `discovery` / `presence` / `registry` / `model` / `facts`) is **absent from
   both module maps** — this one and `web/CLAUDE.md`. It is not a feature; it is
   the generic capability model, and it belongs to `product/capability/`.
+- **`features/server` has no obvious owner.** The Product Model's concepts are
+  Workspace, Workspace Location, Session, Terminal, Agent — Server is not among
+  them, and its tree groups Server under "infrastructure / context" rather than
+  under product or capability. It is three files (`ServerPlugin`,
+  `ServerInfoMenu`, `index`), imported only by `app/`, so it moves whenever the
+  answer arrives; picking one now would be guessing at the product model.
+- **`product → extensions` is a real edge, not a leak.** Moving `AgentDetail`
+  into `product/agent/` surfaced it: the pattern renders the `agent-detail`
+  slot through the registry. That is PRINCIPLE #5 working — Nession owns the
+  structure, the contribution fills a hole in it — so the registry is treated as
+  a contract the product layer may call, distinct from reaching into a
+  capability's internals. Phase 4 inherits the distinction when `extensions/`
+  becomes `capabilities/*/contribution.ts`.
 
 ### `extensions/` today
 
