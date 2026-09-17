@@ -10,6 +10,7 @@ import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/runtime/relayServerConnection';
 import { attachDialogIntentAtom, sessionIdAtom } from '@/atoms/session';
 import { persistConfirmedChoice } from '@/services/sessionAttachProfile';
+import { terminalServerApi } from '@/features/terminal';
 import { mapDomainState } from '@/features/sessions/model/domainState';
 import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -28,7 +29,7 @@ export function useSessionFirstShellState() {
   const clientSessionId = useAtomValue(sessionIdAtom);
   const wsService = useWebSocket();
   // The runtime takes a narrow relay handle, never the transport itself.
-  const serverConnection = useMemo(() => relayServerHandle(wsService), [wsService]);
+  const serverConnection = useMemo(() => relayServerHandle(wsService, terminalServerApi), [wsService]);
   const { fileOps } = useSessionRuntime({ serverConnection });
   const {
     attachDialogSession,

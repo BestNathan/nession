@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { testAddresses } from '@/services/addressSelection';
+import { testAddresses } from '@/lib/addressSelection';
 import {
   resolveDeepLinkAttachChoice,
   resolveProfileAttach,
@@ -20,7 +20,7 @@ vi.mock('@/core/terminal-runtime/Renderer', () => ({
   detectWebGLSupport: () => true,
 }));
 
-vi.mock('@/services/addressSelection', () => ({
+vi.mock('@/lib/addressSelection', () => ({
   testAddresses: vi.fn().mockResolvedValue([
     { url: 'ws://fast/ws', latencyMs: 10 },
     { url: 'ws://slow/ws', latencyMs: 100 },

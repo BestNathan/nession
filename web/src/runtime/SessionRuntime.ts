@@ -6,8 +6,12 @@ import type { ConnectionState } from '@/services/socket/types';
 import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/runtime/AttachStateMachine';
 import { SessionAttachController } from '@/runtime/SessionAttachController';
-import { createFilesApi, type FilesPlugin } from '@/features/files';
-import { createTerminalAgentApi, type TerminalAgentApi } from '@/features/terminal';
+// Types only. The capability *factories* are injected through
+// SessionRuntimeConfig instead of imported, because `runtime/` is `core` and a
+// feature may not be imported from below it — while the runtime is genuinely
+// below the terminal feature, which consumes it (#783).
+import type { FilesPlugin } from '@/features/files';
+import type { TerminalAgentApi } from '@/features/terminal';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -23,6 +27,16 @@ export interface SessionRuntimeConfig {
   transportReady?: boolean;
   /** Relay-mode server connection — runtime re-begins relay after server reconnect. */
   serverConnection?: RelayServerHandle | null;
+  /**
+   * Capability factories the runtime needs for a P2P attach.
+   *
+   * Injected rather than imported: `runtime/` is `core` and may not import a
+   * feature, but the terminal feature needs the runtime, so the dependency has
+   * to point one way. The caller — `features/terminal`, which owns both — hands
+   * them over. See #783.
+   */
+  createFilesApi: () => FilesPlugin;
+  createTerminalAgentApi: (ws: WebSocketService) => TerminalAgentApi;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -601,13 +615,13 @@ export class SessionRuntime {
     this.agentTerminalApi = null;
     this.filesApi = null;
 
-    const files = createFilesApi();
+    const files = this.config.createFilesApi();
     const ws = new WebSocketService(builtUrl, [files], {
       maxReconnectAttempts: this.addressPolicy.maxReconnectAttempts(),
     });
     this.agentWs = ws;
     this.filesApi = files;
-    this.agentTerminalApi = createTerminalAgentApi(ws);
+    this.agentTerminalApi = this.config.createTerminalAgentApi(ws);
     // Fire-and-forget like the legacy client: transport failures surface via
     // onConnectionStateChange (the router rejects in-flight requests). A
     // teardown/dispose while the socket is still opening rejects this pending

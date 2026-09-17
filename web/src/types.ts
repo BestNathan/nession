@@ -149,3 +149,19 @@ export interface ServerInfo {
   /** ISO 8601 timestamp when the binary was built. */
   build_time?: string;
 }
+
+/**
+ * Attach lifecycle status of the local terminal connection.
+ *
+ * Lives here rather than beside the runtime that acts on it, because the Jotai
+ * atoms read it too and `atoms/` is the `shared` layer — which may not import
+ * `core`. `src/types.ts` is the documented home for core types, and it sits
+ * outside the layer directories, so both sides can name it (#783).
+ */
+export type TerminalStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'attached'
+  | 'reconnecting'
+  | 'failed';

@@ -5,10 +5,10 @@ import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pSt
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/features/terminal/state';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
+import { createFilesApi, type FileOps } from '@/features/files';
+import { createTerminalAgentApi, type TerminalAgentApi } from '@/features/terminal';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
 import type { ConnectionState } from '@/services/socket/types';
-import type { TerminalAgentApi } from '@/features/terminal';
-import type { FileOps } from '@/features/files';
 import type { RelayServerHandle } from '@/runtime/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
@@ -334,6 +334,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // server WS handle in hand when a fallback happens with the Terminal
       // config-owner subtree unmounted.
       serverConnection: attachInfo ? options.serverConnection ?? null : null,
+      // Handed to the runtime rather than imported by it — the terminal feature
+      // sits above `core/`, so the dependency has to point this way (#783).
+      createFilesApi,
+      createTerminalAgentApi,
     };
   }, [
     sessionId,
