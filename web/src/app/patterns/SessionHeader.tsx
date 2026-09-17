@@ -7,7 +7,7 @@ import type { DomainState } from '@/features/sessions/model/domainState';
 import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
 
 // Re-exported for the six modules that import the surface type from here.
-import type { Surface } from '@/app/patterns/SurfaceSwitcher';
+import type { Surface } from '@/product/workspace/patterns/SurfaceSwitcher';
 export type { Surface };
 
 /**

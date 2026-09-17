@@ -4,25 +4,130 @@ Final module map and rules after the layering migration (#649 / #655).
 Product design truth lives in [`docs/design/`](../design/README.md); this
 document describes how the code is organised and where new code goes.
 
-## Layer model
+## Architecture vocabulary
 
-Dependency direction: **app → features → core → shared**. Same-layer imports
-are allowed; reverse imports are a lint error (`nession/no-reverse-imports`,
+The model answers **what a module means in Nession**, not how it is built
+(#801). It is the design system's own vocabulary — Product Model, Pattern,
+Experience, Capability — expressed as directories, so that product semantics,
+the design system, the source layout and the lint gate all use one language.
+
+| Layer | Answers | Owns | Physical home |
+|---|---|---|---|
+| **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
+| **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
+| **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`api/ model/ components/ contribution.ts`) | `capabilities/<name>/` |
+| **platform** | How does transport / runtime / attach work? | React-free terminal runtime, session-runtime ownership, socket, attach, persistence | `platform/<domain>/` |
+| **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
+| **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
+
+### Dependency direction
+
+```text
+app  ──────────────▶ product | capabilities | platform | shared | components/ui
+product  ──────────▶ platform | shared | components/ui
+capabilities  ─────▶ product | platform | shared | components/ui
+platform  ──────────▶ shared | components/ui
+shared  ───────────▶ components/ui
+components/ui  ────▶ —
+```
+
+Same-layer imports are allowed; anything against the arrows above is a reverse
+import and a lint error (`nession/no-reverse-imports`,
 `web/eslint-plugin-nession/rules/no-reverse-imports.js`).
 
-| Layer | Physical home (`web/src/`) | Owns | May import |
-|---|---|---|---|
-| **app** | `app/` | composition root: the single session-first shell (`SessionFirstShell`), sidebar/workspace chrome, `app-spatial/`, `workspace/capabilities.ts` + `workspace/views/`, fixture screens, app-composition hooks (`useAppConnection`, `useDashboard`, `useProbePolling`, deep-link restore), `LoginPage` | features, core, shared |
-| **features** | `features/<feature>/` | domain capability plugins + feature UI/hooks/model (`terminal`, `explorer`, `files`, `sessions`, `agents`, `env`, `commands`, `server`, `claude-code`) | core, shared |
-| **core** | `core/`, `runtime/`, `services/` | React-free terminal runtime, session-runtime ownership, WebSocket client | shared |
-| **shared** | `shared/`, `components/ui/`, `lib/`, `atoms/`, `markdown/` | generic hooks (`shared/hooks/`), shadcn primitives, pure helpers, shared atoms, the markdown preview pipeline | — |
+Two constraints that are *not* expressible as a direction and stay prose:
+PRINCIPLE #5 — a capability may contribute views and state but must not define
+global structure, so `capabilities/*` reaches the shell only through a
+contribution contract (`app/workspace/capabilities.ts` +
+`viewBindings.ts`), never by importing `app/` internals. And `platform` is
+React-free where it already is (`core/terminal-runtime`); that property is not
+something the layer rule can enforce.
 
-`extensions/` (extension registry + `claude-code` UI contributions) sits
-outside the layer ladder: it is imported by app and feature code through the
-registry contract and composes the feature it extends. The rule models it as a
-rung of its own (`extensions`) rather than folding it into `features`, so that
-`extensions → features` is allowed while `core → extensions` stays forbidden.
-The mutual `features ↔ extensions` allowance is deliberate.
+### Current layout → target owner
+
+The vocabulary above is the target. This table is the migration state, and it is
+the honest answer to "where does this go today" until the row moves.
+
+| Today | Target owner | Phase |
+|---|---|---|
+| `app/` shell, composition, chrome | `app/` | — (stays) |
+| `app/app-spatial/`, `app/workspace/` | `app/experiences/app/`, `app/` | 2 |
+| `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
+| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
+| `features/{sessions,terminal,agents,server}` | `product/<concept>/` | 3–4 |
+| `features/capabilities` | `product/capability/` | 4 |
+| `features/{files,env,commands,claude-code}` | `capabilities/<name>/` | 4 |
+| `features/explorer` | undecided — a reusable framework, not a capability | 5 |
+| `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
+| `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
+| `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
+| `lib/` — generic | `shared/lib/` | 5 |
+| `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
+| `markdown/` | `shared/` (already the rule's model) | 5 |
+| `components/ui/`, `shared/`, `test/` | unchanged | — |
+
+### How the migration is allowed to proceed
+
+An extraction is only possible while the module it needs has already moved, and
+`product → features` is forbidden. So a pattern cannot be lifted out of its
+feature on its own: the Session patterns need
+`features/sessions/model/domainState`, and moving them alone would leave each
+one importing the place it just left.
+
+There are exactly two ways out, and this is the decision:
+
+- **Move a concept whole** — `features/sessions` → `product/session` in one
+  change. Granular but honest; the rule never loosens.
+- **Allow it temporarily** — let `features` and the new layers import each other
+  until `features/` is empty.
+
+**Taking both, in that order.** Concepts move whole for as long as that is
+possible. It will stop being possible the first time a concept that has already
+moved is needed by one that has not — `features/agents` imports
+`features/sessions` today, so after `sessions` becomes `product/session`,
+`agents` is reaching up out of a layer that is supposed to be below it. At that
+point `features` gets a **transitional allowance in both directions**, declared
+in one place in the rule with the condition that removes it: *`features/` no
+longer exists*. Not a per-file exemption, not an ignore list — one statement
+about a directory that is being deleted.
+
+The allowance is deliberately **not** added now. Nothing needs it yet, and a
+permissive rule added in advance is indistinguishable from one added to make a
+failure go away.
+
+Two other rules decide the ambiguous cases, both from #801's principles:
+
+- **State follows ownership, not state-management technology.** "It is a Jotai
+  atom" is not an architectural boundary; a Session atom belongs to the Session
+  owner.
+- **A helper that can name its owner does not belong in generic `lib/`.** If the
+  answer to "which product / capability / platform owner is this?" is anything
+  other than "none", it goes there.
+
+### Naming collisions found while surveying (unresolved)
+
+- Two different components are both called `ConnectionStatus`.
+  `features/sessions/components/ConnectionStatus.tsx` is the canonical pattern —
+  it implements the three independent dimensions
+  (`patterns/connection-status.md`: Agent / Workspace Location connectivity,
+  Session lifecycle, this-client attachment).
+  `app/patterns/ConnectionStatus.tsx` is a single-dimension client badge used
+  only by `LoginPage`. The canonical owner is the former; the latter needs a
+  name that says what it is.
+- `features/capabilities/` (the product capability lifecycle:
+  `discovery` / `presence` / `registry` / `model` / `facts`) is **absent from
+  both module maps** — this one and `web/CLAUDE.md`. It is not a feature; it is
+  the generic capability model, and it belongs to `product/capability/`.
+
+### `extensions/` today
+
+`extensions/` (extension registry + `claude-code` UI contributions) sits outside
+the ladder: it is imported by app and feature code through the registry contract
+and composes the feature it extends. The rule models it as a rung of its own
+(`extensions`) rather than folding it into `features`, so that
+`extensions → features` is allowed while `platform → extensions` stays
+forbidden. The mutual `features ↔ extensions` allowance is deliberate. Phase 4
+absorbs it into `capabilities/*/contribution.ts`.
 
 `markdown/` is `shared`. Its consumers are `features/files` *and*
 `lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
