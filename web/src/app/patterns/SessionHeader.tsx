@@ -2,7 +2,7 @@ import { Menu, PanelRight } from 'lucide-react';
 import { ConnectionStatus as SessionConnectionStatus } from '@/product/session/components/ConnectionStatus';
 import { Button } from '@/components/ui/button';
 import { shellIconButtonClass } from '@/app/shellStyles';
-import type { CapsuleExperience } from '@/features/terminal/capsule/types';
+import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
 

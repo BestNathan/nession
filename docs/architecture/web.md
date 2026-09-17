@@ -58,7 +58,7 @@ the honest answer to "where does this go today" until the row moves.
 | `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
 | `product/agent/` — the Agent concept | **done** | 3 |
-| `features/terminal` | `product/terminal/` | 3 |
+| `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
 | `features/server` | **undecided** — see below | 3 |
 | `features/capabilities` | `product/capability/` | 4 |
 | `features/{files,env,commands,claude-code}` | `capabilities/<name>/` | 4 |

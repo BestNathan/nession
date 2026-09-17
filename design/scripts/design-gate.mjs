@@ -45,7 +45,7 @@ const FAST_COMMANDS = [
   {
     id: 'capsule-token-boundary',
     command: './scripts/check-design-tokens.sh',
-    owner: 'web/src/features/terminal/capsule/ + web/eslint-plugin-nession/',
+    owner: 'web/src/product/terminal/capsule/ + web/eslint-plugin-nession/',
     expected: 'capsule presentation stays on generated design vocabulary',
     repair: 'route the value through capsuleStyles and design/tokens rather than adding a local metric',
   },
@@ -248,7 +248,7 @@ function checkCapsuleSemanticBridge(root) {
     return violations;
   }
 
-  const bridgePath = join(root, 'web/src/features/terminal/capsule/capsuleStyles.ts');
+  const bridgePath = join(root, 'web/src/product/terminal/capsule/capsuleStyles.ts');
   const source = readFileSync(bridgePath, 'utf8');
   const bridge = extractExportedString(source, 'capsuleIconButtonClass');
   const actualMatch = bridge?.match(/var\(--control-([A-Za-z0-9_-]+)\)/);
@@ -260,7 +260,7 @@ function checkCapsuleSemanticBridge(root) {
     resolvedPx: 44,
   }).map((violation) => ({
     ...violation,
-    file: 'web/src/features/terminal/capsule/capsuleStyles.ts',
+    file: 'web/src/product/terminal/capsule/capsuleStyles.ts',
   })));
   return violations;
 }

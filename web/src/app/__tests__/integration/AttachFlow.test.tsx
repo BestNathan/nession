@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
 import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
 import { envApi } from '@/features/env';

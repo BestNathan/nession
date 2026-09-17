@@ -11,7 +11,7 @@ feature adds no parallel model.
 
 It does **not** own probe/connectivity state (`atoms/probe.ts` +
 `atoms/connection.ts`) — those describe attach routing latency, consumed by
-`features/terminal` and the P2P attach domain, and therefore stay shared.
+`product/terminal` and the P2P attach domain, and therefore stay shared.
 
 ## Module map
 

@@ -4,8 +4,8 @@ import {
   p2pStateAtom,
   activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
 } from '@/atoms/connection';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
-import { lastResizeAtom } from '@/features/terminal/state/terminal';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
+import { lastResizeAtom } from '@/product/terminal/state/terminal';
 import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom, orderedUrlsAtom } from '@/atoms/session';
 
 describe('base atoms', () => {

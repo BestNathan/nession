@@ -5,7 +5,7 @@ import {
   ATTACH_TIMEOUT_MS,
   type AttachTransitionResult,
 } from '@/runtime/AttachStateMachine';
-import type { AttachResult, TerminalAgentApi } from '@/features/terminal';
+import type { AttachResult, TerminalAgentApi } from '@/product/terminal';
 
 /** Two microtask ticks — enough for a resolved attach's .then chain to run. */
 function flushMicrotasks(): Promise<void> {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { SessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
 import { createFilesApi } from '@/features/files';
-import { createTerminalAgentApi } from '@/features/terminal';
+import { createTerminalAgentApi } from '@/product/terminal';
 import type { SessionRuntimeConfig } from '@/runtime/SessionRuntime';
 import type { AttachInfo } from '@/types';
 

@@ -70,7 +70,7 @@ Read from production consumers, not from the values. Counts are Web leaves
 
 | Family | Leaves | Owner | Evidence |
 |---|---|---|---|
-| `composer` | 45 | `pattern.terminal-capsule` | every consumer is under `features/terminal/capsule/` |
+| `composer` | 45 | `pattern.terminal-capsule` | every consumer is under `product/terminal/capsule/` |
 | `workspace` | 13 | `pattern.file-workspace` | tree + editor metrics; consumers are the explorer renderers and the file viewer/editor |
 | `shell.sessionRowPadY` / `TitleFontSize` / `MetaFontSize` | 3 | `pattern.session-item` | consumed only by `features/sessions/components/SessionItem.tsx` |
 | `shell` (the rest) | 18 | **shell composition** | the shell's own chrome. `shell.space-*` is generic spacing; `shell.railWidth` / `foot*` size the shell, which is the composition root rather than a pattern — no `$owner`, and none is warranted |

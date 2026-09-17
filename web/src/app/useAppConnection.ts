@@ -9,7 +9,7 @@ import { serverApi } from '@/features/server';
 import { envApi } from '@/features/env';
 import { commandsApi } from '@/features/commands';
 import { claudeCodeApi } from '@/features/claude-code';
-import { terminalServerApi } from '@/features/terminal';
+import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from '../lib/auth';
 import { getOrCreateClientId } from '../services/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';

@@ -17,7 +17,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT/web"
 
-CAPSULE_DIR="src/features/terminal/capsule"
+CAPSULE_DIR="src/product/terminal/capsule"
 
 # `|| true`: a missing tree must reach the guard below and print what to fix,
 # instead of dying at this line under `set -e -o pipefail` with only find's error.

@@ -121,7 +121,7 @@ const LEGACY_TO_LAYER = {
   'extensions': 'extensions',
   // #801's target layer, being filled one extraction at a time. Only the
   // Product Patterns live here so far; the concepts they belong to
-  // (`features/sessions`, `features/terminal`, …) are still where they were.
+  // (`features/env`, `features/files`, …) are still where they were.
   // The migration state is tracked in docs/architecture/web.md.
   'product': 'product',
 };

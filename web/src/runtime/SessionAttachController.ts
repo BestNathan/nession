@@ -5,7 +5,7 @@ import {
   type AttachEvent,
   type AttachTransitionResult,
 } from '@/runtime/AttachStateMachine';
-import type { TerminalAgentApi } from '@/features/terminal';
+import type { TerminalAgentApi } from '@/product/terminal';
 
 /** Listeners receive every attach outcome the state machine produces. */
 export type AttachOutcomeListener = (result: AttachTransitionResult) => void;
