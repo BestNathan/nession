@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import type { AttachInfo, ProbedAddress } from '@/types';
-import { orderAddressesByLatency } from '@/services/addressSelection';
+import { orderAddressesByLatency } from '@/lib/addressSelection';
 
 /** In-flight probe dedupe — shares one browser latency test across hook instances. */
 const inflightProbes = new Map<string, Promise<string[]>>();

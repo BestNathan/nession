@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { SessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
+import { createFilesApi } from '@/features/files';
+import { createTerminalAgentApi } from '@/features/terminal';
 import type { SessionRuntimeConfig } from '@/runtime/SessionRuntime';
 import type { AttachInfo } from '@/types';
 
@@ -19,6 +21,8 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     forcedRelay: false,
     addressPlan: { ready: true, urls: ['ws://agent/ws'] },
     routeIntentEpoch: 0,
+    createFilesApi,
+    createTerminalAgentApi,
   };
 }
 

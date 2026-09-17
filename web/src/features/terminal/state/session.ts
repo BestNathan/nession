@@ -1,22 +1,20 @@
 // web/src/terminal/state/session.ts
 import { atom } from 'jotai';
-import { sessionIdAtom, sessionNameAtom } from '@/atoms/session';
+import { sessionIdAtom, sessionNameAtom, terminalSessionStateAtom } from '@/atoms/session';
 import { effectiveModeAtom } from '@/atoms/connection';
 
 // TerminalStatus/TerminalSession live in core/terminal-runtime so runtime
 // consumers never depend on the Jotai state layer; re-exported here for
 // React-side imports.
-import type { TerminalSession, TerminalStatus } from '@/core/terminal-runtime/types';
+import type { TerminalSession } from '@/core/terminal-runtime/types';
 export type { TerminalSession, TerminalStatus } from '@/core/terminal-runtime/types';
+// Current terminal connection status. Defined in `atoms/session.ts` and
+// re-exported here: the session atoms write it, and `atoms/` is `shared`, which
+// cannot import a feature. This keeps the feature-side import path stable (#783).
+export { terminalSessionStateAtom };
 
 /** Private: pinned by terminalSessionAtom's write so startedAt stays stable. */
 const startedAtAtom = atom<number>(0);
-
-/**
- * Current terminal connection status — driven by the attach/disconnect/switch
- * action atoms and the state machine effect in Terminal.tsx.
- */
-export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
 
 /**
  * Terminal session derived from the global atoms. Writable with no arguments

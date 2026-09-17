@@ -1,6 +1,8 @@
 import type { WebSocketService } from '@/services/socket';
 import type { ConnectionState } from '@/services/socket/types';
-import { terminalServerApi, type TerminalServerApi } from '@/features/terminal';
+// Type only. The capability singleton is passed in by the caller, which lives
+// above this layer — `runtime/` is `core` and may not import a feature (#783).
+import type { TerminalServerApi } from '@/features/terminal';
 
 /**
  * Relay-mode lifecycle surface SessionRuntime needs from the server
@@ -56,7 +58,10 @@ export type RelayServerTransport = RelayServerHandle &
  * whichever *newer* service owns the binding — relaying a session the stale
  * consumer no longer owns on a connection it never authenticated for.
  */
-export function relayServerHandle(service: WebSocketService): RelayServerTransport {
+export function relayServerHandle(
+  service: WebSocketService,
+  terminalServerApi: TerminalServerApi,
+): RelayServerTransport {
   const stale = (): boolean => service.isDisposed;
   return {
     onConnectionStateChange: (cb) => service.onConnectionStateChange(cb),

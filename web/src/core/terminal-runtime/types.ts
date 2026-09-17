@@ -69,14 +69,14 @@ export type InputMode =
   | { type: 'ai' }
   | { type: 'custom'; id: string };
 
-/** Attach lifecycle status of the local terminal connection. */
-export type TerminalStatus =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'attached'
-  | 'reconnecting'
-  | 'failed';
+/**
+ * Attach lifecycle status of the local terminal connection.
+ *
+ * Defined in `src/types.ts` so the `shared` atoms can name it too; re-exported
+ * here so runtime consumers keep their existing import.
+ */
+import type { TerminalStatus } from '../../types';
+export type { TerminalStatus };
 
 /**
  * Local terminal connection instance — distinct from the backend `Session`

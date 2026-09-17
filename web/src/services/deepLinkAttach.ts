@@ -4,7 +4,7 @@ import { sessionsApi } from '../features/sessions';
 import type { AgentProbe } from '../atoms/probe';
 import { loadAttachPrefs } from './attachPrefs';
 import { detectWebGLSupport } from '../core/terminal-runtime/Renderer';
-import { orderByLatency, testAddresses } from './addressSelection';
+import { orderByLatency, testAddresses } from '@/lib/addressSelection';
 import {
   validateProfile,
   type PersistedAttachChoice,
