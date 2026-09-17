@@ -11,7 +11,7 @@ import {
 import { terminalSessionStateAtom } from '@/features/terminal/state/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { probeResultsAtom } from '../atoms/probe';
-import { resolveProfileAttach } from '../services/deepLinkAttach';
+import { resolveProfileAttach } from './deepLinkAttach';
 import { loadSessionProfile, persistConfirmedChoice } from '../services/sessionAttachProfile';
 import type { Session } from '../types';
 

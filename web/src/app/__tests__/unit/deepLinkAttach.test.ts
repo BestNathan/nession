@@ -4,7 +4,7 @@ import {
   resolveDeepLinkAttachChoice,
   resolveProfileAttach,
   resolveTargetChoice,
-} from '@/services/deepLinkAttach';
+} from '@/app/deepLinkAttach';
 import {
   buildOptionsFingerprint,
   type PersistedAttachChoice,

@@ -1,15 +1,15 @@
-import type { AddressLatency, AttachInfo, Session } from '../types';
+import type { AddressLatency, AttachInfo, Session } from '@/types';
 import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
-import { sessionsApi } from '../features/sessions';
-import type { AgentProbe } from '../atoms/probe';
-import { loadAttachPrefs } from './attachPrefs';
-import { detectWebGLSupport } from '../core/terminal-runtime/Renderer';
+import { sessionsApi } from '@/features/sessions';
+import type { AgentProbe } from '@/atoms/probe';
+import { loadAttachPrefs } from '@/services/attachPrefs';
+import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
 import { orderByLatency, testAddresses } from '@/lib/addressSelection';
 import {
   validateProfile,
   type PersistedAttachChoice,
   type SessionAttachProfile,
-} from './sessionAttachProfile';
+} from '@/services/sessionAttachProfile';
 
 /** Requested transport for a stored mode: 'auto' fetches p2p attach info. */
 function requestedModeOf(mode: PersistedAttachChoice['mode']): 'p2p' | 'relay' {

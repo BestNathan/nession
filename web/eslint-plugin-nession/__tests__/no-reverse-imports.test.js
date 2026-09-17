@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
 import nessionPlugin from '../index.js';
-import { LEGACY_TO_LAYER, NON_LAYER_DIRS } from '../rules/no-reverse-imports.js';
+import {
+  LEGACY_TO_LAYER,
+  NON_LAYER_DIRS,
+  ROOT_FILE_LAYER,
+} from '../rules/no-reverse-imports.js';
 
 // #783. This rule is the mechanical half of the layer direction `web/CLAUDE.md`
 // states, and it had never fired: `getSourceLayer` read the *import path* to
@@ -250,6 +254,70 @@ test('a computed dynamic import names nothing and is left alone', () => {
   assert.equal(reported.length, 1, 'a literal source is still an edge');
 });
 
+// #801 Phase 1 ("正确解析 relative imports"). `getTargetLayer` handled `@/…`
+// only, so every relative specifier fell to `unknown` — which `checkRuntimeEdge`
+// skips. The same reverse import was therefore caught when written with an alias
+// and invisible when written with a path, and both spellings occur in the tree.
+// `web/src/services/deepLinkAttach.ts` was shipping the second kind.
+test('a relative specifier is resolved against the importing file', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      // Downward and same-layer are legal, however they are spelled.
+      { code: "import { probe } from '../lib/probe';", filename: '/p/web/src/services/thing.ts' },
+      { code: "import { helper } from './helper';", filename: '/p/web/src/services/thing.ts' },
+      { code: "import { sibling } from './sibling';", filename: '/p/web/src/components/ui/probe.tsx' },
+      // A specifier that climbs out of every layer names nothing placeable.
+      { code: "import { x } from '../../../../outside';", filename: '/p/web/src/services/thing.ts' },
+    ],
+    invalid: [
+      {
+        // The shape that was shipping: `core` reaching a feature by path.
+        code: "import { sessionsApi } from '../features/sessions';",
+        filename: '/p/web/src/services/deepLinkAttach.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        code: "import { x } from '../../features/terminal';",
+        filename: '/p/web/src/components/ui/probe.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // `shared` may not reach a feature either, and the path climbs two
+        // levels — the resolution, not the spelling, is what is under test.
+        code: "import { x } from '../features/files';",
+        filename: '/p/web/src/lib/thing.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
+// Modules directly under `src/` are on real edges, and a directory-shaped lookup
+// returns `unknown` for them — so both spellings of an edge to them were
+// unchecked. `types.ts` is `shared` (every layer may reach it); `App.tsx` is the
+// composition root (nothing below app may).
+test('files directly under src/ are classified rather than skipped', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      { code: "import { Session } from '@/types';", filename: '/p/web/src/lib/thing.ts' },
+      { code: "import { Session } from '../types';", filename: '/p/web/src/lib/thing.ts' },
+      { code: "import { App } from '@/App';", filename: '/p/web/src/app/mainThing.ts' },
+    ],
+    invalid: [
+      {
+        code: "import { App } from '@/App';",
+        filename: '/p/web/src/lib/thing.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        code: "import { App } from '../App';",
+        filename: '/p/web/src/services/thing.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
 // #793. The rule resolves a directory to a layer through a table, and anything
 // absent from it becomes `unknown` — which `checkRuntimeEdge` skips. An
 // unmapped directory is therefore indistinguishable from a legal one, in both
@@ -283,5 +351,31 @@ test('every src/ directory is classified — mapped, or deliberately not a layer
     stale,
     [],
     `NON_LAYER_DIRS names directories that do not exist: ${stale.join(', ')}`,
+  );
+
+  // Modules directly under `src/` sit on real edges — `types.ts` is imported by
+  // every layer — but the directory-shaped lookup above cannot see them, so they
+  // resolved to `unknown` and went unchecked in both directions. Same hole as
+  // `markdown/`, one level up (#793's general form, closed for files here).
+  // Keyed the way an import specifier would spell them, so `.d.ts` drops both
+  // extensions.
+  const rootFiles = readdirSync(srcDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
+    .map((entry) => entry.name.replace(/\.d\.ts$/, '').replace(/\.tsx?$/, ''));
+
+  const unclassifiedRoots = rootFiles.filter((file) => !(file in ROOT_FILE_LAYER));
+  assert.deepEqual(
+    unclassifiedRoots,
+    [],
+    `src/ ${unclassifiedRoots.join(', ')} has no layer. Add it to ROOT_FILE_LAYER. `
+      + 'A root module outside the table resolves to `unknown`, and every edge '
+      + 'touching it is silently skipped while appearing covered.',
+  );
+
+  const staleRoots = Object.keys(ROOT_FILE_LAYER).filter((f) => !rootFiles.includes(f));
+  assert.deepEqual(
+    staleRoots,
+    [],
+    `ROOT_FILE_LAYER names modules that do not exist: ${staleRoots.join(', ')}`,
   );
 });
