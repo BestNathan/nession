@@ -157,9 +157,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Serialise the tests that mutate `NESSION_TMUX_SOCKET`. `set_var` /
-    /// `remove_var` are process-global and Rust runs tests in parallel, so
-    /// without this one test's mutation lands in the middle of another's read.
+    /// Serialise access to `NESSION_TMUX_SOCKET`. `set_var` / `remove_var` are
+    /// process-global and Rust runs tests in parallel, so without this one
+    /// test's mutation lands in the middle of another's read.
+    ///
+    /// **Reads take it too**, not just the mutations. A test whose reads are
+    /// only consistent while nobody is mid-mutation — two `resolve_socket_path`
+    /// calls inside one `assert_eq!`, say — is racing even though it writes
+    /// nothing; that is exactly how #796 failed. Tests that pass a non-blank
+    /// `Some(..)` are the exception: config short-circuits before the env is
+    /// consulted, so they read nothing shared and need no lock.
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     /// Saved value of `NESSION_TMUX_SOCKET`, put back when the test is done.
@@ -246,6 +253,14 @@ mod tests {
 
     #[test]
     fn blank_configured_path_matches_an_absent_one() {
+        // Reads the env through `resolve_socket_path(None)`, so it takes the
+        // lock for the same reason the mutators do — and unlike them it has two
+        // reads inside one assertion, so a mutation landing between them makes
+        // them disagree. `default_is_used_when_neither_config_nor_env_is_set`
+        // removing the variable there is exactly that interleaving (#796).
+        let _guard = ENV_MUTEX
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // A key present but empty in TOML must behave as "not set" — never as a
         // socket named "" in the process CWD. Compared against `None` rather
         // than against the default, because the test runner exports
