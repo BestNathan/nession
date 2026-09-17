@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import type { FileOps } from '@/features/files';
+import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { TerminalWell } from '@/app/TerminalWell';

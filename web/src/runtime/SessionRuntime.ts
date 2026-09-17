@@ -10,7 +10,7 @@ import { SessionAttachController } from '@/runtime/SessionAttachController';
 // SessionRuntimeConfig instead of imported, because `runtime/` is `core` and a
 // feature may not be imported from below it — while the runtime is genuinely
 // below the terminal feature, which consumes it (#783).
-import type { FilesPlugin } from '@/features/files';
+import type { FilesPlugin } from '@/capabilities/files';
 import type { TerminalAgentApi } from '@/product/terminal';
 
 export interface SessionRuntimeConfig {

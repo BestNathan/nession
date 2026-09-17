@@ -1,8 +1,13 @@
 /**
  * ESLint rule: no-reverse-imports
  *
- * Enforces the dependency direction: app → features → core → shared
- * Prevents reverse imports that would violate the layered architecture.
+ * Enforces the dependency direction between layers, so a module can only be
+ * pulled in by something at or above it.
+ *
+ * The direction is #801's target vocabulary — `app` composes `product` /
+ * `capabilities` / `platform` over `shared` — with the pre-#801 `features/` still
+ * in the table while it is drained. `docs/architecture/web.md` owns the model and
+ * the migration state; this file owns the executable half.
  *
  * ── What this rule is about, and what it is not ─────────────────────────────
  *
@@ -58,12 +63,26 @@
 // `features/` no longer exists (Phase 7), at which point these two constants go
 // and the layers are related by the table below alone.
 const MIGRATION_FROM = 'features';
-const MIGRATION_INTO = ['product'];
+const MIGRATION_INTO = ['product', 'capabilities'];
 
 // Import direction map: which layers can import which
 const ALLOWED_IMPORTS = {
-  'app': ['product', 'features', 'extensions', 'core', 'shared'],
+  'app': ['product', 'capabilities', 'features', 'extensions', 'core', 'shared'],
   'features': ['extensions', 'core', 'shared', ...MIGRATION_INTO],
+  // `capabilities` is #801's second target layer: a unit that can be
+  // discovered, activated and contributed (Files, Env, Commands, Claude Code)
+  // as a vertical slice, rather than a chunk of the product.
+  //
+  // One-way with `product`, and that is measured rather than assumed: six real
+  // value imports go `product → capabilities` (the capsule surfaces quick
+  // commands, the attach dialog offers env files) and **none** come back.
+  // PRINCIPLE #3 is what says the direction is right — "capabilities should
+  // naturally gain presence when they become relevant to the current context"
+  // is a capability appearing *inside* a product context, not a product
+  // appearing inside a capability. If a capability ever needs a Product
+  // Pattern, that is the same decision `features ↔ extensions` already
+  // records, and it should be made then rather than pre-granted here.
+  'capabilities': ['core', 'shared', MIGRATION_FROM],
   // `product` is #801's first target layer: a module that means something in
   // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
   // than one that merely implements something. It sits below `app` (the shell
@@ -77,14 +96,16 @@ const ALLOWED_IMPORTS = {
   // into a capability's internals is the inversion; asking the registry for a
   // slot is not. Phase 4 has to keep that distinction when `extensions/` is
   // absorbed into `capabilities/*/contribution.ts`.
-  'product': ['extensions', 'core', 'shared', MIGRATION_FROM],
-  // `extensions/` is a rung of its own, not a feature. The mutual allowance
-  // with `features` is deliberate and documented in docs/architecture/web.md:
-  // the registry is consumed by app and feature code, and an extension composes
-  // the feature it extends. It is a sanctioned cycle, not an oversight — do not
-  // "fix" it by folding extensions into features, which would wrongly let
-  // `core` reach it.
-  'extensions': ['features', 'core', 'shared'],
+  'product': ['capabilities', 'extensions', 'core', 'shared', MIGRATION_FROM],
+  // `extensions/` is a rung of its own. It may reach `capabilities` because an
+  // extension is the UI contribution *for* a capability — `extensions/claude-code`
+  // renders the Claude Code capability — and it keeps reaching `features` while
+  // that layout is drained. The mutual allowance with `features` is deliberate
+  // and documented in docs/architecture/web.md: the registry is consumed by app
+  // and feature code, and an extension composes what it extends. A sanctioned
+  // cycle, not an oversight — do not "fix" it by folding extensions into
+  // `features`, which would wrongly let `core` reach it.
+  'extensions': ['capabilities', 'features', 'core', 'shared'],
   'core': ['shared'],
   'shared': [], // shared cannot import any business layer
 };
@@ -99,7 +120,7 @@ const ALLOWED_IMPORTS = {
 // by fixing this rule are real, not a mis-classification (#783).
 //
 // `markdown` is `shared`, decided by the same test rather than by its name: its
-// consumers are `features/files` (3 edges) *and* `lib/languageId` (2 edges), and
+// consumers are `capabilities/files` (3 edges) *and* `lib/languageId` (2 edges), and
 // a `shared` module importing it forces it to `shared` — shared is the bottom.
 // The `markdown ↔ lib` cycle that results is deliberate and both files say so:
 // general language detection needs markdown's ranked signals, and markdown
@@ -119,11 +140,13 @@ const LEGACY_TO_LAYER = {
   'app': 'app',
   // Outside the ladder proper; see ALLOWED_IMPORTS.extensions.
   'extensions': 'extensions',
-  // #801's target layer, being filled one extraction at a time. Only the
-  // Product Patterns live here so far; the concepts they belong to
-  // (`features/env`, `features/files`, …) are still where they were.
-  // The migration state is tracked in docs/architecture/web.md.
+  // #801's first target layer, filled one concept at a time: `agent`,
+  // `session` and `terminal` live here now, plus Workspace's Product Pattern.
+  // `capabilities` is the second. The migration state — which concepts have
+  // moved and which have not — is tracked in docs/architecture/web.md.
   'product': 'product',
+  // #801's second target layer, filled by the four contributable capabilities.
+  'capabilities': 'capabilities',
 };
 
 // Directories under `src/` that are deliberately not layers. Everything else

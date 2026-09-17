@@ -22,7 +22,7 @@ rows and preview dialogs) was deleted in Phase 5 (#655).
 | `components/SessionList.tsx` + `SessionItem.tsx` | Sidebar list rows (select-to-attach + hover-kill; per-row `DomainState` derivation). The legacy Dashboard `components/SessionList` copy was deleted with its shell (#655) — name collision resolved by deletion, not coexistence |
 | `components/ConnectionStatus.tsx` | Compact 3-channel (`agent·session·attachment`) render of `DomainState`; consumed by the session header/details and by `features/agents` AgentDetail |
 | `components/SessionDetails.tsx` | Session workspace-tool detail page (metadata + ConnectionStatus) |
-| `components/CreateSessionDialog.tsx`, `KillConfirmDialog.tsx`, `AttachDialog.tsx`, `SearchBar.tsx` | Shared dialogs/list chrome; call `sessionsApi`; env-file picker UI comes from `@/features/env/components/EnvFileMultiSelect` (sessions → env direction); AttachDialog holds the mode/address picker for terminal attach |
+| `components/CreateSessionDialog.tsx`, `KillConfirmDialog.tsx`, `AttachDialog.tsx`, `SearchBar.tsx` | Shared dialogs/list chrome; call `sessionsApi`; env-file picker UI comes from `@/capabilities/env/components/EnvFileMultiSelect` (sessions → env direction); AttachDialog holds the mode/address picker for terminal attach |
 | `hooks/useSessionData.ts` | Per-mount session list state + `fetchSessions({force})` via `sessionsApi` |
 | `hooks/useDebouncedInput.ts` | Generic debounce used by `SearchBar` |
 
@@ -47,7 +47,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 `features/agents` imports `model/domainState` (types) and
 `components/ConnectionStatus` for its in-workspace agent surfaces — the
 channel vocabulary is session-workspace state, so sessions owns it. This
-mirrors the `features/files → features/explorer` direction (owner of the
+mirrors the `capabilities/files → features/explorer` direction (owner of the
 contract stays in one feature; the peer imports its public surface).
 
 ## Consumers

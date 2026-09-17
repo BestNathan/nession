@@ -21,7 +21,7 @@ import { gotoFixtureWorkspace, openFixtureFile } from '../helpers/fixtureVisual'
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
-const THEME_FILE = 'web/src/features/files/model/editorTheme.ts';
+const THEME_FILE = 'web/src/capabilities/files/model/editorTheme.ts';
 const ROOT = '[data-testid="codemirror-editor"]';
 
 interface EditorMetrics {

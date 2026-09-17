@@ -6,7 +6,7 @@ import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard'
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/features/capabilities';
-import type { FileOps } from '@/features/files';
+import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
 

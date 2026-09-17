@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAtom, useSetAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
-import { envApi } from '@/features/env';
+import { envApi } from '@/capabilities/env';
 import type { TerminalAgentApi } from '@/product/terminal/agent';
 import type { ConnectionState } from '@/services/socket/types';
 import {

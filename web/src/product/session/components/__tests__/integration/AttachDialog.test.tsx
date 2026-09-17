@@ -3,14 +3,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { AttachDialog } from '@/product/session/components/AttachDialog';
-import { envApi } from '@/features/env';
+import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Session, AttachInfo } from '@/types';
 import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/atoms/probe';
 import { attachInfoAtom } from '@/atoms/session';
 import { saveSessionProfile, type PersistedAttachChoice } from '@/services/sessionAttachProfile';
 
-vi.mock('@/features/env', () => ({
+vi.mock('@/capabilities/env', () => ({
   envApi: { listEnvFiles: vi.fn() },
 }));
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
 import { FilesAppLayout } from '@/app/workspace/views/filesApp';
-import type { FileEntry, FileOps } from '@/features/files';
+import type { FileEntry, FileOps } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 vi.mock('sonner', () => ({

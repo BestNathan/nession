@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CapsuleCommandsPanel } from '@/product/terminal/capsule/CapsuleCommandsPanel';
 
-vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
+vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: () => ({
     userCommands: [],
     addCommand: vi.fn().mockResolvedValue(undefined),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FileEntry } from '@/features/files';
+import type { FileEntry } from '@/capabilities/files';
 import { fileEntryToExplorerNode, type ExplorerNode } from '@/features/explorer/types';
 
 const FILE_ENTRY: FileEntry = {

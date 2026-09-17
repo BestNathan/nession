@@ -10,7 +10,7 @@ import {
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/features/capabilities';
-import type { FileOps } from '@/features/files';
+import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 
 type SidebarFields = Omit<SessionFirstSidebarProps, 'className' | 'onSelect'>;

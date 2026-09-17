@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { PRESETS } from '@/features/commands/quickCommands';
+import { PRESETS } from '@/capabilities/commands/quickCommands';
 import { useCapsuleCommands } from '@/product/terminal/capsule/useCapsuleCommands';
 
-vi.mock('@/features/commands/hooks/useQuickCommands', () => ({
+vi.mock('@/capabilities/commands/hooks/useQuickCommands', () => ({
   useQuickCommands: vi.fn(),
 }));
 
@@ -12,7 +12,7 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
   useCommandHistory: vi.fn(),
 }));
 
-import { useQuickCommands } from '@/features/commands/hooks/useQuickCommands';
+import { useQuickCommands } from '@/capabilities/commands/hooks/useQuickCommands';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
 
 const mockAddEntry = vi.fn();

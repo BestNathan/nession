@@ -21,7 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '@/types';
-import { envApi } from '@/features/env';
+import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import { loadAttachPrefs } from '@/services/attachPrefs';
 import {
@@ -31,7 +31,7 @@ import {
 } from '@/services/sessionAttachProfile';
 import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
 import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
-import { EnvFileMultiSelect } from '@/features/env/components/EnvFileMultiSelect';
+import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {

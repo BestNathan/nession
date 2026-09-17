@@ -21,7 +21,7 @@ interface UseP2PAttachTransportResult {
   /** Agent-transport connection state, gated 'disconnected' outside the P2P transport. */
   connectionState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
-  fileOps: import('@/features/files').FileOps | null;
+  fileOps: import('@/capabilities/files').FileOps | null;
   runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
   snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;
 }

@@ -5,7 +5,7 @@ import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pSt
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
-import { createFilesApi, type FileOps } from '@/features/files';
+import { createFilesApi, type FileOps } from '@/capabilities/files';
 import { createTerminalAgentApi, type TerminalAgentApi } from '@/product/terminal';
 import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
 import type { ConnectionState } from '@/services/socket/types';
