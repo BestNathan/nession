@@ -121,10 +121,28 @@ function flattenLeaves(obj, prefix = []) {
   return leaves;
 }
 
-function toKebab(parts) {
+export function toKebab(parts) {
   return parts
     .map((part) => String(part).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase())
     .join('-');
+}
+
+/**
+ * The custom property `emitCustomProps` writes for an experience token id:
+ * `experience.app.touchTarget.min` → `touch-target-min`.
+ *
+ * Exported for the design lint rules, which assert token *identity* against the
+ * custom property a component composed. They have to derive the name exactly
+ * the way the emitter does — a second implementation is a second naming scheme,
+ * which is how `EXPERIENCE_APP_CLASSES` below ended up naming classes that no
+ * generator ever produced.
+ */
+export function cssVarFromTokenId(tokenId) {
+  const match = /^experience\.[a-zA-Z0-9]+\.(.+)$/.exec(tokenId ?? '');
+  if (!match) {
+    return null;
+  }
+  return toKebab(match[1].split('.'));
 }
 
 export function resolveRef(node, tokens, seen = new Set(), theme = 'light') {

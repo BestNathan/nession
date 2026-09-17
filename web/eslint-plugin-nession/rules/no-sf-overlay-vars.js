@@ -1,11 +1,14 @@
-const SESSION_FIRST_GLOB = 'src/session-first/';
-const CAPSULE_GLOB = 'src/session-first/capsule/';
+// The shell used to live under `src/session-first/`. It moved to `src/app/`,
+// and this glob was not moved with it — so the rule matched zero files and had
+// silently stopped guarding the retired `--sf-*` vocabulary (issue #759). No
+// `--sf-` variable remains anywhere in web/src, so restoring the scope changes
+// no current verdict; it restores the guard against reintroducing one.
+const APP_SHELL_GLOB = 'src/app/';
 
-function isSessionFirstShellFile(filename) {
+function isAppShellFile(filename) {
   const normalized = filename.replace(/\\/g, '/');
   return (
-    normalized.includes(SESSION_FIRST_GLOB) &&
-    !normalized.includes(CAPSULE_GLOB) &&
+    normalized.includes(APP_SHELL_GLOB) &&
     !normalized.includes('/__tests__/') &&
     !/\.(test|spec)\.[jt]sx?$/.test(normalized)
   );
@@ -27,7 +30,7 @@ export default function noSfOverlayVars() {
     },
     create(context) {
       const filename = context.filename ?? '';
-      if (!isSessionFirstShellFile(filename)) {
+      if (!isAppShellFile(filename)) {
         return {};
       }
 

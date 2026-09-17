@@ -15,6 +15,12 @@ const metadataPath = join(
 );
 const lintMetadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
 
+// A generated shadcn primitive is not exempt from the design system just
+// because the CLI wrote it (#759 SC7). The rule has no filename filter, so the
+// only thing that can make it skip `components/ui/` is a regression in the
+// rule — which is what these fixtures pin.
+const UI_PRIMITIVE = '/proj/web/src/components/ui/probe.tsx';
+
 test('findPrimitiveInString flags green-500 with suggestions', () => {
   const hit = findPrimitiveInString('text-green-500', lintMetadata);
   assert.ok(hit);
@@ -63,4 +69,38 @@ ruleTester.run('no-cross-experience-token', nessionPlugin.rules['no-cross-experi
       errors: [{ message: /App experience class "touch-target-min"/ }],
     },
   ],
+});
+
+// #759 SC7 — a shadcn primitive that brings an upstream raw visual decision into
+// the product must fail on the parts that are mechanically decidable: the
+// palette, and literal colors in class strings or inline styles.
+test('a new shadcn primitive with raw visual decisions fails the gate', () => {
+  ruleTester.run('no-primitive-tokens', nessionPlugin.rules['no-primitive-tokens'], {
+    valid: [
+      {
+        code: 'export const x = "bg-background text-foreground border-input";',
+        filename: UI_PRIMITIVE,
+      },
+    ],
+    invalid: [
+      {
+        // Upstream palette re-entering the product.
+        code: 'export function Probe() { return <div className="text-green-500" />; }',
+        filename: UI_PRIMITIVE,
+        errors: [{ message: /Primitive color "green-500"/ }],
+      },
+      {
+        // An arbitrary literal color in a class string.
+        code: 'export function Probe() { return <div className="bg-[#f6f8fa]" />; }',
+        filename: UI_PRIMITIVE,
+        errors: [{ message: /Literal color/ }],
+      },
+      {
+        // A literal color smuggled through an inline style object.
+        code: 'export function Probe() { return <div style={{ color: "#008450" }} />; }',
+        filename: UI_PRIMITIVE,
+        errors: [{ message: /Literal color/ }],
+      },
+    ],
+  });
 });
