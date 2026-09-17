@@ -1,10 +1,10 @@
 import { Menu, PanelRight } from 'lucide-react';
-import { ConnectionStatus as SessionConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
+import { ConnectionStatus as SessionConnectionStatus } from '@/product/session/components/ConnectionStatus';
 import { Button } from '@/components/ui/button';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { CapsuleExperience } from '@/features/terminal/capsule/types';
-import type { DomainState } from '@/features/sessions/model/domainState';
-import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
+import type { DomainState } from '@/product/session/model/domainState';
+import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
 
 // Re-exported for the six modules that import the surface type from here.
 import type { Surface } from '@/product/workspace/patterns/SurfaceSwitcher';

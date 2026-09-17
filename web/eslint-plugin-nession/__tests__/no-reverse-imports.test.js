@@ -334,13 +334,49 @@ test('the product layer sits below app and above the primitives', () => {
         filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
+    ],
+  });
+});
+
+// The migration allowance, and — more importantly — its edges. It exists because
+// a concept that has moved and one that has not still depend on each other
+// (`features/agents` reaches into the now-`product/session`), and without it no
+// module could move until every module could. What it must NOT do is quietly
+// disable `features` altogether: `components/ui` reaching into a feature is the
+// violation #782 was filed for, and it stays one.
+test('the migration allowance is narrow, and covers only features↔product', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      // The pair it opens, both directions.
       {
-        // Nor keep depending on the pre-#801 feature it was extracted from.
-        // This is the constraint that makes the migration non-trivial: a
-        // pattern can only move once whatever it needs has moved with it, or
-        // the concept moves whole.
-        code: "import { mapDomainState } from '@/features/sessions/model/domainState';",
+        code: "import { sessionsApi } from '@/product/session';",
+        filename: '/p/web/src/features/agents/components/AgentDetail.tsx',
+      },
+      {
+        code: "import { mapDomainState } from '@/features/agents/model/domainState';",
         filename: '/p/web/src/product/session/patterns/SessionList.tsx',
+      },
+    ],
+    invalid: [
+      {
+        // Still enforced: a generic primitive may not know what a Session is,
+        // and `features` being transitional does not exempt it.
+        code: "import { SessionItem } from '@/features/sessions/components/SessionItem';",
+        filename: '/p/web/src/components/ui/probe.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // Still enforced: `shared` is below `features` whether or not the
+        // latter is on its way out.
+        code: "import { sessionsApi } from '@/features/sessions';",
+        filename: '/p/web/src/lib/thing.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // Still enforced: the allowance is for `product`, not for everything —
+        // a feature may not reach up into the shell that composes it.
+        code: "import { SessionFirstShell } from '@/app/SessionFirstShell';",
+        filename: '/p/web/src/features/agents/components/AgentDetail.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],

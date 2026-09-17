@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useDebouncedInput } from '@/features/sessions/hooks/useDebouncedInput';
-import type { StatusFilter } from '@/features/sessions/types';
+import { useDebouncedInput } from '@/product/session/hooks/useDebouncedInput';
+import type { StatusFilter } from '@/product/session/types';
 
 interface SearchBarProps {
   searchQuery: string;

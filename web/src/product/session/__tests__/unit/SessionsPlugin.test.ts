@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeUtf8Base64 } from '@/lib/encoding';
-import { SessionsPlugin } from '@/features/sessions/SessionsPlugin';
+import { SessionsPlugin } from '@/product/session/SessionsPlugin';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import type { Session } from '@/types';
 

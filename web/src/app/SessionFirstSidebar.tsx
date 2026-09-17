@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PanelLeftClose } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SessionList } from '@/features/sessions/components/SessionList';
+import { SessionList } from '@/product/session/components/SessionList';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import { SidebarSectionSeparator } from '@/app/patterns/SidebarSectionHead';
@@ -11,7 +11,7 @@ import { shellIconButtonClass } from '@/app/shellStyles';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 
 export interface SessionFirstSidebarProps {
   className?: string;

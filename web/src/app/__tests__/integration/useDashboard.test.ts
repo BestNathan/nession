@@ -20,7 +20,7 @@ const sessionsApiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/features/agents', () => ({ agentsApi: agentsApiMock }));
-vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
+vi.mock('@/product/session', () => ({ sessionsApi: sessionsApiMock }));
 
 // ---------------------------------------------------------------------------
 // Factory helpers

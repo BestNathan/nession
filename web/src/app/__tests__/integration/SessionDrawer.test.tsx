@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionDrawer } from '@/app/SessionDrawer';
 
-vi.mock('@/features/sessions/components/SessionList', () => ({
+vi.mock('@/product/session/components/SessionList', () => ({
   SessionList: () => <div data-testid="mock-session-list" />,
 }));
 

@@ -1,5 +1,5 @@
 import { SessionHeader } from '@/app/patterns/SessionHeader';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Session } from '@/types';
 

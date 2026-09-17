@@ -6,7 +6,7 @@ import {
   SessionFirstWorkspace,
   type SessionFirstWorkspaceProps,
 } from '@/app/SessionFirstWorkspace';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/features/capabilities';

@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '@/types';
 import { envApi } from '@/features/env';
-import { sessionsApi } from '@/features/sessions';
+import { sessionsApi } from '@/product/session';
 import { loadAttachPrefs } from '@/services/attachPrefs';
 import {
   candidateUrlsOf,

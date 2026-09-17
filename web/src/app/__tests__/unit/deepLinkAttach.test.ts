@@ -33,7 +33,7 @@ const sessionsApiMock = vi.hoisted(() => ({
   requestAttach: vi.fn(),
 }));
 
-vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
+vi.mock('@/product/session', () => ({ sessionsApi: sessionsApiMock }));
 
 describe('resolveDeepLinkAttachChoice', () => {
   const session: Session = {

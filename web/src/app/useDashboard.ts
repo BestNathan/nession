@@ -3,9 +3,9 @@ import type { Agent, Session } from '../types';
 import type { WebSocketService } from '../services/socket';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { useAgentData } from '@/features/agents/hooks/useAgentData';
-import { useSessionData, type FetchSessionsOptions } from '@/features/sessions/hooks/useSessionData';
+import { useSessionData, type FetchSessionsOptions } from '@/product/session/hooks/useSessionData';
 import { useDashboardFilter } from './useDashboardFilter';
-import type { StatusFilter, SortField, SortDirection } from '@/features/sessions/types';
+import type { StatusFilter, SortField, SortDirection } from '@/product/session/types';
 import { useDashboardModals } from './useDashboardModals';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
 

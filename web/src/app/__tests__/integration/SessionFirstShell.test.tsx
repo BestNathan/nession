@@ -76,11 +76,11 @@ vi.mock('@/features/env/components/EnvManager', () => ({
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
 }));
-vi.mock('@/features/sessions/components/CreateSessionDialog', () => ({
+vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="create-session-dialog" /> : null,
 }));
-vi.mock('@/features/sessions/components/KillConfirmDialog', () => ({
+vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
@@ -94,7 +94,7 @@ vi.mock('@/features/env/components/EnvManager', () => ({
 vi.mock('@/features/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
-vi.mock('@/features/sessions/components/AttachDialog', () => ({
+vi.mock('@/product/session/components/AttachDialog', () => ({
   AttachDialog: ({
     isOpen,
     onConfirm,

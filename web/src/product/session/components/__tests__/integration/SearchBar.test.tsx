@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SearchBar } from '@/features/sessions/components/SearchBar';
+import { SearchBar } from '@/product/session/components/SearchBar';
 
 describe('SearchBar', () => {
   afterEach(() => {

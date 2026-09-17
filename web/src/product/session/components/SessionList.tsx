@@ -2,8 +2,8 @@ import { SearchX } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { agentDisplayName } from '@/lib/format';
-import { mapDomainState } from '@/features/sessions/model/domainState';
-import { SessionItem } from '@/features/sessions/components/SessionItem';
+import { mapDomainState } from '@/product/session/model/domainState';
+import { SessionItem } from '@/product/session/components/SessionItem';
 import type { Agent, Session } from '@/types';
 
 export interface SessionListProps {

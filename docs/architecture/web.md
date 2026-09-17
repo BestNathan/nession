@@ -56,7 +56,8 @@ the honest answer to "where does this go today" until the row moves.
 | `app/workspace/` | `app/` | 2 |
 | `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
 | `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
-| `features/{sessions,terminal,agents,server}` | `product/<concept>/` | 3–4 |
+| `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
+| `features/{terminal,agents,server}` | `product/<concept>/` | 3–4 |
 | `features/capabilities` | `product/capability/` | 4 |
 | `features/{files,env,commands,claude-code}` | `capabilities/<name>/` | 4 |
 | `features/explorer` | undecided — a reusable framework, not a capability | 5 |
@@ -84,18 +85,17 @@ There are exactly two ways out, and this is the decision:
   until `features/` is empty.
 
 **Taking both, in that order.** Concepts move whole for as long as that is
-possible. It will stop being possible the first time a concept that has already
-moved is needed by one that has not — `features/agents` imports
-`features/sessions` today, so after `sessions` becomes `product/session`,
-`agents` is reaching up out of a layer that is supposed to be below it. At that
-point `features` gets a **transitional allowance in both directions**, declared
-in one place in the rule with the condition that removes it: *`features/` no
-longer exists*. Not a per-file exemption, not an ignore list — one statement
-about a directory that is being deleted.
+possible — `product/session` moved whole, all 26 files at once. It stopped being
+possible the first time a concept that has already moved was needed by one that
+has not: `features/agents` imports the Session concept, so once `sessions`
+became `product/session`, `agents` was reaching up out of a layer below it.
 
-The allowance is deliberately **not** added now. Nothing needs it yet, and a
-permissive rule added in advance is indistinguishable from one added to make a
-failure go away.
+So `features` now has the **transitional allowance in both directions** — see
+`MIGRATION_FROM` / `MIGRATION_INTO` in the rule. It is deliberately narrow: it
+opens `features ↔ product` and nothing else, so `components/ui` reaching into a
+feature is still an error and so is `shared → features`. It is removed when
+`features/` no longer exists (Phase 7), at which point the two constants go and
+the layers are related by the table alone.
 
 Two other rules decide the ambiguous cases, both from #801's principles:
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionHeader } from '@/app/patterns/SessionHeader';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 
 const healthy: DomainState = {
   agent: { channel: 'online', copy: null },
