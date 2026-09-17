@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   AppSpatialShell,
   type SpatialPageIndex,
-} from '@/app/app-spatial/AppSpatialShell';
+} from '@/app/experiences/app/AppSpatialShell';
 import { mapDomainState } from '@/features/sessions/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
