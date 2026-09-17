@@ -46,8 +46,15 @@
 
 // Import direction map: which layers can import which
 const ALLOWED_IMPORTS = {
-  'app': ['features', 'core', 'shared'],
-  'features': ['core', 'shared'],
+  'app': ['features', 'extensions', 'core', 'shared'],
+  'features': ['extensions', 'core', 'shared'],
+  // `extensions/` is a rung of its own, not a feature. The mutual allowance
+  // with `features` is deliberate and documented in docs/architecture/web.md:
+  // the registry is consumed by app and feature code, and an extension composes
+  // the feature it extends. It is a sanctioned cycle, not an oversight — do not
+  // "fix" it by folding extensions into features, which would wrongly let
+  // `core` reach it.
+  'extensions': ['features', 'core', 'shared'],
   'core': ['shared'],
   'shared': [], // shared cannot import any business layer
 };
@@ -60,16 +67,38 @@ const ALLOWED_IMPORTS = {
 // features import `atoms` (9 files) and `runtime` (8 files), so both must sit
 // below features — which is where they already are. The reverse imports found
 // by fixing this rule are real, not a mis-classification (#783).
+//
+// `markdown` is `shared`, decided by the same test rather than by its name: its
+// consumers are `features/files` (3 edges) *and* `lib/languageId` (2 edges), and
+// a `shared` module importing it forces it to `shared` — shared is the bottom.
+// The `markdown ↔ lib` cycle that results is deliberate and both files say so:
+// general language detection needs markdown's ranked signals, and markdown
+// cannot host the general tables without importing them back. Same layer, so
+// the rule permits it; this entry is what makes that a decision rather than an
+// accident (#793).
 const LEGACY_TO_LAYER = {
   'components': 'shared', // components/ui only
   'lib': 'shared',
   'atoms': 'shared', // atoms are shared state
+  'markdown': 'shared', // markdown pipeline — rationale in the note above
   'services': 'core', // services/socket, attachPrefs, deepLinkAttach
   'runtime': 'core',
   'core': 'core',
   'shared': 'shared',
   'features': 'features',
   'app': 'app',
+  // Outside the ladder proper; see ALLOWED_IMPORTS.extensions.
+  'extensions': 'extensions',
+};
+
+// Directories under `src/` that are deliberately not layers. Everything else
+// must appear in LEGACY_TO_LAYER. A fixture asserts that against the real
+// directory listing, in both directions, so a new `src/` directory cannot
+// repeat the mistake #793 records: falling into `unknown`, which
+// `checkRuntimeEdge` skips — unchecked in both directions while looking mapped.
+const NON_LAYER_DIRS = {
+  '__tests__': 'test files — exempt from this rule entirely (see isTestFile)',
+  'test': 'vitest setup + shared mocks; imported only by test files',
 };
 
 function isTestFile(filePath) {
@@ -151,6 +180,10 @@ function checkRuntimeEdge(context, node, importPath, currentFilePath) {
     });
   }
 }
+
+// Exported for the fixture that asserts every `src/` directory is classified.
+// The rule's own behaviour never reads them directly.
+export { ALLOWED_IMPORTS, LEGACY_TO_LAYER, NON_LAYER_DIRS };
 
 export default {
   meta: {
