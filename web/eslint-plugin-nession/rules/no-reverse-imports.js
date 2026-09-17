@@ -28,14 +28,20 @@
  * it never fired once in its life. A source layer is a property of where the
  * code lives and must never be read from what the code imports.
  *
- * ── What counts as an edge (#788) ───────────────────────────────────────────
+ * ── What counts as an edge (#788, #791) ─────────────────────────────────────
  *
  * A re-export is the same runtime edge as an import: `export { x } from '…'`
  * pulls the module into the bundle exactly as `import` does, so
  * `components/ui` re-exporting a feature is the same violation as importing it.
- * The rule had only an `ImportDeclaration` visitor, so that form passed. All
- * three statements now share one check — and a local `export { x }` with no
- * `from` clause is skipped, since it references no other module.
+ * The rule had only an `ImportDeclaration` visitor, so that form passed. Then
+ * `await import('…')` was uncovered for the same reason — a third syntax for
+ * the identical edge.
+ *
+ * All four statements now share one `checkRuntimeEdge`. A local `export { x }`
+ * with no `from` clause is skipped (it references no other module), as is a
+ * non-literal dynamic import (`import(someVar)` names nothing statically
+ * resolvable). The visit list is the whole taxonomy of runtime edges, so a
+ * fifth form appearing should be a deliberate omission rather than an oversight.
  */
 
 // Import direction map: which layers can import which
@@ -188,6 +194,14 @@ export default {
         if (node.exportKind === 'type') {
           return;
         }
+        checkRuntimeEdge(context, node, node.source?.value, currentFilePath);
+      },
+
+      // `await import('…')` — the same edge by a third syntax. Note `source` is
+      // an *expression*, not a Literal: `import(someVar)` is not statically
+      // resolvable, and checkRuntimeEdge's non-string guard leaves it alone
+      // rather than guessing.
+      ImportExpression(node) {
         checkRuntimeEdge(context, node, node.source?.value, currentFilePath);
       },
     };

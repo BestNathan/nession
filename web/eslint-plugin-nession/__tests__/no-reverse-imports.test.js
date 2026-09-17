@@ -207,3 +207,42 @@ test('a fully-erased type re-export is out of scope, and a local export is not a
     'a local export { x } references no module',
   );
 });
+
+// #791. The third syntax for the same runtime edge. `import()` is ES2020, so
+// unlike `export type` it parses in the legacy RuleTester and needs no
+// direct-visitor workaround.
+test('a dynamic import is the same runtime edge as a static one', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      { code: "import('@/lib/encoding');", filename: '/p/web/src/features/files/F.tsx' },
+      { code: "import('react');", filename: '/p/web/src/components/ui/probe.tsx' },
+    ],
+    invalid: [
+      {
+        code: "import('@/features/terminal');",
+        filename: '/p/web/src/components/ui/probe.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
+// `node.source` on an ImportExpression is an expression, not a Literal, so a
+// computed specifier reaches the rule as an Identifier. It names nothing
+// statically resolvable — the rule must not guess, and must not crash.
+test('a computed dynamic import names nothing and is left alone', () => {
+  const rule = nessionPlugin.rules['no-reverse-imports'];
+  const reported = [];
+  const visitors = rule.create({
+    getFilename: () => '/p/web/src/components/ui/probe.tsx',
+    report: (d) => reported.push(d),
+  });
+
+  visitors.ImportExpression({ source: { type: 'Identifier', name: 'someVar' } });
+  assert.equal(reported.length, 0, 'a non-literal source is not statically resolvable');
+
+  // Same call with a resolvable literal must report, so the assertion above is
+  // about the specifier and not about the visitor being inert.
+  visitors.ImportExpression({ source: { type: 'Literal', value: '@/features/terminal' } });
+  assert.equal(reported.length, 1, 'a literal source is still an edge');
+});
