@@ -4,7 +4,7 @@ import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
 import type { AttachedSession } from '@/features/terminal/types';
 
-vi.mock('@/services/deepLinkAttach', () => ({
+vi.mock('@/app/deepLinkAttach', () => ({
   resolveDeepLinkAttachChoice: vi.fn(),
   resolveProfileAttach: vi.fn(),
 }));
@@ -19,7 +19,7 @@ vi.mock('@/services/sessionAttachProfile', () => ({
   loadSessionProfile: () => profileStore.current,
 }));
 
-import { resolveDeepLinkAttachChoice, resolveProfileAttach } from '@/services/deepLinkAttach';
+import { resolveDeepLinkAttachChoice, resolveProfileAttach } from '@/app/deepLinkAttach';
 import type { SessionAttachProfile } from '@/services/sessionAttachProfile';
 
 function makeSession(id = 'agent-1:s1'): Session {

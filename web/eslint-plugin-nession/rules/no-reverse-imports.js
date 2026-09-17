@@ -101,6 +101,22 @@ const NON_LAYER_DIRS = {
   'test': 'vitest setup + shared mocks; imported only by test files',
 };
 
+// Modules that sit directly under `src/`, outside any layer directory. They are
+// on real edges like anything else — `@/types` is imported by every layer, and
+// `App.tsx` is the composition root — but a directory-shaped lookup misses them
+// and returns `unknown`, which `checkRuntimeEdge` skips. `types.ts` is `shared`
+// per `docs/architecture/web.md` ("shared root type barrel"); the two entries
+// are the composition root, which is `app` by the same doc.
+//
+// Keyed by module name as written in an import (`@/types`), not by filename, so
+// both `@/types` and a resolved `../types` land on the same entry.
+const ROOT_FILE_LAYER = {
+  App: 'app',
+  main: 'app',
+  types: 'shared',
+  'vite-env': 'shared',
+};
+
 function isTestFile(filePath) {
   const normalized = (filePath ?? '').replace(/\\/g, '/');
   return (
@@ -109,32 +125,57 @@ function isTestFile(filePath) {
   );
 }
 
-/** The layer of the file *doing the importing*, from its own path. */
-function getSourceLayer(currentFilePath) {
-  const normalized = (currentFilePath ?? '').replace(/\\/g, '/');
-  const match = normalized.match(/\/src\/([^/]+)\//);
-  if (!match) {
-    return 'unknown';
+/**
+ * Layer of a module path — a directory under `src/`, or a file directly in it.
+ *
+ * Every module needs a layer. Anything this cannot place becomes `unknown`,
+ * and `checkRuntimeEdge` skips on unknown, so an unplaced path is not
+ * "unclassified", it is *unchecked* — in both directions, while looking
+ * covered. That is the bug #793 records for directories, and the same hole
+ * swallowed `../features/...` (relative targets) and `@/types` (root files).
+ */
+function layerOfPath(path) {
+  const normalized = (path ?? '').replace(/\\/g, '/');
+  const dir = normalized.match(/\/src\/([^/]+)\//);
+  if (dir) {
+    return LEGACY_TO_LAYER[dir[1]] ?? 'unknown';
   }
-  return LEGACY_TO_LAYER[match[1]] ?? 'unknown';
+  const rootFile = normalized.match(/\/src\/([^/]+)$/);
+  if (rootFile) {
+    return ROOT_FILE_LAYER[rootFile[1]] ?? 'unknown';
+  }
+  return 'unknown';
 }
 
-function getTargetLayer(importPath) {
-  // Handle layer aliases
-  if (importPath.startsWith('@app/')) return 'app';
-  if (importPath.startsWith('@features/')) return 'features';
-  if (importPath.startsWith('@core/')) return 'core';
-  if (importPath.startsWith('@shared/')) return 'shared';
+/** The layer of the file *doing the importing*, from its own path. */
+function getSourceLayer(currentFilePath) {
+  return layerOfPath(currentFilePath);
+}
 
-  // Handle @/ imports
-  if (importPath.startsWith('@/')) {
-    const match = importPath.match(/^@\/([^/]+)/);
-    if (match) {
-      const dir = match[1];
-      return LEGACY_TO_LAYER[dir] || 'unknown';
-    }
+/**
+ * Resolve a relative specifier against the importing file, so it can be
+ * classified like any other path. Returns a `src`-rooted path; extensionless
+ * specifiers are fine because `layerOfPath` only reads the first segment.
+ */
+function resolveRelative(fromFile, specifier) {
+  const segments = fromFile.replace(/\\/g, '/').split('/').slice(0, -1);
+  for (const segment of specifier.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
   }
+  return segments.join('/');
+}
 
+/** The layer an import specifier points at, from the importing file's path. */
+function getTargetLayer(importPath, currentFilePath) {
+  // `@/x/y` and `../x/y` are the same lookup once normalised to a src path.
+  if (importPath.startsWith('@/')) {
+    return layerOfPath(`/src/${importPath.slice(2)}`);
+  }
+  if (importPath.startsWith('.')) {
+    return layerOfPath(resolveRelative(currentFilePath, importPath));
+  }
   return 'unknown';
 }
 
@@ -159,7 +200,7 @@ function checkRuntimeEdge(context, node, importPath, currentFilePath) {
   }
 
   const sourceLayer = getSourceLayer(currentFilePath);
-  const targetLayer = getTargetLayer(importPath);
+  const targetLayer = getTargetLayer(importPath, currentFilePath);
 
   // Skip if we can't determine layers
   if (sourceLayer === 'unknown' || targetLayer === 'unknown') {
@@ -183,7 +224,7 @@ function checkRuntimeEdge(context, node, importPath, currentFilePath) {
 
 // Exported for the fixture that asserts every `src/` directory is classified.
 // The rule's own behaviour never reads them directly.
-export { ALLOWED_IMPORTS, LEGACY_TO_LAYER, NON_LAYER_DIRS };
+export { ALLOWED_IMPORTS, LEGACY_TO_LAYER, NON_LAYER_DIRS, ROOT_FILE_LAYER };
 
 export default {
   meta: {
