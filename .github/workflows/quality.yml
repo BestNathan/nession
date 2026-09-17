@@ -37,6 +37,6 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
       - run: cd web && npm ci
+      - run: just design-check full
       - run: just web-lint
       - run: just web-test
-      - run: just design-test

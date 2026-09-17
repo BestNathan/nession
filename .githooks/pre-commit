@@ -13,6 +13,7 @@ NC='\033[0m'
 STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
 STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep '^web/' || true)
 STAGED_ALL=$(git diff --cached --name-only --diff-filter=ACM)
+STAGED_DESIGN=$(echo "$STAGED_ALL" | grep -E '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)' || true)
 
 if [ -z "$STAGED_ALL" ]; then
   exit 0
@@ -86,6 +87,19 @@ if [ -n "$STAGED_TMUX_CHECK" ]; then
   fi
 fi
 
+# ── Canonical design-system gate (fast profile) ────────────────────────────
+# #759 owns the rule list in design/scripts/design-gate.mjs. Hooks choose a
+# cost profile only; they must not duplicate capsule/token/shadcn rule lists.
+if [ -n "$STAGED_DESIGN" ]; then
+  echo -e "${YELLOW}→ just design-check fast${NC}"
+  if just design-check fast; then
+    echo -e "${GREEN}✓ just design-check fast${NC}"
+  else
+    echo -e "${RED}✗ just design-check fast — follow DESIGN_SYSTEM_VIOLATION owner/repair output${NC}"
+    HAS_ERROR=1
+  fi
+fi
+
 # ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
 if [ -n "$STAGED_TSX" ]; then
   echo -e "${YELLOW}→ just web-lint${NC}"
@@ -93,29 +107,6 @@ if [ -n "$STAGED_TSX" ]; then
     echo -e "${GREEN}✓ just web-lint${NC}"
   else
     echo -e "${RED}✗ just web-lint${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Capsule design-token gate (eslint rule + selftest on script change) ─────
-STAGED_CAPSULE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^web/src/features/terminal/capsule/.*\.(ts|tsx)$' || true)
-STAGED_TOKEN_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^design/tokens/' || true)
-STAGED_TOKEN_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-design-tokens' || true)
-if [ -n "$STAGED_CAPSULE$STAGED_TOKEN_SRC$STAGED_TOKEN_CHECK" ]; then
-  echo -e "${YELLOW}→ check-design-tokens${NC}"
-  if ./scripts/check-design-tokens.sh; then
-    echo -e "${GREEN}✓ check-design-tokens${NC}"
-  else
-    echo -e "${RED}✗ check-design-tokens — use capsuleStyles + design/tokens/${NC}"
-    HAS_ERROR=1
-  fi
-fi
-if echo "$STAGED_TOKEN_CHECK" | grep -q selftest; then
-  echo -e "${YELLOW}→ check-design-tokens-selftest${NC}"
-  if ./scripts/check-design-tokens-selftest.sh; then
-    echo -e "${GREEN}✓ check-design-tokens-selftest${NC}"
-  else
-    echo -e "${RED}✗ check-design-tokens-selftest${NC}"
     HAS_ERROR=1
   fi
 fi
@@ -131,7 +122,7 @@ if [ -n "$STAGED_TSX" ]; then
   fi
 fi
 
-# ── Relocate stray root PNG screenshots ───────────────────────────────────────
+# ── Relocate stray root PNG screenshots ────────────────────────────────────
 # Playwright MCP saves a screenshot to the CWD when given a bare filename, so
 # screenshots can land in the repo root. Move them into the gitignored
 # .playwright-mcp/screenshots/ and unstage any that were accidentally staged —
