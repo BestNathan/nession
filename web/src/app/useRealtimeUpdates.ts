@@ -1,8 +1,8 @@
 import { useEffect, useCallback } from 'react';
 import type { WebSocketService } from '../services/socket';
-import { agentsApi } from '../features/agents';
+import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
-import type { useAgentData } from '@/features/agents/hooks/useAgentData';
+import type { useAgentData } from '@/product/agent/hooks/useAgentData';
 import type { useSessionData } from '@/product/session/hooks/useSessionData';
 
 type AgentDataReturn = ReturnType<typeof useAgentData>;

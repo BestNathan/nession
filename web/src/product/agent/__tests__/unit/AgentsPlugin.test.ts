@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AgentsPlugin } from '@/features/agents/AgentsPlugin';
+import { AgentsPlugin } from '@/product/agent/AgentsPlugin';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import type { Agent } from '@/types';
 

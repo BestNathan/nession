@@ -1,7 +1,7 @@
 import { UserRound } from 'lucide-react';
 import type { WorkspaceViewBinding } from '../workspaceContext';
 import { AppToolScroll } from '../AppToolScroll';
-import { AgentDetail } from '@/features/agents/components/AgentDetail';
+import { AgentDetail } from '@/product/agent/components/AgentDetail';
 
 export const agentView: WorkspaceViewBinding = {
   id: 'agent',
