@@ -73,6 +73,10 @@
   --editor-background: var(--background);
   --editor-gutter: var(--muted);
   --editor-active-line: var(--accent);
+  --typography-primary-size: 12.5px;
+  --typography-secondary-size: 11px;
+  --typography-metadata-size: 10px;
+  --typography-code-size: 12px;
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 36px;

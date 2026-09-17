@@ -84,6 +84,54 @@ test('the pattern doc list is read from the docs tree, not hand-kept', () => {
   assert.ok(docs.includes('pattern.terminal-capsule'));
 });
 
+// #774 Workstream 2: a typography role is only real if production text uses it.
+// The failure mode this guards against is the one the requirement names —
+// adding semantic roles that nothing consumes, so the vocabulary grows while
+// the fragmentation it was meant to fix stays exactly where it was.
+test('every typography role is reached by a production consumer', () => {
+  const records = new Map(buildInventory().tokens.records.map((r) => [r.id, r]));
+  const roles = ['primary', 'secondary', 'metadata', 'code'];
+
+  for (const role of roles) {
+    const id = `experience.web.typography.${role}.size`;
+    const record = records.get(id);
+    assert.ok(record, `${id} is missing from the token source`);
+    assert.ok(
+      record.downstream.length > 0,
+      `${id} is not referenced by any component token — a role nothing derives from`,
+    );
+    assert.ok(
+      record.effectiveConsumers.length > 0,
+      `${id} reaches no production file — a zero-consumer role`,
+    );
+  }
+});
+
+test('typography roles own size only — family, weight and line-height stay out', () => {
+  const ids = buildInventory().tokens.records.map((r) => r.id);
+  const roleIds = ids.filter((id) => id.startsWith('experience.web.typography.'));
+
+  assert.ok(roleIds.length > 0);
+  // Every role leaf is a `.size`. Family (mono/sans) and weight are cross-cutting
+  // — `font-medium` appears under every role and mono is used for both metadata
+  // and primary — so folding them into a role would be wrong. Line-height belongs
+  // to the block that owns it, e.g. `workspace.treeLineHeight`.
+  for (const id of roleIds) {
+    assert.match(id, /^experience\.web\.typography\.[a-z]+\.size$/, `${id} is not a size leaf`);
+  }
+});
+
+test('one role can own a size for two different components', () => {
+  const records = new Map(buildInventory().tokens.records.map((r) => [r.id, r]));
+  const role = records.get('experience.web.typography.secondary.size');
+  // A section heading and a tree row are different components with the same
+  // text job. Before this, each stated 11px independently.
+  assert.deepEqual(role.downstream.slice().sort(), [
+    'experience.web.shell.sectionHeadFontSize',
+    'experience.web.workspace.treeFontSize',
+  ]);
+});
+
 test('$owner inherits down its group, and absent means generic platform', () => {
   const byId = new Map(buildInventory().tokens.records.map((r) => [r.id, r]));
   // Group annotation reaches every leaf under it.

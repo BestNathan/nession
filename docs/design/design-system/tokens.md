@@ -83,6 +83,53 @@ session-item metric that happens to be reused. Its name is narrower than its
 use, which is a naming question for whoever next touches those rows — not an
 ownership one, and not a reason to move a value.
 
+### Typography roles
+
+[visual-language.md](../visual-language.md) defines five chrome text roles. Until
+#774 they existed only as prose: the token layer named sizes per component
+(`sessionRowTitleFontSize`, `nodeFontSize`, `footFontSize`, …), so the same job
+had a different name everywhere it appeared.
+
+`experience.web.typography.{primary,secondary,metadata,code}.size` is that
+vocabulary in the token layer. A component token says which role it is and
+derives the size from it:
+
+```json
+"sessionRowTitleFontSize": { "ref": "experience.web.typography.primary.size" }
+```
+
+**A role owns size only.** Family and weight are cross-cutting — `font-medium`
+appears under every role, and monospace carries both metadata
+(`sessionRowMetaFontSize`) and primary (`nodeFontSize`) — so folding them into a
+role would misstate the evidence. Line-height stays with the block that owns it
+(`workspace.treeLineHeight`), not with the size role.
+
+Because a role's consumers are reached through the ref graph, the inventory
+reports them (`downstream` + `effectiveConsumers`) rather than anyone grepping
+for `--typography-*`. A role that reaches no production file fails a test — the
+requirement's own failure mode is "new semantic roles that nothing consumes".
+
+The pilot migration moved five tokens onto roles and **changed no value**:
+`design/generated/web.css` gained four role variables and no existing variable
+moved. `|value|` in the token source is now stated once per role instead of once
+per component.
+
+#### Near-duplicates this surfaced and deliberately did *not* collapse
+
+Three tokens do a role's job at a different size. Converging them is a visual
+decision, not a token one, so they were left where they are:
+
+| Token | Value | Role value | Why it is not obviously the role |
+|---|---|---|---|
+| `shell.footFontSize` | 10.5px | 10px | its own description says "matching the session metadata it sits under" — the stated intent and the value already disagree |
+| `shell.nodeFontSize` | 11.5px | 12.5px | monospace; "a node name is infrastructure identity" may earn its own role |
+| `workspace.editorHeadFontSize` | 11.5px | 10px | "it names what is open, it is not a title" — reads as metadata |
+
+These three are the evidence that the fragmentation was real. Separately, 20
+font sizes in production are still raw literals — `text-[10px]` (15),
+`text-[11px]` (3), `text-[9px]` (2), across seven files — and those bypass the
+token layer entirely. They are the next migration, not this one.
+
 Product UI must not consume Primitive palette values directly.
 
 Web and App share Primitive, Semantic, and Domain meaning. They specialize at Experience for density, touch/pointer behavior, safe areas, and control sizing. Do not create two independent design systems.
