@@ -25,6 +25,7 @@ export default tseslint.config(
       'nession/no-primitive-tokens': 'error',
       'nession/no-cross-experience-token': 'error',
       'nession/no-capsule-magic-metrics': 'error',
+      'nession/no-capsule-control-band': 'error',
       'nession/no-sf-overlay-vars': 'error',
       'nession/no-reverse-imports': 'error', // Enforce layered architecture import direction
 
@@ -91,6 +92,7 @@ export default tseslint.config(
     rules: {
       'max-lines-per-function': 'off',
       'nession/no-capsule-magic-metrics': 'off',
+      'nession/no-capsule-control-band': 'off',
       'nession/no-sf-overlay-vars': 'off',
     },
   },
