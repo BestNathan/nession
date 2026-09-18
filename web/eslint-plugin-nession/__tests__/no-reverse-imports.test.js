@@ -477,6 +477,22 @@ test('every src/ directory is classified — mapped, or deliberately not a layer
     `NON_LAYER_DIRS names directories that do not exist: ${stale.join(', ')}`,
   );
 
+  // And the same for the layer table itself. It is the table that decides
+  // whether an edge gets checked at all, so a row for a directory that no
+  // longer exists is the most misleading kind of leftover: it reads as a layer
+  // with no members rather than as stale. `NON_LAYER_DIRS` and
+  // `ROOT_FILE_LAYER` have had this direction checked from the start; this one
+  // had not, which is how `core` survived its own directory being deleted.
+  const staleLayers = Object.keys(LEGACY_TO_LAYER).filter((dir) => !dirs.includes(dir));
+  assert.deepEqual(
+    staleLayers,
+    [],
+    `LEGACY_TO_LAYER names directories that do not exist: ${staleLayers.join(', ')}. `
+      + 'Delete the row: a layer nothing can be in protects nothing while reading '
+      + 'as coverage. (A layer name may outlive its directory — rename the row to '
+      + 'the directory that now carries it rather than keeping both.)',
+  );
+
   // Modules directly under `src/` sit on real edges — `types.ts` is imported by
   // every layer — but the directory-shaped lookup above cannot see them, so they
   // resolved to `unknown` and went unchecked in both directions. Same hole as

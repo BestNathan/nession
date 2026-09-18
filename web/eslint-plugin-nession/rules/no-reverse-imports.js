@@ -89,12 +89,14 @@ const ALLOWED_IMPORTS = {
   // product semantics (the Explorer file-tree framework, the Server plugin).
   // It sits above `shared` and below everything that means anything.
   //
-  // It is not React-free as a layer; `core/terminal-runtime` is React-free as a
-  // module, and that property is worth keeping where it already holds. Widening
-  // the layer's definition to admit a UI framework is deliberate: #801's §7
-  // convergence list describes where `platform` will *come from*
+  // It is not React-free as a layer; `platform/terminal-runtime` is React-free
+  // as a module, and that property is worth keeping where it already holds.
+  // Widening the layer's definition to admit a UI framework is deliberate:
+  // #801's §7 convergence list describes where `platform` will *come from*
   // (`core/` + `runtime/` + `services/` + `atoms/` + owner-specific `lib/`),
-  // not the whole of what it may hold.
+  // not the whole of what it may hold. Of that list `core/terminal-runtime` has
+  // arrived; `runtime/`, `services/`, `atoms/` and the owner-specific `lib/`
+  // files still classify as the `core` layer and are allowed below.
   'platform': ['core', 'shared'],
   // `extensions/` is a rung of its own. It may reach `capabilities` because an
   // extension is the UI contribution *for* a capability —
@@ -132,7 +134,11 @@ const LEGACY_TO_LAYER = {
   'markdown': 'shared', // markdown pipeline — rationale in the note above
   'services': 'core', // services/socket, attachPrefs, deepLinkAttach
   'runtime': 'core',
-  'core': 'core',
+  // `core` the *directory* is gone — `core/terminal-runtime` became
+  // `platform/terminal-runtime`, and it was `core/`'s only child. `core` the
+  // *layer* is still here, holding `services/` and `runtime/` until they
+  // converge too; that is why ALLOWED_IMPORTS still names it. Deleting this row
+  // while keeping the layer is the accurate state, not a half-measure.
   'shared': 'shared',
   // `features` is deliberately absent: the directory is gone. A row for it would
   // be a layer that nothing can be in — and if someone recreates `src/features/`,

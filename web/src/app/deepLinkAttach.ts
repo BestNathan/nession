@@ -3,7 +3,7 @@ import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import { sessionsApi } from '@/product/session';
 import type { AgentProbe } from '@/atoms/probe';
 import { loadAttachPrefs } from '@/services/attachPrefs';
-import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
+import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
 import { orderByLatency, testAddresses } from '@/lib/addressSelection';
 import {
   validateProfile,

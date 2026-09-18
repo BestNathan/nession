@@ -18,7 +18,7 @@ import { getDefaultStore } from 'jotai';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { terminalTransportReadyAtom } from '@/product/terminal/state/transport';
-import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
+import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 
 // xterm.open() requires window.matchMedia in jsdom (same stub as
 // TerminalController.test.ts).

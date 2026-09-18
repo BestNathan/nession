@@ -57,7 +57,7 @@ Two constraints that are *not* expressible as a direction and stay prose:
 PRINCIPLE #5 — a capability may contribute views and state but must not define
 global structure, so `capabilities/*` reaches the shell only through a
 contribution contract (`app/workspace/capabilities.ts` +
-`viewBindings.ts`), never by importing `app/` internals. And `core/terminal-runtime`
+`viewBindings.ts`), never by importing `app/` internals. And `platform/terminal-runtime`
 is React-free; that is a property of the module, not of `platform`, and the
 layer rule cannot enforce either.
 
@@ -85,7 +85,8 @@ the honest answer to "where does this go today" until the row moves.
 | `extensions/claude-code/` — the retired UI-section registration | **deleted** | 4 |
 | `app/workspace/views/` — the other four Web/App layouts | **split into the experiences** — `experiences/{web,app}/workspaceViews.tsx` | **done (finishes 2)** |
 | `app/workspace/AppToolScroll.tsx` — App scroll chrome | `app/experiences/app/AppToolScroll.tsx` | **done (finishes 2)** |
-| `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
+| `core/terminal-runtime/` — the React-free terminal runtime | `platform/terminal-runtime/` | **done** | 5 |
+| `runtime/`, `services/` | `platform/<domain>/` | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
 | `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
@@ -162,7 +163,7 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 
   Widening `platform` to admit a UI framework is deliberate: #801's §7
   convergence list says where `platform` will *come from*, not the whole of what
-  it may hold, and "React-free" is a property of `core/terminal-runtime` rather
+  it may hold, and "React-free" is a property of `platform/terminal-runtime` rather
   than a precondition for the layer.
 - **`product → extensions` is a real edge, not a leak.** Moving `AgentDetail`
   into `product/agent/` surfaced it: the pattern renders the `agent-detail`
@@ -252,8 +253,8 @@ src/
 │   └── claude-code/         # transport, UI, and contribution.tsx (presence + view)
 ├── platform/                # transport, runtime, attach — and framework-level code
 │   ├── server/              # the Server transport plugin + its menu
-│   └── explorer/            # the file-tree framework (no Nession product semantics)
-├── core/terminal-runtime/   # React-free runtime: controller, transports, input, xterm
+│   ├── explorer/            # the file-tree framework (no Nession product semantics)
+│   └── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
 ├── runtime/                 # SessionRuntime registry + attach state machines
 ├── services/                # socket/ (WebSocketService, MessageRouter, clientId) +
 │                            #   attachPrefs, sessionAttachProfile, deepLinkAttach, addressSelection
@@ -321,13 +322,14 @@ in each README — e.g. `files → explorer` (the file-tree framework),
 
 ### State ownership
 
-Rules follow #649 (per-feature READMEs hold the detailed table):
+Rules follow #649 (the owner's README holds the detailed table):
 
-- transient / short-lived UI state → component state or a capability hook
+- transient / short-lived UI state → component state or an owner hook
 - capability state shared across components → capability `model/`/`hooks/` (per
   mount; session-list state is deliberately **not** hoisted to a global atom)
-- transport / connection / terminal lifecycle → core (`core/terminal-runtime`,
-  `services/socket`) and shared atoms (`atoms/`)
+- transport / connection / terminal lifecycle → `platform/terminal-runtime`,
+  `platform/<domain>`, `services/socket` (still the `core` layer until Phase 5
+  finishes) and `atoms/`
 - current page, layout, selected workspace → app layer (`app/`)
 
 ### Extension points

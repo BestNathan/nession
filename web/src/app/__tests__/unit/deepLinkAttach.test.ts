@@ -16,7 +16,7 @@ vi.mock('@/services/attachPrefs', () => ({
   loadAttachPrefs: () => ({ mode: 'auto', renderer: 'webgl' }),
 }));
 
-vi.mock('@/core/terminal-runtime/Renderer', () => ({
+vi.mock('@/platform/terminal-runtime/Renderer', () => ({
   detectWebGLSupport: () => true,
 }));
 

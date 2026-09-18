@@ -5,11 +5,11 @@ import '@xterm/xterm/css/xterm.css';
 import {
   NESSION_TERMINAL_THEME,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
-} from '@/core/terminal-runtime/ThemeManager';
+} from '@/platform/terminal-runtime/ThemeManager';
 import {
   DEFAULT_FONT,
   DEFAULT_FONT_SIZE,
-} from '@/core/terminal-runtime/instance/TerminalInstance';
+} from '@/platform/terminal-runtime/instance/TerminalInstance';
 import { TerminalSurface } from '@/product/terminal/TerminalSurface';
 
 const FIXTURE_BUFFER = [

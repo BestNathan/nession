@@ -9,7 +9,7 @@ and the **filter vocabulary** (`StatusFilter`/`SortField`/`SortDirection`,
 declared in `types.ts`) shared with app-layer composers.
 
 It does **not** own the attach/terminal runtime — that lives in `atoms/` +
-`runtime/` + `core/terminal-runtime` (connectivity domain). The Dashboard
+`runtime/` + `platform/terminal-runtime` (connectivity domain). The Dashboard
 predecessor shell (with its own `components/SessionList` + `SessionsSection`
 rows and preview dialogs) was deleted in Phase 5 (#655).
 
