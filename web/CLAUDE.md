@@ -71,9 +71,9 @@ src/
 │                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
 │                          #   code with no product semantics
+│                          #   server/, explorer/, terminal-runtime/ (React-free)
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
-├── core/terminal-runtime/ # React-free terminal runtime
 ├── runtime/               # SessionRuntime ownership + attach state machines
 ├── atoms/                 # Jotai atoms split by domain
 ├── services/              # WS client and other core services
@@ -89,10 +89,10 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 ## 4. State and data
 
-- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores.
-- Session / attach / file flows go through app-composition and feature hooks rather than embedding WebSocket calls deep in presentational components.
+- Jotai atoms live under `src/atoms/` and owner-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores. **State follows ownership, not state-management technology** — `atoms/` is not a default home for new state (#801 Phase 5).
+- Session / attach / file flows go through app-composition and owner hooks rather than embedding WebSocket calls deep in presentational components.
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
-- New feature capabilities should expose a feature-owned API/plugin boundary rather than leaking transport concerns into UI composition.
+- A new capability should expose an owner-owned API/plugin boundary rather than leaking transport concerns into UI composition.
 
 ---
 

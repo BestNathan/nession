@@ -26,10 +26,10 @@ import {
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/product/terminal/useSessionFirstTerminalAttach';
-import { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
-import { createAttachGate } from '@/core/terminal-runtime/adapters/TransportAttachGate';
-import { detectProfile, PROFILES } from '@/core/terminal-runtime/DeviceProfile';
-import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
+import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
+import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
+import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
+import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/product/terminal/state/ui';
 

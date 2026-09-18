@@ -87,16 +87,16 @@ nession/
 │       ├── capabilities/     # Discoverable/activatable capabilities, as vertical slices:
 │       │                     #   files/, env/, commands/, claude-code/
 │       ├── platform/         # transport/runtime/attach + framework-level code with no
-│       │                     #   product semantics: server/, explorer/
+│       │                     #   product semantics: server/, explorer/,
+│       │                     #   terminal-runtime/ (React-free: controller, transport, input)
 │       ├── shared/           # Shared layer: hooks/ (generic React hooks importable by all layers)
 │       ├── components/
 │       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
-│       ├── core/terminal-runtime/  # React-free terminal runtime (controller, transport, input)
 │       ├── runtime/          # SessionRuntime ownership + attach state machines (core layer)
 │       ├── atoms/            # Shared Jotai atoms (connection, session, probe) (shared layer)
 │       ├── lib/              # Pure helpers (shared layer)
 │       ├── services/         # WS client, attach prefs, deep link (core layer)
-│       └── extensions/       # Extension registry (e.g. claude-code UI contributions)
+│       └── extensions/       # Generic UI-slot registry (no contributor today)
 │
 ├── deploy/                   # Docker runtime scripts & configs
 │   ├── docker-compose.yml

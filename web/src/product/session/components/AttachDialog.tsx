@@ -29,7 +29,7 @@ import {
   loadSessionProfile,
   type SessionAttachProfile,
 } from '@/services/sessionAttachProfile';
-import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
+import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
 import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
 import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';
 

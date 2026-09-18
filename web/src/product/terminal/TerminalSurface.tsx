@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { TerminalCapsule, type CapsuleMode } from '@/product/terminal/capsule/TerminalCapsule';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
-import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
+import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (SessionFirstTerminalPane). */

@@ -3,11 +3,11 @@ import { atom } from 'jotai';
 import { sessionIdAtom, sessionNameAtom, terminalSessionStateAtom } from '@/atoms/session';
 import { effectiveModeAtom } from '@/atoms/connection';
 
-// TerminalStatus/TerminalSession live in core/terminal-runtime so runtime
+// TerminalStatus/TerminalSession live in platform/terminal-runtime so runtime
 // consumers never depend on the Jotai state layer; re-exported here for
 // React-side imports.
-import type { TerminalSession } from '@/core/terminal-runtime/types';
-export type { TerminalSession, TerminalStatus } from '@/core/terminal-runtime/types';
+import type { TerminalSession } from '@/platform/terminal-runtime/types';
+export type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtime/types';
 // Current terminal connection status. Defined in `atoms/session.ts` and
 // re-exported here: the session atoms write it, and `atoms/` is `shared`, which
 // cannot import a feature. This keeps the feature-side import path stable (#783).

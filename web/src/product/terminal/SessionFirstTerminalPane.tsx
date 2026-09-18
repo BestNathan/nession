@@ -1,5 +1,5 @@
 import { Loader2 } from 'lucide-react';
-import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
+import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { TerminalInputOverlay } from '@/product/terminal/components/input/TerminalInputOverlay';
 import { isTerminalLive } from '@/product/terminal/useSessionFirstTerminalAttach';

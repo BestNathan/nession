@@ -1,5 +1,5 @@
 import { useRef, useLayoutEffect } from 'react';
-import type { TerminalController } from '@/core/terminal-runtime/controller/TerminalController';
+import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
 /**
  * Pure DOM mount point for xterm.
