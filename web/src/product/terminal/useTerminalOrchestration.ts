@@ -210,20 +210,6 @@ export function useTerminalOrchestration({
   const terminalState = snapshot?.phase ?? mirroredAttach.terminalState;
   const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
 
-  // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
-  if (effectiveMode === 'relay') {
-    console.log('[diag-relay]', JSON.stringify({
-      runtimeId: runtime?.diagId ?? null,
-      sid: runtime?.sessionId ?? null,
-      effectiveMode,
-      terminalState,
-      snapshotPhase: snapshot?.phase ?? null,
-      mirrorState: mirroredAttach.terminalState,
-      hasRuntime: runtime !== null,
-      hasAgentApi: agentTerminalApi !== null,
-    }));
-  }
-
   const handleDisconnect = useEndRelayOnDisconnect({
     effectiveMode, serverConnection: relayServer, sessionId, onDisconnect,
   });

@@ -93,13 +93,7 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.reconnectCount === b.reconnectCount;
 }
 
-// TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
-let diagRuntimeCounter = 0;
-
 export class SessionRuntime {
-  /** TEMPORARY DIAGNOSTIC — identity, so the UI's runtime can be matched to the
-   *  one that actually attaches. Remove before merge. */
-  readonly diagId: number = ++diagRuntimeCounter;
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
   readonly attachController: SessionAttachController;
@@ -510,24 +504,6 @@ export class SessionRuntime {
    */
   private driveRelayAttach(): void {
     const conn = this.config.serverConnection;
-    // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
-    console.log('[diag-gate]', JSON.stringify({
-      runtimeId: this.diagId,
-      sid: this.sessionId,
-      hasConn: !!conn,
-      connReady: conn ? conn.isReady() : null,
-      hasAttachInfo: !!this.config.attachInfo,
-      forcedRelay: this.config.forcedRelay,
-      transportReady: this.transportReady,
-      phase: this.attachState.phase,
-      // The published snapshot's own phase. If this lags `phase`, the UI can
-      // only ever see the stale value — which is the whole question.
-      snapshotPhase: this.snapshot.phase,
-      // Last standing candidate: a spurious route-intent change re-drives the
-      // attach and holds it at 'connecting'. If this value moves across the
-      // attached -> connecting transition, that is the cause.
-      epoch: this.routeIntentEpoch,
-    }));
     if (!conn || !this.config.attachInfo) {
       return;
     }
