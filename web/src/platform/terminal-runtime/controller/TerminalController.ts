@@ -1,6 +1,6 @@
 // web/src/terminal/controller/TerminalController.ts
 import { Terminal } from '@xterm/xterm';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type {
   DeviceProfile,
   InputMode,

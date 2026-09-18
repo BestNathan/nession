@@ -6,7 +6,7 @@ import {
   validateProfile,
   type PersistedAttachChoice,
   type SessionAttachProfile,
-} from '@/services/sessionAttachProfile';
+} from '@/platform/attach/sessionAttachProfile';
 
 function addr(url: string, networkType = 'lan') {
   return {

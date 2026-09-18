@@ -87,14 +87,13 @@ nession/
 │       ├── capabilities/     # Discoverable/activatable capabilities, as vertical slices:
 │       │                     #   files/, env/, commands/, claude-code/
 │       ├── platform/         # transport/runtime/attach + framework-level code with no
-│       │                     #   product semantics: server/, explorer/, terminal-runtime/
-│       │                     #   (React-free), session-runtime/, attach/
+│       │                     #   product semantics: socket/, server/, explorer/,
+│       │                     #   terminal-runtime/ (React-free), session-runtime/, attach/
 │       ├── shared/           # Shared layer: hooks/ (generic React hooks importable by all layers)
 │       ├── components/
 │       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
 │       ├── atoms/            # Shared Jotai atoms (connection, session, probe) (shared layer)
 │       ├── lib/              # Pure helpers (shared layer)
-│       ├── services/         # WS client, attach prefs, deep link (core layer)
 │       └── extensions/       # Generic UI-slot registry (no contributor today)
 │
 ├── deploy/                   # Docker runtime scripts & configs
@@ -144,7 +143,7 @@ tmux sessions (per-node)
 
 - **hooks placement**: shared hooks in `shared/hooks/`, owner hooks in `<owner>/hooks/` (`product/<concept>/`, `capabilities/<name>/`, `platform/<domain>/`), app-composition hooks in `app/`. Never place hooks in `components/`.
 - **components/**: only the shared `ui/` shadcn primitives live under `components/ui/`; owner UI belongs in `<owner>/components/`, shell UI in `app/`.
-- **services/socket/**: WebSocket functionality is plugin-based. A new wire-protocol family is a `TransportPlugin` (`services/socket/types.ts`) implemented inside its owner layer and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`) — never added to the core `WebSocketService`. **Not to be confused with a Product Capability**, which has a presence state (`product/capability`); a transport plugin has none and is user-invisible.
+- **platform/socket/**: WebSocket functionality is plugin-based. A new wire-protocol family is a `TransportPlugin` (`platform/socket/types.ts`) implemented inside its owner layer and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`) — never added to the core `WebSocketService`. **Not to be confused with a Product Capability**, which has a presence state (`product/capability`); a transport plugin has none and is user-invisible.
 - **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
 
 ### Key Design Decisions

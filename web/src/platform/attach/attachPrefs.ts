@@ -1,4 +1,4 @@
-import type { AttachMode } from '../types';
+import type { AttachMode } from '@/types';
 
 const STORAGE_KEY = 'nession_attach_prefs';
 

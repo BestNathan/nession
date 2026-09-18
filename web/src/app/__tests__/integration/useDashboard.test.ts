@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDashboard } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
-import type { WebSocketService } from '@/services/socket';
+import type { WebSocketService } from '@/platform/socket';
 
 // ---------------------------------------------------------------------------
 // Feature API mocks — useDashboard's data/subscription chain now talks to the

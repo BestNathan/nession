@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { Agent, Session } from '../types';
-import type { WebSocketService } from '../services/socket';
+import type { WebSocketService } from '../platform/socket';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { useAgentData } from '@/product/agent/hooks/useAgentData';
 import { useSessionData, type FetchSessionsOptions } from '@/product/session/hooks/useSessionData';

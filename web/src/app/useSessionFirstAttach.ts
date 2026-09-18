@@ -9,10 +9,10 @@ import {
   sessionIdAtom,
 } from '../atoms/session';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
-import { saveAttachPrefs } from '../services/attachPrefs';
+import { saveAttachPrefs } from '../platform/attach/attachPrefs';
 import { probeResultsAtom } from '../atoms/probe';
 import { resolveProfileAttach } from './deepLinkAttach';
-import { loadSessionProfile, persistConfirmedChoice } from '../services/sessionAttachProfile';
+import { loadSessionProfile, persistConfirmedChoice } from '../platform/attach/sessionAttachProfile';
 import type { Session } from '../types';
 
 /** Session-first attach: profile-aware dialog bypass + explicit configure. */

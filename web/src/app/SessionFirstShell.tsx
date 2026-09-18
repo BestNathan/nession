@@ -5,7 +5,7 @@ import { useProbePolling } from '@/app/useProbePolling';
 import { SessionFirstDialogs } from '@/app/SessionFirstDialogs';
 import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
 import { useSessionFirstShellState } from '@/app/useSessionFirstShellState';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 
 export interface SessionFirstShellProps {
   connectionStatus: ConnectionState;

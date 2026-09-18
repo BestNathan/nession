@@ -15,7 +15,7 @@ import {
   manualOverrideAtom,
 } from '@/atoms/session';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type { AttachResult, TerminalAgentApi } from '@/product/terminal';
 import { AttachStateMachine, type AttachPhase } from '@/platform/attach/AttachStateMachine';
 import { SessionAttachController } from '@/platform/attach/SessionAttachController';

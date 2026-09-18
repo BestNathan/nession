@@ -4,7 +4,7 @@ import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTran
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/capabilities/env';
 import type { TerminalAgentApi } from '@/product/terminal/agent';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import {
   relayServerHandle,
   type RelayServerHandle,

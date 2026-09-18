@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketService } from '@/services/socket/WebSocketService';
+import { WebSocketService } from '@/platform/socket/WebSocketService';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import type { TransportPlugin, HandshakeSurface, SocketMessage } from '@/services/socket/types';
+import type { TransportPlugin, HandshakeSurface, SocketMessage } from '@/platform/socket/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 

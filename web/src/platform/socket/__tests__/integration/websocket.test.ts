@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketService } from '@/services/socket';
-import type { TransportPlugin, SocketMessage } from '@/services/socket/types';
+import { WebSocketService } from '@/platform/socket';
+import type { TransportPlugin, SocketMessage } from '@/platform/socket/types';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
 import { serverApi } from '@/platform/server';

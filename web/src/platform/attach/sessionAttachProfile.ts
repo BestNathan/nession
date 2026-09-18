@@ -1,4 +1,4 @@
-import type { AttachInfo, AttachMode, EnvFileRef, Session } from '../types';
+import type { AttachInfo, AttachMode, EnvFileRef, Session } from '@/types';
 
 const STORAGE_KEY = 'nession_session_attach_profiles';
 export const ATTACH_PROFILE_SCHEMA_VERSION = 1 as const;

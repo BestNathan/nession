@@ -23,12 +23,12 @@ import { Label } from '@/components/ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '@/types';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
-import { loadAttachPrefs } from '@/services/attachPrefs';
+import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
 import {
   candidateUrlsOf,
   loadSessionProfile,
   type SessionAttachProfile,
-} from '@/services/sessionAttachProfile';
+} from '@/platform/attach/sessionAttachProfile';
 import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
 import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
 import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';

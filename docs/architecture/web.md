@@ -24,7 +24,7 @@ the design system, the source layout and the lint gate all use one language.
 activatable, with a presence state, met by a user in the UI (Files, Env,
 Commands, Claude Code). The wire-protocol adapters on `WebSocketService` used to
 be called `CapabilityPlugin` too; they are now `TransportPlugin`
-(`services/socket/types.ts`), because they have no presence, are never
+(`platform/socket/types.ts`), because they have no presence, are never
 activated, and are invisible to the user. Any sentence where "capability" could
 mean either is a sentence to rewrite.
 
@@ -87,7 +87,7 @@ the honest answer to "where does this go today" until the row moves.
 | `app/workspace/AppToolScroll.tsx` — App scroll chrome | `app/experiences/app/AppToolScroll.tsx` | **done (finishes 2)** |
 | `core/terminal-runtime/` — the React-free terminal runtime | `platform/terminal-runtime/` | **done** | 5 |
 | `runtime/` — SessionRuntime + the attach machinery | `platform/{session-runtime,attach}/` | **done** | 5 |
-| `services/` | `platform/{socket,attach}/` | 5 |
+| `services/` — the WS client + attach prefs/profile | `platform/{socket,attach}/` | **done** | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
 | `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
@@ -253,15 +253,13 @@ src/
 │   ├── commands/            # quick-command capability + presets
 │   └── claude-code/         # transport, UI, and contribution.tsx (presence + view)
 ├── platform/                # transport, runtime, attach — and framework-level code
+│   ├── socket/              # WebSocketService, MessageRouter, clientId, wire types
 │   ├── server/              # the Server transport plugin + its menu
 │   ├── explorer/            # the file-tree framework (no Nession product semantics)
 │   ├── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
 │   ├── session-runtime/     # SessionRuntime + its registry (acquire/release leases)
 │   └── attach/              # attach state machine, controller, address policy,
 │                            #   relay connection, attach prefs/profile
-├── services/                # socket/ (WebSocketService, MessageRouter, clientId)
-│                            #   — still the `core` layer until Phase 5 finishes it;
-│                            #   capability plugins live in capabilities/, not here
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
@@ -330,9 +328,8 @@ Rules follow #649 (the owner's README holds the detailed table):
 - transient / short-lived UI state → component state or an owner hook
 - capability state shared across components → capability `model/`/`hooks/` (per
   mount; session-list state is deliberately **not** hoisted to a global atom)
-- transport / connection / terminal lifecycle → `platform/terminal-runtime`,
-  `platform/<domain>`, `services/socket` (still the `core` layer until Phase 5
-  finishes) and `atoms/`
+- transport / connection / terminal lifecycle → `platform/<domain>`
+  (`socket/`, `attach/`, `session-runtime/`, `terminal-runtime/`) and `atoms/`
 - current page, layout, selected workspace → app layer (`app/`)
 
 ### Extension points

@@ -1,5 +1,5 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
-import type { PluginSurface } from '@/services/socket/types';
+import type { PluginSurface } from '@/platform/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 
 /**

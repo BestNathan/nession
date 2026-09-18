@@ -1,5 +1,5 @@
-import type { WebSocketService } from '@/services/socket';
-import type { ConnectionState } from '@/services/socket/types';
+import type { WebSocketService } from '@/platform/socket';
+import type { ConnectionState } from '@/platform/socket/types';
 // Type only. The capability singleton is passed in by the caller, which lives
 // above this layer — `platform` may not import a `product` module (#783).
 import type { TerminalServerApi } from '@/product/terminal';

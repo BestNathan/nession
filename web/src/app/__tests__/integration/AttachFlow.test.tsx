@@ -7,7 +7,7 @@ import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
-import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
+import { buildOptionsFingerprint } from '@/platform/attach/sessionAttachProfile';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';

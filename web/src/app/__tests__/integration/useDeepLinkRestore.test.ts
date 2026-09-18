@@ -15,12 +15,12 @@ const profileStore = vi.hoisted(() => ({
   current: null as SessionAttachProfile | null,
 }));
 
-vi.mock('@/services/sessionAttachProfile', () => ({
+vi.mock('@/platform/attach/sessionAttachProfile', () => ({
   loadSessionProfile: () => profileStore.current,
 }));
 
 import { resolveDeepLinkAttachChoice, resolveProfileAttach } from '@/app/deepLinkAttach';
-import type { SessionAttachProfile } from '@/services/sessionAttachProfile';
+import type { SessionAttachProfile } from '@/platform/attach/sessionAttachProfile';
 
 function makeSession(id = 'agent-1:s1'): Session {
   return {

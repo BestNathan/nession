@@ -4,7 +4,7 @@ import {
   loadSessionProfile,
   saveSessionProfile,
   type PersistedAttachChoice,
-} from '@/services/sessionAttachProfile';
+} from '@/platform/attach/sessionAttachProfile';
 
 const session = {
   session_id: 'agent-1:dev',
