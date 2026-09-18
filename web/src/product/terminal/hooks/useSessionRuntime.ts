@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
-import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pStateAtom } from '@/atoms/connection';
+import {
+  attachInfoAtom, effectiveModeAtom, forcedRelayAtom, manualOverrideAtom,
+  orderedUrlsAtom, sessionIdAtom, sessionNameAtom,
+} from '@/product/session/state';
+import { p2pStateAtom, routeIntentEpochAtom, transportGenerationAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
-import { forcedRelayAtom } from '@/atoms/session';
+import { forcedRelayAtom } from '@/product/session/state';
 import {
   terminalSessionStateAtom,
   type TerminalStatus,

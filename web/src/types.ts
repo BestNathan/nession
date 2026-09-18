@@ -153,10 +153,14 @@ export interface ServerInfo {
 /**
  * Attach lifecycle status of the local terminal connection.
  *
- * Lives here rather than beside the runtime that acts on it, because the Jotai
- * atoms read it too and `atoms/` is the `shared` layer — which may not import
- * `core`. `src/types.ts` is the documented home for core types, and it sits
- * outside the layer directories, so both sides can name it (#783).
+ * Lives here rather than beside the runtime that acts on it, because the state
+ * atoms read it too and they sat in `atoms/`, which was the `shared` layer and
+ * may not import `core`. `src/types.ts` is the documented home for core types,
+ * and it sits outside the layer directories, so both sides can name it (#783).
+ *
+ * The actors have since moved — the readers are `product/session/state` and
+ * `product/terminal/state` now, not `atoms/` — but the type stays here: it is a
+ * root type by the rule above, and `platform/terminal-runtime` names it too.
  */
 export type TerminalStatus =
   | 'idle'

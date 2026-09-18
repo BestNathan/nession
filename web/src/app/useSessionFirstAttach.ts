@@ -7,10 +7,10 @@ import {
   attachDialogSessionAtom,
   attachToSessionAtom,
   sessionIdAtom,
-} from '../atoms/session';
+} from '@/product/session/state';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { saveAttachPrefs } from '../platform/attach/attachPrefs';
-import { probeResultsAtom } from '../atoms/probe';
+import { probeResultsAtom } from '@/product/agent/state';
 import { resolveProfileAttach } from './deepLinkAttach';
 import { loadSessionProfile, persistConfirmedChoice } from '../platform/attach/sessionAttachProfile';
 import type { Session } from '../types';

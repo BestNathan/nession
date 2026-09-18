@@ -11,8 +11,8 @@ import {
   sessionIdAtom,
   sessionIdFromUrlAtom,
   sessionNameAtom,
-} from '@/atoms/session';
-import { probeResultsAtom } from '@/atoms/probe';
+} from '@/product/session/state';
+import { probeResultsAtom } from '@/product/agent/state';
 import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
 

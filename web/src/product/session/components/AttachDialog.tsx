@@ -30,7 +30,7 @@ import {
   type SessionAttachProfile,
 } from '@/platform/attach/sessionAttachProfile';
 import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
-import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
+import { probeResultsAtom, probeRefreshRequestAtom } from '@/product/agent/state';
 import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';
 
 /** Result handed back to the flow once the user confirms an attach. */
