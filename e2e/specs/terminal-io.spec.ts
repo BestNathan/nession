@@ -125,6 +125,12 @@ test.describe('Terminal I/O', () => {
 
   test('relay mode: echo command and verify output', async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    // TEMPORARY DIAGNOSTIC — baseline probe, not for merge.
+    page.on('console', (msg) => {
+      if (msg.text().startsWith('[diag-relay]') || msg.text().startsWith('[diag-gate]')) {
+        console.log(msg.text());
+      }
+    });
     const SESSION_NAME = `e2e-terminal-relay-${testInfo.retry}`;
     await createSession(page, SESSION_NAME);
     await attachToSession(page, SESSION_NAME, 'Relay');

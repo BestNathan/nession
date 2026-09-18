@@ -210,6 +210,16 @@ export function useTerminalOrchestration({
   // Runtime snapshot is the protocol source of truth. The attach hook keeps
   // the legacy atom mirror alive for older chrome/components during migration.
   const terminalState = snapshot?.phase ?? mirroredAttach.terminalState;
+  // TEMPORARY DIAGNOSTIC — baseline probe, not for merge.
+  if (effectiveMode === 'relay') {
+    console.log('[diag-relay]', JSON.stringify({
+      runtimeId: runtime?.diagId ?? null,
+      effectiveMode,
+      terminalState,
+      snapshotPhase: snapshot?.phase ?? null,
+      mirrorState: mirroredAttach.terminalState,
+    }));
+  }
   const reconnectCount = snapshot?.reconnectCount ?? mirroredAttach.reconnectCount;
 
   const handleDisconnect = useEndRelayOnDisconnect({

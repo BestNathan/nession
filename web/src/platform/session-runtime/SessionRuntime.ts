@@ -93,7 +93,11 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.reconnectCount === b.reconnectCount;
 }
 
+// TEMPORARY DIAGNOSTIC — baseline probe, not for merge.
+let diagRuntimeCounter = 0;
+
 export class SessionRuntime {
+  readonly diagId: number = ++diagRuntimeCounter;
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
   readonly attachController: SessionAttachController;
@@ -504,6 +508,15 @@ export class SessionRuntime {
    */
   private driveRelayAttach(): void {
     const conn = this.config.serverConnection;
+    // TEMPORARY DIAGNOSTIC — baseline probe, not for merge.
+    console.log('[diag-gate]', JSON.stringify({
+      runtimeId: this.diagId,
+      phase: this.attachState.phase,
+      transportReady: this.transportReady,
+      hasAttachInfo: !!this.config.attachInfo,
+      forcedRelay: this.config.forcedRelay,
+      connReady: conn ? conn.isReady() : null,
+    }));
     if (!conn || !this.config.attachInfo) {
       return;
     }
