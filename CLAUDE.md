@@ -89,10 +89,11 @@ nession/
 │       ├── platform/         # transport/runtime/attach + framework-level code with no
 │       │                     #   product semantics: socket/, server/, explorer/,
 │       │                     #   terminal-runtime/ (React-free), session-runtime/, attach/
+│       │                     #   state lives in <owner>/state/ — product/*/state,
+│       │                     #   platform/attach/state (no central atoms/ — #801 Phase 5)
 │       ├── shared/           # Shared layer: hooks/ (generic React hooks importable by all layers)
 │       ├── components/
 │       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
-│       ├── atoms/            # Shared Jotai atoms (connection, session, probe) (shared layer)
 │       ├── lib/              # Pure helpers (shared layer)
 │       └── extensions/       # Generic UI-slot registry (no contributor today)
 │

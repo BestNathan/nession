@@ -9,9 +9,12 @@ shell in #655 — the v2 IA treats Agent as metadata + a Workspace tool, not a
 nav parent. The `Agent` type stays in the shared barrel (`@/types`); the
 feature adds no parallel model.
 
-It does **not** own probe/connectivity state (`atoms/probe.ts` +
-`atoms/connection.ts`) — those describe attach routing latency, consumed by
-`product/terminal` and the P2P attach domain, and therefore stay shared.
+It **does** own the browser-latency probe (`state/probe.ts`). That was written
+as a disclaimer while the probe lived in `atoms/` as shared state; #801 Phase 5
+moved it here, because the subject of a probe is an agent's addresses. The
+transport-side atoms it used to be grouped with (p2p status, route epoch,
+transport generation) went to `platform/attach/state` instead — they read
+nothing from above `platform`, which the probe does (`agentIdAtom`).
 
 ## Module map
 
@@ -32,7 +35,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 |---|---|---|
 | Agent list + loading/error + heartbeat history | `features/agents/hooks/useAgentData` per mount | Composed by `app/useDashboard`. Deliberately **no** list atom |
 | Push updates (`agents.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | One bridge for agents+sessions subscriptions keyed on `wsService` identity; kept app-layer while it fuses both domains |
-| Probe results / latencies | `atoms/probe.ts` (shared) | Written by `useProbePolling` (mounted once per shell), read by the P2P attach domain — connectivity, not agent registry |
+| Probe results / latencies | `product/agent/state/probe.ts` | Written by `useProbePolling` (mounted once per shell), read by the P2P attach domain for route choice. Keyed by `agent_id`, so it is the Agent's state — moved out of `atoms/` in #801 Phase 5 |
 | Wire registration | `AgentsPlugin` instance (module singleton `agentsApi`) | One binding per WebSocketService lifetime; re-install after reconnect with generation-tagged teardown (`AgentsPlugin.ts`) |
 
 ## Cross-feature dependency

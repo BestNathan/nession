@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { Agent } from '../types';
-import { probeRefreshRequestAtom, probeResultsAtom } from '../atoms/probe';
+import { probeRefreshRequestAtom, probeResultsAtom } from '@/product/agent/state';
 import { testAddresses, orderByLatency } from '../lib/addressSelection';
 
 const POLL_INTERVAL_MS = 5 * 60_000;

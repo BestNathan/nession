@@ -3,14 +3,14 @@ import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
-import { p2pStateAtom, routeIntentEpochAtom } from '@/atoms/connection';
+import { p2pStateAtom, routeIntentEpochAtom } from '@/platform/attach/state';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
   manualOverrideAtom, forcedRelayAtom, rendererAtom, envRefsAtom,
   agentIdAtom, addressesAtom, hasActiveSessionAtom, sessionIdFromUrlAtom,
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
-} from '@/atoms/session';
+} from '@/product/session/state';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 
 const navigate = () => {};

@@ -88,7 +88,7 @@ the honest answer to "where does this go today" until the row moves.
 | `core/terminal-runtime/` — the React-free terminal runtime | `platform/terminal-runtime/` | **done** | 5 |
 | `runtime/` — SessionRuntime + the attach machinery | `platform/{session-runtime,attach}/` | **done** | 5 |
 | `services/` — the WS client + attach prefs/profile | `platform/{socket,attach}/` | **done** | 5 |
-| `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
+| `atoms/` — the state cluster | `product/{session,agent}/state`, `platform/attach/state` | **done** | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
 | `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
 | `markdown/` | `shared/` (already the rule's model) | 5 |
@@ -242,9 +242,11 @@ src/
 │   │   useSessionFirst{Attach,DeepLink,MobileNav}.ts
 │   └── LoginPage.tsx
 ├── product/                 # Nession product concepts + their Product Patterns
-│   ├── session/             # the Session concept: model, state, UI, hooks
+│   ├── session/             # the Session concept: model, state/, UI, hooks
+│   │                        #   state/ = identity, the attach choice, route, dialog
 │   ├── agent/               # the Agent concept + AgentDetail pattern
-│   ├── terminal/            # the Terminal concept, incl. capsule/
+│   │                        #   state/ = the browser-latency probe, keyed by agent
+│   ├── terminal/            # the Terminal concept, incl. capsule/ and state/
 │   └── capability/          # the generic capability model (singular: the model,
 │                            #   not a capability): discovery, presence, registry, facts
 ├── capabilities/            # discoverable / activatable capabilities, vertical slices
@@ -259,12 +261,12 @@ src/
 │   ├── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
 │   ├── session-runtime/     # SessionRuntime + its registry (acquire/release leases)
 │   └── attach/              # attach state machine, controller, address policy,
-│                            #   relay connection, attach prefs/profile
+│                            #   relay connection, attach prefs/profile, state/
+│                            #   (state/ = p2p status, route epoch, transport generation)
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
 ├── lib/                     # pure helpers (cn, format, encoding, session-first-free utils)
-├── atoms/                   # shared jotai atoms (connection, session, probe)
 ├── extensions/              # the generic UI-slot registry (no contributor today)
 ├── markdown/                # markdown pipeline (shared)
 └── test/                    # vitest setup + shared mocks (not a layer)
@@ -323,13 +325,25 @@ in each README — e.g. `files → explorer` (the file-tree framework),
 
 ### State ownership
 
+State follows **ownership, not state-management technology**. "It is a Jotai
+atom" is not an architectural boundary: a Session atom belongs to the Session
+owner, wherever that owner sits. `src/atoms/` was a directory named after a
+library, which is why it had to be `shared` — and `shared` may import nothing,
+which is what made the cluster impossible to move. It is gone; `product/*/state`
+and `platform/*/state` are where state lives now.
+
 Rules follow #649 (the owner's README holds the detailed table):
 
 - transient / short-lived UI state → component state or an owner hook
 - capability state shared across components → capability `model/`/`hooks/` (per
   mount; session-list state is deliberately **not** hoisted to a global atom)
 - transport / connection / terminal lifecycle → `platform/<domain>`
-  (`socket/`, `attach/`, `session-runtime/`, `terminal-runtime/`) and `atoms/`
+  (`socket/`, `attach/state/`, `session-runtime/`, `terminal-runtime/`)
+- **the attachment's own model** — which Session, over which route, with which
+  choice → `product/session/state/`. It cannot be `platform`: its route
+  derivation reads Session identity, and a platform module may not reach up.
+  That constraint, not taste, is what fixes the boundary between
+  `product/session/state` and `platform/attach/state`.
 - current page, layout, selected workspace → app layer (`app/`)
 
 ### Extension points

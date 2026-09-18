@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
-import { sessionIdAtom } from '@/atoms/session';
+import { sessionIdAtom } from '@/product/session/state';
 import { toast } from 'sonner';
 import type { Agent, Session } from '@/types';
 

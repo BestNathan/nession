@@ -1,7 +1,7 @@
 // web/src/terminal/state/__tests__/session.test.ts
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
-import { sessionIdAtom, sessionNameAtom, attachInfoAtom } from '@/atoms/session';
+import { sessionIdAtom, sessionNameAtom, attachInfoAtom } from '@/product/session/state';
 import { terminalSessionAtom, terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { terminalViewModelAtomFamily } from '@/product/terminal/state/index';
 

@@ -1,8 +1,8 @@
 // web/src/atoms/__tests__/probe.test.ts
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
-import { probeResultsAtom, currentAgentLatenciesAtom, type AgentProbe } from '@/atoms/probe';
-import { sessionIdAtom } from '@/atoms/session';
+import { probeResultsAtom, currentAgentLatenciesAtom, type AgentProbe } from '@/product/agent/state';
+import { sessionIdAtom } from '@/product/session/state';
 
 describe('currentAgentLatenciesAtom', () => {
   it('returns empty when no session is active', () => {

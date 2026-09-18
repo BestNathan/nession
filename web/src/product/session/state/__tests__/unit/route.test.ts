@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
-import {
-  p2pStateAtom,
-  activeUrlAtom, effectiveModeAtom, isSwitchingAtom,
-} from '@/atoms/connection';
+import { activeUrlAtom, effectiveModeAtom, isSwitchingAtom } from '../../route';
+import { p2pStateAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { lastResizeAtom } from '@/product/terminal/state/terminal';
-import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom, orderedUrlsAtom } from '@/atoms/session';
+import { manualOverrideAtom, forcedRelayAtom, attachInfoAtom, orderedUrlsAtom } from '@/product/session/state';
 
 describe('base atoms', () => {
   it('start with defaults', () => {

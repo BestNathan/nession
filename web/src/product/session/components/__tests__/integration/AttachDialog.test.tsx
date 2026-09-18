@@ -6,8 +6,8 @@ import { AttachDialog } from '@/product/session/components/AttachDialog';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Session, AttachInfo } from '@/types';
-import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/atoms/probe';
-import { attachInfoAtom } from '@/atoms/session';
+import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/product/agent/state';
+import { attachInfoAtom } from '@/product/session/state';
 import { saveSessionProfile, type PersistedAttachChoice } from '@/platform/attach/sessionAttachProfile';
 
 vi.mock('@/capabilities/env', () => ({

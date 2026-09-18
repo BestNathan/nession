@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
-import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
+import { sessionIdAtom, attachInfoAtom } from '@/product/session/state';
 import { bannerAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/platform/socket/types';
 

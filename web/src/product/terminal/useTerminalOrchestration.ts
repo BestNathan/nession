@@ -12,17 +12,15 @@ import {
 } from '@/platform/attach/relayServerConnection';
 import type { EnvFileRef } from '@/types';
 import {
-  sessionIdAtom,
-  sessionNameAtom,
   attachInfoAtom,
+  effectiveModeAtom,
+  envRefsAtom,
+  isSwitchingAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
-  envRefsAtom,
-} from '@/atoms/session';
-import {
-  effectiveModeAtom,
-  isSwitchingAtom,
-} from '@/atoms/connection';
+  sessionIdAtom,
+  sessionNameAtom,
+} from '@/product/session/state';
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import { useSessionFirstTerminalAttach } from '@/product/terminal/useSessionFirstTerminalAttach';

@@ -8,7 +8,7 @@ import { useSessionFirstMobileNav } from '@/app/useSessionFirstMobileNav';
 import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/platform/attach/relayServerConnection';
-import { attachDialogIntentAtom, sessionIdAtom } from '@/atoms/session';
+import { attachDialogIntentAtom, sessionIdAtom } from '@/product/session/state';
 import { persistConfirmedChoice } from '@/platform/attach/sessionAttachProfile';
 import { terminalServerApi } from '@/product/terminal';
 import { mapDomainState } from '@/product/session/model/domainState';

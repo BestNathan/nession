@@ -116,9 +116,8 @@ const ALLOWED_IMPORTS = {
 // components/ now holds only the shared shadcn ui/ primitives.
 //
 // Verified against who *consumes* each directory, so these are not guesses:
-// features import `atoms` (9 files) and `runtime` (8 files), so both must sit
-// below features — which is where they already are. The reverse imports found
-// by fixing this rule are real, not a mis-classification (#783).
+// the reverse imports found by fixing this rule are real, not a
+// mis-classification (#783).
 //
 // `markdown` is `shared`, decided by the same test rather than by its name: its
 // consumers are `capabilities/files` (3 edges) *and* `lib/languageId` (2 edges), and
@@ -131,7 +130,13 @@ const ALLOWED_IMPORTS = {
 const LEGACY_TO_LAYER = {
   'components': 'shared', // components/ui only
   'lib': 'shared',
-  'atoms': 'shared', // atoms are shared state
+  // `atoms` is gone: its state moved to the owners that own it — session and
+  // route atoms to `product/session/state`, probe atoms to
+  // `product/agent/state`, transport atoms to `platform/attach/state`, and the
+  // terminal status atom to `product/terminal/state`. The old row mapped the
+  // directory to `shared`, which is exactly what made the cluster unmovable:
+  // `shared` may import nothing, so a Session atom could not live with the
+  // Session. "It is a Jotai atom" was never an owner.
   'markdown': 'shared', // markdown pipeline — rationale in the note above
   // `core` the layer is gone entirely: its three members converged in Phase 5
   // (`core/terminal-runtime` -> `platform/terminal-runtime`, `runtime/` ->

@@ -75,7 +75,8 @@ src/
 │                          #   session-runtime/, attach/
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
-├── atoms/                 # Jotai atoms split by domain
+├── (no atoms/)            # state lives with its owner: product/*/state,
+│                          #   platform/attach/state
 ├── lib/                   # Pure helpers
 ├── markdown/              # Markdown preview pipeline
 ├── extensions/            # the generic UI-slot registry (no contributor today)
@@ -88,7 +89,7 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 ## 4. State and data
 
-- Jotai atoms live under `src/atoms/` and owner-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores. **State follows ownership, not state-management technology** — `atoms/` is not a default home for new state (#801 Phase 5).
+- Jotai atoms live in their owner's `state/` (`product/<concept>/state/`, `platform/<domain>/state/`). `src/atoms/` is gone. Prefer small domain atoms over mega-stores. **State follows ownership, not state-management technology** — "it is a Jotai atom" is not a boundary, and there is no central state directory to default into (#801 Phase 5).
 - Session / attach / file flows go through app-composition and owner hooks rather than embedding WebSocket calls deep in presentational components.
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
 - A new capability should expose an owner-owned API/plugin boundary rather than leaking transport concerns into UI composition.

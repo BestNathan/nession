@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
 import { useSessionFirstDeepLink } from '@/app/useSessionFirstDeepLink';
-import { sessionIdAtom } from '@/atoms/session';
+import { sessionIdAtom } from '@/product/session/state';
 import type { Session } from '@/types';
 
 vi.mock('@/app/useDeepLinkRestore', () => ({

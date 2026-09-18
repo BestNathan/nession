@@ -13,7 +13,7 @@ import {
   attachInfoAtom,
   forcedRelayAtom,
   manualOverrideAtom,
-} from '@/atoms/session';
+} from '@/product/session/state';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { AttachResult, TerminalAgentApi } from '@/product/terminal';

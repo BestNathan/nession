@@ -1,7 +1,11 @@
-// web/src/atoms/probe.ts
+// web/src/product/agent/state/probe.ts
+//
+// Browser-latency probes, keyed by agent. They lived in `atoms/` while that
+// directory was the default home for anything Jotai-shaped; the subject here is
+// an Agent's addresses, so they belong to the Agent concept (#801 Phase 5).
 import { atom } from 'jotai';
-import type { AddressLatency } from '../types';
-import { agentIdAtom } from './session';
+import type { AddressLatency } from '@/types';
+import { agentIdAtom } from '@/product/session/state';
 
 /** One agent's browser-latency probe result (written by useProbePolling). */
 export interface AgentProbe {

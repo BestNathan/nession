@@ -10,9 +10,10 @@ import {
   attachInfoAtom,
   orderedUrlsAtom,
   forcedRelayAtom,
+  isSwitchingAtom,
   manualOverrideAtom,
-} from '@/atoms/session';
-import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
+} from '@/product/session/state';
+import { routeIntentEpochAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
