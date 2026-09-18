@@ -22,12 +22,13 @@ export function createTerminalRuntimeAdapter(runtime?: SessionRuntime | null): T
       // `detach()` is the documented source of ready=false and TerminalViewport
       // is its only caller; the stack names whoever triggers it after a
       // successful attach.
-      if (!ready) {
-        console.log('[diag-ready]', JSON.stringify({
-          ready,
-          trace: (new Error().stack ?? '').split('\n').slice(2, 9).join(' | '),
-        }));
-      }
+      // Log BOTH values: rewireTransport publishes false then true, so knowing
+      // the false alone cannot distinguish "rewire completed" from "the true
+      // never landed". Only the second is the bug.
+      console.log('[diag-ready]', JSON.stringify({
+        ready,
+        trace: (new Error().stack ?? '').split('\n').slice(2, 6).join(' | '),
+      }));
       if (runtime) {
         runtime.setTransportReady(ready);
       } else {
