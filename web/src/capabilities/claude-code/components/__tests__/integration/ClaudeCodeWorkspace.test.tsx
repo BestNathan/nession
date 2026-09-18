@@ -1,17 +1,14 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeCodeWorkspace } from '@/extensions/claude-code/components/ClaudeCodeWorkspace';
-import { claudeCodeApi } from '@/capabilities/claude-code';
-import type {
-  ClaudeCodeListResponse,
-  ClaudeCodeReadResponse,
-} from '@/capabilities/claude-code/types';
+import { ClaudeCodeWorkspace } from '../../ClaudeCodeWorkspace';
+import { claudeCodeApi } from '../../../ClaudeCodePlugin';
+import type { ClaudeCodeListResponse, ClaudeCodeReadResponse } from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
 import type { DomainState } from '@/product/session/model/domainState';
 
-vi.mock('@/capabilities/claude-code', () => ({
+vi.mock('../../../ClaudeCodePlugin', () => ({
   claudeCodeApi: {
     claudeCodeList: vi.fn(),
     claudeCodeRead: vi.fn(),

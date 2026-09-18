@@ -64,7 +64,9 @@ src/
 ├── product/               # Nession product concepts + their Product Patterns
 │                          #   (target owner; see the migration map in web.md)
 ├── capabilities/          # discoverable / activatable / contributable
-│                          #   capabilities, as vertical slices
+│                          #   capabilities, as vertical slices; one that
+│                          #   contributes to the shell declares it in its own
+│                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
 │                          #   code with no product semantics
 ├── shared/                # Shared hooks and generic helpers
@@ -75,7 +77,7 @@ src/
 ├── services/              # WS client and other core services
 ├── lib/                   # Pure helpers
 ├── markdown/              # Markdown preview pipeline
-├── extensions/            # Extension registry / UI contributions
+├── extensions/            # the generic UI-slot registry (no contributor today)
 └── test/                  # Vitest setup
 ```
 

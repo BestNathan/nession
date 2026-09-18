@@ -3,7 +3,6 @@ import { render, screen } from '@testing-library/react';
 import { renderSlot } from '@/extensions/registry';
 import { AgentDetail } from '@/product/agent/components/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
-import claudeCodeExtension from '@/extensions/claude-code';
 import type { Agent, Session } from '@/types';
 import type { DomainState } from '@/product/session/model/domainState';
 
@@ -57,7 +56,7 @@ describe('AgentDetail', () => {
     expect(screen.getByTestId('other-extension')).toBeInTheDocument();
   });
 
-  it('does not render Claude Code from the default extension entry', () => {
+  it('asks the agent-detail slot for sections and renders none of its own', () => {
     const agent: Agent = {
       agent_id: 'a1', hostname: 'devbox-01', display_name: 'devbox-01',
       ip_address: '10.0.0.1', port: 19091, status: 'online', session_count: 1,
@@ -71,7 +70,9 @@ describe('AgentDetail', () => {
 
     render(<AgentDetail agent={agent} state={state} />);
 
-    expect(claudeCodeExtension.slots['agent-detail']).toBeUndefined();
+    // The slot is a real extension point (docs/design patterns/agent-detail.md);
+    // what this pins is that AgentDetail contributes nothing of its own and the
+    // Claude Code section stays retired — it became a Workspace tool.
     expect(renderSlot).toHaveBeenCalledWith('agent-detail', { agent });
     expect(screen.queryByText('Claude Code')).not.toBeInTheDocument();
   });
