@@ -4,7 +4,7 @@ import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { TerminalWell } from '@/app/TerminalWell';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';

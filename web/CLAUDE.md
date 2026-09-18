@@ -63,6 +63,8 @@ src/
 ├── app/                   # App composition, shell, workspace, app-level hooks
 ├── product/               # Nession product concepts + their Product Patterns
 │                          #   (target owner; see the migration map in web.md)
+├── capabilities/          # discoverable / activatable / contributable
+│                          #   capabilities, as vertical slices
 ├── features/              # Domain features: plugin + components/hooks/model
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure

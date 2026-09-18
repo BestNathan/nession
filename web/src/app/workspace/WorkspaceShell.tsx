@@ -1,9 +1,9 @@
 import { Plus } from 'lucide-react';
-import { resolveCapabilityPresences, type CapabilityId } from '@/features/capabilities';
+import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import {
   CapabilityDisclosureMenu,
   type CapabilityDisclosureMenuEntry,
-} from '@/features/capabilities/components/CapabilityDisclosureMenu';
+} from '@/product/capability/components/CapabilityDisclosureMenu';
 import { cn } from '@/lib/utils';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {

@@ -1,4 +1,4 @@
-import type { CapabilityDisclosureEntry, CapabilityId } from '@/features/capabilities';
+import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
 
 export type CapsuleMode = 'input' | 'commands';
 

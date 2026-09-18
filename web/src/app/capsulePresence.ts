@@ -5,7 +5,7 @@ import {
   type CapabilityFacts,
   type CapabilityId,
   type CapabilitySnapshot,
-} from '@/features/capabilities';
+} from '@/product/capability';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';

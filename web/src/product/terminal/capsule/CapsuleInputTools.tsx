@@ -6,7 +6,7 @@ import {
   capsuleIconButtonClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import { Plus } from 'lucide-react';
-import { CapabilityDisclosureMenu } from '@/features/capabilities/components/CapabilityDisclosureMenu';
+import { CapabilityDisclosureMenu } from '@/product/capability/components/CapabilityDisclosureMenu';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';

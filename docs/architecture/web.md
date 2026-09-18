@@ -70,7 +70,7 @@ the honest answer to "where does this go today" until the row moves.
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
 | `features/server` | **undecided** — see below | 3 |
-| `features/capabilities` | `product/capability/` | 4 |
+| `product/capability/` — the generic capability lifecycle (discovery, presence, registry, model, facts) | **done** | 4 |
 | `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
 | `features/explorer` | undecided — a reusable framework, not a capability | 5 |
 | `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
@@ -128,10 +128,11 @@ Two other rules decide the ambiguous cases, both from #801's principles:
   `app/patterns/ConnectionStatus.tsx` is a single-dimension client badge used
   only by `LoginPage`. The canonical owner is the former; the latter needs a
   name that says what it is.
-- `features/capabilities/` (the product capability lifecycle:
-  `discovery` / `presence` / `registry` / `model` / `facts`) is **absent from
-  both module maps** — this one and `web/CLAUDE.md`. It is not a feature; it is
-  the generic capability model, and it belongs to `product/capability/`.
+- **Resolved:** the generic capability lifecycle (`discovery` / `presence` /
+  `registry` / `model` / `facts`) used to sit at `features/capabilities/` while
+  appearing in neither module map. It was never a feature — it is the model every
+  capability is described by — and it now lives at `product/capability/`, which
+  is also why it is singular: it is the capability *model*, not a capability.
 - **`features/server` has no obvious owner.** The Product Model's concepts are
   Workspace, Workspace Location, Session, Terminal, Agent — Server is not among
   them, and its tree groups Server under "infrastructure / context" rather than

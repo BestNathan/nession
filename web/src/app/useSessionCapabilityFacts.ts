@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { observeSessionCommand, type CapabilityFacts } from '@/features/capabilities';
+import { observeSessionCommand, type CapabilityFacts } from '@/product/capability';
 import type { Session } from '@/types';
 
 interface Observation {

@@ -14,7 +14,7 @@ import { terminalServerApi } from '@/product/terminal';
 import { mapDomainState } from '@/product/session/model/domainState';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
 
 export function useSessionFirstShellState() {

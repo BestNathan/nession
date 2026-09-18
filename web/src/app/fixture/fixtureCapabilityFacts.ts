@@ -1,4 +1,4 @@
-import type { CapabilityFacts } from '@/features/capabilities';
+import type { CapabilityFacts } from '@/product/capability';
 
 /**
  * Capability facts a canonical fixture route can express.
