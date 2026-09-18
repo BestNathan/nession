@@ -19,7 +19,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { Explorer } from '@/platform/explorer/Explorer';

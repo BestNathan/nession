@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseEnv } from '@/lib/envParser';
+import { parseEnv } from '@/capabilities/env/model/envParser';
 
 describe('parseEnv', () => {
   it('parses basic KEY=VALUE pairs', () => {

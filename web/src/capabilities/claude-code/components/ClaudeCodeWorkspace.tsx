@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import type { ClaudeCodeListResponse, ClaudeCodeReadResponse } from '../types';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 type Scope = 'global' | 'project';

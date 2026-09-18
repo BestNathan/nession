@@ -1,4 +1,4 @@
-import type { AttachInfo } from '../types';
+import type { AttachInfo } from '@/types';
 
 /** First P2P URL Auto mode would pick — mirrors activeUrlAtom / useAddressPlan sync path. */
 export function resolveAutoP2pUrl(

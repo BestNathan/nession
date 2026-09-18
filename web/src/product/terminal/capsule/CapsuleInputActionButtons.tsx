@@ -1,7 +1,7 @@
 import { ClipboardPaste, Copy, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { capsuleIconButtonClass } from '@/product/terminal/capsule/capsuleStyles';
 
 interface CapsuleInputActionButtonsProps {

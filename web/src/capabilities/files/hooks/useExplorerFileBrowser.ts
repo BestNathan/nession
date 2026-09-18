@@ -7,7 +7,7 @@ import { createNessionFileSystemProvider } from '@/capabilities/files/adapters/N
 import type { ExplorerDataProvider } from '@/platform/explorer/providers/types';
 import type { ExplorerNode } from '@/platform/explorer/types';
 import { registerSeenLangKeys, scanLangKeysFromPaths } from '../model/codeMirrorLangs';
-import { toastError } from '@/lib/errorHelpers';
+import { toastError } from '@/shared/lib/errorHelpers';
 
 import { useFileBrowserDialogs } from './useFileBrowserDialogs';
 import { useNewEntryForm } from './useNewEntryForm';

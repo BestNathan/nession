@@ -16,7 +16,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select';
 import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
-import { agentDisplayName } from '@/lib/format';
+import { agentDisplayName } from '@/shared/lib/format';
 import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';

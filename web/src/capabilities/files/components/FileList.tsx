@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, File as FileIcon, Folder } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { formatSize } from '@/lib/format';
+import { cn } from '@/shared/lib/utils';
+import { formatSize } from '@/shared/lib/format';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 
 export interface FileListProps {

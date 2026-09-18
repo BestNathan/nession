@@ -1,6 +1,6 @@
 import { Settings, Trash2 } from 'lucide-react';
-import { formatRelativeTime } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/shared/lib/format';
+import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';

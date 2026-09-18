@@ -73,12 +73,13 @@ src/
 │                          #   code with no product semantics: socket/, server/,
 │                          #   explorer/, terminal-runtime/ (React-free),
 │                          #   session-runtime/, attach/
-├── shared/                # Shared hooks and generic helpers
+├── shared/                # Shared layer: hooks/, lib/ (generic pure helpers),
+│                          #   markdown/. May import nothing above it.
 ├── components/ui/         # Shared generic UI infrastructure
 ├── (no atoms/)            # state lives with its owner: product/*/state,
 │                          #   platform/attach/state
-├── lib/                   # Pure helpers
-├── markdown/              # Markdown preview pipeline
+├── (no lib/)              # generic helpers are shared/lib/; owner-specific ones
+│                          #   live with the owner that consumes them
 ├── extensions/            # the generic UI-slot registry (no contributor today)
 └── test/                  # Vitest setup
 ```

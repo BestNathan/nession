@@ -8,7 +8,7 @@ import {
   ContextMenuContent,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 import type { ResolvedDecorations } from '../decorations/resolveDecorations';
 import type { ExplorerNode } from '../types';

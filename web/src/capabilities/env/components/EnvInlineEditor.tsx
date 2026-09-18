@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Copy, Trash2, FileText, Eye, EyeOff, Clock, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import {
 import type { Agent, EnvFileInfo, EnvSource } from '@/types';
 import { envApi } from '@/capabilities/env';
 import { EnvDiff } from '@/capabilities/env/components/EnvDiff';
-import { parseEnv } from '@/lib/envParser';
+import { parseEnv } from '@/capabilities/env/model/envParser';
 import { sourceLabel } from '@/capabilities/env/model/envRef';
 
 const PLACEHOLDER =

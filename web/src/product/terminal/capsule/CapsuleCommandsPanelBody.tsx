@@ -8,7 +8,7 @@ import {
   capsulePopoverBodyClass,
   capsulePopoverItemClass,
 } from '@/product/terminal/capsule/capsuleStyles';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { CapsuleAddCommandButton, CapsuleDeleteButton } from '@/product/terminal/capsule/CapsuleAddCommandDialog';
 import { CapsuleChainBar } from '@/product/terminal/capsule/CapsuleChainBar';
 import { PhysKeyRow } from '@/product/terminal/capsule/PhysKeyRow';

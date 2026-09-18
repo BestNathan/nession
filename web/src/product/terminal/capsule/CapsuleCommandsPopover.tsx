@@ -13,7 +13,7 @@ import {
   capsulePopoverPanelClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import { readPopoverSideOffset } from '@/product/terminal/capsule/measure/readPopoverSideOffset';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { CapsuleAddCommandDialog } from '@/product/terminal/capsule/CapsuleAddCommandDialog';
 import { CapsuleCommandsPanelBody } from '@/product/terminal/capsule/CapsuleCommandsPanelBody';
 import { useCapsuleCommands } from '@/product/terminal/capsule/useCapsuleCommands';

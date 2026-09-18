@@ -89,9 +89,9 @@ the honest answer to "where does this go today" until the row moves.
 | `runtime/` — SessionRuntime + the attach machinery | `platform/{session-runtime,attach}/` | **done** | 5 |
 | `services/` — the WS client + attach prefs/profile | `platform/{socket,attach}/` | **done** | 5 |
 | `atoms/` — the state cluster | `product/{session,agent}/state`, `platform/attach/state` | **done** | 5 |
-| `lib/` — generic | `shared/lib/` | 5 |
-| `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
-| `markdown/` | `shared/` (already the rule's model) | 5 |
+| `lib/` — generic (`utils`, `format`, `encoding`, `errorHelpers`, `languageId`, `clipboard`, `addressSelection`) | `shared/lib/` | **done** | 5 |
+| `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | **done** | 5 |
+| `markdown/` | `shared/markdown/` (the rule already classified it `shared`) | **done** | 5 |
 | `components/ui/`, `shared/`, `test/` | unchanged | — |
 
 ### How the migration was allowed to proceed
@@ -205,11 +205,20 @@ a Product Model concept, so the move is not free and is not made here.
 Claude Code's own contribution — its presence state and its Workspace view —
 does live with the capability, at `capabilities/claude-code/contribution.tsx`.
 
-`markdown/` is `shared`. Its consumers are `capabilities/files` *and*
-`lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
-The resulting `markdown ↔ lib` cycle is deliberate — both files document it;
-general language detection needs markdown's ranked signals, and markdown cannot
-host the general extension/basename tables without importing them back.
+`shared/markdown/` is `shared` — and that is now structural rather than a table
+entry. Its consumers are `capabilities/files` *and* `languageId`, and a `shared`
+module importing it pins it to the bottom rung, so Phase 5 moved it inside the
+layer it was already classified as. The `markdown ↔ languageId` cycle is
+deliberate — both files document it; general language detection needs markdown's
+ranked signals, and markdown cannot host the general extension/basename tables
+without importing them back. It is now genuinely intra-layer
+(`shared/markdown` ↔ `shared/lib`), so the rule permits it by construction.
+
+`shared/lib/` holds what is left of `lib/`: the generic helpers every layer may
+use. The owner-specific modules could not stay — a module under `shared/` may
+import nothing, so each was unmovable until it moved to the layer that consumes
+it. `addressSelection` is the one that stayed, and by the same test: its consumer
+is `shared/hooks/useAddressPlan`, and `shared` cannot reach `platform`.
 
 > Every directory under `web/src/` is either mapped in the rule's
 > `LEGACY_TO_LAYER` or listed in `NON_LAYER_DIRS` with a reason, and a fixture
@@ -265,10 +274,11 @@ src/
 │                            #   (state/ = p2p status, route epoch, transport generation)
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
+├── shared/lib/              # generic pure helpers (cn, format, encoding, languageId,
+│                            #   errorHelpers, clipboard, addressSelection)
+├── shared/markdown/         # markdown pipeline (its consumers pin it to this layer)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
-├── lib/                     # pure helpers (cn, format, encoding, session-first-free utils)
 ├── extensions/              # the generic UI-slot registry (no contributor today)
-├── markdown/                # markdown pipeline (shared)
 └── test/                    # vitest setup + shared mocks (not a layer)
 ```
 

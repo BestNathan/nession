@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConnectionStatus } from '@/app/patterns/ConnectionStatus';
-import { getRememberPreference, setRememberPreference } from '../lib/auth';
+import { getRememberPreference, setRememberPreference } from './auth';
 import type { ConnectionState } from '@/platform/socket';
 
 interface LoginPageProps {

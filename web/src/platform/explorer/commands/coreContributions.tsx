@@ -5,7 +5,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
-import { copyToClipboard } from '@/lib/clipboard';
+import { copyToClipboard } from '@/shared/lib/clipboard';
 
 import type { ExplorerExtension } from './types';
 

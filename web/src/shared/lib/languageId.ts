@@ -2,13 +2,13 @@
  * LanguageId detection - VS Code-style language identifiers
  * This module provides unified language detection decoupled from CodeMirror grammar loading.
  *
- * Markdown is not decided here: it is delegated to `@/markdown`, which ranks
+ * Markdown is not decided here: it is delegated to `@/shared/markdown`, which ranks
  * extension / MIME / basename signals above content and caps content-only
  * guesses. This module owns everything else — basenames, shebangs, extensions.
  */
 
-import { detectMarkdownLanguage } from '@/markdown/detect';
-import { AUTO_APPLY_CONFIDENCE, type LanguageDetection } from '@/markdown/types';
+import { detectMarkdownLanguage } from '@/shared/markdown/detect';
+import { AUTO_APPLY_CONFIDENCE, type LanguageDetection } from '@/shared/markdown/types';
 
 // 66 VS Code-style language identifiers
 export type LanguageId =

@@ -10,7 +10,7 @@
  * - The special value '__dockerfile__' signals legacy mode loading via @codemirror/legacy-modes
  */
 
-import type { LanguageId } from './languageId';
+import type { LanguageId } from '@/shared/lib/languageId';
 
 const LANGUAGE_ID_TO_CODEMIRROR: Partial<Record<LanguageId, string>> = {
   javascript: 'js',

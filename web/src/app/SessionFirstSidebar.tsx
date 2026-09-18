@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { PanelLeftClose } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { SessionList } from '@/product/session/components/SessionList';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';

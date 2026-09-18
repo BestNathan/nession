@@ -6,7 +6,7 @@ import {
   isMarkdownBasename,
   isMarkdownExt,
   isMarkdownMimeType,
-} from '@/markdown/extensions';
+} from '@/shared/markdown/extensions';
 
 describe('isMarkdownExt', () => {
   it('accepts every registered extension', () => {

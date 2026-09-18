@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { SessionFirstTerminalPane } from '@/product/terminal/SessionFirstTerminalPane';
 import { TerminalSurface } from '@/product/terminal/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';

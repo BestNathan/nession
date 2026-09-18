@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { copyToClipboard } from '@/lib/clipboard';
+import { copyToClipboard } from '@/shared/lib/clipboard';
 
 describe('copyToClipboard', () => {
   const originalExecCommand = document.execCommand;

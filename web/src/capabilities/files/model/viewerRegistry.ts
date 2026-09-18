@@ -1,4 +1,4 @@
-import { detectLanguage } from '@/lib/languageId';
+import { detectLanguage } from '@/shared/lib/languageId';
 
 export type ViewerType = 'image' | 'video' | 'audio' | 'pdf' | 'markdown';
 
@@ -137,6 +137,6 @@ export function parseExt(path: string): string {
 }
 
 /** Return true if the extension indicates a markdown file.
- * @deprecated Import from `@/markdown` instead — this is a compatibility re-export. */
-export { isMarkdownExt } from '@/markdown/extensions';
+ * @deprecated Import from `@/shared/markdown` instead — this is a compatibility re-export. */
+export { isMarkdownExt } from '@/shared/markdown/extensions';
 

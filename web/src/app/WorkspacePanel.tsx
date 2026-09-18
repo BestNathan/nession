@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';

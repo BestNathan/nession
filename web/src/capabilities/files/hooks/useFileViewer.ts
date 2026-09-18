@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { toastError } from '@/lib/errorHelpers';
+import { toastError } from '@/shared/lib/errorHelpers';
 import { getViewerType, parseExt, type ViewerType } from '../model/viewerRegistry';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
   isMarkdownExt,
-} from '@/markdown';
+} from '@/shared/markdown';
 import { readFileChunked, type FileOps } from '@/capabilities/files';
 export type ViewMode = 'preview' | 'raw';
 

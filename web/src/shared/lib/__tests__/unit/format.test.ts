@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, formatSize, formatRelativeTimeSeconds } from '@/lib/format';
+import { formatRelativeTime, formatAbsoluteTime, getStatusVariant, formatSize, formatRelativeTimeSeconds } from '@/shared/lib/format';
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {
