@@ -5,8 +5,12 @@ import {
   type CapabilityResolution,
   type CapabilityId,
   type CapabilityScope,
-  type CapabilityState,
 } from '@/product/capability';
+import {
+  CLAUDE_CODE_ID,
+  CLAUDE_CODE_TITLE,
+  resolveClaudeCodeState,
+} from '@/capabilities/claude-code';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -56,12 +60,6 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'env', title: 'Env', available: () => true },
 ];
 
-const CLAUDE_CODE_PROVIDER: WorkspaceCapabilityProvider = {
-  id: 'claude-code',
-  title: 'Claude Code',
-  available: () => true,
-};
-
 function providerFor(
   provider: WorkspaceCapabilityProvider,
   workspaceContext: WorkspaceContext,
@@ -77,49 +75,23 @@ function providerFor(
 }
 
 /**
- * Commands that mean "Claude Code is running here".
+ * Claude Code's presence is capability knowledge, so it lives with the
+ * capability (`resolveClaudeCodeState`) rather than here.
  *
- * `claude.exe` is the name the CLI actually runs under: the distributed package
- * installs its native binary as `bin/claude.exe`, and that is what the agent
- * reports as the pane's foreground command (measured against a real install).
- * The bare name covers installs that expose a plain `claude` wrapper.
- *
- * Deliberately excludes `node`: `claude` surfaces as `node` on some installs,
- * but so does every other node TUI, and a false positive would light Claude
- * Code up for unrelated work. Under-matching is the honest failure here.
- */
-const CLAUDE_CODE_COMMANDS = ['claude', 'claude.exe'];
-
-function isClaudeCodeCommand(command: string): boolean {
-  return CLAUDE_CODE_COMMANDS.includes(command);
-}
-
-/**
- * The one provider whose state comes from observation rather than environment:
- * the agent reports the session's foreground command, the app layer records what
- * it has seen, and this turns those facts into a state.
+ * What stays in the app layer is only the registration: the id it registers
+ * under and the scope it resolves against. Every other provider in this file
+ * reads its availability straight off the environment; this one is handed a
+ * state derived from observed session facts, which is why it takes a different
+ * shape rather than going through `providerFor`.
  */
 function claudeCodeProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
   return {
-    id: CLAUDE_CODE_PROVIDER.id,
-    title: CLAUDE_CODE_PROVIDER.title,
-    resolve: (context) => {
-      const current = context.facts?.sessionForegroundCommand;
-      const observed = context.facts?.sessionObservedCommands ?? [];
-
-      let state: CapabilityState;
-      if (!context.sessionId) {
-        state = 'unavailable';
-      } else if (current && isClaudeCodeCommand(current)) {
-        state = 'active';
-      } else if (observed.some(isClaudeCodeCommand)) {
-        state = 'relevant';
-      } else {
-        state = 'available';
-      }
-
-      return { scope: resolveScope(context, workspaceContext), state };
-    },
+    id: CLAUDE_CODE_ID,
+    title: CLAUDE_CODE_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveClaudeCodeState(context.facts, context.sessionId),
+    }),
   };
 }
 

@@ -15,7 +15,7 @@ the design system, the source layout and the lint gate all use one language.
 |---|---|---|---|
 | **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
 | **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
-| **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`api/ model/ components/ contribution.ts`) | `capabilities/<name>/` |
+| **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`Plugin.ts`, `types.ts`, `components/`, `contribution.tsx`) | `capabilities/<name>/` |
 | **platform** | How does the machinery work? | transport, runtime, attach, persistence — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin) | `platform/<domain>/` |
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
@@ -73,7 +73,8 @@ the honest answer to "where does this go today" until the row moves.
 | `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
 | `platform/server/` — the Server transport plugin + its menu | **done** | 3 |
 | `platform/explorer/` — the file-tree framework | **done** | 5 |
-| `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
+| `app/workspace/views/claudeCodeView.tsx` — the Claude Code view binding | **done** | 4 |
+| `extensions/claude-code/` — the retired UI-section registration | **deleted** | 4 |
 | `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
@@ -158,19 +159,39 @@ Two other rules decide the ambiguous cases, both from #801's principles:
   slot through the registry. That is PRINCIPLE #5 working — Nession owns the
   structure, the contribution fills a hole in it — so the registry is treated as
   a contract the product layer may call, distinct from reaching into a
-  capability's internals. Phase 4 inherits the distinction when `extensions/`
-  becomes `capabilities/*/contribution.ts`.
+  capability's internals. Phase 4 kept the distinction: the registry is the
+  generic mechanism, a capability's contribution is a separate thing that now
+  lives with its capability (see `extensions/` below).
 
-### `extensions/` today
+### `extensions/` — a mechanism with no content
 
-`extensions/` (extension registry + `claude-code` UI contributions) sits outside
-the ladder: it is imported by app and capability code through the registry
-contract and composes what it extends. The rule models it as a rung of its own
-(`extensions`) rather than folding it into a layer, so that
+`extensions/` now holds only `registry.ts` and `types.ts`: the generic slot
+mechanism. It sits outside the ladder as a rung of its own, so that
 `extensions → capabilities` is allowed while `platform → extensions` stays
-forbidden. The mutual `capabilities ↔ extensions` allowance is deliberate —
-an extension is the UI contribution *for* a capability. Phase 4 absorbs it into
-`capabilities/*/contribution.ts`.
+forbidden.
+
+Its one registered extension, `extensions/claude-code/`, was **deleted** in
+Phase 4. It declared `slots: {}` and contributed nothing: the 2026-09-06
+claude-code-workspace spec removed its AgentDetail section and its
+terminal-header tab, moving Claude Code to a Workspace tool, and the empty
+registration outlived the removal. A directory that exists to register an
+extension which contributes nothing is the same failure as a rule that protects
+nothing — it reads as coverage. Nothing was lost: `renderSlot` returned `[]`
+before the deletion and returns `[]` after.
+
+**The mechanism itself stays.** `docs/design/design-system/patterns/agent-detail.md`
+sanctions it — "Extensions may contribute diagnostic data or actions for this
+detail view" — so it is a designed extension point that currently has no
+contributor, which is a different thing from a dead one. That also means Phase 4
+did *not* absorb `extensions/` into `capabilities/*/contribution.ts` as this
+document previously predicted: the slot registry is a generic mechanism, not a
+capability's contribution, and the two are not the same thing. Where the
+registry ends up is still open — it is framework-level code with no product
+semantics, which is the `platform` definition, but its slot props name `Agent`,
+a Product Model concept, so the move is not free and is not made here.
+
+Claude Code's own contribution — its presence state and its Workspace view —
+does live with the capability, at `capabilities/claude-code/contribution.tsx`.
 
 `markdown/` is `shared`. Its consumers are `capabilities/files` *and*
 `lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
@@ -206,60 +227,75 @@ src/
 │   │   useVisibilityReconnect.ts / useDeepLinkRestore.ts /
 │   │   useSessionFirst{Attach,DeepLink,MobileNav}.ts
 │   └── LoginPage.tsx
-├── features/                # one dir per capability (README.md = ownership map)
-│   ├── terminal/            # capability plugin, viewport, hooks, state/, capsule/
-│   ├── explorer/            # extensible file-tree framework
-│   ├── files/               # file RPC + browser/viewer UI
-│   ├── sessions/            # list/details, CRUD dialogs, AttachDialog, domainState model
-│   ├── agents/              # workspace agent page, AgentContext, data hooks
-│   ├── env/                 # env capability plugin + manager UI/dialogs
+├── product/                 # Nession product concepts + their Product Patterns
+│   ├── session/             # the Session concept: model, state, UI, hooks
+│   ├── agent/               # the Agent concept + AgentDetail pattern
+│   ├── terminal/            # the Terminal concept, incl. capsule/
+│   └── capability/          # the generic capability model (singular: the model,
+│                            #   not a capability): discovery, presence, registry, facts
+├── capabilities/            # discoverable / activatable capabilities, vertical slices
+│   ├── files/               # file RPC + browser/viewer UI (+ adapters/)
+│   ├── env/                 # env capability + manager UI/dialogs
 │   ├── commands/            # quick-command capability + presets
-│   ├── server/              # server capability + ServerInfoMenu
-│   └── claude-code/         # Claude Code capability plugin
+│   └── claude-code/         # transport, UI, and contribution.tsx (presence + view)
+├── platform/                # transport, runtime, attach — and framework-level code
+│   ├── server/              # the Server transport plugin + its menu
+│   └── explorer/            # the file-tree framework (no Nession product semantics)
 ├── core/terminal-runtime/   # React-free runtime: controller, transports, input, xterm
 ├── runtime/                 # SessionRuntime registry + attach state machines
 ├── services/                # socket/ (WebSocketService, MessageRouter, clientId) +
 │                            #   attachPrefs, sessionAttachProfile, deepLinkAttach, addressSelection
-│                            #   — capability plugins live in features/, not here
+│                            #   — capability plugins live in capabilities/, not here
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
 ├── lib/                     # pure helpers (cn, format, encoding, session-first-free utils)
 ├── atoms/                   # shared jotai atoms (connection, session, probe)
-├── extensions/              # registry + extension contributions (own rung)
+├── extensions/              # the generic UI-slot registry (no contributor today)
 ├── markdown/                # markdown pipeline (shared)
 └── test/                    # vitest setup + shared mocks (not a layer)
 ```
 
-## Feature layout & ownership
+## Capability layout & ownership
 
-Each feature mirrors the same skeleton (see `features/{sessions,agents}/README.md`
-for the exemplars and `capabilities/files/README.md` for the original):
+A capability is a vertical slice (`capabilities/files/README.md` is the
+original, and the closest thing to an exemplar):
 
 ```text
-features/<feature>/
-├── <Feature>Plugin.ts   # class implements CapabilityPlugin; generation-tagged
+capabilities/<name>/
+├── <Name>Plugin.ts      # class implements CapabilityPlugin; generation-tagged
 │                        #   install(connection) — StrictMode-safe
 ├── types.ts             # wire request/response types
-├── index.ts             # re-exports + `export const xxxApi = new XPlugin()`
-│                        #   (module singleton; FilesPlugin is a per-runtime factory)
-├── components/          # feature UI (+ __tests__/integration/)
-├── hooks/               # feature hooks (+ tests)
+├── index.ts             # the public surface
+├── contribution.tsx     # presence state + the view it contributes, if it has one
+├── components/          # capability UI (+ __tests__/integration/)
+├── hooks/               # capability hooks (+ tests)
 ├── model/               # pure domain model, if any
-└── README.md            # ownership, module map, state ownership, cross-feature deps
+└── README.md            # ownership, module map, state ownership, cross-capability deps
 ```
 
-Cross-feature imports are allowed through the peer's public surface and are
-recorded in each README — e.g. `agents → sessions` (`model/domainState`
-channel vocabulary, `ConnectionStatus`), `sessions → env`
-(`EnvFileMultiSelect`), `terminal → commands` (presets/`useQuickCommands`).
+Claude Code is the reference for the whole slice: transport, wire types, UI,
+presence state and its Workspace view are all in `capabilities/claude-code/`,
+and the app layer only registers what the contribution hands it. The other three
+still keep their view bindings in `app/workspace/views/` — Phase 4 continues.
+
+The singleton convention differs where a cycle would otherwise close: `envApi`
+and the others are declared in `index.ts`, while `claudeCodeApi` is declared in
+`ClaudeCodePlugin.ts`, because `index` re-exports the contribution, the
+contribution imports the component, and the component needs the singleton.
+Declaring it in the barrel would close that into a cycle.
+
+Cross-capability imports go through the peer's public surface and are recorded
+in each README — e.g. `files → explorer` (the file-tree framework),
+`env → session` (`EnvFileMultiSelect`), `terminal → commands`
+(presets/`useQuickCommands`).
 
 ### State ownership
 
 Rules follow #649 (per-feature READMEs hold the detailed table):
 
-- transient / short-lived UI state → component state or a feature hook
-- capability state shared across components → feature `model/`/`hooks/` (per
+- transient / short-lived UI state → component state or a capability hook
+- capability state shared across components → capability `model/`/`hooks/` (per
   mount; session-list state is deliberately **not** hoisted to a global atom)
 - transport / connection / terminal lifecycle → core (`core/terminal-runtime`,
   `services/socket`) and shared atoms (`atoms/`)
@@ -267,16 +303,22 @@ Rules follow #649 (per-feature READMEs hold the detailed table):
 
 ### Extension points
 
-- **Capability plugins** (wire APIs): each feature's `*Api` singleton is
+- **Capability plugins** (wire APIs): each capability's `*Api` singleton is
   registered centrally in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`)
   and installed on every `WebSocketService` connection.
-- **`extensions/registry`**: UI slots (e.g. `agent-detail`) contributed by
-  extensions such as claude-code; consumed by feature components.
-- **Workspace capabilities**: `app/workspace/capabilities.ts` registers what the
-  Workspace can show and when each is available; `app/workspace/viewBindings.ts`
-  registers how each is drawn (`app/workspace/views/`). A capability's name and
-  state come from its provider, never from its view — see
-  `docs/design/workspace.md`, "Contribution model".
+- **`extensions/registry`**: UI slots (e.g. `agent-detail`, `terminal-header`)
+  that an extension may contribute into a product pattern. The mechanism is
+  live but has **no contributor today** — Claude Code's sections were retired
+  when it became a Workspace tool, and its empty registration was deleted with
+  them. Adding one means adding `extensions/<name>/index.ts`, which the
+  registry discovers by glob.
+- **Capability contributions**: a capability that contributes to the shell
+  declares it in its own `contribution.tsx` — presence state plus its Workspace
+  view binding (`capabilities/claude-code/` is the reference). The app layer
+  registers what it receives: `app/workspace/capabilities.ts` for presence,
+  `app/workspace/viewBindings.ts` for views. A capability's name and state come
+  from its provider, never from its view — see `docs/design/workspace.md`,
+  "Contribution model".
 - **Fixture screens**: `app/fixture/` powers the `/fixture*` routes used by
   e2e visual baselines.
 
