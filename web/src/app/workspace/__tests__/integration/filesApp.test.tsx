@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
-import { FilesAppLayout } from '@/app/workspace/views/filesApp';
+import { FilesAppLayout } from '@/app/experiences/app/FilesAppLayout';
 import type { FileEntry, FileOps } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
