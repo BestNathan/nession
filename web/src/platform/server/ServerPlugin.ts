@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
 import type { ServerInfo } from '@/types';
 
 /**
@@ -6,7 +6,7 @@ import type { ServerInfo } from '@/types';
  * file; the typed API is what consumers import (module singleton in
  * index.ts).
  */
-export class ServerPlugin implements CapabilityPlugin {
+export class ServerPlugin implements TransportPlugin {
   readonly name = 'server';
 
   private connection: PluginSurface | null = null;

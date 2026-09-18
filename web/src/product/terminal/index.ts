@@ -1,4 +1,4 @@
-// Terminal capability plugins — pure TypeScript, no React/xterm chain.
+// Terminal transport plugins — pure TypeScript, no React/xterm chain.
 // Runtime code (SessionRuntime, relayServerConnection) imports from this
 // entry point; keep React components out so module-level xterm evaluation
 // never leaks into runtime consumers.

@@ -20,6 +20,14 @@ the design system, the source layout and the lint gate all use one language.
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
 
+**"Capability" means one thing here: the Product Capability** — discoverable,
+activatable, with a presence state, met by a user in the UI (Files, Env,
+Commands, Claude Code). The wire-protocol adapters on `WebSocketService` used to
+be called `CapabilityPlugin` too; they are now `TransportPlugin`
+(`services/socket/types.ts`), because they have no presence, are never
+activated, and are invisible to the user. Any sentence where "capability" could
+mean either is a sentence to rewrite.
+
 ### Dependency direction
 
 ```text
@@ -267,7 +275,7 @@ original, and the closest thing to an exemplar):
 
 ```text
 capabilities/<name>/
-├── <Name>Plugin.ts      # class implements CapabilityPlugin; generation-tagged
+├── <Name>Plugin.ts      # class implements TransportPlugin; generation-tagged
 │                        #   install(connection) — StrictMode-safe
 ├── types.ts             # wire request/response types
 ├── index.ts             # the public surface
@@ -324,9 +332,12 @@ Rules follow #649 (per-feature READMEs hold the detailed table):
 
 ### Extension points
 
-- **Capability plugins** (wire APIs): each capability's `*Api` singleton is
-  registered centrally in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`)
-  and installed on every `WebSocketService` connection.
+- **Transport plugins** (wire APIs): each owner's `*Api` singleton is registered
+  centrally in `app/useAppConnection.ts` (`SERVER_PLUGINS`) and installed on
+  every `WebSocketService` connection. Renamed from `CapabilityPlugin` in #801:
+  one word was carrying both this and Product Capability, and the two share
+  nothing — a transport plugin has no presence, is never activated, and is
+  invisible to the user.
 - **`extensions/registry`**: UI slots (e.g. `agent-detail`, `terminal-header`)
   that an extension may contribute into a product pattern. The mechanism is
   live but has **no contributor today** — Claude Code's sections were retired

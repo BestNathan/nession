@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
 import type {
   AttachInfo,
   CreateSessionResponse,
@@ -22,7 +22,7 @@ interface GenerationEntry<T> {
  * session list fresh. Wire strings live only in this file; the typed API is
  * what consumers import (module singleton in index.ts).
  */
-export class SessionsPlugin implements CapabilityPlugin {
+export class SessionsPlugin implements TransportPlugin {
   readonly name = 'sessions';
 
   private connection: PluginSurface | null = null;
