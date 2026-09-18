@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { SessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
+import { SessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { createFilesApi } from '@/capabilities/files';
 import { createTerminalAgentApi } from '@/product/terminal';
-import type { SessionRuntimeConfig } from '@/runtime/SessionRuntime';
+import type { SessionRuntimeConfig } from '@/platform/session-runtime/SessionRuntime';
 import type { AttachInfo } from '@/types';
 
 function makeConfig(sessionId: string): SessionRuntimeConfig {

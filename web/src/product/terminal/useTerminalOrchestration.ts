@@ -9,7 +9,7 @@ import {
   relayServerHandle,
   type RelayServerHandle,
   type RelayServerTransport,
-} from '@/runtime/relayServerConnection';
+} from '@/platform/attach/relayServerConnection';
 import type { EnvFileRef } from '@/types';
 import {
   sessionIdAtom,

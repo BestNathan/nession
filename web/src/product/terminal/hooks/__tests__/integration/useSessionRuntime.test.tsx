@@ -15,10 +15,10 @@ import {
 import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/services/socket/types';
-import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
-import { SessionRuntime } from '@/runtime/SessionRuntime';
-import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
+import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
 const addressPlanState = vi.hoisted(() => ({
   urls: ['ws://shared-agent/ws'] as string[],

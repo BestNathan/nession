@@ -1,15 +1,18 @@
 import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
-import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/services/socket';
 import type { ConnectionState } from '@/services/socket/types';
-import { AddressAttachPolicy } from '@/runtime/AddressAttachPolicy';
-import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/runtime/AttachStateMachine';
-import { SessionAttachController } from '@/runtime/SessionAttachController';
+import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
+import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
+import { SessionAttachController } from '@/platform/attach/SessionAttachController';
 // Types only. The capability *factories* are injected through
-// SessionRuntimeConfig instead of imported, because `runtime/` is `core` and a
-// feature may not be imported from below it — while the runtime is genuinely
-// below the terminal feature, which consumes it (#783).
+// SessionRuntimeConfig instead of imported, because `platform` sits below
+// `product` and `capabilities` and may not import either — while the runtime is
+// genuinely below the terminal concept, which consumes it (#783). This was
+// written when the module lived at `runtime/` and the layer was called `core`;
+// the constraint is the same one, and it is why the type-only imports below are
+// legal while a value import of the same modules would not be.
 import type { FilesPlugin } from '@/capabilities/files';
 import type { TerminalAgentApi } from '@/product/terminal';
 
@@ -30,8 +33,8 @@ export interface SessionRuntimeConfig {
   /**
    * Capability factories the runtime needs for a P2P attach.
    *
-   * Injected rather than imported: `runtime/` is `core` and may not import a
-   * feature, but the terminal feature needs the runtime, so the dependency has
+   * Injected rather than imported: `platform` may not import a `product`
+   * module, but the terminal concept needs the runtime, so the dependency has
    * to point one way. The caller — `product/terminal`, which owns both — hands
    * them over. See #783.
    */

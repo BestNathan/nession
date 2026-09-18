@@ -3,7 +3,7 @@ import type { TerminalControllerEvents } from '@/platform/terminal-runtime/contr
 import { inputModeAtomFamily } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
 import { terminalTransportReadyAtom } from '../state/transport';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 /**
  * Mirrors imperative TerminalController events into Jotai atoms for React UI.

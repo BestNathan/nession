@@ -1,4 +1,4 @@
-import { SessionRuntime, type RuntimeMirrorSnapshot, type SessionRuntimeConfig } from '@/runtime/SessionRuntime';
+import { SessionRuntime, type RuntimeMirrorSnapshot, type SessionRuntimeConfig } from '@/platform/session-runtime/SessionRuntime';
 
 /** One acquire() lease. release() is idempotent and generation-safe. */
 export interface SessionRuntimeLease {

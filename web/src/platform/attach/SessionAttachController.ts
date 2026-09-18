@@ -4,7 +4,7 @@ import {
   P2P_MAX_RECONNECT,
   type AttachEvent,
   type AttachTransitionResult,
-} from '@/runtime/AttachStateMachine';
+} from '@/platform/attach/AttachStateMachine';
 import type { TerminalAgentApi } from '@/product/terminal';
 
 /** Listeners receive every attach outcome the state machine produces. */
