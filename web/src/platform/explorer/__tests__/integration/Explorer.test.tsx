@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { Explorer } from '@/features/explorer/Explorer';
-import { ROOT_ID } from '@/features/explorer/ExplorerStore';
-import type { ExplorerExtension } from '@/features/explorer/commands/types';
-import type { ExplorerDataProvider } from '@/features/explorer/providers/types';
-import { mockExplorerExtension } from '@/features/explorer/testing/mockExtension';
-import type { ExplorerNode } from '@/features/explorer/types';
+import { Explorer } from '@/platform/explorer/Explorer';
+import { ROOT_ID } from '@/platform/explorer/ExplorerStore';
+import type { ExplorerExtension } from '@/platform/explorer/commands/types';
+import type { ExplorerDataProvider } from '@/platform/explorer/providers/types';
+import { mockExplorerExtension } from '@/platform/explorer/testing/mockExtension';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 function makeNode(
   id: string,

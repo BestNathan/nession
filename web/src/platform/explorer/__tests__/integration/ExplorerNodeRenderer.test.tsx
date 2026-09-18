@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import { ContextMenuItem } from '@/components/ui/context-menu';
-import { ExplorerNodeRenderer } from '@/features/explorer/renderers/ExplorerNodeRenderer';
-import type { ExplorerNode } from '@/features/explorer/types';
+import { ExplorerNodeRenderer } from '@/platform/explorer/renderers/ExplorerNodeRenderer';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 const FILE_NODE: ExplorerNode = {
   id: 'src/main.ts',

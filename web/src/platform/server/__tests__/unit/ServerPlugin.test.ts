@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ServerPlugin } from '@/features/server/ServerPlugin';
+import { ServerPlugin } from '@/platform/server/ServerPlugin';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import type { ServerInfo } from '@/types';
 

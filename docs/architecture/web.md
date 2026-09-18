@@ -16,15 +16,15 @@ the design system, the source layout and the lint gate all use one language.
 | **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
 | **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
 | **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`api/ model/ components/ contribution.ts`) | `capabilities/<name>/` |
-| **platform** | How does transport / runtime / attach work? | React-free terminal runtime, session-runtime ownership, socket, attach, persistence | `platform/<domain>/` |
+| **platform** | How does the machinery work? | transport, runtime, attach, persistence — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin) | `platform/<domain>/` |
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
 
 ### Dependency direction
 
 ```text
-app  ──────────────▶ product | capabilities | extensions | platform | shared | components/ui
-product  ──────────▶ capabilities | extensions | platform | shared | components/ui
+app  ──────────────▶ product | capabilities | platform | extensions | shared | components/ui
+product  ──────────▶ capabilities | platform | extensions | shared | components/ui
 capabilities  ─────▶ platform | shared | components/ui
 platform  ──────────▶ shared | components/ui
 shared  ───────────▶ components/ui
@@ -38,8 +38,8 @@ come back. PRINCIPLE #3 is what says the direction is right: "capabilities
 should naturally gain presence when they become relevant to the current
 context" describes a capability appearing *inside* a product context, not a
 product appearing inside a capability. If a capability ever needs a Product
-Pattern, that is the same decision `features ↔ extensions` already records, and
-it should be made then rather than pre-granted here.
+Pattern, that is the same decision `extensions ↔ capabilities` already records,
+and it should be made then rather than pre-granted here.
 
 Same-layer imports are allowed; anything against the arrows above is a reverse
 import and a lint error (`nession/no-reverse-imports`,
@@ -49,9 +49,9 @@ Two constraints that are *not* expressible as a direction and stay prose:
 PRINCIPLE #5 — a capability may contribute views and state but must not define
 global structure, so `capabilities/*` reaches the shell only through a
 contribution contract (`app/workspace/capabilities.ts` +
-`viewBindings.ts`), never by importing `app/` internals. And `platform` is
-React-free where it already is (`core/terminal-runtime`); that property is not
-something the layer rule can enforce.
+`viewBindings.ts`), never by importing `app/` internals. And `core/terminal-runtime`
+is React-free; that is a property of the module, not of `platform`, and the
+layer rule cannot enforce either.
 
 ### Current layout → target owner
 
@@ -69,10 +69,10 @@ the honest answer to "where does this go today" until the row moves.
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
-| `features/server` | **undecided** — see below | 3 |
 | `product/capability/` — the generic capability lifecycle (discovery, presence, registry, model, facts) | **done** | 4 |
 | `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
-| `features/explorer` | undecided — a reusable framework, not a capability | 5 |
+| `platform/server/` — the Server transport plugin + its menu | **done** | 3 |
+| `platform/explorer/` — the file-tree framework | **done** | 5 |
 | `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
 | `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
@@ -81,33 +81,33 @@ the honest answer to "where does this go today" until the row moves.
 | `markdown/` | `shared/` (already the rule's model) | 5 |
 | `components/ui/`, `shared/`, `test/` | unchanged | — |
 
-### How the migration is allowed to proceed
+### How the migration was allowed to proceed
+
+Kept as a record because the decision was not obvious and the next layout change
+will face the same shape.
 
 An extraction is only possible while the module it needs has already moved, and
-`product → features` is forbidden. So a pattern cannot be lifted out of its
-feature on its own: the Session patterns need
-`features/sessions/model/domainState`, and moving them alone would leave each
-one importing the place it just left.
+`product → features` was forbidden. So a pattern could not be lifted out of its
+feature on its own: the Session patterns need the Session model, and moving them
+alone would leave each one importing the place it just left.
 
-There are exactly two ways out, and this is the decision:
+Two ways out, taken in this order:
 
-- **Move a concept whole** — `features/sessions` → `product/session` in one
-  change. Granular but honest; the rule never loosens.
-- **Allow it temporarily** — let `features` and the new layers import each other
-  until `features/` is empty.
+1. **Move the concept whole**, which `product/session` did — all 26 files at once,
+   granular but honest, the rule never loosening.
+2. **Allow it temporarily**, which became necessary the first time an
+   already-moved concept was needed by one that had not moved: `features/agents`
+   imports the Session concept, so the moment `sessions` became
+   `product/session`, `agents` was reaching up out of a layer below it.
 
-**Taking both, in that order.** Concepts move whole for as long as that is
-possible — `product/session` moved whole, all 26 files at once. It stopped being
-possible the first time a concept that has already moved was needed by one that
-has not: `features/agents` imports the Session concept, so once `sessions`
-became `product/session`, `agents` was reaching up out of a layer below it.
+The allowance opened exactly one pair of directions (`features ↔ product`, later
+`↔ capabilities`), so everything else about `features` stayed enforced —
+`components/ui → features` remained an error, and so did `shared → features`.
 
-So `features` now has the **transitional allowance in both directions** — see
-`MIGRATION_FROM` / `MIGRATION_INTO` in the rule. It is deliberately narrow: it
-opens `features ↔ product` and nothing else, so `components/ui` reaching into a
-feature is still an error and so is `shared → features`. It is removed when
-`features/` no longer exists (Phase 7), at which point the two constants go and
-the layers are related by the table alone.
+**It is gone now.** `features/` is empty and deleted, so `MIGRATION_FROM` /
+`MIGRATION_INTO` were removed in the same change that emptied it, and the layers
+are related by the table alone. A rule that protects nothing is worse than no
+rule: it reads as coverage.
 
 Two other rules decide the ambiguous cases, both from #801's principles:
 
@@ -121,7 +121,7 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 ### Naming collisions found while surveying (unresolved)
 
 - Two different components are both called `ConnectionStatus`.
-  `features/sessions/components/ConnectionStatus.tsx` is the canonical pattern —
+  `product/session/components/ConnectionStatus.tsx` is the canonical pattern —
   it implements the three independent dimensions
   (`patterns/connection-status.md`: Agent / Workspace Location connectivity,
   Session lifecycle, this-client attachment).
@@ -133,12 +133,26 @@ Two other rules decide the ambiguous cases, both from #801's principles:
   appearing in neither module map. It was never a feature — it is the model every
   capability is described by — and it now lives at `product/capability/`, which
   is also why it is singular: it is the capability *model*, not a capability.
-- **`features/server` has no obvious owner.** The Product Model's concepts are
-  Workspace, Workspace Location, Session, Terminal, Agent — Server is not among
-  them, and its tree groups Server under "infrastructure / context" rather than
-  under product or capability. It is three files (`ServerPlugin`,
-  `ServerInfoMenu`, `index`), imported only by `app/`, so it moves whenever the
-  answer arrives; picking one now would be guessing at the product model.
+- **Decided: `Server` and `Explorer` are `platform/`.** Neither was placed by
+  #801, and the reasoning is worth keeping because both were tempting to file
+  somewhere they do not belong.
+  - *Server* is the thing you connect **to** — the same family as socket and
+    attach — and it is not a contextual capability: you do not "activate
+    Server". The Product Model's concepts (Workspace, Workspace Location,
+    Session, Terminal, Agent) do not include it, which is the signal that it is
+    machinery rather than meaning.
+  - *Explorer* is a file-tree framework carrying no Nession product semantics.
+    Not `product` (no product meaning), not `capabilities` (nothing to discover
+    or activate), not `shared` (#801 scopes shared to hooks + lib), and — the
+    tempting one — **not** `capabilities/files/explorer`. Burying it there
+    would have made the next capability that wants a tree violate the rule that
+    capabilities reach each other only through public contracts. A reusable
+    framework in one capability's internals creates the next violation.
+
+  Widening `platform` to admit a UI framework is deliberate: #801's §7
+  convergence list says where `platform` will *come from*, not the whole of what
+  it may hold, and "React-free" is a property of `core/terminal-runtime` rather
+  than a precondition for the layer.
 - **`product → extensions` is a real edge, not a leak.** Moving `AgentDetail`
   into `product/agent/` surfaced it: the pattern renders the `agent-detail`
   slot through the registry. That is PRINCIPLE #5 working — Nession owns the
@@ -150,12 +164,13 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 ### `extensions/` today
 
 `extensions/` (extension registry + `claude-code` UI contributions) sits outside
-the ladder: it is imported by app and feature code through the registry contract
-and composes the feature it extends. The rule models it as a rung of its own
-(`extensions`) rather than folding it into `features`, so that
-`extensions → features` is allowed while `platform → extensions` stays
-forbidden. The mutual `features ↔ extensions` allowance is deliberate. Phase 4
-absorbs it into `capabilities/*/contribution.ts`.
+the ladder: it is imported by app and capability code through the registry
+contract and composes what it extends. The rule models it as a rung of its own
+(`extensions`) rather than folding it into a layer, so that
+`extensions → capabilities` is allowed while `platform → extensions` stays
+forbidden. The mutual `capabilities ↔ extensions` allowance is deliberate —
+an extension is the UI contribution *for* a capability. Phase 4 absorbs it into
+`capabilities/*/contribution.ts`.
 
 `markdown/` is `shared`. Its consumers are `capabilities/files` *and*
 `lib/languageId`, and a `shared` module importing it pins it to the bottom rung.

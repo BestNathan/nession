@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createCoreExplorerExtension } from '@/features/explorer/commands/coreContributions';
-import type { ExplorerContextMenuContribution } from '@/features/explorer/commands/types';
-import { ExplorerRegistry } from '@/features/explorer/registry';
-import type { ExplorerNode } from '@/features/explorer/types';
+import { createCoreExplorerExtension } from '@/platform/explorer/commands/coreContributions';
+import type { ExplorerContextMenuContribution } from '@/platform/explorer/commands/types';
+import { ExplorerRegistry } from '@/platform/explorer/registry';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 const CORE_MENU_IDS = [
   'core.copy-path',

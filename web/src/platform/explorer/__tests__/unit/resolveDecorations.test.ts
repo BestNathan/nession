@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveDecorations } from '@/features/explorer/decorations/resolveDecorations';
-import type { ExplorerDecorationProvider } from '@/features/explorer/decorations/types';
-import type { ExplorerNode } from '@/features/explorer/types';
+import { resolveDecorations } from '@/platform/explorer/decorations/resolveDecorations';
+import type { ExplorerDecorationProvider } from '@/platform/explorer/decorations/types';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 const FILE_NODE: ExplorerNode = {
   id: 'src/main.ts',

@@ -27,7 +27,7 @@ import {
   Explorer,
   type ExplorerExtension,
   type ExplorerDecorationProvider,
-} from '@/features/explorer';
+} from '@/platform/explorer';
 
 const gitDecorationProvider: ExplorerDecorationProvider = {
   provide(node) {
@@ -57,7 +57,7 @@ or receive an `ExplorerRegistry` instance directly — it is plain TypeScript,
 framework-free:
 
 ```ts
-import { ExplorerRegistry, type ExplorerExtension } from '@/features/explorer';
+import { ExplorerRegistry, type ExplorerExtension } from '@/platform/explorer';
 
 const registry = new ExplorerRegistry();
 registry.register(gitExtension); // throws on duplicate id

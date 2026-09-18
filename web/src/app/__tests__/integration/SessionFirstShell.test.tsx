@@ -91,7 +91,7 @@ vi.mock('@/capabilities/env/components/EnvManager', () => ({
     </div>
   ),
 }));
-vi.mock('@/features/server/components/ServerInfoMenu', () => ({
+vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
 vi.mock('@/product/session/components/AttachDialog', () => ({

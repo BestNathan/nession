@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ExplorerExtension } from '@/features/explorer/commands/types';
-import { ExplorerRegistry } from '@/features/explorer/registry';
-import type { ExplorerNode } from '@/features/explorer/types';
+import type { ExplorerExtension } from '@/platform/explorer/commands/types';
+import { ExplorerRegistry } from '@/platform/explorer/registry';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 const FILE_NODE: ExplorerNode = {
   id: 'readme.md',

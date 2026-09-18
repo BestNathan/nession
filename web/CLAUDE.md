@@ -30,10 +30,10 @@ Do not infer permanent product boundaries from today's component tree or transpo
 
 | Rule | Detail |
 |------|--------|
-| Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
-| Components | Shared generic UI infrastructure lives in `src/components/ui/`; feature UI belongs in `features/<feature>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
-| Layers | Target vocabulary (#801): `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`. The older `app → features → core → shared` ladder is the **migration state**, not the target. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and current→target mapping: `docs/architecture/web.md`. |
-| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own feature (`features/<feature>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
+| Hooks | Shared hooks in `src/shared/hooks/`, capability/product hooks in `<owner>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
+| Components | Shared generic UI infrastructure lives in `src/components/ui/`; capability/product UI belongs in `<owner>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
+| Layers | The vocabulary is `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`; `features/` no longer exists. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and migration state: `docs/architecture/web.md`. |
+| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own layer (`capabilities/<name>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling follows the existing component model. UI styling policy and design values live in `nession-web-design`. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -65,7 +65,8 @@ src/
 │                          #   (target owner; see the migration map in web.md)
 ├── capabilities/          # discoverable / activatable / contributable
 │                          #   capabilities, as vertical slices
-├── features/              # Domain features: plugin + components/hooks/model
+├── platform/              # transport, runtime, attach — and framework-level
+│                          #   code with no product semantics
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
 ├── core/terminal-runtime/ # React-free terminal runtime

@@ -47,7 +47,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 `features/agents` imports `model/domainState` (types) and
 `components/ConnectionStatus` for its in-workspace agent surfaces — the
 channel vocabulary is session-workspace state, so sessions owns it. This
-mirrors the `capabilities/files → features/explorer` direction (owner of the
+mirrors the `capabilities/files → platform/explorer` direction (owner of the
 contract stays in one feature; the peer imports its public surface).
 
 ## Consumers

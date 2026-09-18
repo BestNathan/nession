@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/capabilities/files';
-import { Explorer } from '@/features/explorer/Explorer';
+import { Explorer } from '@/platform/explorer/Explorer';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
