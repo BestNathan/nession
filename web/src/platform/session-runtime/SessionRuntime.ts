@@ -523,6 +523,10 @@ export class SessionRuntime {
       // The published snapshot's own phase. If this lags `phase`, the UI can
       // only ever see the stale value — which is the whole question.
       snapshotPhase: this.snapshot.phase,
+      // Last standing candidate: a spurious route-intent change re-drives the
+      // attach and holds it at 'connecting'. If this value moves across the
+      // attached -> connecting transition, that is the cause.
+      epoch: this.routeIntentEpoch,
     }));
     if (!conn || !this.config.attachInfo) {
       return;
