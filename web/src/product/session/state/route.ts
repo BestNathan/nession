@@ -6,8 +6,11 @@
 // constraint, not taste, is what keeps them here (#801 Phase 5).
 import { atom } from 'jotai';
 import { probeResultsAtom } from '@/product/agent/state/probe';
-import { p2pStateAtom, routeIntentEpochAtom } from '@/platform/attach/state/transport';
-import { terminalSessionStateAtom } from '@/product/terminal/state/session';
+import {
+  p2pStateAtom,
+  routeIntentEpochAtom,
+  terminalSessionStateAtom,
+} from '@/platform/attach/state/transport';
 import { resolveAutoP2pUrl } from '@/lib/resolveAutoP2pUrl';
 import {
   agentIdAtom,

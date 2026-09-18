@@ -7,8 +7,11 @@
 import { atom } from 'jotai';
 import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
-import { p2pStateAtom, routeIntentEpochAtom } from '@/platform/attach/state/transport';
-import { terminalSessionStateAtom } from '@/product/terminal/state/session';
+import {
+  p2pStateAtom,
+  routeIntentEpochAtom,
+  terminalSessionStateAtom,
+} from '@/platform/attach/state/transport';
 
 export const sessionIdAtom = atom('');
 export const sessionNameAtom = atom('');

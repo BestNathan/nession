@@ -2,11 +2,12 @@
 import { atom } from 'jotai';
 import { sessionIdAtom, sessionNameAtom } from '@/product/session/state/session';
 import { effectiveModeAtom } from '@/product/session/state/route';
+import { terminalSessionStateAtom } from '@/platform/attach/state/transport';
 
 // TerminalStatus/TerminalSession live in platform/terminal-runtime so runtime
 // consumers never depend on the Jotai state layer; re-exported here for
 // React-side imports.
-import type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtime/types';
+import type { TerminalSession } from '@/platform/terminal-runtime/types';
 export type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtime/types';
 
 /**
@@ -14,13 +15,13 @@ export type { TerminalSession, TerminalStatus } from '@/platform/terminal-runtim
  * actions in `product/session/state` and the state machine effect in the
  * terminal hooks.
  *
- * It used to be *defined* in `atoms/session.ts` and re-exported from here, with
- * a comment explaining that `atoms/` was `shared` and could not import a
- * feature, so the writer had to live below the terminal (#783). That reason is
- * gone: the writers are `product/session/state` now, which may reach
- * `product/terminal` directly, so the atom is simply owned here.
+ * Re-exported, not defined: it lives in `platform/attach/state/transport.ts`,
+ * below both this module and the `product/session` actions that write it.
+ * Defining it here instead makes `product/session/state` and this file import
+ * each other — which is what an earlier revision of this refactor did, and it
+ * deterministically broke relay-mode terminal I/O in e2e.
  */
-export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
+export { terminalSessionStateAtom } from '@/platform/attach/state/transport';
 
 /** Private: pinned by terminalSessionAtom's write so startedAt stays stable. */
 const startedAtAtom = atom<number>(0);

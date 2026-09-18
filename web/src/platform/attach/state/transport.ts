@@ -7,6 +7,22 @@
 // follows ownership, not "it is a Jotai atom".)
 import { atom } from 'jotai';
 import type { ConnectionState } from '@/platform/socket/types';
+import type { TerminalStatus } from '@/types';
+
+/**
+ * Attach lifecycle status of the local terminal connection.
+ *
+ * It lives here, below both of its users, and that placement is load-bearing:
+ * `product/session/state` **writes** it (the attach and disconnect actions) and
+ * `product/terminal/state` **reads** it. Defining it in the terminal state —
+ * where it was imported from — makes those two modules import each other, and
+ * the app was broken by exactly that cycle when this refactor first tried it.
+ *
+ * The original code kept the atom in `atoms/` for the same reason, and said so:
+ * "these session atoms write it … a shared atom could not have lived in
+ * `features/`". Only the layer name changed; the constraint never did.
+ */
+export const terminalSessionStateAtom = atom<TerminalStatus>('idle');
 
 export const p2pStateAtom = atom<ConnectionState>('disconnected');
 
