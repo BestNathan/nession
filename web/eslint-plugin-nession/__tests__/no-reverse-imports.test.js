@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { RuleTester } from 'eslint';
 import tseslint from 'typescript-eslint';
@@ -57,9 +57,10 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
         errors: [{ messageId: 'reverseImport' }],
       },
       {
-        // The cycle #783 found: core reaching a feature that consumes core.
+        // The cycle #783 found: the runtime reaching a product module that
+        // consumes it. Written against `runtime/` then; `platform/` now.
         code: "import { createTerminalAgentApi } from '@/product/terminal';",
-        filename: '/p/web/src/runtime/SessionRuntime.ts',
+        filename: '/p/web/src/platform/session-runtime/SessionRuntime.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
       {
@@ -90,7 +91,7 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
       },
       {
         code: "import { createFilesApi } from '@/capabilities/files';",
-        filename: '/p/web/src/runtime/__tests__/unit/SessionRuntime.test.ts',
+        filename: '/p/web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts',
       },
       {
         code: "import { x } from '@/capabilities/files/model/x';",
@@ -102,7 +103,7 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
     invalid: [
       {
         code: "import { createFilesApi } from '@/capabilities/files';",
-        filename: '/p/web/src/runtime/SessionRuntime.ts',
+        filename: '/p/web/src/platform/session-runtime/SessionRuntime.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],
@@ -119,7 +120,7 @@ test('a fully-erased type import is out of scope — it creates no runtime edge'
   function reportFor(importKind) {
     const reported = [];
     const visitors = rule.create({
-      getFilename: () => '/p/web/src/runtime/SessionRuntime.ts',
+      getFilename: () => '/p/web/src/platform/session-runtime/SessionRuntime.ts',
       report: (d) => reported.push(d),
     });
     visitors.ImportDeclaration({
@@ -517,5 +518,35 @@ test('every src/ directory is classified — mapped, or deliberately not a layer
     staleRoots,
     [],
     `ROOT_FILE_LAYER names modules that do not exist: ${staleRoots.join(', ')}`,
+  );
+});
+
+// The tables above are checked against the real tree. This closes the other
+// end: the *fixtures'* own paths.
+//
+// A fixture's `filename` is an input — it is what decides which layer the rule
+// believes the code lives in. So a fixture naming a directory that has since
+// moved does not fail as "stale path". It fails as "expected 1 error, got 0",
+// or worse, passes as a `valid` case, because the code resolves to `unknown`
+// and every edge out of `unknown` is skipped. That has now happened three times
+// in this file's life — `features/`, `core/`, `runtime/` — and each time it was
+// noticed by accident, while moving something else.
+//
+// Reading this file's own text is deliberate: the paths are literals because
+// they are the thing under test, so the only way to check them is to read them.
+test('every fixture path names a directory the rule can classify', () => {
+  const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const segments = [...self.matchAll(/web\/src\/([A-Za-z0-9_]+)\//g)].map((m) => m[1]);
+  const unknown = [...new Set(segments)].filter(
+    (dir) => !(dir in LEGACY_TO_LAYER) && !(dir in NON_LAYER_DIRS),
+  );
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `fixture paths name directories the rule cannot classify: ${unknown.join(', ')}. `
+      + 'Those fixtures are not testing what they claim — the code resolves to '
+      + '`unknown` and every edge is skipped. Point them at the module\'s current '
+      + 'home.',
   );
 });

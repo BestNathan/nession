@@ -1,5 +1,5 @@
 import type { TerminalAgentApi } from '@/product/terminal';
-import type { RelayServerTransport } from '@/runtime/relayServerConnection';
+import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
 /** Banner state surfaced to the React layer for UI rendering. */
 export type ReconnectBanner = 'none' | 'reconnecting' | 'failed';

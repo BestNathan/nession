@@ -70,11 +70,10 @@ src/
 │                          #   contributes to the shell declares it in its own
 │                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
-│                          #   code with no product semantics
-│                          #   server/, explorer/, terminal-runtime/ (React-free)
+│                          #   code with no product semantics: server/, explorer/,
+│                          #   terminal-runtime/ (React-free), session-runtime/, attach/
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
-├── runtime/               # SessionRuntime ownership + attach state machines
 ├── atoms/                 # Jotai atoms split by domain
 ├── services/              # WS client and other core services
 ├── lib/                   # Pure helpers

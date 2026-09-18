@@ -99,7 +99,7 @@ vi.mock('sonner', () => ({
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
-// onConnectionStateChange + connectionState (runtime/relayServerConnection.ts).
+// onConnectionStateChange + connectionState (platform/attach/relayServerConnection.ts).
 // 'connected' mirrors the shell's post-handshake render state.
 vi.mock('@/shared/hooks/useWebSocket', () => ({
   useWebSocket: () => ({

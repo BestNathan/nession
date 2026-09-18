@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AttachStateMachine, P2P_MAX_RECONNECT } from '@/runtime/AttachStateMachine';
+import { AttachStateMachine, P2P_MAX_RECONNECT } from '@/platform/attach/AttachStateMachine';
 
 describe('AttachStateMachine', () => {
   it('starts connecting on SESSION_SELECTED', () => {

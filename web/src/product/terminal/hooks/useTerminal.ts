@@ -5,7 +5,7 @@ import { createTerminalRuntimeAdapter } from '../adapters/TerminalRuntimeAdapter
 import type { TerminalSession } from '../state/session';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { DeviceProfile, TerminalScrollbackMode } from '@/platform/terminal-runtime/types';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 export interface UseTerminalOptions {
   sessionId: string;

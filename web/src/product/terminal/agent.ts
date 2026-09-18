@@ -3,7 +3,7 @@ import type { PluginSurface } from '@/services/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 
 /**
- * Default attach timeout — must mirror `runtime/AttachStateMachine.ts`
+ * Default attach timeout — must mirror `platform/attach/AttachStateMachine.ts`
  * (controller-level budget kept there for the old consumer; this one serves
  * the feature API). Do not import from the feature into runtime.
  */

@@ -17,9 +17,9 @@ import {
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import type { ConnectionState } from '@/services/socket/types';
 import type { AttachResult, TerminalAgentApi } from '@/product/terminal';
-import { AttachStateMachine, type AttachPhase } from '@/runtime/AttachStateMachine';
-import { SessionAttachController } from '@/runtime/SessionAttachController';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import { AttachStateMachine, type AttachPhase } from '@/platform/attach/AttachStateMachine';
+import { SessionAttachController } from '@/platform/attach/SessionAttachController';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 /** Two microtask ticks — enough for a resolved attach's .then chain to run. */
 function flushMicrotasks(): Promise<void> {

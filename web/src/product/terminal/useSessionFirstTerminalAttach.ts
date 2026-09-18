@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { forcedRelayAtom } from '@/atoms/session';
 import {
   terminalSessionStateAtom,
   type TerminalStatus,
 } from '@/product/terminal/state';
 
-export { P2P_MAX_RECONNECT, ATTACH_TIMEOUT_MS } from '@/runtime/AttachStateMachine';
+export { P2P_MAX_RECONNECT, ATTACH_TIMEOUT_MS } from '@/platform/attach/AttachStateMachine';
 
 export interface UseSessionFirstTerminalAttachOptions {
   sessionId: string;

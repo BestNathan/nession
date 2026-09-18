@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SessionAttachController } from '@/runtime/SessionAttachController';
+import { SessionAttachController } from '@/platform/attach/SessionAttachController';
 import {
   AttachStateMachine,
   ATTACH_TIMEOUT_MS,
   type AttachTransitionResult,
-} from '@/runtime/AttachStateMachine';
+} from '@/platform/attach/AttachStateMachine';
 import type { AttachResult, TerminalAgentApi } from '@/product/terminal';
 
 /** Two microtask ticks — enough for a resolved attach's .then chain to run. */

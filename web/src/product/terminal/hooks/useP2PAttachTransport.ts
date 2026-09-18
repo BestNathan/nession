@@ -2,7 +2,7 @@ import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { TerminalAgentApi } from '@/product/terminal';
-import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
 
 interface UseP2PAttachTransportOptions {
   attachInfo: AttachInfo | null;
@@ -22,8 +22,8 @@ interface UseP2PAttachTransportResult {
   connectionState: import('@/services/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
   fileOps: import('@/capabilities/files').FileOps | null;
-  runtime: import('@/runtime/SessionRuntime').SessionRuntime | null;
-  snapshot: import('@/runtime/SessionRuntime').SessionRuntimeSnapshot | null;
+  runtime: import('@/platform/session-runtime/SessionRuntime').SessionRuntime | null;
+  snapshot: import('@/platform/session-runtime/SessionRuntime').SessionRuntimeSnapshot | null;
 }
 
 /**

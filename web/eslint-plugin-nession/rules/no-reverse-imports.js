@@ -132,13 +132,13 @@ const LEGACY_TO_LAYER = {
   'lib': 'shared',
   'atoms': 'shared', // atoms are shared state
   'markdown': 'shared', // markdown pipeline — rationale in the note above
-  'services': 'core', // services/socket, attachPrefs, deepLinkAttach
-  'runtime': 'core',
-  // `core` the *directory* is gone — `core/terminal-runtime` became
-  // `platform/terminal-runtime`, and it was `core/`'s only child. `core` the
-  // *layer* is still here, holding `services/` and `runtime/` until they
-  // converge too; that is why ALLOWED_IMPORTS still names it. Deleting this row
-  // while keeping the layer is the accurate state, not a half-measure.
+  'services': 'core', // services/socket, attachPrefs, sessionAttachProfile
+  // `core` the *directory* is gone (`core/terminal-runtime` became
+  // `platform/terminal-runtime`) and so is `runtime/` (`platform/attach` +
+  // `platform/session-runtime`). `core` the *layer* now holds only `services/`,
+  // which is why ALLOWED_IMPORTS still names it — when `services/` converges
+  // the layer goes with it. Deleting the rows while keeping the layer is the
+  // accurate state, not a half-measure.
   'shared': 'shared',
   // `features` is deliberately absent: the directory is gone. A row for it would
   // be a layer that nothing can be in — and if someone recreates `src/features/`,

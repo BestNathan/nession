@@ -86,7 +86,8 @@ the honest answer to "where does this go today" until the row moves.
 | `app/workspace/views/` — the other four Web/App layouts | **split into the experiences** — `experiences/{web,app}/workspaceViews.tsx` | **done (finishes 2)** |
 | `app/workspace/AppToolScroll.tsx` — App scroll chrome | `app/experiences/app/AppToolScroll.tsx` | **done (finishes 2)** |
 | `core/terminal-runtime/` — the React-free terminal runtime | `platform/terminal-runtime/` | **done** | 5 |
-| `runtime/`, `services/` | `platform/<domain>/` | 5 |
+| `runtime/` — SessionRuntime + the attach machinery | `platform/{session-runtime,attach}/` | **done** | 5 |
+| `services/` | `platform/{socket,attach}/` | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
 | `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
@@ -254,11 +255,13 @@ src/
 ├── platform/                # transport, runtime, attach — and framework-level code
 │   ├── server/              # the Server transport plugin + its menu
 │   ├── explorer/            # the file-tree framework (no Nession product semantics)
-│   └── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
-├── runtime/                 # SessionRuntime registry + attach state machines
-├── services/                # socket/ (WebSocketService, MessageRouter, clientId) +
-│                            #   attachPrefs, sessionAttachProfile, deepLinkAttach, addressSelection
-│                            #   — capability plugins live in capabilities/, not here
+│   ├── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
+│   ├── session-runtime/     # SessionRuntime + its registry (acquire/release leases)
+│   └── attach/              # attach state machine, controller, address policy,
+│                            #   relay connection, attach prefs/profile
+├── services/                # socket/ (WebSocketService, MessageRouter, clientId)
+│                            #   — still the `core` layer until Phase 5 finishes it;
+│                            #   capability plugins live in capabilities/, not here
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
