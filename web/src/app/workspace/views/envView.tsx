@@ -1,5 +1,5 @@
 import { FileCog } from 'lucide-react';
-import { EnvManager } from '@/features/env/components/EnvManager';
+import { EnvManager } from '@/capabilities/env/components/EnvManager';
 import type { WorkspaceViewBinding } from '../workspaceContext';
 import { AppToolScroll } from '../AppToolScroll';
 

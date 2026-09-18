@@ -1,8 +1,13 @@
 /**
  * ESLint rule: no-reverse-imports
  *
- * Enforces the dependency direction: app → features → core → shared
- * Prevents reverse imports that would violate the layered architecture.
+ * Enforces the dependency direction between layers, so a module can only be
+ * pulled in by something at or above it.
+ *
+ * The direction is #801's target vocabulary — `app` composes `product` /
+ * `capabilities` / `platform` over `shared` — with the pre-#801 `features/` still
+ * in the table while it is drained. `docs/architecture/web.md` owns the model and
+ * the migration state; this file owns the executable half.
  *
  * ── What this rule is about, and what it is not ─────────────────────────────
  *
@@ -44,17 +49,61 @@
  * fifth form appearing should be a deliberate omission rather than an oversight.
  */
 
-// Import direction map: which layers can import which
+// Import direction map: which layers can import which.
+//
+// The #801 migration allowance lived here — `features` exempt in both
+// directions while it was drained into the layers below. `features/` is now
+// empty and deleted, so the allowance is gone with it, exactly as its comment
+// promised: the layers are related by this table alone.
 const ALLOWED_IMPORTS = {
-  'app': ['features', 'extensions', 'core', 'shared'],
-  'features': ['extensions', 'core', 'shared'],
-  // `extensions/` is a rung of its own, not a feature. The mutual allowance
-  // with `features` is deliberate and documented in docs/architecture/web.md:
-  // the registry is consumed by app and feature code, and an extension composes
-  // the feature it extends. It is a sanctioned cycle, not an oversight — do not
-  // "fix" it by folding extensions into features, which would wrongly let
-  // `core` reach it.
-  'extensions': ['features', 'core', 'shared'],
+  'app': ['product', 'capabilities', 'platform', 'extensions', 'core', 'shared'],
+  // `capabilities` is #801's second target layer: a unit that can be
+  // discovered, activated and contributed (Files, Env, Commands, Claude Code)
+  // as a vertical slice, rather than a chunk of the product.
+  //
+  // One-way with `product`, and that is measured rather than assumed: six real
+  // value imports go `product → capabilities` (the capsule surfaces quick
+  // commands, the attach dialog offers env files) and **none** come back.
+  // PRINCIPLE #3 is what says the direction is right — "capabilities should
+  // naturally gain presence when they become relevant to the current context"
+  // is a capability appearing *inside* a product context, not a product
+  // appearing inside a capability. If a capability ever needs a Product
+  // Pattern, that is the same decision `extensions ↔ capabilities` already
+  // records, and it should be made then rather than pre-granted here.
+  'capabilities': ['platform', 'core', 'shared'],
+  // `product` is #801's first target layer: a module that means something in
+  // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
+  // than one that merely implements something. It sits below `app` (the shell
+  // composes it) and above the infrastructure. `core` is listed because it is
+  // the pre-Phase-5 name for `platform` — when that convergence lands this
+  // becomes `['platform', 'shared']` and nothing else about the layer changes.
+  // `extensions` is in this list because the registry *is* the contribution
+  // contract, not a peer to reach into: a Product Pattern rendering a slot
+  // (`AgentDetail` renders `agent-detail`) is PRINCIPLE #5 working as designed —
+  // Nession owns the structure, the contribution fills a hole in it. Reaching
+  // into a capability's internals is the inversion; asking the registry for a
+  // slot is not.
+  'product': ['capabilities', 'platform', 'extensions', 'core', 'shared'],
+  // `platform` is #801's fourth layer: the machinery beneath the product —
+  // transport, runtime, attach, and framework-level code that carries no
+  // product semantics (the Explorer file-tree framework, the Server plugin).
+  // It sits above `shared` and below everything that means anything.
+  //
+  // It is not React-free as a layer; `core/terminal-runtime` is React-free as a
+  // module, and that property is worth keeping where it already holds. Widening
+  // the layer's definition to admit a UI framework is deliberate: #801's §7
+  // convergence list describes where `platform` will *come from*
+  // (`core/` + `runtime/` + `services/` + `atoms/` + owner-specific `lib/`),
+  // not the whole of what it may hold.
+  'platform': ['core', 'shared'],
+  // `extensions/` is a rung of its own. It may reach `capabilities` because an
+  // extension is the UI contribution *for* a capability —
+  // `extensions/claude-code` renders the Claude Code capability. The mutual
+  // allowance is deliberate and documented in docs/architecture/web.md: the
+  // registry is consumed by app and capability code, and an extension composes
+  // what it extends. A sanctioned cycle, not an oversight — do not "fix" it by
+  // folding extensions into a layer, which would wrongly let `core` reach it.
+  'extensions': ['capabilities', 'core', 'shared'],
   'core': ['shared'],
   'shared': [], // shared cannot import any business layer
 };
@@ -69,7 +118,7 @@ const ALLOWED_IMPORTS = {
 // by fixing this rule are real, not a mis-classification (#783).
 //
 // `markdown` is `shared`, decided by the same test rather than by its name: its
-// consumers are `features/files` (3 edges) *and* `lib/languageId` (2 edges), and
+// consumers are `capabilities/files` (3 edges) *and* `lib/languageId` (2 edges), and
 // a `shared` module importing it forces it to `shared` — shared is the bottom.
 // The `markdown ↔ lib` cycle that results is deliberate and both files say so:
 // general language detection needs markdown's ranked signals, and markdown
@@ -85,10 +134,25 @@ const LEGACY_TO_LAYER = {
   'runtime': 'core',
   'core': 'core',
   'shared': 'shared',
-  'features': 'features',
+  // `features` is deliberately absent: the directory is gone. A row for it would
+  // be a layer that nothing can be in — and if someone recreates `src/features/`,
+  // the completeness fixture fails until it is classified rather than letting it
+  // fall silently into `unknown`.
   'app': 'app',
   // Outside the ladder proper; see ALLOWED_IMPORTS.extensions.
   'extensions': 'extensions',
+  // #801's first target layer, filled one concept at a time: `agent`,
+  // `session` and `terminal` live here now, plus Workspace's Product Pattern.
+  // `capabilities` is the second. The migration state — which concepts have
+  // moved and which have not — is tracked in docs/architecture/web.md.
+  'product': 'product',
+  // #801's second target layer, filled by the four contributable capabilities.
+  'capabilities': 'capabilities',
+  // #801's fourth target layer. Started early, with the two modules that are
+  // infrastructure but were neither product, capability, nor helper — the
+  // Explorer framework and the Server plugin. `core/`, `runtime/`, `services/`
+  // and `atoms/` converge here in Phase 5.
+  'platform': 'platform',
 };
 
 // Directories under `src/` that are deliberately not layers. Everything else
@@ -101,6 +165,22 @@ const NON_LAYER_DIRS = {
   'test': 'vitest setup + shared mocks; imported only by test files',
 };
 
+// Modules that sit directly under `src/`, outside any layer directory. They are
+// on real edges like anything else — `@/types` is imported by every layer, and
+// `App.tsx` is the composition root — but a directory-shaped lookup misses them
+// and returns `unknown`, which `checkRuntimeEdge` skips. `types.ts` is `shared`
+// per `docs/architecture/web.md` ("shared root type barrel"); the two entries
+// are the composition root, which is `app` by the same doc.
+//
+// Keyed by module name as written in an import (`@/types`), not by filename, so
+// both `@/types` and a resolved `../types` land on the same entry.
+const ROOT_FILE_LAYER = {
+  App: 'app',
+  main: 'app',
+  types: 'shared',
+  'vite-env': 'shared',
+};
+
 function isTestFile(filePath) {
   const normalized = (filePath ?? '').replace(/\\/g, '/');
   return (
@@ -109,32 +189,57 @@ function isTestFile(filePath) {
   );
 }
 
-/** The layer of the file *doing the importing*, from its own path. */
-function getSourceLayer(currentFilePath) {
-  const normalized = (currentFilePath ?? '').replace(/\\/g, '/');
-  const match = normalized.match(/\/src\/([^/]+)\//);
-  if (!match) {
-    return 'unknown';
+/**
+ * Layer of a module path — a directory under `src/`, or a file directly in it.
+ *
+ * Every module needs a layer. Anything this cannot place becomes `unknown`,
+ * and `checkRuntimeEdge` skips on unknown, so an unplaced path is not
+ * "unclassified", it is *unchecked* — in both directions, while looking
+ * covered. That is the bug #793 records for directories, and the same hole
+ * swallowed `../features/...` (relative targets) and `@/types` (root files).
+ */
+function layerOfPath(path) {
+  const normalized = (path ?? '').replace(/\\/g, '/');
+  const dir = normalized.match(/\/src\/([^/]+)\//);
+  if (dir) {
+    return LEGACY_TO_LAYER[dir[1]] ?? 'unknown';
   }
-  return LEGACY_TO_LAYER[match[1]] ?? 'unknown';
+  const rootFile = normalized.match(/\/src\/([^/]+)$/);
+  if (rootFile) {
+    return ROOT_FILE_LAYER[rootFile[1]] ?? 'unknown';
+  }
+  return 'unknown';
 }
 
-function getTargetLayer(importPath) {
-  // Handle layer aliases
-  if (importPath.startsWith('@app/')) return 'app';
-  if (importPath.startsWith('@features/')) return 'features';
-  if (importPath.startsWith('@core/')) return 'core';
-  if (importPath.startsWith('@shared/')) return 'shared';
+/** The layer of the file *doing the importing*, from its own path. */
+function getSourceLayer(currentFilePath) {
+  return layerOfPath(currentFilePath);
+}
 
-  // Handle @/ imports
-  if (importPath.startsWith('@/')) {
-    const match = importPath.match(/^@\/([^/]+)/);
-    if (match) {
-      const dir = match[1];
-      return LEGACY_TO_LAYER[dir] || 'unknown';
-    }
+/**
+ * Resolve a relative specifier against the importing file, so it can be
+ * classified like any other path. Returns a `src`-rooted path; extensionless
+ * specifiers are fine because `layerOfPath` only reads the first segment.
+ */
+function resolveRelative(fromFile, specifier) {
+  const segments = fromFile.replace(/\\/g, '/').split('/').slice(0, -1);
+  for (const segment of specifier.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
   }
+  return segments.join('/');
+}
 
+/** The layer an import specifier points at, from the importing file's path. */
+function getTargetLayer(importPath, currentFilePath) {
+  // `@/x/y` and `../x/y` are the same lookup once normalised to a src path.
+  if (importPath.startsWith('@/')) {
+    return layerOfPath(`/src/${importPath.slice(2)}`);
+  }
+  if (importPath.startsWith('.')) {
+    return layerOfPath(resolveRelative(currentFilePath, importPath));
+  }
   return 'unknown';
 }
 
@@ -159,7 +264,7 @@ function checkRuntimeEdge(context, node, importPath, currentFilePath) {
   }
 
   const sourceLayer = getSourceLayer(currentFilePath);
-  const targetLayer = getTargetLayer(importPath);
+  const targetLayer = getTargetLayer(importPath, currentFilePath);
 
   // Skip if we can't determine layers
   if (sourceLayer === 'unknown' || targetLayer === 'unknown') {
@@ -183,7 +288,7 @@ function checkRuntimeEdge(context, node, importPath, currentFilePath) {
 
 // Exported for the fixture that asserts every `src/` directory is classified.
 // The rule's own behaviour never reads them directly.
-export { ALLOWED_IMPORTS, LEGACY_TO_LAYER, NON_LAYER_DIRS };
+export { ALLOWED_IMPORTS, LEGACY_TO_LAYER, NON_LAYER_DIRS, ROOT_FILE_LAYER };
 
 export default {
   meta: {

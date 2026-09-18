@@ -3,7 +3,7 @@ import {
   type CapabilityId,
   type CapabilityPresence,
   type CapabilitySnapshot,
-} from '@/features/capabilities';
+} from '@/product/capability';
 
 export const WORKSPACE_DIRECT_CAPABILITY_LIMIT = 2;
 

@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Session } from '../types';
-import type { AttachedSession } from '@/features/terminal/types';
-import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
+import type { AttachedSession } from '@/product/terminal/types';
+import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import type { AgentProbe } from '../atoms/probe';
-import { resolveDeepLinkAttachChoice, resolveProfileAttach } from '../services/deepLinkAttach';
+import { resolveDeepLinkAttachChoice, resolveProfileAttach } from './deepLinkAttach';
 import { loadSessionProfile } from '../services/sessionAttachProfile';
 
 /**

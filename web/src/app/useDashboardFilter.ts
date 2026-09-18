@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { StatusFilter, SortField, SortDirection } from '@/features/sessions/types';
+import type { StatusFilter, SortField, SortDirection } from '@/product/session/types';
 
 /** Filter / sort state. Filtering itself lives in useDashboard
  *  because it needs the agents + sessions data which are fetched elsewhere. */

@@ -5,12 +5,12 @@ import {
   type CapabilityFacts,
   type CapabilityId,
   type CapabilitySnapshot,
-} from '@/features/capabilities';
+} from '@/product/capability';
 import type {
   CapsuleCapabilityDisclosure,
-} from '@/features/terminal/capsule/types';
-import type { DomainState } from '@/features/sessions/model/domainState';
-import type { FileOps } from '@/features/files';
+} from '@/product/terminal/capsule/types';
+import type { DomainState } from '@/product/session/model/domainState';
+import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';

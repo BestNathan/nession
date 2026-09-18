@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/features/capabilities';
+import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/product/capability';
 import type { Session } from '@/types';
 import { resolveCapsuleCapabilities, type CapsuleCapabilityInput } from '../../capsulePresence';
 

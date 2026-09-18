@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
-import type { AgentError, TerminalAgentApi } from '@/features/terminal';
+import type { AgentError, TerminalAgentApi } from '@/product/terminal';
 import type { ConnectionState } from '@/services/socket/types';
 import type { RelayServerTransport } from '@/runtime/relayServerConnection';
 

@@ -2,16 +2,16 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeWorkspace } from '@/extensions/claude-code/components/ClaudeCodeWorkspace';
-import { claudeCodeApi } from '@/features/claude-code';
+import { claudeCodeApi } from '@/capabilities/claude-code';
 import type {
   ClaudeCodeListResponse,
   ClaudeCodeReadResponse,
-} from '@/features/claude-code/types';
+} from '@/capabilities/claude-code/types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 
-vi.mock('@/features/claude-code', () => ({
+vi.mock('@/capabilities/claude-code', () => ({
   claudeCodeApi: {
     claudeCodeList: vi.fn(),
     claudeCodeRead: vi.fn(),

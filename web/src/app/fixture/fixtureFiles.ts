@@ -1,4 +1,4 @@
-import type { FileEntry } from '@/features/files';
+import type { FileEntry } from '@/capabilities/files';
 
 /**
  * Static modified timestamp for the fixture tree — keeps the modified column

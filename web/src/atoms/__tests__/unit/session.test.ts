@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'jotai';
 import type { Session } from '@/types';
-import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
+import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import { p2pStateAtom, routeIntentEpochAtom } from '@/atoms/connection';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
@@ -11,7 +11,7 @@ import {
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
 } from '@/atoms/session';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 
 const navigate = () => {};
 

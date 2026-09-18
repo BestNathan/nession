@@ -71,30 +71,30 @@ vi.mock('@/app/workspace/views/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/features/env/components/EnvManager', () => ({
+vi.mock('@/capabilities/env/components/EnvManager', () => ({
   EnvManager: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
 }));
-vi.mock('@/features/sessions/components/CreateSessionDialog', () => ({
+vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="create-session-dialog" /> : null,
 }));
-vi.mock('@/features/sessions/components/KillConfirmDialog', () => ({
+vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
-vi.mock('@/features/env/components/EnvManager', () => ({
+vi.mock('@/capabilities/env/components/EnvManager', () => ({
   EnvManager: ({ onBack }: { onBack: () => void }) => (
     <div data-testid="env-manager">
       <button type="button" onClick={() => onBack()}>Back</button>
     </div>
   ),
 }));
-vi.mock('@/features/server/components/ServerInfoMenu', () => ({
+vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
-vi.mock('@/features/sessions/components/AttachDialog', () => ({
+vi.mock('@/product/session/components/AttachDialog', () => ({
   AttachDialog: ({
     isOpen,
     onConfirm,

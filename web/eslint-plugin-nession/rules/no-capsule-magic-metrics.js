@@ -1,8 +1,8 @@
-const CAPSULE_GLOB = 'src/features/terminal/capsule/';
+const CAPSULE_GLOB = 'src/product/terminal/capsule/';
 
 const ALLOWLIST = new Set([
-  'src/features/terminal/capsule/capsuleStyles.ts',
-  'src/features/terminal/capsule/components/ComposerMeasureMirror.tsx',
+  'src/product/terminal/capsule/capsuleStyles.ts',
+  'src/product/terminal/capsule/components/ComposerMeasureMirror.tsx',
 ]);
 
 const METRIC_PREFIX =

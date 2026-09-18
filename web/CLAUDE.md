@@ -30,10 +30,10 @@ Do not infer permanent product boundaries from today's component tree or transpo
 
 | Rule | Detail |
 |------|--------|
-| Hooks | Shared hooks in `src/shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
-| Components | Shared generic UI infrastructure lives in `src/components/ui/`; feature UI belongs in `features/<feature>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
-| Layers | Import direction app → features → core → shared (`nession/no-reverse-imports`). Full module map: `docs/architecture/web.md`. |
-| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own feature (`features/<feature>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
+| Hooks | Shared hooks in `src/shared/hooks/`, capability/product hooks in `<owner>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
+| Components | Shared generic UI infrastructure lives in `src/components/ui/`; capability/product UI belongs in `<owner>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
+| Layers | The vocabulary is `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`; `features/` no longer exists. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and migration state: `docs/architecture/web.md`. |
+| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own layer (`capabilities/<name>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling follows the existing component model. UI styling policy and design values live in `nession-web-design`. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -61,7 +61,12 @@ src/
 ├── index.css              # Global CSS / Tailwind entry
 ├── types.ts               # Shared TS types
 ├── app/                   # App composition, shell, workspace, app-level hooks
-├── features/              # Domain features: plugin + components/hooks/model
+├── product/               # Nession product concepts + their Product Patterns
+│                          #   (target owner; see the migration map in web.md)
+├── capabilities/          # discoverable / activatable / contributable
+│                          #   capabilities, as vertical slices
+├── platform/              # transport, runtime, attach — and framework-level
+│                          #   code with no product semantics
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
 ├── core/terminal-runtime/ # React-free terminal runtime
@@ -80,7 +85,7 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 ## 4. State and data
 
-- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/features/terminal/state/`. Prefer small domain atoms over mega-stores.
+- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores.
 - Session / attach / file flows go through app-composition and feature hooks rather than embedding WebSocket calls deep in presentational components.
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
 - New feature capabilities should expose a feature-owned API/plugin boundary rather than leaking transport concerns into UI composition.

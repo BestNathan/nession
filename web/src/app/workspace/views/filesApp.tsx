@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileList } from '@/features/files/components/FileList';
-import { FileViewer } from '@/features/files/components/FileViewer';
+import { FileList } from '@/capabilities/files/components/FileList';
+import { FileViewer } from '@/capabilities/files/components/FileViewer';
 import { AppBackButton } from '@/app/patterns/AppBackButton';
 import {
   AlertDialog,
@@ -12,7 +12,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import type { FileEntry } from '@/features/files';
+import type { FileEntry } from '@/capabilities/files';
 import type { WorkspaceContext } from '../workspaceContext';
 
 interface SelectedFile { path: string; filename: string; size: number; }

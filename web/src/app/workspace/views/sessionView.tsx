@@ -1,7 +1,7 @@
 import { Settings2 } from 'lucide-react';
 import type { WorkspaceViewBinding } from '../workspaceContext';
 import { AppToolScroll } from '../AppToolScroll';
-import { SessionDetails } from '@/features/sessions/components/SessionDetails';
+import { SessionDetails } from '@/product/session/components/SessionDetails';
 
 export const sessionView: WorkspaceViewBinding = {
   id: 'session',

@@ -2,7 +2,7 @@ import type { WebSocketService } from '@/services/socket';
 import type { ConnectionState } from '@/services/socket/types';
 // Type only. The capability singleton is passed in by the caller, which lives
 // above this layer — `runtime/` is `core` and may not import a feature (#783).
-import type { TerminalServerApi } from '@/features/terminal';
+import type { TerminalServerApi } from '@/product/terminal';
 
 /**
  * Relay-mode lifecycle surface SessionRuntime needs from the server

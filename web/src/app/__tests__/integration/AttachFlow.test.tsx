@@ -5,11 +5,11 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import { SessionFirstShell } from '@/app/SessionFirstShell';
 import { sessionIdAtom } from '@/atoms/session';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
 import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
-import { envApi } from '@/features/env';
-import { sessionsApi } from '@/features/sessions';
+import { envApi } from '@/capabilities/env';
+import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';
 
 const agent: Agent = {
@@ -79,20 +79,20 @@ vi.mock('@/app/workspace/views/filesWeb', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
-vi.mock('@/features/env/components/EnvManager', () => ({
+vi.mock('@/capabilities/env/components/EnvManager', () => ({
   EnvManager: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="env-manager" data-embedded={embedded ? 'true' : 'false'} />
   ),
 }));
-vi.mock('@/features/sessions/components/CreateSessionDialog', () => ({
+vi.mock('@/product/session/components/CreateSessionDialog', () => ({
   CreateSessionDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="create-session-dialog" /> : null,
 }));
-vi.mock('@/features/sessions/components/KillConfirmDialog', () => ({
+vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
 }));
-vi.mock('@/features/server/components/ServerInfoMenu', () => ({
+vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
 vi.mock('sonner', () => ({
@@ -115,10 +115,10 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 }));
 // Data sources behind the REAL AttachDialog and the profile resolver: the
 // attach-info request and the env-file list never touch the socket singleton.
-vi.mock('@/features/sessions', () => ({
+vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
-vi.mock('@/features/env', () => ({
+vi.mock('@/capabilities/env', () => ({
   envApi: { listEnvFiles: vi.fn() },
 }));
 

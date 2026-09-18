@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { relayServerHandle, type RelayServerTransport } from '@/runtime/relayServerConnection';
 import { WebSocketService } from '@/services/socket/WebSocketService';
-import { terminalServerApi } from '@/features/terminal';
+import { terminalServerApi } from '@/product/terminal';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import type { SocketMessage } from '@/services/socket/types';
 

@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils';
 import type { ConnectionState } from '@/services/socket/types';
-import { ConnectionStatus } from '@/features/sessions/components/ConnectionStatus';
-import { ServerInfoMenu } from '@/features/server/components/ServerInfoMenu';
-import { resolveSessionChrome } from '@/features/sessions/model/sessionChrome';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';
+import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
+import type { DomainState } from '@/product/session/model/domainState';
 
 export interface SessionFirstSidebarFooterProps {
   /** The active Session's domain state, for the attachment/lifecycle line. */

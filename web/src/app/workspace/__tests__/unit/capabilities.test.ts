@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import {
   createWorkspaceCapabilityRegistry,
   resolveWorkspaceCapabilities,

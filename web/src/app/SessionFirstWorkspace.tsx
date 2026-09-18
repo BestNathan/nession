@@ -1,14 +1,12 @@
 import type { ReactNode } from 'react';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
-import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
-import { SessionDrawer } from '@/app/SessionDrawer';
-import { SessionFirstSpatialLayout } from '@/app/SessionFirstSpatialLayout';
-import { useAppSpatialIndex } from '@/app/app-spatial/useAppSpatialIndex';
+import { SessionFirstSpatialLayout } from '@/app/experiences/app/SessionFirstSpatialLayout';
+import { useAppSpatialIndex } from '@/app/experiences/app/useAppSpatialIndex';
+import { SessionFirstWebLayout } from '@/app/experiences/web/SessionFirstWebLayout';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/features/capabilities';
-import type { FileOps } from '@/features/files';
+import type { CapabilityId } from '@/product/capability';
+import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';
 
@@ -86,6 +84,9 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
     onSurfaceChange, onToolChange,
   };
 
+  // The two experiences, named. Which one renders is the whole of this
+  // component's decision — everything above it is shared state, and everything
+  // below it is a composition that lives in its own directory.
   if (useSpatial) {
     return (
       <SessionFirstSpatialLayout
@@ -99,52 +100,17 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1">
-      {isWide ? (
-        /* Two columns above `lg` (the breakpoint the contract schema's enum
-           permits and `useSessionFirstMobileNav` already uses). The sidebar is a
-           real column here — it used to be an overlay drawer at every width,
-           which meant the work surface never actually shared the frame. */
-        <div
-          data-testid="session-first-sidebar-column"
-          /* No border: the sidebar carries the chrome surface and the work
-             region sits on the canvas, so the background shift is the
-             separator (visual-language.md P7 — background shift before
-             border). The mockup draws no rule here either. */
-          className="flex min-h-0 w-[min(var(--shell-sidebar-width),90vw)] shrink-0"
-        >
-          <SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />
-        </div>
-      ) : (
-        /* Below `lg` the sidebar is still an overlay: there is no room for a
-           column that the work surface would have to share. */
-        <SessionDrawer
-          open={showList}
-          onClose={() => onCloseDrawer()}
-          sidebar={
-            <SessionFirstSidebar
-              {...sidebarProps}
-              collapsible={false}
-              onSelect={(session) => {
-                onCloseDrawer();
-                onSelect(session);
-              }}
-              onConfigure={(session) => {
-                onCloseDrawer();
-                onConfigure(session);
-              }}
-            />
-          }
-        />
-      )}
-      <main className="flex min-h-0 flex-1 flex-col">
-        <SessionFirstMain
-          {...mainShared}
-          surface={surface}
-          onOpenDrawer={() => onBackToSessions?.()}
-          terminal={terminal}
-        />
-      </main>
-    </div>
+    <SessionFirstWebLayout
+      isWide={isWide}
+      showList={showList}
+      onCloseDrawer={onCloseDrawer}
+      onBackToSessions={onBackToSessions}
+      sidebarProps={sidebarProps}
+      onSelect={onSelect}
+      onConfigure={onConfigure}
+      mainShared={mainShared}
+      surface={surface}
+      terminal={terminal}
+    />
   );
 }

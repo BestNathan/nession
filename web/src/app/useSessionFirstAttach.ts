@@ -1,17 +1,17 @@
 import { useCallback, useRef } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { AttachChoice } from '@/features/sessions/components/AttachDialog';
+import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import {
   attachDialogIntentAtom,
   attachDialogSessionAtom,
   attachToSessionAtom,
   sessionIdAtom,
 } from '../atoms/session';
-import { terminalSessionStateAtom } from '@/features/terminal/state/session';
+import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { saveAttachPrefs } from '../services/attachPrefs';
 import { probeResultsAtom } from '../atoms/probe';
-import { resolveProfileAttach } from '../services/deepLinkAttach';
+import { resolveProfileAttach } from './deepLinkAttach';
 import { loadSessionProfile, persistConfirmedChoice } from '../services/sessionAttachProfile';
 import type { Session } from '../types';
 

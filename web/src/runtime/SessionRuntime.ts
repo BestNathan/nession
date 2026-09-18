@@ -10,8 +10,8 @@ import { SessionAttachController } from '@/runtime/SessionAttachController';
 // SessionRuntimeConfig instead of imported, because `runtime/` is `core` and a
 // feature may not be imported from below it — while the runtime is genuinely
 // below the terminal feature, which consumes it (#783).
-import type { FilesPlugin } from '@/features/files';
-import type { TerminalAgentApi } from '@/features/terminal';
+import type { FilesPlugin } from '@/capabilities/files';
+import type { TerminalAgentApi } from '@/product/terminal';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -32,7 +32,7 @@ export interface SessionRuntimeConfig {
    *
    * Injected rather than imported: `runtime/` is `core` and may not import a
    * feature, but the terminal feature needs the runtime, so the dependency has
-   * to point one way. The caller — `features/terminal`, which owns both — hands
+   * to point one way. The caller — `product/terminal`, which owns both — hands
    * them over. See #783.
    */
   createFilesApi: () => FilesPlugin;

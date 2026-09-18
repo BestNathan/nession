@@ -19,8 +19,8 @@ const sessionsApiMock = vi.hoisted(() => ({
   onSessionsChanged: vi.fn<(cb: (sessions: Session[]) => void) => () => void>(() => () => {}),
 }));
 
-vi.mock('@/features/agents', () => ({ agentsApi: agentsApiMock }));
-vi.mock('@/features/sessions', () => ({ sessionsApi: sessionsApiMock }));
+vi.mock('@/product/agent', () => ({ agentsApi: agentsApiMock }));
+vi.mock('@/product/session', () => ({ sessionsApi: sessionsApiMock }));
 
 // ---------------------------------------------------------------------------
 // Factory helpers

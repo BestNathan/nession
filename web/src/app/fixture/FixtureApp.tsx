@@ -2,8 +2,8 @@ import { useState } from 'react';
 import {
   AppSpatialShell,
   type SpatialPageIndex,
-} from '@/app/app-spatial/AppSpatialShell';
-import { mapDomainState } from '@/features/sessions/model/domainState';
+} from '@/app/experiences/app/AppSpatialShell';
+import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import {
   FIXTURE_AGENTS,
@@ -14,7 +14,7 @@ import {
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import { fixtureFileOps } from './fixtureFileOps';
 
 // Module-stable — the stub is immutable and stateless (same pattern as

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveWorkspaceCapabilities } from '../../capabilities';
 import type { WorkspaceContext } from '../../workspaceContext';
-import type { CapabilityFacts, CapabilityState } from '@/features/capabilities';
+import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 
 function workspaceContext(
   facts?: CapabilityFacts,

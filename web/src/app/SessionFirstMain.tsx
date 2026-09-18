@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import type { FileOps } from '@/features/files';
-import type { DomainState } from '@/features/sessions/model/domainState';
+import type { FileOps } from '@/capabilities/files';
+import type { DomainState } from '@/product/session/model/domainState';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { TerminalWell } from '@/app/TerminalWell';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import type { Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
-import { SurfaceSwitcher } from '@/app/patterns/SurfaceSwitcher';
+import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
