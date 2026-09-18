@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ExplorerStore, ROOT_ID } from '@/features/explorer/ExplorerStore';
-import type { ExplorerDataProvider } from '@/features/explorer/providers/types';
-import type { ExplorerNode } from '@/features/explorer/types';
+import { ExplorerStore, ROOT_ID } from '@/platform/explorer/ExplorerStore';
+import type { ExplorerDataProvider } from '@/platform/explorer/providers/types';
+import type { ExplorerNode } from '@/platform/explorer/types';
 
 function makeNode(
   id: string,

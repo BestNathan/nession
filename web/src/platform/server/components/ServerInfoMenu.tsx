@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { ServerInfo } from '@/types';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { serverApi } from '@/features/server';
+import { serverApi } from '@/platform/server';
 import pkg from '../../../../package.json';
 
 function formatUptimeCompact(seconds: number): string {

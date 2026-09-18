@@ -32,7 +32,7 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
       // app may reach everything below it.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
       { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/app/LoginPage.tsx' },
-      // features may reach core and shared.
+      // capabilities may reach core and shared.
       { code: "import { x } from '@/services/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
       { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // core may reach shared.
@@ -51,8 +51,8 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
         errors: [{ messageId: 'reverseImport' }],
       },
       {
-        // shared must not reach product features either.
-        code: "import { SessionItem } from '@/features/sessions/components/SessionItem';",
+        // shared must not reach product either.
+        code: "import { SessionItem } from '@/product/sessions/components/SessionItem';",
         filename: '/p/web/src/components/ui/probe.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -157,7 +157,7 @@ test('a re-export is the same runtime edge as an import', () => {
       {
         // The shape #788 was filed for: a shared primitive re-exporting product
         // code, which pulls the feature into the bundle just as `import` would.
-        code: "export { SessionItem } from '@/features/sessions/components/SessionItem';",
+        code: "export { SessionItem } from '@/product/sessions/components/SessionItem';",
         filename: '/p/web/src/components/ui/probe.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -272,7 +272,7 @@ test('a relative specifier is resolved against the importing file', () => {
     invalid: [
       {
         // The shape that was shipping: `core` reaching a feature by path.
-        code: "import { sessionsApi } from '../features/sessions';",
+        code: "import { sessionsApi } from '../product/sessions';",
         filename: '/p/web/src/services/deepLinkAttach.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -338,45 +338,78 @@ test('the product layer sits below app and above the primitives', () => {
   });
 });
 
-// The migration allowance, and — more importantly — its edges. It exists because
-// a concept that has moved and one that has not still depend on each other
-// (`features/agents` reaches into the now-`product/session`), and without it no
-// module could move until every module could. What it must NOT do is quietly
-// disable `features` altogether: `components/ui` reaching into a feature is the
-// violation #782 was filed for, and it stays one.
-test('the migration allowance is narrow, and covers only features↔product', () => {
+// `features/` is gone, so the migration allowance that existed to let it be
+// drained is gone too — and this is the assertion that keeps it gone. A fixture
+// for the allowance would be a fixture for a rule that no longer exists; what is
+// worth pinning instead is that a `features/` path is now **unclassifiable**, so
+// the old spelling cannot quietly pass as a known layer.
+test('the former features/ paths are no longer a layer', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
-      // The pair it opens, both directions.
       {
-        code: "import { sessionsApi } from '@/product/session';",
-        filename: '/p/web/src/features/agents/components/AgentDetail.tsx',
-      },
-      {
-        code: "import { mapDomainState } from '@/features/agents/model/domainState';",
-        filename: '/p/web/src/product/session/patterns/SessionList.tsx',
+        // Unresolvable, therefore skipped — not silently legal. The distinction
+        // matters: if `features` ever came back in the table by accident, this
+        // would start reporting and the fixtures above would fail.
+        code: "import { x } from '@/features/anything';",
+        filename: '/p/web/src/components/ui/probe.tsx',
       },
     ],
     invalid: [
       {
-        // Still enforced: a generic primitive may not know what a Session is,
-        // and `features` being transitional does not exempt it.
-        code: "import { SessionItem } from '@/features/sessions/components/SessionItem';",
+        // The same edge, spelled at its real home, is still enforced: a generic
+        // primitive may not know what a Session is (#782).
+        code: "import { SessionItem } from '@/product/session/patterns/SessionItem';",
         filename: '/p/web/src/components/ui/probe.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
       {
-        // Still enforced: `shared` is below `features` whether or not the
-        // latter is on its way out.
-        code: "import { sessionsApi } from '@/features/sessions';",
+        // And `shared` is still below `product`.
+        code: "import { sessionsApi } from '@/product/session';",
         filename: '/p/web/src/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
+    ],
+  });
+});
+
+// The new layer, and its two edges. `platform` is machinery: it may reach
+// `shared` and be reached by everything above it, and it may not reach up.
+test('platform sits above shared and below everything that means something', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      // capabilities compose it — the Files capability renders the Explorer.
       {
-        // Still enforced: the allowance is for `product`, not for everything —
-        // a feature may not reach up into the shell that composes it.
-        code: "import { SessionFirstShell } from '@/app/SessionFirstShell';",
-        filename: '/p/web/src/features/agents/components/AgentDetail.tsx',
+        code: "import { Explorer } from '@/platform/explorer/components/Explorer';",
+        filename: '/p/web/src/capabilities/files/components/FileBrowser.tsx',
+      },
+      // app composes it directly too.
+      {
+        code: "import { serverApi } from '@/platform/server';",
+        filename: '/p/web/src/app/useAppConnection.ts',
+      },
+      // and it composes shared.
+      {
+        code: "import { cn } from '@/lib/utils';",
+        filename: '/p/web/src/platform/explorer/components/Explorer.tsx',
+      },
+    ],
+    invalid: [
+      {
+        // platform may not reach up into a capability.
+        code: "import { createFilesApi } from '@/capabilities/files';",
+        filename: '/p/web/src/platform/explorer/components/Explorer.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // nor into the product.
+        code: "import { TerminalSurface } from '@/product/terminal/TerminalSurface';",
+        filename: '/p/web/src/platform/explorer/components/Explorer.tsx',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+      {
+        // and nothing below it may reach it — `shared` is the floor.
+        code: "import { Explorer } from '@/platform/explorer/components/Explorer';",
+        filename: '/p/web/src/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],

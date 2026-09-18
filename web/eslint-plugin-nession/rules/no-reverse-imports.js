@@ -49,26 +49,14 @@
  * fifth form appearing should be a deliberate omission rather than an oversight.
  */
 
-// #801 migration allowance — the one this file's comments elsewhere promise.
+// Import direction map: which layers can import which.
 //
-// `features/` is the pre-#801 layout, drained one concept at a time into
-// `product/` / `capabilities/` / `platform/`. A concept that has moved and one
-// that has not still depend on each other: now that `sessions` is
-// `product/session`, `features/agents` reaches into it. Without an allowance no
-// module could move until every module could — the big-bang #801 forbids.
-//
-// Deliberately narrow. It opens exactly one pair of directions, so everything
-// else about `features` is still enforced: `components/ui` reaching into a
-// feature remains an error, and so does `shared → features`. Removed when
-// `features/` no longer exists (Phase 7), at which point these two constants go
-// and the layers are related by the table below alone.
-const MIGRATION_FROM = 'features';
-const MIGRATION_INTO = ['product', 'capabilities'];
-
-// Import direction map: which layers can import which
+// The #801 migration allowance lived here — `features` exempt in both
+// directions while it was drained into the layers below. `features/` is now
+// empty and deleted, so the allowance is gone with it, exactly as its comment
+// promised: the layers are related by this table alone.
 const ALLOWED_IMPORTS = {
-  'app': ['product', 'capabilities', 'features', 'extensions', 'core', 'shared'],
-  'features': ['extensions', 'core', 'shared', ...MIGRATION_INTO],
+  'app': ['product', 'capabilities', 'platform', 'extensions', 'core', 'shared'],
   // `capabilities` is #801's second target layer: a unit that can be
   // discovered, activated and contributed (Files, Env, Commands, Claude Code)
   // as a vertical slice, rather than a chunk of the product.
@@ -80,32 +68,42 @@ const ALLOWED_IMPORTS = {
   // naturally gain presence when they become relevant to the current context"
   // is a capability appearing *inside* a product context, not a product
   // appearing inside a capability. If a capability ever needs a Product
-  // Pattern, that is the same decision `features ↔ extensions` already
+  // Pattern, that is the same decision `extensions ↔ capabilities` already
   // records, and it should be made then rather than pre-granted here.
-  'capabilities': ['core', 'shared', MIGRATION_FROM],
+  'capabilities': ['platform', 'core', 'shared'],
   // `product` is #801's first target layer: a module that means something in
   // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
   // than one that merely implements something. It sits below `app` (the shell
   // composes it) and above the infrastructure. `core` is listed because it is
-  // the pre-Phase-5 name for `platform` — when that rename lands this becomes
-  // `['platform', 'shared']` and nothing else about the layer changes.
+  // the pre-Phase-5 name for `platform` — when that convergence lands this
+  // becomes `['platform', 'shared']` and nothing else about the layer changes.
   // `extensions` is in this list because the registry *is* the contribution
   // contract, not a peer to reach into: a Product Pattern rendering a slot
   // (`AgentDetail` renders `agent-detail`) is PRINCIPLE #5 working as designed —
   // Nession owns the structure, the contribution fills a hole in it. Reaching
   // into a capability's internals is the inversion; asking the registry for a
-  // slot is not. Phase 4 has to keep that distinction when `extensions/` is
-  // absorbed into `capabilities/*/contribution.ts`.
-  'product': ['capabilities', 'extensions', 'core', 'shared', MIGRATION_FROM],
+  // slot is not.
+  'product': ['capabilities', 'platform', 'extensions', 'core', 'shared'],
+  // `platform` is #801's fourth layer: the machinery beneath the product —
+  // transport, runtime, attach, and framework-level code that carries no
+  // product semantics (the Explorer file-tree framework, the Server plugin).
+  // It sits above `shared` and below everything that means anything.
+  //
+  // It is not React-free as a layer; `core/terminal-runtime` is React-free as a
+  // module, and that property is worth keeping where it already holds. Widening
+  // the layer's definition to admit a UI framework is deliberate: #801's §7
+  // convergence list describes where `platform` will *come from*
+  // (`core/` + `runtime/` + `services/` + `atoms/` + owner-specific `lib/`),
+  // not the whole of what it may hold.
+  'platform': ['core', 'shared'],
   // `extensions/` is a rung of its own. It may reach `capabilities` because an
-  // extension is the UI contribution *for* a capability — `extensions/claude-code`
-  // renders the Claude Code capability — and it keeps reaching `features` while
-  // that layout is drained. The mutual allowance with `features` is deliberate
-  // and documented in docs/architecture/web.md: the registry is consumed by app
-  // and feature code, and an extension composes what it extends. A sanctioned
-  // cycle, not an oversight — do not "fix" it by folding extensions into
-  // `features`, which would wrongly let `core` reach it.
-  'extensions': ['capabilities', 'features', 'core', 'shared'],
+  // extension is the UI contribution *for* a capability —
+  // `extensions/claude-code` renders the Claude Code capability. The mutual
+  // allowance is deliberate and documented in docs/architecture/web.md: the
+  // registry is consumed by app and capability code, and an extension composes
+  // what it extends. A sanctioned cycle, not an oversight — do not "fix" it by
+  // folding extensions into a layer, which would wrongly let `core` reach it.
+  'extensions': ['capabilities', 'core', 'shared'],
   'core': ['shared'],
   'shared': [], // shared cannot import any business layer
 };
@@ -136,7 +134,10 @@ const LEGACY_TO_LAYER = {
   'runtime': 'core',
   'core': 'core',
   'shared': 'shared',
-  'features': 'features',
+  // `features` is deliberately absent: the directory is gone. A row for it would
+  // be a layer that nothing can be in — and if someone recreates `src/features/`,
+  // the completeness fixture fails until it is classified rather than letting it
+  // fall silently into `unknown`.
   'app': 'app',
   // Outside the ladder proper; see ALLOWED_IMPORTS.extensions.
   'extensions': 'extensions',
@@ -147,6 +148,11 @@ const LEGACY_TO_LAYER = {
   'product': 'product',
   // #801's second target layer, filled by the four contributable capabilities.
   'capabilities': 'capabilities',
+  // #801's fourth target layer. Started early, with the two modules that are
+  // infrastructure but were neither product, capability, nor helper — the
+  // Explorer framework and the Server plugin. `core/`, `runtime/`, `services/`
+  // and `atoms/` converge here in Phase 5.
+  'platform': 'platform',
 };
 
 // Directories under `src/` that are deliberately not layers. Everything else

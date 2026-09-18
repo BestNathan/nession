@@ -4,7 +4,7 @@ import { WebSocketService } from '@/services/socket';
 import type { CapabilityPlugin, SocketMessage } from '@/services/socket/types';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
-import { serverApi } from '@/features/server';
+import { serverApi } from '@/platform/server';
 import { envApi } from '@/capabilities/env';
 import { commandsApi } from '@/capabilities/commands';
 import { claudeCodeApi } from '@/capabilities/claude-code';

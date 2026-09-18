@@ -3,7 +3,7 @@
 The files feature owns the nession file **protocol capability** (FilesPlugin,
 FileOps/FileApi RPC surfaces) and the file **browsing and viewing UI**
 (FileBrowser/FileViewer and their viewers). It does not own the extensible
-tree framework itself — that lives in `features/explorer`.
+tree framework itself — that lives in `platform/explorer`.
 
 ## Module map
 
@@ -11,7 +11,7 @@ tree framework itself — that lives in `features/explorer`.
 |---|---|
 | `FilesPlugin.ts`, `types.ts`, `index.ts` | File RPC capability (`file.list/read/write/…`) installed per SessionRuntime on the agent socket |
 | `adapters/NessionFileSystemProvider.ts` | Maps `FileOps` → `ExplorerDataProvider` (the files-side implementation of the explorer port); `ExplorerNode` ids are relative paths |
-| `components/FileBrowser.tsx` | Browser chrome (toolbar, new-entry row, upload, delete confirm) composing `Explorer` from features/explorer |
+| `components/FileBrowser.tsx` | Browser chrome (toolbar, new-entry row, upload, delete confirm) composing `Explorer` from platform/explorer |
 | `components/FileViewer.tsx` + viewer components | Viewer dispatch: image/video/audio/pdf/markdown/code-mirror; content load + dirty tracking live in `hooks/useFileViewer` |
 | `hooks/useExplorerFileBrowser.ts` | Provider wiring, navigation state, mutations for FileBrowser |
 | `hooks/useFileViewer.ts` | Per-viewer content/read-state (`useFileLoader`: read/chunked/blob/markdown detection) |
@@ -25,9 +25,9 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 
 | State | Owner today | Lifetime / scope |
 |---|---|---|
-| Tree structure, expand/collapse, lazy load, selection, active | `features/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
+| Tree structure, expand/collapse, lazy load, selection, active | `platform/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
 | File operations (list/read/write/rename/delete) | `FileOps` RPC surface (`FilesPlugin`) | Per SessionRuntime agent socket; surfaced to UI as `ctx.fileOps` when a P2P transport is attached |
-| Explorer extensions (decorations, context menus) | `features/explorer` — `ExplorerRegistry` | One registry per `Explorer` mount; register/unregister notify subscribers → incremental row refresh |
+| Explorer extensions (decorations, context menus) | `platform/explorer` — `ExplorerRegistry` | One registry per `Explorer` mount; register/unregister notify subscribers → incremental row refresh |
 | Open-files/tab state | Single-selection state inside the `filesWeb`/`filesApp` Workspace views (`app/workspace/tools/`) | Per mount; content is re-read from the backend on every viewer mount — deliberately no cross-surface cache today |
 | File content / edit state (dirty, saving) | `useFileViewer` per viewer mount | Discarded on tab switch (viewers unmount) |
 | Editor UI state (cursor/selection) | Inside `CodeMirrorEditor`'s EditorView | Not lifted; only text diffs are used for dirty tracking |
@@ -46,7 +46,7 @@ switch, and the four surfaces deliberately differ (10-tab + terminal pseudo
 tab on legacy desktop; single selection in session-first). The intended
 boundaries:
 
-- **ExplorerStore** — implemented (`features/explorer/ExplorerStore.ts`).
+- **ExplorerStore** — implemented (`platform/explorer/ExplorerStore.ts`).
 - **DocumentStore** (future) — open-file set, per-document content/edit
   state, delete/rename sync across surfaces, keyed by session/workspace.
   Extraction triggers: a real multi-workspace/workbench model with
