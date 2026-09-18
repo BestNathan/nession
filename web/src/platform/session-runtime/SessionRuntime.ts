@@ -504,6 +504,15 @@ export class SessionRuntime {
    */
   private driveRelayAttach(): void {
     const conn = this.config.serverConnection;
+    // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
+    console.log('[diag-gate]', JSON.stringify({
+      hasConn: !!conn,
+      connReady: conn ? conn.isReady() : null,
+      hasAttachInfo: !!this.config.attachInfo,
+      forcedRelay: this.config.forcedRelay,
+      transportReady: this.transportReady,
+      phase: this.attachState.phase,
+    }));
     if (!conn || !this.config.attachInfo) {
       return;
     }
