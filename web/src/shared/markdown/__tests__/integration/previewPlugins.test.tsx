@@ -5,7 +5,7 @@ import {
   getRehypePlugins,
   getRemarkPlugins,
   getRemarkRehypeOptions,
-} from '@/markdown/previewPlugins';
+} from '@/shared/markdown/previewPlugins';
 
 /**
  * These render through the real plugin chain — including `remarkRehypeOptions`,

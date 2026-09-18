@@ -34,9 +34,9 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
       { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/app/LoginPage.tsx' },
       // capabilities may reach platform and shared.
       { code: "import { x } from '@/platform/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
-      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/capabilities/files/F.tsx' },
+      { code: "import { cn } from '@/shared/lib/utils';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // platform may reach shared.
-      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/platform/socket/probe.ts' },
+      { code: "import { cn } from '@/shared/lib/utils';", filename: '/p/web/src/platform/socket/probe.ts' },
       // same-layer is always fine.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/components/ui/probe.tsx' },
       { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/capabilities/files/F.tsx' },
@@ -222,7 +222,7 @@ test('a fully-erased type re-export is out of scope, and a local export is not a
 test('a dynamic import is the same runtime edge as a static one', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
-      { code: "import('@/lib/encoding');", filename: '/p/web/src/capabilities/files/F.tsx' },
+      { code: "import('@/shared/lib/encoding');", filename: '/p/web/src/capabilities/files/F.tsx' },
       { code: "import('react');", filename: '/p/web/src/components/ui/probe.tsx' },
     ],
     invalid: [
@@ -264,7 +264,7 @@ test('a relative specifier is resolved against the importing file', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
       // Downward and same-layer are legal, however they are spelled.
-      { code: "import { probe } from '../lib/probe';", filename: '/p/web/src/platform/thing.ts' },
+      { code: "import { probe } from '../shared/lib/probe';", filename: '/p/web/src/platform/thing.ts' },
       { code: "import { helper } from './helper';", filename: '/p/web/src/platform/thing.ts' },
       { code: "import { sibling } from './sibling';", filename: '/p/web/src/components/ui/probe.tsx' },
       // A specifier that climbs out of every layer names nothing placeable.
@@ -286,8 +286,8 @@ test('a relative specifier is resolved against the importing file', () => {
       {
         // `shared` may not reach a feature either, and the path climbs two
         // levels — the resolution, not the spelling, is what is under test.
-        code: "import { x } from '../capabilities/files';",
-        filename: '/p/web/src/lib/thing.ts',
+        code: "import { x } from '../../capabilities/files';",
+        filename: '/p/web/src/shared/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],
@@ -314,7 +314,7 @@ test('the product layer sits below app and above the primitives', () => {
         filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
       },
       {
-        code: "import { cn } from '@/lib/utils';",
+        code: "import { cn } from '@/shared/lib/utils';",
         filename: '/p/web/src/product/workspace/patterns/SurfaceSwitcher.tsx',
       },
       // same layer is always fine.
@@ -367,7 +367,7 @@ test('the former features/ paths are no longer a layer', () => {
       {
         // And `shared` is still below `product`.
         code: "import { sessionsApi } from '@/product/session';",
-        filename: '/p/web/src/lib/thing.ts',
+        filename: '/p/web/src/shared/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],
@@ -418,7 +418,7 @@ test('platform sits above shared and below everything that means something', () 
       },
       // and it composes shared.
       {
-        code: "import { cn } from '@/lib/utils';",
+        code: "import { cn } from '@/shared/lib/utils';",
         filename: '/p/web/src/platform/explorer/components/Explorer.tsx',
       },
     ],
@@ -438,7 +438,7 @@ test('platform sits above shared and below everything that means something', () 
       {
         // and nothing below it may reach it — `shared` is the floor.
         code: "import { Explorer } from '@/platform/explorer/components/Explorer';",
-        filename: '/p/web/src/lib/thing.ts',
+        filename: '/p/web/src/shared/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],
@@ -452,14 +452,14 @@ test('platform sits above shared and below everything that means something', () 
 test('files directly under src/ are classified rather than skipped', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
-      { code: "import { Session } from '@/types';", filename: '/p/web/src/lib/thing.ts' },
-      { code: "import { Session } from '../types';", filename: '/p/web/src/lib/thing.ts' },
+      { code: "import { Session } from '@/types';", filename: '/p/web/src/shared/lib/thing.ts' },
+      { code: "import { Session } from '../../types';", filename: '/p/web/src/shared/lib/thing.ts' },
       { code: "import { App } from '@/App';", filename: '/p/web/src/app/mainThing.ts' },
     ],
     invalid: [
       {
         code: "import { App } from '@/App';",
-        filename: '/p/web/src/lib/thing.ts',
+        filename: '/p/web/src/shared/lib/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
       {

@@ -1,4 +1,4 @@
-import type { ProbedAddress, AddressLatency } from '../types';
+import type { ProbedAddress, AddressLatency } from '@/types';
 
 /**
  * Measure connection latency to a candidate agent WebSocket by opening a bare

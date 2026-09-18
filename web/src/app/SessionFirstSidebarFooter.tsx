@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import type { ConnectionState } from '@/platform/socket/types';
 import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
 import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';

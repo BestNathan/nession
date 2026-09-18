@@ -1,6 +1,6 @@
 import { Separator } from '@/components/ui/separator';
 import { renderSlot } from '@/extensions/registry';
-import { agentDisplayName, formatRelativeTime } from '@/lib/format';
+import { agentDisplayName, formatRelativeTime } from '@/shared/lib/format';
 import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent } from '@/types';

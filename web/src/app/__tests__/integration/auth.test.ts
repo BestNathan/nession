@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getToken, setToken, clearToken, getRememberPreference, setRememberPreference } from '@/lib/auth';
+import { getToken, setToken, clearToken, getRememberPreference, setRememberPreference } from '@/app/auth';
 
 describe('auth token storage', () => {
   beforeEach(() => {

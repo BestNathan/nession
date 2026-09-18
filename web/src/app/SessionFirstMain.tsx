@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';

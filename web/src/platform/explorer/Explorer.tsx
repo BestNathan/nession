@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
 
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 import {
   EXPLORER_ROW_HEIGHT,

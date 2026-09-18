@@ -10,7 +10,7 @@ import {
   capsuleQuickKeyAppButtonClass,
   capsuleQuickKeyAppRowClass,
 } from '@/product/terminal/capsule/capsuleStyles';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 interface CapsuleCommandsRowProps {
   sendText: (text: string) => void;

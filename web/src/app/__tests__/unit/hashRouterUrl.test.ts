@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { normalizeHashRouterLocation } from '@/lib/hashRouterUrl';
+import { normalizeHashRouterLocation } from '@/app/hashRouterUrl';
 
 describe('normalizeHashRouterLocation', () => {
   const replace = vi.fn();

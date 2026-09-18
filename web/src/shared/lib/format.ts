@@ -1,4 +1,4 @@
-import type { Agent } from '../types';
+import type { Agent } from '@/types';
 
 export function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

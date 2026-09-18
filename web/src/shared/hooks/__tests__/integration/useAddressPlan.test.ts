@@ -6,7 +6,7 @@ import type { AttachInfo, ProbedAddress } from '@/types';
 // Mock the latency ordering so the hook test is deterministic. The real
 // implementation tests ALL addresses from the browser and never filters on
 // server-side status; the mock returns every url in input order.
-vi.mock( '@/lib/addressSelection', () => ({
+vi.mock( '@/shared/lib/addressSelection', () => ({
   orderAddressesByLatency: vi.fn(async (addrs: ProbedAddress[]) => addrs.map((a) => a.url)),
 }));
 

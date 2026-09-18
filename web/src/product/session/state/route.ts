@@ -11,7 +11,7 @@ import {
   routeIntentEpochAtom,
   terminalSessionStateAtom,
 } from '@/platform/attach/state/transport';
-import { resolveAutoP2pUrl } from '@/lib/resolveAutoP2pUrl';
+import { resolveAutoP2pUrl } from '@/platform/attach/resolveAutoP2pUrl';
 import {
   agentIdAtom,
   attachInfoAtom,

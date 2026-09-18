@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectLanguage, detectLanguageForFile, parseLangBasename, parseLangExt } from '@/lib/languageId';
-import { AUTO_APPLY_CONFIDENCE, SUGGEST_CONFIDENCE } from '@/markdown';
+import { detectLanguage, detectLanguageForFile, parseLangBasename, parseLangExt } from '@/shared/lib/languageId';
+import { AUTO_APPLY_CONFIDENCE, SUGGEST_CONFIDENCE } from '@/shared/markdown';
 
 describe('parseLangBasename', () => {
   it('extracts basename from absolute path', () => {

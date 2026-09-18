@@ -20,7 +20,7 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import { type ViewerType } from '../model/viewerRegistry';
-import { formatSize } from '@/lib/format';
+import { formatSize } from '@/shared/lib/format';
 import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
 

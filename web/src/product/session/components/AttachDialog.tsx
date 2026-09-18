@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import {
   Dialog,
   DialogContent,

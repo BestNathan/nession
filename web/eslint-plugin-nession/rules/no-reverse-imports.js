@@ -92,9 +92,10 @@ const ALLOWED_IMPORTS = {
   // Widening the layer's definition to admit a UI framework is deliberate:
   // #801's §7 convergence list describes where `platform` will *come from*
   // (`core/` + `runtime/` + `services/` + `atoms/` + owner-specific `lib/`),
-  // not the whole of what it may hold. Of that list `core/`, `runtime/` and
-  // `services/` have arrived; `atoms/` and the owner-specific `lib/` files are
-  // still classified under their old layers and converge next.
+  // not the whole of what it may hold. All five have now arrived: `core/`,
+  // `runtime/` and `services/` as directories, `atoms/` as state moved to its
+  // owners, and the owner-specific `lib/` modules to theirs — of which
+  // `resolveAutoP2pUrl` (attach address planning) landed here.
   //
   // `core` is gone from this list, and from every other, in the same change
   // that emptied it — it was the pre-Phase-5 name for this layer, so leaving it
@@ -119,17 +120,32 @@ const ALLOWED_IMPORTS = {
 // the reverse imports found by fixing this rule are real, not a
 // mis-classification (#783).
 //
-// `markdown` is `shared`, decided by the same test rather than by its name: its
-// consumers are `capabilities/files` (3 edges) *and* `lib/languageId` (2 edges), and
-// a `shared` module importing it forces it to `shared` — shared is the bottom.
-// The `markdown ↔ lib` cycle that results is deliberate and both files say so:
-// general language detection needs markdown's ranked signals, and markdown
-// cannot host the general tables without importing them back. Same layer, so
-// the rule permits it; this entry is what makes that a decision rather than an
-// accident (#793).
+// `markdown` and `lib` have no rows because they have no directories: Phase 5
+// moved both *inside* the layer they were always classified as —
+// `markdown/` -> `shared/markdown/`, `lib/`'s generic helpers ->
+// `shared/lib/`. They were `shared` before and are `shared` now; only the path
+// changed, so the first-segment lookup reaches the `shared` row below and both
+// rows would be rows for a directory nothing can be in.
+//
+// That classification was decided by the consumer test rather than by name
+// (#793), and the move is what makes it structural rather than a table entry:
+// markdown's consumers are `capabilities/files` *and* `lib/languageId`, and a
+// `shared` module importing it forces it to `shared` — shared is the bottom.
+// The `markdown ↔ lib` cycle is deliberate and both files say so: general
+// language detection needs markdown's ranked signals, and markdown cannot host
+// the general tables without importing them back. It is now genuinely
+// intra-layer (`shared/lib` ↔ `shared/markdown`), so the rule permits it by
+// construction instead of by an entry asserting that it should.
 const LEGACY_TO_LAYER = {
   'components': 'shared', // components/ui only
-  'lib': 'shared',
+  // `lib` is gone as a directory: its generic helpers are `shared/lib/` and its
+  // owner-specific modules (auth, hashRouterUrl, envParser,
+  // languageIdToCodeMirror, resolveAutoP2pUrl) went to the owners that use them.
+  // The split is the point — a module under `shared/` may import nothing, so
+  // every one of those five would have been unmovable while it sat in `lib/`,
+  // exactly as the `atoms` row below records for state. `addressSelection` is
+  // the counter-example that stayed: `shared/hooks/useAddressPlan` consumes it,
+  // and `shared` cannot reach `platform`, so its owner really is shared.
   // `atoms` is gone: its state moved to the owners that own it — session and
   // route atoms to `product/session/state`, probe atoms to
   // `product/agent/state`, transport atoms to `platform/attach/state`, and the
@@ -137,7 +153,6 @@ const LEGACY_TO_LAYER = {
   // directory to `shared`, which is exactly what made the cluster unmovable:
   // `shared` may import nothing, so a Session atom could not live with the
   // Session. "It is a Jotai atom" was never an owner.
-  'markdown': 'shared', // markdown pipeline — rationale in the note above
   // `core` the layer is gone entirely: its three members converged in Phase 5
   // (`core/terminal-runtime` -> `platform/terminal-runtime`, `runtime/` ->
   // `platform/{session-runtime,attach}`, `services/` -> `platform/{socket,attach}`).

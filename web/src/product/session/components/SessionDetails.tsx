@@ -1,4 +1,4 @@
-import { formatRelativeTime } from '@/lib/format';
+import { formatRelativeTime } from '@/shared/lib/format';
 import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';

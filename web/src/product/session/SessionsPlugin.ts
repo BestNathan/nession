@@ -176,7 +176,7 @@ export class SessionsPlugin implements TransportPlugin {
     if (response.ansi_b64 === null || response.ansi_b64 === undefined) {
       throw new Error('Capture failed: no data returned');
     }
-    const { decodeBase64Utf8 } = await import('@/lib/encoding');
+    const { decodeBase64Utf8 } = await import('@/shared/lib/encoding');
     return {
       ansi: decodeBase64Utf8(response.ansi_b64),
       cols: response.cols,

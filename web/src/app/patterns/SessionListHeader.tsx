@@ -4,7 +4,7 @@ import { SearchBar } from '@/product/session/components/SearchBar';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 /** A disclosure entry plus the icon this surface happens to have for it. */
 export type CapabilityDisclosureMenuEntry = CapabilityDisclosureEntry & { icon?: LucideIcon };

@@ -8,7 +8,7 @@
  * `detect.ts` for the reasoning and `types.ts` for the confidence bands.
  *
  * Note: the general-purpose `detectLanguageForFile()` lives in
- * `@/lib/languageId` and is re-exported here for convenience. It cannot be
+ * `@/shared/lib/languageId` and is re-exported here for convenience. It cannot be
  * implemented inside this module without a circular import, since it needs the
  * full extension/basename tables that in turn depend on markdown detection.
  */
@@ -51,4 +51,4 @@ export {
   type MarkdownDetection,
 } from './types';
 
-export { detectLanguageForFile } from '@/lib/languageId';
+export { detectLanguageForFile } from '@/shared/lib/languageId';

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { measureLatency, orderAddressesByLatency } from '@/lib/addressSelection';
+import { measureLatency, orderAddressesByLatency } from '@/shared/lib/addressSelection';
 import type { ProbedAddress } from '@/types';
 
 // ---------------------------------------------------------------------------

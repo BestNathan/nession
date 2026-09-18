@@ -6,8 +6,8 @@ import {
   getRemarkPlugins,
   getRemarkRehypeOptions,
   markdownSanitizeSchema,
-} from '@/markdown/previewPlugins';
-import { FRONTMATTER_TABLE_CLASS } from '@/markdown/frontmatterTable';
+} from '@/shared/markdown/previewPlugins';
+import { FRONTMATTER_TABLE_CLASS } from '@/shared/markdown/frontmatterTable';
 
 /**
  * Renders through the real plugin chain — the point is what reaches the DOM, not

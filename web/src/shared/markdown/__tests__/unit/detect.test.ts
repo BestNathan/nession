@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { detectMarkdown, detectMarkdownLanguage } from '@/markdown/detect';
+import { detectMarkdown, detectMarkdownLanguage } from '@/shared/markdown/detect';
 import {
   AUTO_APPLY_CONFIDENCE,
   MAX_CONTENT_CONFIDENCE,
   SUGGEST_CONFIDENCE,
-} from '@/markdown/types';
+} from '@/shared/markdown/types';
 
 /**
  * The cases that matter here are the *negatives*. Detecting a README as

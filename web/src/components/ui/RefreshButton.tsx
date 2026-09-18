@@ -1,6 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { Button } from './button';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 
 interface RefreshButtonProps {

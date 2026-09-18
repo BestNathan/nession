@@ -14,7 +14,7 @@ import {
   LEFT_KEYS,
   type PhysKey,
 } from '@/product/terminal/capsule/physKeys';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 interface PhysKeyRowProps {
   onKey: (seq: string) => void;

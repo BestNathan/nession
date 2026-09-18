@@ -1,7 +1,7 @@
-// web/src/lib/__tests__/errorHelpers.test.ts
+// web/src/shared/lib/__tests__/unit/errorHelpers.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { toast } from 'sonner';
-import { toastError } from '@/lib/errorHelpers';
+import { toastError } from '@/shared/lib/errorHelpers';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 

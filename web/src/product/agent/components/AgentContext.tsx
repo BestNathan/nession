@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 
 function agentCopyClass(channel: AgentChannel): string {

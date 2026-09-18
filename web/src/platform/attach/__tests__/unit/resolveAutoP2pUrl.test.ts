@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveAutoP2pUrl } from '@/lib/resolveAutoP2pUrl';
+import { resolveAutoP2pUrl } from '@/platform/attach/resolveAutoP2pUrl';
 import type { AttachInfo } from '@/types';
 
 const p2pInfo: AttachInfo = {
