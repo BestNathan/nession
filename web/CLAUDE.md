@@ -61,6 +61,8 @@ src/
 ├── index.css              # Global CSS / Tailwind entry
 ├── types.ts               # Shared TS types
 ├── app/                   # App composition, shell, workspace, app-level hooks
+│                          #   experiences/{web,app}/ own each experience's
+│                          #   frame and its Workspace layouts
 ├── product/               # Nession product concepts + their Product Patterns
 │                          #   (target owner; see the migration map in web.md)
 ├── capabilities/          # discoverable / activatable / contributable

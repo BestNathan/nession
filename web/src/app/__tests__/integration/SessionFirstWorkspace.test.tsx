@@ -42,12 +42,11 @@ vi.mock('@/app/SessionFirstTerminal', () => ({
   SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
 }));
 
-vi.mock('@/app/workspace/views/filesWeb', () => ({
+vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
-  FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 
-vi.mock('@/app/workspace/views/filesApp', () => ({
+vi.mock('@/app/experiences/app/FilesAppLayout', () => ({
   FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 

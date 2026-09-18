@@ -4,19 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
-vi.mock('@/app/workspace/views/filesView', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@/app/workspace/views/filesView')>();
-  return {
-    filesView: {
-      ...actual.filesView,
-      layout: {
-        web: () => <div data-testid="mock-files-web" />,
-        app: () => <div />,
-      },
-    },
-  };
-});
+// The Web experience's Files layout is stubbed rather than the whole binding:
+// a binding is now assembled in `viewBindings.ts` from an id, an icon and the
+// two experiences' layouts, so there is no single object left to swap out.
+vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
+  FilesWebLayout: () => <div data-testid="mock-files-web" />,
+}));
 
 function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
   return {

@@ -75,6 +75,8 @@ the honest answer to "where does this go today" until the row moves.
 | `platform/explorer/` — the file-tree framework | **done** | 5 |
 | `app/workspace/views/claudeCodeView.tsx` — the Claude Code view binding | **done** | 4 |
 | `extensions/claude-code/` — the retired UI-section registration | **deleted** | 4 |
+| `app/workspace/views/` — the other four Web/App layouts | **split into the experiences** — `experiences/{web,app}/workspaceViews.tsx` | **done (finishes 2)** |
+| `app/workspace/AppToolScroll.tsx` — App scroll chrome | `app/experiences/app/AppToolScroll.tsx` | **done (finishes 2)** |
 | `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
 | `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
 | `lib/` — generic | `shared/lib/` | 5 |
@@ -218,9 +220,11 @@ src/
 │   ├── SessionDrawer.tsx, TerminalWell.tsx, shellStyles.ts
 │   ├── useSessionFirstShellState.ts # shell state composer
 │   ├── patterns/            # SessionHeader, SessionListHeader, AppToolHeader, …
-│   ├── app-spatial/         # mobile 3-page pager (Sessions ← Terminal → Workspace)
+│   ├── experiences/         # per-experience composition
+│   │   ├── web/             #   SessionFirstWebLayout + workspaceViews
+│   │   └── app/             #   spatial shell, gestures, AppToolScroll, workspaceViews
 │   ├── workspace/           # WorkspaceShell, capabilities.ts, viewBindings.ts,
-│   │                        #   workspaceContext.ts, views/{files,session,agent,env,claudeCode}
+│   │                        #   workspaceContext.ts, presentation.ts
 │   ├── fixture/             # deterministic screens for /fixture visual tests
 │   ├── useAppConnection.ts / useDashboard.ts / useDashboardFilter.ts /
 │   │   useDashboardModals.ts / useProbePolling.ts / useRealtimeUpdates.ts /
@@ -276,8 +280,25 @@ capabilities/<name>/
 
 Claude Code is the reference for the whole slice: transport, wire types, UI,
 presence state and its Workspace view are all in `capabilities/claude-code/`,
-and the app layer only registers what the contribution hands it. The other three
-still keep their view bindings in `app/workspace/views/` — Phase 4 continues.
+and the app layer only registers what the contribution hands it.
+
+**A capability keeps its view only when it draws the same one in both
+experiences.** Claude Code does, so its `contribution.tsx` supplies a whole
+binding. The other four do not — every one of them is drawn differently by Web
+and App — so their layouts belong to the experiences
+(`experiences/{web,app}/workspaceViews.tsx`) and `viewBindings.ts` pairs the two
+halves up. The deciding fact is not taste: `FilesAppLayout` and the App scroll
+chrome import `AppBackButton`/`AppToolScroll` from the app layer, so a
+capability owning them would be a reverse import, and pushing App chrome down
+into `components/ui` would put experience geometry in a layer that is meant to
+be product-agnostic. `#801` §6's sketch describes the Claude Code case; this is
+the case it does not cover, and the acceptance criterion settles it — "Web/App
+差异主要通过 Experience Composition 表达".
+
+For the same reason the web/app pairs used to be written side by side in one
+file as a `{ web, app }` object whose two halves were the same element with and
+without a wrapper. Expressing that as composition — each experience owning its
+own file — is what stops it from becoming a flag on a shared component.
 
 The singleton convention differs where a cycle would otherwise close: `envApi`
 and the others are declared in `index.ts`, while `claudeCodeApi` is declared in
@@ -312,13 +333,19 @@ Rules follow #649 (per-feature READMEs hold the detailed table):
   when it became a Workspace tool, and its empty registration was deleted with
   them. Adding one means adding `extensions/<name>/index.ts`, which the
   registry discovers by glob.
-- **Capability contributions**: a capability that contributes to the shell
-  declares it in its own `contribution.tsx` — presence state plus its Workspace
-  view binding (`capabilities/claude-code/` is the reference). The app layer
-  registers what it receives: `app/workspace/capabilities.ts` for presence,
-  `app/workspace/viewBindings.ts` for views. A capability's name and state come
-  from its provider, never from its view — see `docs/design/workspace.md`,
-  "Contribution model".
+- **Capability contributions**: a capability declares its presence state in its
+  own `contribution.tsx`, and its Workspace view too *when the two experiences
+  draw it the same way* (`capabilities/claude-code/` is the reference). The app
+  layer registers what it receives: `app/workspace/capabilities.ts` for
+  presence, `app/workspace/viewBindings.ts` for views. A capability's name and
+  state come from its provider, never from its view — see
+  `docs/design/workspace.md`, "Contribution model".
+- **Experience views**: when Web and App draw a capability differently, the
+  layouts belong to the experiences —
+  `app/experiences/{web,app}/workspaceViews.tsx`, keyed by capability id, with
+  `viewBindings.ts` supplying the icon and pairing the halves. Moving a
+  capability's view *out* of here and into the capability is only correct if
+  both experiences would render the same thing.
 - **Fixture screens**: `app/fixture/` powers the `/fixture*` routes used by
   e2e visual baselines.
 
