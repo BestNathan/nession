@@ -5,7 +5,7 @@ import { SessionFirstWebLayout } from '@/app/experiences/web/SessionFirstWebLayo
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/services/socket';

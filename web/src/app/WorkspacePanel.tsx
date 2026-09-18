@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { FileOps } from '@/capabilities/files';
-import type { CapabilityFacts, CapabilityId } from '@/features/capabilities';
+import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 import { AppToolHeader } from '@/app/patterns/AppToolHeader';

@@ -14,7 +14,7 @@ import {
 import { SessionFirstMain } from '@/app/SessionFirstMain';
 import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
-import type { CapabilityId } from '@/features/capabilities';
+import type { CapabilityId } from '@/product/capability';
 import { fixtureFileOps } from './fixtureFileOps';
 
 // Module-stable — the stub is immutable and stateless (same pattern as

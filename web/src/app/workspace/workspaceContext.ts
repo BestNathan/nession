@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
-import type { CapabilityFacts, CapabilityId } from '@/features/capabilities';
+import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';

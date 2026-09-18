@@ -3,7 +3,7 @@ import {
   resolveCapabilityPresences,
   type CapabilityPresence,
   type CapabilitySnapshot,
-} from '@/features/capabilities';
+} from '@/product/capability';
 import { buildWorkspacePresentationModel } from '../../presentation';
 
 function snapshot(id: string, state: CapabilitySnapshot['state']): CapabilitySnapshot {

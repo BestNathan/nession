@@ -6,7 +6,7 @@ import {
   type CapabilityId,
   type CapabilityScope,
   type CapabilityState,
-} from '@/features/capabilities';
+} from '@/product/capability';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {

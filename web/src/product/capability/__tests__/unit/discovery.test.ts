@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveCapabilityDisclosure } from '../../discovery';
-import type { CapabilityId, CapabilityPresence, CapabilityPresenceLevel } from '@/features/capabilities';
+import type { CapabilityId, CapabilityPresence, CapabilityPresenceLevel } from '@/product/capability';
 
 function presence(id: CapabilityId, level: CapabilityPresenceLevel): CapabilityPresence {
   return { capabilityId: id, surface: 'workspace', level };

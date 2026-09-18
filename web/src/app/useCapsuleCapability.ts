@@ -4,7 +4,7 @@ import {
   type CapsuleCapabilityContribution,
   type CapsuleCapabilityInput,
 } from '@/app/capsulePresence';
-import type { CapabilityFacts } from '@/features/capabilities';
+import type { CapabilityFacts } from '@/product/capability';
 
 export interface CapsuleCapability {
   facts: CapabilityFacts | undefined;
