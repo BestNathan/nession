@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketService } from '@/services/socket';
-import type { CapabilityPlugin, SocketMessage } from '@/services/socket/types';
+import type { TransportPlugin, SocketMessage } from '@/services/socket/types';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
 import { serverApi } from '@/platform/server';
@@ -29,12 +29,12 @@ const AUTH_PAYLOAD = { auth_token: 'test-token', client_id: 'test-client' };
  * into the feature singletons' consumers, plugin replace/unregister, and the
  * re-login remount that keeps a newer service alive across a stale teardown.
  *
- * The plugin list mirrors useAppConnection's SERVER_CAPABILITIES (the module
+ * The plugin list mirrors useAppConnection's SERVER_PLUGINS (the module
  * singletons install into whichever service owns them); the handshake mirrors
  * the app's client.auth + auth_token/client_id flow. `maxReconnectAttempts: 0`
  * keeps failure paths deterministic — no timers ever get scheduled.
  */
-const SERVER_CAPABILITIES = [
+const SERVER_PLUGINS = [
   agentsApi,
   sessionsApi,
   serverApi,
@@ -77,7 +77,7 @@ function reply(socket: MockWebSocket, request: SocketMessage, payload: Record<st
 
 /** Build a service with the app's capability set and an auth handshake. */
 function makeService(): WebSocketService {
-  const service = new WebSocketService(TEST_URL, SERVER_CAPABILITIES, {
+  const service = new WebSocketService(TEST_URL, SERVER_PLUGINS, {
     maxReconnectAttempts: 0,
     handshake: (surface) =>
       surface.request<AuthResponse>('client.auth', AUTH_PAYLOAD).then((res) => {
@@ -135,7 +135,7 @@ function makeSession(agentId: string, sessionName: string): Session {
 }
 
 /** Plugin whose install/teardown are recorded into a shared event log. */
-function makePlugin(name: string, events: string[]): CapabilityPlugin {
+function makePlugin(name: string, events: string[]): TransportPlugin {
   return {
     name,
     install: () => {

@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
 import type { ClaudeCodeListRequest, ClaudeCodeListResponse, ClaudeCodeReadRequest, ClaudeCodeReadResponse } from './types';
 
 /**
@@ -7,7 +7,7 @@ import type { ClaudeCodeListRequest, ClaudeCodeListResponse, ClaudeCodeReadReque
  * forwarded whole — the transport never sees individual fields. Wire strings
  * live only in this file; the typed API is what consumers import.
  */
-export class ClaudeCodePlugin implements CapabilityPlugin {
+export class ClaudeCodePlugin implements TransportPlugin {
   readonly name = 'claude-code';
 
   private connection: PluginSurface | null = null;

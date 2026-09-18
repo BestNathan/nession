@@ -1,5 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
 
 type RelayOutputCallback = (data: Uint8Array) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;
@@ -42,7 +42,7 @@ export interface TerminalServerApi {
   onRelayResize(sessionName: string, cb: RelayResizeCallback): () => void;
 }
 
-export class TerminalServerPlugin implements CapabilityPlugin, TerminalServerApi {
+export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi {
   readonly name = 'terminal-server';
 
   private connection: PluginSurface | null = null;

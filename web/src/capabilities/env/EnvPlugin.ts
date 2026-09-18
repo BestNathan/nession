@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
 import type {
   EnvDeleteResponse,
   EnvFileRef,
@@ -16,7 +16,7 @@ import type {
  * strings live only in this file; the typed API is what consumers import
  * (module singleton in index.ts).
  */
-export class EnvPlugin implements CapabilityPlugin {
+export class EnvPlugin implements TransportPlugin {
   readonly name = 'env';
 
   private connection: PluginSurface | null = null;

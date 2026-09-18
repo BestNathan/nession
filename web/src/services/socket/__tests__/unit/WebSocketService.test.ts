@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketService } from '@/services/socket/WebSocketService';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import type { CapabilityPlugin, HandshakeSurface, SocketMessage } from '@/services/socket/types';
+import type { TransportPlugin, HandshakeSurface, SocketMessage } from '@/services/socket/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 
@@ -42,7 +42,7 @@ function controlledHandshake(): {
   };
 }
 
-function makePlugin(name: string, events: string[]): CapabilityPlugin {
+function makePlugin(name: string, events: string[]): TransportPlugin {
   return {
     name,
     install: () => {
@@ -350,7 +350,7 @@ describe('WebSocketService', () => {
 
   it('does not reinstall plugins on reconnect and subscriptions do not duplicate across sockets', async () => {
     let teardownCalls = 0;
-    const plugin: CapabilityPlugin = {
+    const plugin: TransportPlugin = {
       name: 'probe',
       install: vi.fn(() => () => {
         teardownCalls += 1;

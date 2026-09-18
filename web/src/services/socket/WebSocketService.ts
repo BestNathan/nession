@@ -1,6 +1,6 @@
 import { MessageRouterImpl } from './MessageRouter';
 import type {
-  CapabilityPlugin,
+  TransportPlugin,
   ConnectionState,
   HandshakeSurface,
   PluginSurface,
@@ -26,7 +26,7 @@ export function buildAgentWsUrl(agentUrl: string, connectionToken?: string): str
 }
 
 interface RegisteredPlugin {
-  plugin: CapabilityPlugin;
+  plugin: TransportPlugin;
   teardown: () => void;
 }
 
@@ -40,12 +40,12 @@ type ConnectionWaiter = {
  *
  * Lifecycle: reconnect with exponential backoff, generation guard for stale
  * socket events, request correlation via MessageRouterImpl. Three differences
- * make it the transport for capability plugins:
+ * make it the transport these plugins install on:
  *
  * 1. Readiness gate — when `options.handshake` is provided, the state stays
  *    'connecting' until the handshake succeeds; `connect()`/`waitForConnection()`
  *    only resolve post-handshake and `request()` waits behind the same gate.
- * 2. Plugin registry — `CapabilityPlugin`s install once per service lifetime
+ * 2. Plugin registry — `TransportPlugin`s install once per service lifetime
  *    (never on reconnect) and are torn down on `dispose()`.
  * 3. Envelope — `send(type, payload)` wraps the payload in the
  *    `SocketMessage` envelope instead of exposing raw frames.
@@ -79,7 +79,7 @@ export class WebSocketService implements PluginSurface {
 
   constructor(
     private readonly url: string,
-    plugins: CapabilityPlugin[] = [],
+    plugins: TransportPlugin[] = [],
     private readonly options: WebSocketServiceOptions = {},
   ) {
     this.router = new MessageRouterImpl({
@@ -178,8 +178,8 @@ export class WebSocketService implements PluginSurface {
     this.stateListeners.clear();
   }
 
-  /** Install a capability plugin; a same-name plugin is replaced (old teardown first). */
-  use(plugin: CapabilityPlugin): void {
+  /** Install a transport plugin; a same-name plugin is replaced (old teardown first). */
+  use(plugin: TransportPlugin): void {
     this.unregister(plugin.name);
     const teardown = plugin.install(this);
     this.plugins.set(plugin.name, { plugin, teardown });

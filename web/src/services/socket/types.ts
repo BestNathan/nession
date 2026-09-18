@@ -17,7 +17,7 @@ export interface HandshakeSurface {
   request<T>(type: string, payload: Record<string, unknown>, options?: RequestOptions): Promise<T>;
 }
 
-/** Capability-facing surface — everything a plugin may do with the transport. */
+/** Plugin-facing surface — everything a plugin may do with the transport. */
 export interface PluginSurface {
   readonly connectionState: ConnectionState;
   send(type: string, payload: Record<string, unknown>): void;
@@ -31,7 +31,22 @@ export interface PluginSurface {
   onConnectionStateChange(handler: (state: ConnectionState) => void): () => void;
 }
 
-export interface CapabilityPlugin {
+/**
+ * A wire-protocol adapter bound to a connection.
+ *
+ * Named for what it plugs *into*, not for what it serves. Implementors are the
+ * request/response families a connection speaks — `file.*`, `session.*`,
+ * `extension.claude_code.*` — installed once per service lifetime and never on
+ * reconnect.
+ *
+ * It was called `CapabilityPlugin` until #801, which put one word on two
+ * unrelated things. **Product Capability** is the discoverable/activatable
+ * concept with a presence state that a user meets in the UI; a transport plugin
+ * has no presence, is never activated, and is invisible to the user. Keeping a
+ * single term for both made every sentence about capabilities ambiguous — which
+ * is why this one is named after the layer it belongs to instead.
+ */
+export interface TransportPlugin {
   readonly name: string;
   install(connection: PluginSurface): () => void;
 }

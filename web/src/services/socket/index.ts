@@ -1,6 +1,6 @@
 export { WebSocketService, buildAgentWsUrl } from './WebSocketService';
 export type {
-  CapabilityPlugin,
+  TransportPlugin,
   ConnectionState,
   HandshakeSurface,
   PluginSurface,
