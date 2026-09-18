@@ -18,6 +18,16 @@ export function createTerminalRuntimeAdapter(runtime?: SessionRuntime | null): T
   const store = getDefaultStore();
   return {
     onTransportReady: (ready) => {
+      // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
+      // `detach()` is the documented source of ready=false and TerminalViewport
+      // is its only caller; the stack names whoever triggers it after a
+      // successful attach.
+      if (!ready) {
+        console.log('[diag-ready]', JSON.stringify({
+          ready,
+          trace: (new Error().stack ?? '').split('\n').slice(2, 9).join(' | '),
+        }));
+      }
       if (runtime) {
         runtime.setTransportReady(ready);
       } else {

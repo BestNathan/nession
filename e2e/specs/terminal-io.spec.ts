@@ -128,7 +128,8 @@ test.describe('Terminal I/O', () => {
     // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
     // Registered first so it also catches the attach-phase logs.
     page.on('console', (msg) => {
-      if (msg.text().startsWith('[diag-relay]') || msg.text().startsWith('[diag-gate]')) {
+      if (msg.text().startsWith('[diag-relay]') || msg.text().startsWith('[diag-gate]')
+        || msg.text().startsWith('[diag-ready]')) {
         console.log(msg.text());
       }
     });
