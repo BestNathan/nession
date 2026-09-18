@@ -10,7 +10,10 @@ import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/pr
 import { attachInfoAtom } from '@/product/session/state';
 import { saveSessionProfile, type PersistedAttachChoice } from '@/platform/attach/sessionAttachProfile';
 
-vi.mock('@/capabilities/env', () => ({
+// Partial mock — see CreateSessionDialog.test.tsx: the barrel exports the
+// capability's components too, and this dialog renders one of them.
+vi.mock('@/capabilities/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: { listEnvFiles: vi.fn() },
 }));
 

@@ -5,7 +5,11 @@ import { EnvManager } from '@/capabilities/env/components/EnvManager';
 import { envApi } from '@/capabilities/env';
 import type { Agent, EnvFileInfo } from '@/types';
 
-vi.mock('@/capabilities/env', () => ({
+// Partial mock — the barrel also exports the capability's components. Spreading
+// the real module keeps them real and only the API is replaced, so the mock
+// stays correct as the barrel grows (see CreateSessionDialog.test.tsx).
+vi.mock('@/capabilities/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: {
     listEnvFiles: vi.fn(),
     getEnvFile: vi.fn(),

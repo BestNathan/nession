@@ -117,7 +117,9 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
-vi.mock('@/capabilities/env', () => ({
+// Partial mock — see CreateSessionDialog.test.tsx.
+vi.mock('@/capabilities/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: { listEnvFiles: vi.fn() },
 }));
 
