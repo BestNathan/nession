@@ -1,4 +1,4 @@
-import { PRESETS } from '@/capabilities/commands/quickCommands';
+import { PRESETS } from '@/capabilities/commands';
 import { Separator } from '@/components/ui/separator';
 import {
   capsuleCaptionTextClass,

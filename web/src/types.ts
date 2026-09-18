@@ -128,7 +128,7 @@ export type {
   SessionEnvActiveResponse,
   SessionEnvResponse,
   SessionEnvQueryResponse,
-} from '@/capabilities/env/types';
+} from '@/capabilities/env';
 
 export type {
   QuickCommandItem,
@@ -136,7 +136,7 @@ export type {
   CommandsAddResponse,
   CommandsRemoveResponse,
   CommandsUpdateResponse,
-} from '@/capabilities/commands/types';
+} from '@/capabilities/commands';
 
 /** Server info returned by client.server.info. */
 export interface ServerInfo {

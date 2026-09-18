@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { PRESETS, type QuickCommand } from '@/capabilities/commands/quickCommands';
-import { useQuickCommands } from '@/capabilities/commands/hooks/useQuickCommands';
+import { PRESETS, useQuickCommands, type QuickCommand } from '@/capabilities/commands';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
 
 export function useCapsuleCommands(sendText: (text: string) => void) {

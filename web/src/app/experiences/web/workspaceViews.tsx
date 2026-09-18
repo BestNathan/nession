@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { EnvManager } from '@/capabilities/env/components/EnvManager';
+import { EnvManager } from '@/capabilities/env';
 import { AgentDetail } from '@/product/agent/components/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
 import { FilesWebLayout } from './FilesWebLayout';
