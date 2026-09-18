@@ -520,6 +520,9 @@ export class SessionRuntime {
       forcedRelay: this.config.forcedRelay,
       transportReady: this.transportReady,
       phase: this.attachState.phase,
+      // The published snapshot's own phase. If this lags `phase`, the UI can
+      // only ever see the stale value — which is the whole question.
+      snapshotPhase: this.snapshot.phase,
     }));
     if (!conn || !this.config.attachInfo) {
       return;
