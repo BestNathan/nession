@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { MessageRouterImpl } from '@/services/socket/MessageRouter';
-import type { SocketMessage } from '@/services/socket/types';
+import { MessageRouterImpl } from '@/platform/socket/MessageRouter';
+import type { SocketMessage } from '@/platform/socket/types';
 
 describe('MessageRouterImpl', () => {
   let router: MessageRouterImpl;

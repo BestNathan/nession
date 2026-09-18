@@ -14,7 +14,7 @@ import {
 } from '@/atoms/session';
 import { routeIntentEpochAtom, isSwitchingAtom } from '@/atoms/connection';
 import { terminalSessionStateAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
 import type { AttachInfo } from '@/types';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';

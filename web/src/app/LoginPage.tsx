@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConnectionStatus } from '@/app/patterns/ConnectionStatus';
 import { getRememberPreference, setRememberPreference } from '../lib/auth';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 
 interface LoginPageProps {
   connectionStatus: ConnectionState;

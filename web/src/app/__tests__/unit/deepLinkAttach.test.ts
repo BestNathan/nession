@@ -9,10 +9,10 @@ import {
   buildOptionsFingerprint,
   type PersistedAttachChoice,
   type SessionAttachProfile,
-} from '@/services/sessionAttachProfile';
+} from '@/platform/attach/sessionAttachProfile';
 import type { Session } from '@/types';
 
-vi.mock('@/services/attachPrefs', () => ({
+vi.mock('@/platform/attach/attachPrefs', () => ({
   loadAttachPrefs: () => ({ mode: 'auto', renderer: 'webgl' }),
 }));
 

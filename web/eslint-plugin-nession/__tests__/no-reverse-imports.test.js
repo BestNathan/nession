@@ -32,11 +32,11 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
       // app may reach everything below it.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
       { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/app/LoginPage.tsx' },
-      // capabilities may reach core and shared.
-      { code: "import { x } from '@/services/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
+      // capabilities may reach platform and shared.
+      { code: "import { x } from '@/platform/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
       { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/capabilities/files/F.tsx' },
-      // core may reach shared.
-      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/services/socket/probe.ts' },
+      // platform may reach shared.
+      { code: "import { cn } from '@/lib/utils';", filename: '/p/web/src/platform/socket/probe.ts' },
       // same-layer is always fine.
       { code: "import { Badge } from '@/components/ui/badge';", filename: '/p/web/src/components/ui/probe.tsx' },
       { code: "import { x } from '@/capabilities/files/model/x';", filename: '/p/web/src/capabilities/files/F.tsx' },
@@ -46,7 +46,7 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
     invalid: [
       {
         // The shape that shipped: a generic primitive reaching into a service.
-        code: "import { ConnectionState } from '@/services/socket';",
+        code: "import { ConnectionState } from '@/platform/socket';",
         filename: '/p/web/src/components/ui/ConnectionStatusBadge.tsx',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -70,7 +70,7 @@ test('no-reverse-imports enforces the layer direction on aliased imports', () =>
         errors: [{ messageId: 'reverseImport' }],
       },
       {
-        code: "import { orderAddressesByLatency } from '@/services/addressSelection';",
+        code: "import { orderAddressesByLatency } from '@/platform/socket';",
         filename: '/p/web/src/shared/hooks/useAddressPlan.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
@@ -87,7 +87,7 @@ test('the rule reports the runtime graph only: test files are out of scope', () 
         // A test wiring several layers to exercise something is doing its job;
         // it is not part of the shipped graph.
         code: "import { terminalServerApi } from '@/product/terminal';",
-        filename: '/p/web/src/services/__tests__/integration/websocket.test.ts',
+        filename: '/p/web/src/platform/__tests__/integration/websocket.test.ts',
       },
       {
         code: "import { createFilesApi } from '@/capabilities/files';",
@@ -144,7 +144,7 @@ test('a re-export is the same runtime edge as an import', () => {
     valid: [
       // Legal directions behave exactly as the import form does.
       { code: "export { Badge } from '@/components/ui/badge';", filename: '/p/web/src/app/LoginPage.tsx' },
-      { code: "export { probe } from '@/services/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
+      { code: "export { probe } from '@/platform/socket';", filename: '/p/web/src/capabilities/files/F.tsx' },
       // A local re-export references no other module. The binding has to exist
       // for the parser to accept the statement at all.
       {
@@ -165,7 +165,7 @@ test('a re-export is the same runtime edge as an import', () => {
       {
         // `export *` carries a whole module graph — an edge like any other.
         code: "export * from '@/product/terminal';",
-        filename: '/p/web/src/services/socket/probe.ts',
+        filename: '/p/web/src/platform/socket/probe.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],
@@ -259,22 +259,23 @@ test('a computed dynamic import names nothing and is left alone', () => {
 // only, so every relative specifier fell to `unknown` — which `checkRuntimeEdge`
 // skips. The same reverse import was therefore caught when written with an alias
 // and invisible when written with a path, and both spellings occur in the tree.
-// `web/src/services/deepLinkAttach.ts` was shipping the second kind.
+// `web/src/platform/deepLinkAttach.ts` was shipping the second kind.
 test('a relative specifier is resolved against the importing file', () => {
   ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
     valid: [
       // Downward and same-layer are legal, however they are spelled.
-      { code: "import { probe } from '../lib/probe';", filename: '/p/web/src/services/thing.ts' },
-      { code: "import { helper } from './helper';", filename: '/p/web/src/services/thing.ts' },
+      { code: "import { probe } from '../lib/probe';", filename: '/p/web/src/platform/thing.ts' },
+      { code: "import { helper } from './helper';", filename: '/p/web/src/platform/thing.ts' },
       { code: "import { sibling } from './sibling';", filename: '/p/web/src/components/ui/probe.tsx' },
       // A specifier that climbs out of every layer names nothing placeable.
-      { code: "import { x } from '../../../../outside';", filename: '/p/web/src/services/thing.ts' },
+      { code: "import { x } from '../../../../outside';", filename: '/p/web/src/platform/thing.ts' },
     ],
     invalid: [
       {
-        // The shape that was shipping: `core` reaching a feature by path.
+        // The shape that was shipping: `core` reaching a feature by path. `core`'s three
+        // directories are `platform/` now, and the edge is unchanged.
         code: "import { sessionsApi } from '../product/sessions';",
-        filename: '/p/web/src/services/deepLinkAttach.ts',
+        filename: '/p/web/src/platform/deepLinkAttach.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
       {
@@ -373,6 +374,33 @@ test('the former features/ paths are no longer a layer', () => {
   });
 });
 
+// Same shape as `features/` above, for the layer Phase 5 retired. `core` was
+// the pre-Phase-5 name for `platform`; its three directories have converged, so
+// it is no longer a layer at all — not an empty one, and not an alias for
+// `platform` either. A path spelled `@/core/…` resolves to nothing.
+test('the former core/ paths are no longer a layer', () => {
+  ruleTester.run('no-reverse-imports', nessionPlugin.rules['no-reverse-imports'], {
+    valid: [
+      {
+        // Unresolvable, therefore skipped. If `core` came back in the table by
+        // accident, this starts reporting and fails — which is the point: the
+        // old spelling must not quietly pass as a known layer.
+        code: "import { x } from '@/core/anything';",
+        filename: '/p/web/src/components/ui/probe.tsx',
+      },
+    ],
+    invalid: [
+      {
+        // What those three directories are now, spelled at the new home: the
+        // edge is still enforced, it just has a different name.
+        code: "import { createFilesApi } from '@/capabilities/files';",
+        filename: '/p/web/src/platform/socket/probe.ts',
+        errors: [{ messageId: 'reverseImport' }],
+      },
+    ],
+  });
+});
+
 // The new layer, and its two edges. `platform` is machinery: it may reach
 // `shared` and be reached by everything above it, and it may not reach up.
 test('platform sits above shared and below everything that means something', () => {
@@ -436,7 +464,7 @@ test('files directly under src/ are classified rather than skipped', () => {
       },
       {
         code: "import { App } from '../App';",
-        filename: '/p/web/src/services/thing.ts',
+        filename: '/p/web/src/platform/thing.ts',
         errors: [{ messageId: 'reverseImport' }],
       },
     ],

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadAttachPrefs, saveAttachPrefs } from '@/services/attachPrefs';
+import { loadAttachPrefs, saveAttachPrefs } from '@/platform/attach/attachPrefs';
 
 describe('attachPrefs', () => {
   beforeEach(() => localStorage.clear());

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { WebSocketService } from '../services/socket';
-import type { ConnectionState } from '../services/socket/types';
+import { WebSocketService } from '../platform/socket';
+import type { ConnectionState } from '../platform/socket/types';
 import type { AuthResponse } from '../types';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
@@ -11,7 +11,7 @@ import { commandsApi } from '@/capabilities/commands';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from '../lib/auth';
-import { getOrCreateClientId } from '../services/socket/clientId';
+import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;

@@ -1,5 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
-import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 
 type RelayOutputCallback = (data: Uint8Array) => void;
 type RelayResizeCallback = (cols: number, rows: number) => void;

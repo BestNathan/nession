@@ -1,4 +1,4 @@
-import type { TransportPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   EnvDeleteResponse,
   EnvFileRef,

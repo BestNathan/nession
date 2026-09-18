@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { commandsApi } from '@/capabilities/commands';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
-import type { WebSocketService } from '@/services/socket';
+import type { WebSocketService } from '@/platform/socket';
 import {
   loadLegacyCommands,
   clearLegacyCommands,

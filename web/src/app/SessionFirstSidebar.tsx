@@ -10,7 +10,7 @@ import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 import type { DomainState } from '@/product/session/model/domainState';
 
 export interface SessionFirstSidebarProps {

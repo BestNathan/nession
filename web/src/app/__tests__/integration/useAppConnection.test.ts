@@ -7,7 +7,7 @@ import { useAppConnection } from '@/app/useAppConnection';
 import { useVisibilityReconnect } from '@/app/useVisibilityReconnect';
 import * as auth from '@/lib/auth';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import type { SocketMessage } from '@/services/socket/types';
+import type { SocketMessage } from '@/platform/socket/types';
 
 vi.mock('@/lib/auth');
 vi.mock('@/app/useVisibilityReconnect', () => ({

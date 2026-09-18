@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import type { AgentError, TerminalAgentApi } from '@/product/terminal';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 
 const attached = { isAttached: () => true };

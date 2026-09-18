@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { WebSocketService } from '../services/socket';
+import type { WebSocketService } from '../platform/socket';
 
 /**
  * When the tab becomes visible after being backgrounded (e.g. mobile app

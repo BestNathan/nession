@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getOrCreateClientId } from '@/services/socket/clientId';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
 
 const CLIENT_ID_KEY = 'nessioclientid';
 

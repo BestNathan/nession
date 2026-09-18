@@ -3,7 +3,7 @@ import type {
   PluginSurface,
   RequestOptions,
   SocketMessage,
-} from '@/services/socket/types';
+} from '@/platform/socket/types';
 
 /** A fire-and-forget message the mock surface was asked to send. */
 export interface MockSentMessage {

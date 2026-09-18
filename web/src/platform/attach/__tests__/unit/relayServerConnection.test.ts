@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { relayServerHandle, type RelayServerTransport } from '@/platform/attach/relayServerConnection';
-import { WebSocketService } from '@/services/socket/WebSocketService';
+import { WebSocketService } from '@/platform/socket/WebSocketService';
 import { terminalServerApi } from '@/product/terminal';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import type { SocketMessage } from '@/services/socket/types';
+import type { SocketMessage } from '@/platform/socket/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 

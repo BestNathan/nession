@@ -4,7 +4,7 @@ import { createTerminalAgentApi } from '@/product/terminal';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT } from '@/platform/attach/AttachStateMachine';
 import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type { AttachInfo } from '@/types';
 
 const OriginalWebSocket = globalThis.WebSocket;

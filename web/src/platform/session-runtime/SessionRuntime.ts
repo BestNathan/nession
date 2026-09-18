@@ -1,8 +1,8 @@
 import type { AttachInfo } from '@/types';
 import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
-import { buildAgentWsUrl, WebSocketService } from '@/services/socket';
-import type { ConnectionState } from '@/services/socket/types';
+import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
+import type { ConnectionState } from '@/platform/socket/types';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
 import { SessionAttachController } from '@/platform/attach/SessionAttachController';

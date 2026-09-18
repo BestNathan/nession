@@ -19,7 +19,7 @@ interface UseP2PAttachTransportResult {
   /** Live agent terminal capability of the current P2P transport (null in relay). */
   agentTerminalApi: TerminalAgentApi | null;
   /** Agent-transport connection state, gated 'disconnected' outside the P2P transport. */
-  connectionState: import('@/services/socket/types').ConnectionState;
+  connectionState: import('@/platform/socket/types').ConnectionState;
   waitingForAddressPlan: boolean;
   fileOps: import('@/capabilities/files').FileOps | null;
   runtime: import('@/platform/session-runtime/SessionRuntime').SessionRuntime | null;

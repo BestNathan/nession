@@ -1,6 +1,6 @@
 // web/src/atoms/connection.ts
 import { atom } from 'jotai';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import {
   manualOverrideAtom, forcedRelayAtom, attachInfoAtom, agentIdAtom, orderedUrlsAtom,
   terminalSessionStateAtom,

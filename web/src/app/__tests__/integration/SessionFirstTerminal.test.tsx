@@ -4,7 +4,7 @@ import { Provider, createStore } from 'jotai';
 import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
 import { sessionIdAtom, attachInfoAtom } from '@/atoms/session';
 import { bannerAtomFamily } from '@/product/terminal/state/ui';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 
 const { wsListeners } = vi.hoisted(() => ({
   wsListeners: [] as Array<(state: ConnectionState) => void>,

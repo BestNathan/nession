@@ -33,7 +33,7 @@ Do not infer permanent product boundaries from today's component tree or transpo
 | Hooks | Shared hooks in `src/shared/hooks/`, capability/product hooks in `<owner>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
 | Components | Shared generic UI infrastructure lives in `src/components/ui/`; capability/product UI belongs in `<owner>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
 | Layers | The vocabulary is `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`; `features/` no longer exists. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and migration state: `docs/architecture/web.md`. |
-| WebSocket | A new wire-protocol family is a `TransportPlugin` (`src/services/socket/types.ts`) implemented inside its own layer (`<owner>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`). **"Transport plugin" is not "Product Capability"** — the latter is the discoverable/activatable concept with presence (`product/capability`); a transport plugin has no presence and is user-invisible. Do not add protocol-specific transport logic to core `WebSocketService`. |
+| WebSocket | A new wire-protocol family is a `TransportPlugin` (`src/platform/socket/types.ts`) implemented inside its own layer (`<owner>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`). **"Transport plugin" is not "Product Capability"** — the latter is the discoverable/activatable concept with presence (`product/capability`); a transport plugin has no presence and is user-invisible. Do not add protocol-specific transport logic to core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling follows the existing component model. UI styling policy and design values live in `nession-web-design`. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -70,12 +70,12 @@ src/
 │                          #   contributes to the shell declares it in its own
 │                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
-│                          #   code with no product semantics: server/, explorer/,
-│                          #   terminal-runtime/ (React-free), session-runtime/, attach/
+│                          #   code with no product semantics: socket/, server/,
+│                          #   explorer/, terminal-runtime/ (React-free),
+│                          #   session-runtime/, attach/
 ├── shared/                # Shared hooks and generic helpers
 ├── components/ui/         # Shared generic UI infrastructure
 ├── atoms/                 # Jotai atoms split by domain
-├── services/              # WS client and other core services
 ├── lib/                   # Pure helpers
 ├── markdown/              # Markdown preview pipeline
 ├── extensions/            # the generic UI-slot registry (no contributor today)

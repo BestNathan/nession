@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 
 /**
  * How this client's connection state is presented.

@@ -8,7 +8,7 @@ import { sessionsApi } from '@/product/session';
 import type { Session, AttachInfo } from '@/types';
 import { probeResultsAtom, probeRefreshRequestAtom, type AgentProbe } from '@/atoms/probe';
 import { attachInfoAtom } from '@/atoms/session';
-import { saveSessionProfile, type PersistedAttachChoice } from '@/services/sessionAttachProfile';
+import { saveSessionProfile, type PersistedAttachChoice } from '@/platform/attach/sessionAttachProfile';
 
 vi.mock('@/capabilities/env', () => ({
   envApi: { listEnvFiles: vi.fn() },

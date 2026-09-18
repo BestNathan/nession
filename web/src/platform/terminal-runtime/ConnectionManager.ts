@@ -1,5 +1,5 @@
 import type { ConnectionOptions } from './types';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import type { TerminalTransport } from './transport/TerminalTransport';
 
 export class ConnectionManager implements TerminalTransport {

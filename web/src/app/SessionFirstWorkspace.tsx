@@ -8,7 +8,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 
 export interface SessionFirstWorkspaceProps {
   connectionStatus: ConnectionState;
