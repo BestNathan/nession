@@ -213,6 +213,8 @@ export function useTerminalOrchestration({
   // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
   if (effectiveMode === 'relay') {
     console.log('[diag-relay]', JSON.stringify({
+      runtimeId: runtime?.diagId ?? null,
+      sid: runtime?.sessionId ?? null,
       effectiveMode,
       terminalState,
       snapshotPhase: snapshot?.phase ?? null,

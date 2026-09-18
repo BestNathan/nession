@@ -93,7 +93,13 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.reconnectCount === b.reconnectCount;
 }
 
+// TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
+let diagRuntimeCounter = 0;
+
 export class SessionRuntime {
+  /** TEMPORARY DIAGNOSTIC — identity, so the UI's runtime can be matched to the
+   *  one that actually attaches. Remove before merge. */
+  readonly diagId: number = ++diagRuntimeCounter;
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
   readonly attachController: SessionAttachController;
@@ -506,6 +512,8 @@ export class SessionRuntime {
     const conn = this.config.serverConnection;
     // TEMPORARY DIAGNOSTIC for the #818 relay regression — remove before merge.
     console.log('[diag-gate]', JSON.stringify({
+      runtimeId: this.diagId,
+      sid: this.sessionId,
       hasConn: !!conn,
       connReady: conn ? conn.isReady() : null,
       hasAttachInfo: !!this.config.attachInfo,
