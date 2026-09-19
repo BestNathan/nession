@@ -13,6 +13,7 @@ test-utils = []
 [dependencies]
 nession-common = { path = "../nession-common" }
 nession-claude-code = { path = "../nession-claude-code" }
+nession-git = { path = "../nession-git" }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true

@@ -11,6 +11,7 @@ import {
   CLAUDE_CODE_TITLE,
   resolveClaudeCodeState,
 } from '@/capabilities/claude-code';
+import { GIT_ID, GIT_TITLE, resolveGitState } from '@/capabilities/git';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -96,6 +97,23 @@ function claudeCodeProvider(workspaceContext: WorkspaceContext): CapabilityDefin
 }
 
 /**
+ * Git's presence is likewise capability knowledge (`resolveGitState`), and
+ * likewise only registration happens here. It resolves against the Session and
+ * nothing else: whether that Session sits in a repository is an answer only the
+ * agent can give, so presence does not pretend to know it (#750 SC4).
+ */
+function gitProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: GIT_ID,
+    title: GIT_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveGitState(context.sessionId),
+    }),
+  };
+}
+
+/**
  * Shipping Workspace capability registry: every capability the Workspace can
  * show, registered once, none of them through a compatibility path.
  */
@@ -108,6 +126,7 @@ export function createWorkspaceCapabilityRegistry(
     registry.register(providerFor(provider, workspaceContext));
   }
   registry.register(claudeCodeProvider(workspaceContext));
+  registry.register(gitProvider(workspaceContext));
 
   return registry;
 }

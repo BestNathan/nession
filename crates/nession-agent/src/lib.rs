@@ -11,6 +11,7 @@ pub mod connection;
 pub mod env;
 pub mod extension;
 pub mod fs;
+pub mod git_workdir;
 pub mod identity;
 pub mod netdetect;
 pub mod netwatch;

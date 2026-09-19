@@ -80,7 +80,13 @@ IA consequences:
 - **Unavailable:** hidden; no dead navigation slot is required.
 - **Available:** may be discoverable in Workspace or an explicit capability picker when useful.
 - **Relevant:** can be promoted within Workspace and contextual actions.
-- **Active:** can gain lightweight presence in the current Session, expressed through the interaction capsule's `+` expansion rather than on its resting surface.
+- **Active:** can gain lightweight presence in the current Session. The resting capsule remains unchanged, while a capability may be selected/discovered through `+` and then materialize as a temporary Signal or Peek adjacent to the capsule.
+
+Session presence follows the progressive disclosure model in [capability-emergence.md](capability-emergence.md):
+
+```text
+Dormant -> Signal -> Peek -> Workspace
+```
 
 Deeper capability surfaces are explicitly opened. They should not automatically replace the main work surface merely because a capability is active.
 
@@ -103,7 +109,7 @@ Workspace is not synonymous with File Browser and is no longer defined as only "
 
 Workspace is the contextual layer for the logical work represented by [workspace.md](workspace.md). A current Session normally executes in one Workspace Location, while Workspace may expose resources or state across additional locations over time.
 
-Workspace should not be implemented as a feature lobby containing every registered plugin. Its visible structure should follow the current Workspace context and capability state.
+Workspace should not be implemented as a feature lobby containing every registered plugin. Its visible structure should follow the current Workspace context and capability state. When entered from a Terminal Signal/Peek, Workspace should open the matching capability and preserve the originating context rather than starting from a generic capability homepage.
 
 ## What the IA deliberately does not make universal
 

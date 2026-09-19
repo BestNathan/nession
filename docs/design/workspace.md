@@ -98,19 +98,34 @@ provider that carries layout would do the same from the other side.
 
 ## Session-level versus Workspace-level presence
 
-Session and Workspace expose different depths of the same capability.
+Session and Workspace expose different **disclosure depths** of the same capability.
 
-### Session
+The canonical model is defined in [capability-emergence.md](capability-emergence.md):
+
+```text
+Dormant -> Signal -> Peek -> Workspace
+```
+
+### Session / Terminal
 
 The Session layer is about **what is happening now**.
 
-An active capability may gain lightweight presence near the interaction surface. For example, if Claude Code becomes active in the current terminal, Nession may expose its identity, state, and contextual actions without opening a permanent panel.
+A capability may contribute:
+
+- a compact **Signal**: the minimum current state that explains why the capability matters;
+- an explicit **Peek**: a small Session-scoped summary that helps the user decide whether to go deeper.
+
+The Terminal projection must stay intentionally incomplete. It may summarize state, but it should not reproduce a full capability client.
+
+For example, Git in Terminal may show branch, worktree, dirty/change count, staged/unstaged count, and ahead/behind. A Peek may list a few changed files. Full diff, commit history, branch/worktree management, staging workflows, and other rich Git operations belong in Workspace.
 
 ### Workspace
 
 The Workspace layer is about **what belongs to or is relevant to this work**.
 
-It may expose broader capability state, configuration, resources, history, or location-specific information even when that capability is not the foreground application at this exact moment.
+It is the high-density capability surface and may expose broader state, resources, configuration, history, and multi-step workflows even when that capability is not the foreground application at this exact moment.
+
+Opening Workspace from a Signal/Peek must preserve the exact context that caused the capability to emerge: Session, location, repository/worktree, selected resource, and focus where applicable.
 
 This distinction allows Workspace to be rich without making the Session noisy.
 
