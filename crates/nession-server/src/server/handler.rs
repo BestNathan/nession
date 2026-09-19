@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
@@ -2071,7 +2071,7 @@ impl ConnectionHandler {
             .await
             .and_then(|agent| agent.protocol_manifest)
         {
-            if !manifest.carries(&msg.msg_type) {
+            let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
                 return Ok(HandlerAction::Reply(Some(Message::Text(
                     json!({
                         "msg_type": response_msg_type,
@@ -2088,6 +2088,48 @@ impl ConnectionHandler {
                     })
                     .to_string(),
                 ))));
+            };
+
+            // If the caller named a contract version, the target must offer it.
+            //
+            // A caller that names one has already resolved — it read the
+            // manifest this server serves and picked a version. Refusing here
+            // is not a second negotiation; it is checking that the manifest the
+            // caller resolved against is still the one the target advertises,
+            // which is the "target manifest stale" case the design lists.
+            //
+            // No version named means the caller has not resolved, and it relays
+            // as it always did. Absence is not a claim about versions any more
+            // than it is about wire types.
+            if let Some(named) = msg.payload.get("contract_version").and_then(Value::as_u64) {
+                let offered = manifest
+                    .support(unit)
+                    .map(|support| support.versions.clone())
+                    .unwrap_or_default();
+                let known = offered.iter().any(|v| u64::from(v.get()) == named);
+                if !known {
+                    return Ok(HandlerAction::Reply(Some(Message::Text(
+                        json!({
+                            "msg_type": response_msg_type,
+                            "id": msg.id,
+                            "timestamp": current_timestamp(),
+                            "payload": {
+                                "error": "contract_not_supported",
+                                "available": false,
+                                // Both sides, so a reader can see who has to
+                                // move rather than only that something did not
+                                // line up.
+                                "message": format!(
+                                    "`{agent_id}` offers `{unit}` at {offered:?}, not v{named}"
+                                ),
+                                "protocol": unit.as_str(),
+                                "named_version": named,
+                                "offered_versions": offered.iter().map(|v| v.get()).collect::<Vec<_>>(),
+                            },
+                        })
+                        .to_string(),
+                    ))));
+                }
             }
         }
 
@@ -3461,11 +3503,36 @@ mod tests {
     }
 
     async fn relay(h: &mut ConnectionHandler, wire: &str) -> serde_json::Value {
-        let action = h
-            .handle_message(proto_msg(wire, json!({"agent_id": "agent-a"})))
-            .await
-            .unwrap();
+        relay_payload(h, wire, json!({"agent_id": "agent-a"})).await
+    }
+
+    async fn relay_payload(
+        h: &mut ConnectionHandler,
+        wire: &str,
+        payload: serde_json::Value,
+    ) -> serde_json::Value {
+        let action = h.handle_message(proto_msg(wire, payload)).await.unwrap();
         parse_reply(action)["payload"].clone()
+    }
+
+    /// A manifest offering `git.status` at v1 and v2.
+    fn manifest_with_two_versions() -> ProtocolManifest {
+        use nession_protocol::{ContractDescriptor, ContractVersion, ProtocolDescriptor};
+        ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[ProtocolDescriptor::new(
+                "git.status",
+                "nession-git",
+                vec![
+                    ContractDescriptor::new(ContractVersion::V1, &["extension.git.status"]),
+                    ContractDescriptor::new(
+                        ContractVersion::new(2).unwrap(),
+                        &["extension.git.status.v2"],
+                    ),
+                ],
+            )
+            .unwrap()],
+        )
     }
 
     #[tokio::test]
@@ -3542,6 +3609,72 @@ mod tests {
             protocols["protocols"]["git.status"]["wire"][0],
             "extension.git.status"
         );
+    }
+
+    // ---- a named contract version is checked against the target (#678) ----
+
+    #[tokio::test]
+    async fn a_named_version_the_target_does_not_offer_is_refused() {
+        // The caller resolved against a manifest and picked v3. The target
+        // offers v1 and v2 — so either the caller read a manifest that is no
+        // longer current (the design's "target manifest stale"), or it invented
+        // the version. Either way it must not be relayed.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        let payload = relay_payload(
+            &mut h,
+            "extension.git.status",
+            json!({"agent_id": "agent-a", "contract_version": 3}),
+        )
+        .await;
+
+        assert_eq!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["protocol"], "git.status");
+        assert_eq!(payload["named_version"], 3);
+        // Both sides, so a reader learns who has to move rather than only that
+        // something did not line up.
+        assert_eq!(payload["offered_versions"], json!([1, 2]));
+        assert!(
+            payload["message"].as_str().unwrap_or("").contains("v3"),
+            "the refusal should name the version asked for: {payload}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_named_version_the_target_offers_is_relayed() {
+        // The discriminating half, as in the wire-type gate: with no live agent
+        // the relay fails later and differently, which is how this test knows
+        // the version check let it through.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        for version in [1, 2] {
+            let payload = relay_payload(
+                &mut h,
+                "extension.git.status",
+                json!({"agent_id": "agent-a", "contract_version": version}),
+            )
+            .await;
+            assert_ne!(
+                payload["error"], "contract_not_supported",
+                "v{version} is offered and must not be refused"
+            );
+            assert_eq!(payload["error"], "agent_disconnected");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_named_no_version_is_relayed_as_before() {
+        // Absence is not a claim about versions, any more than it is about wire
+        // types. A caller that has not resolved keeps working exactly as it did
+        // before version checking existed.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_with_two_versions())).await;
+
+        let payload = relay(&mut h, "extension.git.status").await;
+        assert_ne!(payload["error"], "contract_not_supported");
+        assert_eq!(payload["error"], "agent_disconnected");
     }
 
     #[tokio::test]
