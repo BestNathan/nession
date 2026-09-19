@@ -1876,6 +1876,7 @@ dependencies = [
  "mime_guess",
  "nession-claude-code",
  "nession-common",
+ "nession-git",
  "nession-server",
  "portable-pty",
  "rand 0.8.7",
@@ -1964,6 +1965,20 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "nession-git"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "nession-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

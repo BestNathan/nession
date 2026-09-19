@@ -31,6 +31,7 @@ declare -A THRESHOLDS=(
     ["nession-server"]=80
     ["nession-cli"]=40
     ["nession-claude-code"]=55
+    ["nession-git"]=80
 )
 
 # macOS tmux 3.6b crashes when control-mode clients disconnect in parallel
@@ -49,6 +50,7 @@ declare -A FIX_HINTS=(
     ["nession-server"]="Add unit tests in crates/nession-server/src/. Run: cargo test -p nession-server"
     ["nession-cli"]="CLI coverage target is 40%. Add tests in crates/nession-cli/."
     ["nession-claude-code"]="Claude Code extension coverage target is 55% (floor, not the 80% the other crates hold). Add tests in crates/nession-claude-code/. Raising this to 80% is known debt and still has no issue tracking it."
+    ["nession-git"]="Add unit tests in crates/nession-git/src/ and integration tests in crates/nession-git/tests/ (they build a real temporary repository). Run: cargo test -p nession-git"
 )
 
 # Filter to specified crates if arguments provided
