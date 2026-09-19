@@ -34,14 +34,19 @@ export function resolveGitState(sessionId: string | undefined): CapabilityState 
 }
 
 /**
- * Both experiences render the same view. Git is a repository browser, and its
+ * Both experiences render the same view. Git is a repository browser; its
  * Web/App difference is the chrome around it, which the experience compositions
- * own — not something this binding branches on.
+ * own, and the width it has to work with, which the view adapts to itself — not
+ * something this binding branches on.
  *
  * The component is named once and used for both keys rather than written out
  * twice as two identical arrow functions: one reference means the two cannot
  * drift apart, and an assertion that they are the same is then a fact about the
  * code rather than a coincidence of two look-alikes.
+ *
+ * #826 owns the App realization of capability surfaces (push/pop, Signal/Peek).
+ * Until that lands this is the shared view at both widths, which is why it
+ * stacks rather than assuming a desktop pane.
  */
 export const gitView: WorkspaceViewBinding = {
   id: GIT_ID,

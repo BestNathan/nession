@@ -82,11 +82,12 @@ function GitRowItem({
       <div
         data-testid={`git-row-${row.kind}`}
         data-path={row.path}
+        title={rowTitle(row)}
         className="flex items-center gap-2 px-2 py-1.5 text-sm"
       >
         <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="truncate text-muted-foreground">{row.path}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+        {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
       </div>
     );
   }
@@ -97,6 +98,7 @@ function GitRowItem({
       data-testid="git-row-tracked"
       data-path={row.path}
       aria-label={row.path}
+      title={rowTitle(row)}
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(row.path)}
       className={cn(
@@ -107,18 +109,36 @@ function GitRowItem({
     >
       <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="truncate">{row.path}</span>
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
     </button>
   );
 }
 
-/** The two-letter porcelain-ish code, in words only where a letter is opaque. */
-function rowLabel(row: GitRow): string {
-  if (row.kind === 'untracked') {
-    return 'untracked';
+/**
+ * What a row adds to what its group already says — usually nothing.
+ *
+ * The heading reads "Modified (3)", so repeating `modified` on all three rows is
+ * decoration; the same for `untracked`. What the heading does *not* say is
+ * `renamed`, `copied` or `typechanged`, so those still earn the space. Returns
+ * `null` when the group has already said it.
+ */
+function rowLabel(row: GitRow): string | null {
+  if (row.kind === 'untracked' || row.kind === 'unmerged') {
+    return null;
   }
-  if (row.kind === 'unmerged') {
-    return 'conflict';
+  return row.file.kind === 'modified' ? null : row.file.kind;
+}
+
+/**
+ * The full description, for the row's tooltip.
+ *
+ * A rename's old path is real information the row cannot show inline without
+ * squeezing the filename it is about, so it goes where the filename is still
+ * readable and the detail is one hover away.
+ */
+function rowTitle(row: GitRow): string {
+  if (isSelectable(row) && row.file.originalPath) {
+    return `${row.file.originalPath} → ${row.path}`;
   }
-  return row.file.kind;
+  return row.path;
 }

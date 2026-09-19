@@ -154,6 +154,45 @@ describe('GitWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'notes.txt' })).toBeNull();
   });
 
+  it('does not repeat the group heading on every row, but keeps what it omits', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [
+            { path: 'src/a.ts', kind: 'modified', staged: false, unstaged: true },
+            {
+              path: 'src/c.ts',
+              originalPath: 'src/b.ts',
+              kind: 'renamed',
+              staged: true,
+              unstaged: false,
+            },
+          ],
+          untracked: ['notes.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-change-list');
+
+    const rows = screen.getAllByTestId('git-row-tracked');
+    // "Modified (2)" already says both are modified; saying it twice more is
+    // decoration. `renamed` is not in the heading, so it stays.
+    expect(rows[0]).not.toHaveTextContent('modified');
+    expect(rows[1]).toHaveTextContent('renamed');
+    // The old path cannot fit inline without squeezing the name being read.
+    expect(rows[1]).toHaveAttribute('title', 'src/b.ts → src/c.ts');
+
+    // The heading already says untracked, so the row repeats nothing.
+    expect(screen.getByTestId('git-row-untracked')).not.toHaveTextContent('untracked');
+  });
+
   it('opens a modified file’s diff, and shows the truncation notice (SC3)', async () => {
     mockedStatus.mockResolvedValue(
       statusResponse({

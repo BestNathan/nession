@@ -264,16 +264,25 @@ function GitBody({
     );
   }
 
+  // Side by side when there is room, stacked when there is not. The breakpoint
+  // is about available width, not about the experience: a phone in a desktop
+  // browser has the same problem as an App, and a tablet has neither's room.
+  //
+  // Stacked, the list is capped at half the pane so the diff it opened stays on
+  // screen — a repository with fifty changed files must not push the file the
+  // user just picked out of view. A flex column rather than a grid, because the
+  // cap is a share of the pane and a percentage inside an auto-sized grid row
+  // resolves against that row, which is the thing being sized.
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
-      <aside className="min-h-0 overflow-y-auto border-r">
+    <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
+      <aside className="max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r">
         <GitChangeList
           rows={rows}
           selectedPath={state.selectedPath}
           onSelect={onSelect}
         />
       </aside>
-      <main className="flex min-h-0 flex-col">
+      <main className="flex min-h-0 flex-1 flex-col lg:flex-none">
         <GitDiffView
           response={state.diff}
           loading={state.diffLoading}
