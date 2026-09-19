@@ -10,7 +10,7 @@ import {
   DEFAULT_FONT,
   DEFAULT_FONT_SIZE,
 } from '@/platform/terminal-runtime/instance/TerminalInstance';
-import { TerminalSurface } from '@/product/terminal/TerminalSurface';
+import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 
 const FIXTURE_BUFFER = [
   '$ git status --short',

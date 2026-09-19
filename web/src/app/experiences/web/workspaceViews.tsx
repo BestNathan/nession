@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import { EnvManager } from '@/capabilities/env';
-import { AgentDetail } from '@/product/agent/components/AgentDetail';
+import { AgentDetail } from '@/product/agent/patterns/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
 import { FilesWebLayout } from './FilesWebLayout';
 import type { WorkspaceContext, WorkspaceViewId } from '@/app/workspace/workspaceContext';

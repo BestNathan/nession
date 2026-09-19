@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SessionList } from '@/product/session/components/SessionList';
+import { SessionList } from '@/product/session/patterns/SessionList';
 import type { Agent, Session } from '@/types';
 
 const agent: Agent = {

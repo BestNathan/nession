@@ -3,7 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { agentDisplayName } from '@/shared/lib/format';
 import { mapDomainState } from '@/product/session/model/domainState';
-import { SessionItem } from '@/product/session/components/SessionItem';
+import { SessionItem } from '@/product/session/patterns/SessionItem';
 import type { Agent, Session } from '@/types';
 
 export interface SessionListProps {

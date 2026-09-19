@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 
 const state: DomainState = {

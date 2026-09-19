@@ -1,6 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import type { ConnectionState } from '@/platform/socket/types';
-import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
 import type { DomainState } from '@/product/session/model/domainState';

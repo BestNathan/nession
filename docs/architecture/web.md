@@ -72,8 +72,8 @@ the honest answer to "where does this go today" until the row moves.
 | `app/experiences/app/` — App experience: spatial shell, gestures, page index | **done** | 2 |
 | `app/experiences/web/` — Web experience: the frame, list column vs overlay | **done** | 2 |
 | `app/workspace/` | `app/` | 2 |
-| `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
-| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
+| `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **done** | 3 |
+| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | **done** | 3 |
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
@@ -133,14 +133,28 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 
 ### Naming collisions found while surveying (unresolved)
 
-- Two different components are both called `ConnectionStatus`.
-  `product/session/components/ConnectionStatus.tsx` is the canonical pattern —
-  it implements the three independent dimensions
-  (`patterns/connection-status.md`: Agent / Workspace Location connectivity,
-  Session lifecycle, this-client attachment).
-  `app/patterns/ConnectionStatus.tsx` is a single-dimension client badge used
-  only by `LoginPage`. The canonical owner is the former; the latter needs a
-  name that says what it is.
+- ~~Two different components are both called `ConnectionStatus`.~~
+  **Resolved.** The canonical pattern — the three independent dimensions of
+  `patterns/connection-status.md` (Agent / Workspace Location connectivity,
+  Session lifecycle, this-client attachment) — is now
+  `product/session/patterns/ConnectionStatus.tsx`. The other one was a
+  single-dimension badge whose only consumer is `LoginPage`; it is now
+  `app/LoginConnectionBadge.tsx` and sits next to that consumer, being
+  single-consumer UI rather than a pattern.
+
+- **`SessionHeader` is `app` chrome, not a Product Pattern — and the layer gate
+  is what settled it.** It was moved to `product/session/patterns/` with the
+  other canonical patterns and
+  `nession/no-reverse-imports` rejected it: `product` may not import `app`, and
+  `SessionHeader` imports `shellIconButtonClass` from `app/shellStyles.ts`. That
+  turns out to be the correct reading rather than an obstacle — `shellStyles` is
+  *"session-first shell chrome — token vars only"* and 4 of its 5 consumers are
+  `app` chrome; `SessionHeader` was the only product-layer file reaching for it.
+  `patterns/session-header.md`'s own contract agrees, describing it as
+  inheriting *chrome band rules*. So the design system's pattern list and the
+  code's layer model genuinely differ here, and the layer model wins: a pattern
+  whose styling vocabulary is shell chrome lives in the shell. Recorded because
+  the next `patterns/` move will meet the same question.
 - **Resolved:** the generic capability lifecycle (`discovery` / `presence` /
   `registry` / `model` / `facts`) used to sit at `features/capabilities/` while
   appearing in neither module map. It was never a feature — it is the model every
@@ -238,7 +252,12 @@ src/
 │   ├── SessionFirstWorkspace/Sidebar/Main/Terminal/SpatialLayout…
 │   ├── SessionDrawer.tsx, TerminalWell.tsx, shellStyles.ts
 │   ├── useSessionFirstShellState.ts # shell state composer
-│   ├── patterns/            # SessionHeader, SessionListHeader, AppToolHeader, …
+│   ├── patterns/            # shell chrome: SessionHeader, SessionListHeader,
+│   │                        #   SidebarRail, AppToolHeader, AppBackButton, …
+│   │                        #   NOTE: the name is now wider than its contents —
+│   │                        #   every Product Pattern moved to product/*/patterns/,
+│   │                        #   so this holds chrome only. A rename to `chrome/`
+│   │                        #   is available and deliberately not taken here.
 │   ├── experiences/         # per-experience composition
 │   │   ├── web/             #   SessionFirstWebLayout + workspaceViews
 │   │   └── app/             #   spatial shell, gestures, AppToolScroll, workspaceViews
@@ -252,10 +271,13 @@ src/
 │   └── LoginPage.tsx
 ├── product/                 # Nession product concepts + their Product Patterns
 │   ├── session/             # the Session concept: model, state/, UI, hooks
-│   │                        #   state/ = identity, the attach choice, route, dialog
-│   ├── agent/               # the Agent concept + AgentDetail pattern
-│   │                        #   state/ = the browser-latency probe, keyed by agent
+│   │                        #   state/    = identity, the attach choice, route, dialog
+│   │                        #   patterns/ = SessionItem, SessionList, ConnectionStatus
+│   ├── agent/               # the Agent concept
+│   │                        #   state/    = the browser-latency probe, keyed by agent
+│   │                        #   patterns/ = AgentContext, AgentDetail
 │   ├── terminal/            # the Terminal concept, incl. capsule/ and state/
+│   │                        #   patterns/ = TerminalSurface
 │   └── capability/          # the generic capability model (singular: the model,
 │                            #   not a capability): discovery, presence, registry, facts
 ├── capabilities/            # discoverable / activatable capabilities, vertical slices

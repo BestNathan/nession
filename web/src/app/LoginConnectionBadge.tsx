@@ -3,7 +3,7 @@ import { cn } from '@/shared/lib/utils';
 import type { ConnectionState } from '@/platform/socket';
 
 /**
- * How this client's connection state is presented.
+ * How this client's own connection state is presented on the login screen.
  *
  * This lives here, not in `components/ui`, because it knows what a connection
  * is. `components.md` draws the primitive → product-pattern → feature line at
@@ -13,17 +13,23 @@ import type { ConnectionState } from '@/platform/socket';
  * `services/socket` and owning the user-facing labels — a shared primitive
  * bound to a service state machine from above it in the layer order (#774).
  *
- * The split is: this pattern owns *meaning* (which states exist, what they are
- * called, how each is toned), and `Badge` owns *presentation*.
+ * The split is: this owns *meaning* (which states exist, what they are called,
+ * how each is toned), and `Badge` owns *presentation*.
  *
+ * ── Why the name, and why it is not a Product Pattern ───────────────────────
+ *
+ * It was called `ConnectionStatus` and sat in `app/patterns/`, which made two
+ * components share one name and one of them look like the canonical pattern.
  * `pattern.connection-status` describes a richer model — independent continuity
  * dimensions for Agent reachability, Session lifecycle and this-client
- * attachment, which may coexist and which need not all be visible at once. This
- * component covers the attachment dimension only; it is the part the login
- * screen needs. The wider pattern is not implemented here and this comment is
- * not a claim that it is.
+ * attachment, which may coexist and which need not all be visible at once — and
+ * its implementation is `product/session/patterns/ConnectionStatus.tsx`. This
+ * component covers the attachment dimension only, for the one screen that needs
+ * it before a session exists, and `LoginPage` is its only consumer. The name now
+ * says so, and being single-consumer UI it is LoginPage's neighbour rather than
+ * a pattern in its own right.
  */
-interface ConnectionStatusProps {
+interface LoginConnectionBadgeProps {
   status: ConnectionState;
   showPulse?: boolean;
   className?: string;
@@ -36,7 +42,7 @@ const STATUS_CONFIG: Record<ConnectionState, { color: string; text: string }> = 
   connected: { color: 'bg-muted-foreground', text: 'Connected' },
 };
 
-export function ConnectionStatus({ status, showPulse = true, className }: ConnectionStatusProps) {
+export function LoginConnectionBadge({ status, showPulse = true, className }: LoginConnectionBadgeProps) {
   const config = STATUS_CONFIG[status];
 
   return (

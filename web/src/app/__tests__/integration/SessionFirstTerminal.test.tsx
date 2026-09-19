@@ -51,7 +51,7 @@ vi.mock('@/product/terminal/SessionFirstTerminalPane', () => ({
     <div data-testid="session-first-terminal-pane">{sessionId}</div>
   ),
 }));
-vi.mock('@/product/terminal/TerminalSurface', () => ({
+vi.mock('@/product/terminal/patterns/TerminalSurface', () => ({
   TerminalSurface: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="session-first-terminal-surface">{children}</div>
   ),
