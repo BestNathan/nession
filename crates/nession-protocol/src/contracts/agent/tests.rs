@@ -1,17 +1,139 @@
-use super::*;
+use super::v1::*;
+use crate::{Message, ProtocolMessage};
 
 #[test]
-fn test_message_new_from_protocol() {
-    let msg: ProtocolMessage<String> = Message::new(
-        "test.type".to_string(),
-        "msg-1".to_string(),
-        1234567890,
-        "hello".to_string(),
-    );
-    assert_eq!(msg.msg_type, "test.type");
-    assert_eq!(msg.id, "msg-1");
-    assert_eq!(msg.timestamp, 1234567890);
-    assert_eq!(msg.payload, "hello");
+fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
+    // The kernel's own tests pin the envelope; this pins the envelope *with a
+    // contract payload in it*, which is the pair every real message is. A
+    // rename on either side that the other's tests do not see fails here.
+    let msg: ProtocolMessage<AgentRegisterPayload> = Message {
+        msg_type: "agent.register".to_string(),
+        id: "msg-99".to_string(),
+        timestamp: 1700000000,
+        payload: AgentRegisterPayload {
+            agent_id: "a1".to_string(),
+            hostname: "h1".to_string(),
+            ip_address: "1.2.3.4".to_string(),
+            port: 8080,
+            auth_token: "tok".to_string(),
+            metadata: AgentMetadata {
+                tmux_version: "3.3".to_string(),
+                os_version: "Linux".to_string(),
+                nession_version: "0.1.0".to_string(),
+                image_tag: "test".to_string(),
+            },
+            protocol_version: "1.0".to_string(),
+            display_name: None,
+            connect_url: None,
+            addresses: vec![],
+            protocol_manifest: None,
+        },
+    };
+
+    let json = serde_json::to_string(&msg).unwrap();
+    let decoded: ProtocolMessage<AgentRegisterPayload> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.msg_type, "agent.register");
+    assert_eq!(decoded.id, "msg-99");
+    assert_eq!(decoded.payload.agent_id, "a1");
+    assert_eq!(decoded.payload.metadata.tmux_version, "3.3");
+}
+
+#[test]
+fn test_agent_address_update_payload_serde() {
+    let payload = AgentAddressUpdatePayload {
+        agent_id: "agent-1".to_string(),
+        addresses: vec![AgentAddress {
+            url: "ws://192.168.1.5:8080/ws".to_string(),
+            label: Some("LAN (eth0)".to_string()),
+            network_type: NetworkType::Lan,
+            priority: 10,
+        }],
+    };
+    let json = serde_json::to_string(&payload).unwrap();
+    let deserialized: AgentAddressUpdatePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.agent_id, "agent-1");
+    assert_eq!(deserialized.addresses.len(), 1);
+    assert_eq!(deserialized.addresses[0].url, "ws://192.168.1.5:8080/ws");
+    assert_eq!(deserialized.addresses[0].network_type, NetworkType::Lan);
+}
+
+#[test]
+fn test_network_type_as_str() {
+    assert_eq!(NetworkType::Lan.as_str(), "lan");
+    assert_eq!(NetworkType::Vpn.as_str(), "vpn");
+    assert_eq!(NetworkType::Tunnel.as_str(), "tunnel");
+    assert_eq!(NetworkType::Public.as_str(), "public");
+    assert_eq!(NetworkType::Custom.as_str(), "custom");
+}
+
+#[test]
+fn test_network_type_serde() {
+    let t: NetworkType = serde_json::from_str("\"lan\"").unwrap();
+    assert_eq!(t, NetworkType::Lan);
+    let json = serde_json::to_string(&NetworkType::Tunnel).unwrap();
+    assert_eq!(json, "\"tunnel\"");
+}
+
+#[test]
+fn test_address_status_as_str() {
+    assert_eq!(AddressStatus::Unknown.as_str(), "unknown");
+    assert_eq!(AddressStatus::Reachable.as_str(), "reachable");
+    assert_eq!(AddressStatus::Unreachable.as_str(), "unreachable");
+}
+
+#[test]
+fn test_agent_register_payload_serde() {
+    let payload = AgentRegisterPayload {
+        agent_id: "agent-1".to_string(),
+        hostname: "host".to_string(),
+        ip_address: "127.0.0.1".to_string(),
+        port: 8080,
+        auth_token: "token".to_string(),
+        metadata: AgentMetadata {
+            tmux_version: "3.4".to_string(),
+            os_version: "linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        },
+        protocol_version: "1.0".to_string(),
+        display_name: Some("my-agent".to_string()),
+        connect_url: None,
+        addresses: vec![],
+        protocol_manifest: None,
+    };
+    let json = serde_json::to_string(&payload).unwrap();
+    let deserialized: AgentRegisterPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.agent_id, "agent-1");
+    assert_eq!(deserialized.port, 8080);
+    assert!(deserialized.connect_url.is_none());
+}
+
+#[test]
+fn test_agent_register_payload_no_display_name() {
+    // Old agents without display_name should deserialize to None (backward compat)
+    let json = serde_json::json!({
+        "agent_id": "agent-1",
+        "hostname": "host",
+        "ip_address": "127.0.0.1",
+        "port": 8080,
+        "auth_token": "token",
+        "addresses": [],
+        "metadata": {
+            "tmux_version": "3.4",
+            "os_version": "linux",
+            "nession_version": "0.1.0"
+        }
+    });
+    let payload: AgentRegisterPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(payload.agent_id, "agent-1");
+    assert!(payload.display_name.is_none());
+}
+
+#[test]
+fn test_agent_metadata_image_tag_default() {
+    let json = r#"{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1.0"}"#;
+    let meta: AgentMetadata = serde_json::from_str(json).unwrap();
+    assert_eq!(meta.image_tag, "unknown"); // serde default
 }
 
 #[test]
@@ -105,7 +227,7 @@ fn a_manifest_rides_along_in_the_register_payload() {
     // The composed manifest, as an agent would send it. One unit, one version —
     // and the version comes back as an integer, so a peer reading this in any
     // language sees the same thing.
-    let manifest: nession_protocol::ProtocolManifest = serde_json::from_value(serde_json::json!({
+    let manifest: crate::ProtocolManifest = serde_json::from_value(serde_json::json!({
         "provider": "agent-1",
         "protocols": { "git.status": { "versions": [1] } }
     }))
@@ -140,7 +262,7 @@ fn a_manifest_rides_along_in_the_register_payload() {
     let manifest = decoded
         .protocol_manifest
         .expect("the manifest survives the round trip");
-    let id = nession_protocol::ProtocolId::new("git.status").unwrap();
+    let id = crate::ProtocolId::new("git.status").unwrap();
     assert!(manifest.offers(&id), "and still names the unit it carried");
 }
 
@@ -325,152 +447,4 @@ fn test_server_heartbeat_ack_payload() {
     let decoded: ServerHeartbeatAckPayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.server_time, 1700000000);
-}
-
-#[test]
-fn test_server_session_create_payload() {
-    let payload = ServerSessionCreatePayload {
-        request_id: "req-1".to_string(),
-        name: "my-session".to_string(),
-        width: 120,
-        height: 40,
-        env_snapshots: Vec::new(),
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.request_id, "req-1");
-    assert_eq!(decoded.name, "my-session");
-    assert_eq!(decoded.width, 120);
-    assert_eq!(decoded.height, 40);
-}
-
-#[test]
-fn test_server_session_create_default_dimensions() {
-    let json = r#"{"request_id":"req-1","name":"sess"}"#;
-    let decoded: ServerSessionCreatePayload = serde_json::from_str(json).unwrap();
-    assert_eq!(decoded.width, 80);
-    assert_eq!(decoded.height, 24);
-}
-
-#[test]
-fn test_server_session_kill_payload() {
-    let payload = ServerSessionKillPayload {
-        request_id: "req-2".to_string(),
-        name: "doomed".to_string(),
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ServerSessionKillPayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.request_id, "req-2");
-    assert_eq!(decoded.name, "doomed");
-}
-
-#[test]
-fn test_agent_command_response_payload() {
-    let payload = AgentCommandResponsePayload {
-        request_id: "req-1".to_string(),
-        command: "session.create".to_string(),
-        success: true,
-        error: None,
-        session_name: Some("new-session".to_string()),
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
-    assert!(decoded.success);
-    assert_eq!(decoded.session_name, Some("new-session".to_string()));
-}
-
-#[test]
-fn test_agent_command_response_payload_failure() {
-    let payload = AgentCommandResponsePayload {
-        request_id: "req-2".to_string(),
-        command: "session.create".to_string(),
-        success: false,
-        error: Some("session already exists".to_string()),
-        session_name: None,
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
-    assert!(!decoded.success);
-    assert_eq!(decoded.error, Some("session already exists".to_string()));
-    assert!(decoded.session_name.is_none());
-}
-
-#[test]
-fn test_client_session_create_payload() {
-    let payload = ClientSessionCreatePayload {
-        agent_id: "agent-1".to_string(),
-        name: "new-session".to_string(),
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.agent_id, "agent-1");
-    assert_eq!(decoded.name, "new-session");
-}
-
-#[test]
-fn test_client_session_kill_payload() {
-    let payload = ClientSessionKillPayload {
-        session_id: "agent-1:doomed".to_string(),
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ClientSessionKillPayload = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.session_id, "agent-1:doomed");
-}
-
-#[test]
-fn test_client_session_create_response_payload() {
-    let payload = ClientSessionCreateResponsePayload {
-        success: true,
-        session_id: Some("agent-1:new-sess".to_string()),
-        error: None,
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();
-    assert!(decoded.success);
-    assert_eq!(decoded.session_id, Some("agent-1:new-sess".to_string()));
-}
-
-#[test]
-fn test_client_session_kill_response_payload() {
-    let payload = ClientSessionKillResponsePayload {
-        success: true,
-        error: None,
-    };
-    let json = serde_json::to_string(&payload).unwrap();
-    let decoded: ClientSessionKillResponsePayload = serde_json::from_str(&json).unwrap();
-    assert!(decoded.success);
-}
-
-#[test]
-fn test_message_wrapped_in_protocol_envelope() {
-    let msg: ProtocolMessage<AgentRegisterPayload> = Message {
-        msg_type: "agent.register".to_string(),
-        id: "msg-99".to_string(),
-        timestamp: 1700000000,
-        payload: AgentRegisterPayload {
-            agent_id: "a1".to_string(),
-            hostname: "h1".to_string(),
-            ip_address: "1.2.3.4".to_string(),
-            port: 8080,
-            auth_token: "tok".to_string(),
-            metadata: AgentMetadata {
-                tmux_version: "3.3".to_string(),
-                os_version: "Linux".to_string(),
-                nession_version: "0.1.0".to_string(),
-                image_tag: "test".to_string(),
-            },
-            protocol_version: "1.0".to_string(),
-            display_name: None,
-            connect_url: None,
-            addresses: vec![],
-            protocol_manifest: None,
-        },
-    };
-
-    let json = serde_json::to_string(&msg).unwrap();
-    let decoded: ProtocolMessage<AgentRegisterPayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.msg_type, "agent.register");
-    assert_eq!(decoded.id, "msg-99");
-    assert_eq!(decoded.payload.agent_id, "a1");
-    assert_eq!(decoded.payload.metadata.tmux_version, "3.3");
 }
