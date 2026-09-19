@@ -1,10 +1,11 @@
 //! Read-only git state for a Session's working directory (#750).
 //!
-//! The capability answers three questions about the repository a Session is
+//! The capability answers five questions about the repository a Session is
 //! sitting in — *what state is it in* (`status`), *what changed in this file*
-//! (`diff`), and *what happened here recently* (`log`) — and refuses the rest.
-//! Reads only: no stage, no commit, no checkout. See `cmd.rs` for why that is
-//! enforced in code rather than by convention.
+//! (`diff`), *what happened here recently* (`log`), *what other branches are
+//! there* (`branches`), and *what other checkouts are there* (`worktrees`) —
+//! and refuses the rest. Reads only: no stage, no commit, no checkout. See
+//! `cmd.rs` for why that is enforced in code rather than by convention.
 //!
 //! ## Layout
 //!
@@ -16,6 +17,8 @@
 //!   state rather than pretending a paused rebase is a set of edits.
 //! - [`diff`] — one file's diff against HEAD, capped, with truncation reported.
 //! - [`log`] — recent commits, bounded by count and by bytes.
+//! - [`branches`] — local branches and their tracking state, current first.
+//! - [`worktrees`] — the repository's other checkouts, and this one marked.
 //! - [`agent`] — the `AgentExtension` implementation.
 //!
 //! ## What this crate deliberately does not own
@@ -26,14 +29,18 @@
 //! a tmux server and the agent never spawns git.
 
 pub mod agent;
+pub mod branches;
 pub mod cmd;
 pub mod diff;
 pub mod log;
 pub mod security;
 pub mod status;
+pub mod worktrees;
 
 pub use agent::{GitAgentExtension, WorkdirResolver};
+pub use branches::{Branch, Branches};
 pub use cmd::{GitCmd, GitOutput};
 pub use diff::FileDiff;
 pub use log::{Commit, History};
 pub use status::{ChangeKind, ChangedFile, RepoStatus};
+pub use worktrees::{Worktree, Worktrees};

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,18 +13,26 @@ import {
   worktreeName,
 } from '../state';
 import type { GitDiffResponse, GitStatusResponse } from '../types';
+import { GitBranchesView } from './GitBranchesView';
 import { GitChangeList } from './GitChangeList';
 import { GitDiffView } from './GitDiffView';
 import { GitHistoryView } from './GitHistoryView';
+import { GitNotice } from './GitNotice';
+import { GitWorktreesView } from './GitWorktreesView';
 
 /**
  * What the Git surface can show (`#826` §4).
  *
- * Two so far. Staging and commit authoring are the write half of that list and
- * need their own decision — `#750`'s Non-Goals drew the read-only boundary for a
- * reason. Branches and Worktrees are read-only and simply not built yet.
+ * Everything on that list that is a **read**: the working tree, what happened
+ * here, what other branches there are, and what other checkouts there are.
+ * Staging and commit authoring are the write half and need their own decision —
+ * `#750`'s Non-Goals drew the read-only boundary for a reason (#845).
+ *
+ * Four short, stable labels for the current context, which is the case
+ * `workspace-navigation.md` allows segments in — this chooses what the
+ * capability shows, and is not a second navigation shell.
  */
-type GitSection = 'changes' | 'history';
+type GitSection = 'changes' | 'history' | 'branches' | 'worktrees';
 
 interface GitDiffState {
   selectedPath: string | null;
@@ -142,12 +150,17 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         onSectionChange={setSection}
       />
       {/*
-        History is unmounted, not hidden, when the other section is showing: its
-        hook fetches on mount, and a hidden section would run `git log` on the
-        agent for a reader who never looked at it.
+        Only the section that is showing is mounted. Its hook fetches on mount,
+        so a hidden section would run its own command on the agent for a reader
+        who never looked at it — a log, a ref listing, or a worktree listing
+        nobody asked for.
       */}
       {section === 'history' ? (
         <GitHistoryView ctx={ctx} />
+      ) : section === 'branches' ? (
+        <GitBranchesView ctx={ctx} />
+      ) : section === 'worktrees' ? (
+        <GitWorktreesView ctx={ctx} />
       ) : (
         <GitBody status={status} diff={diff} onSelect={selectFile} />
       )}
@@ -173,9 +186,15 @@ function GitHeader({
   const worktree = worktreeName(ok?.root);
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+    // `flex-wrap`, and the identity block carries a floor rather than
+    // `min-w-0`. Four sections plus a branch name plus Refresh do not fit a
+    // phone, and without a floor the name — the only item that *can* shrink —
+    // absorbs all of it and disappears: measured at 390px it was 0px wide with
+    // the header overflowing by 18px. Wrapping puts the sections on their own
+    // row there and changes nothing wherever they already fit.
+    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
       <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[8rem] flex-1">
         <p data-testid="git-branch" className="truncate text-sm font-medium">
           {branch ?? 'Repository'}
         </p>
@@ -183,15 +202,16 @@ function GitHeader({
           {headerSummary(status, loading, worktree)}
         </p>
       </div>
-      {/*
-        A small, stable set for the current context — the one case
-        `workspace-navigation.md` allows segments in. It chooses what this
-        capability shows; it is not a second navigation shell.
-      */}
-      <Tabs value={section} onValueChange={(value) => onSectionChange(value as GitSection)}>
+      <Tabs
+        value={section}
+        onValueChange={(value) => onSectionChange(value as GitSection)}
+        className="shrink-0"
+      >
         <TabsList>
           <TabsTrigger value="changes">Changes</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="branches">Branches</TabsTrigger>
+          <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
         </TabsList>
       </Tabs>
       <Button
@@ -310,26 +330,3 @@ function GitBody({
   );
 }
 
-function GitNotice({
-  testId,
-  destructive,
-  children,
-}: {
-  testId: string;
-  destructive?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className="flex h-full min-h-0 items-center justify-center px-6 text-center"
-    >
-      <p
-        role={destructive ? 'alert' : undefined}
-        className={destructive ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
-      >
-        {children}
-      </p>
-    </div>
-  );
-}

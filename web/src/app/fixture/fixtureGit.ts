@@ -1,5 +1,11 @@
 import type { PluginSurface } from '@/platform/socket/types';
-import type { GitDiffResponse, GitLogResponse, GitStatusResponse } from '@/capabilities/git';
+import type {
+  GitBranchesResponse,
+  GitDiffResponse,
+  GitLogResponse,
+  GitStatusResponse,
+  GitWorktreesResponse,
+} from '@/capabilities/git';
 
 /**
  * A canned git backend for the fixture route.
@@ -14,6 +20,11 @@ import type { GitDiffResponse, GitLogResponse, GitStatusResponse } from '@/capab
  * cannot ask for "the truncated view" or "the failure view" directly, only for
  * a repository that produces one. A fixture that could name a state would let a
  * test assert a rendering the app never decided on.
+ *
+ * Answers must be shapes the real agent can produce. A field the agent derives
+ * from a request or a default is copied from *there* — its default count, its
+ * clamping — not derived from this file's own sample data, because a fixture
+ * that invents an answer makes the view render a state the product never has.
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
@@ -33,6 +44,12 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       if (type === 'extension.git.log') {
         return Promise.resolve(historyFor(payload.limit) as T);
+      }
+      if (type === 'extension.git.branches') {
+        return Promise.resolve(branchesFor(payload.limit) as T);
+      }
+      if (type === 'extension.git.worktrees') {
+        return Promise.resolve(WORKTREES as T);
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
@@ -180,6 +197,102 @@ function historyFor(limit: unknown): GitLogResponse {
     history: { commits, limit: asked, truncatedBytes: 0, truncated: false },
   };
 }
+
+/**
+ * The agent's default when the caller asks for no particular count —
+ * `DEFAULT_BRANCH_LIMIT` in `crates/nession-git/src/security.rs`.
+ */
+const DEFAULT_BRANCH_LIMIT = 100;
+
+/**
+ * Branches, one of each state the view has to have an answer for: the current
+ * one carrying unpushed work, one in sync, one with no upstream at all, and one
+ * whose upstream was deleted — the case that arrives as identical counts to "in
+ * sync" and is separated only by `upstream` being present.
+ *
+ * The current branch is first, which is the order the agent's `--sort=-HEAD`
+ * produces and the reason its `--count` can never cut the current branch off.
+ */
+const BRANCHES = [
+  {
+    name: 'feat/repo-status',
+    current: true,
+    upstream: 'origin/feat/repo-status',
+    ahead: 2,
+    behind: 1,
+    upstreamGone: false,
+  },
+  {
+    name: 'main',
+    current: false,
+    upstream: 'origin/main',
+    ahead: 0,
+    behind: 0,
+    upstreamGone: false,
+  },
+  {
+    name: 'local-only',
+    current: false,
+    ahead: 0,
+    behind: 0,
+    upstreamGone: false,
+  },
+  {
+    name: 'chore/old-remote',
+    current: false,
+    upstream: 'origin/chore/old-remote',
+    ahead: 0,
+    behind: 0,
+    upstreamGone: true,
+  },
+];
+
+function branchesFor(limit: unknown): GitBranchesResponse {
+  const asked =
+    typeof limit === 'number' && limit > 0 ? Math.floor(limit) : DEFAULT_BRANCH_LIMIT;
+  const branches = BRANCHES.slice(0, Math.min(asked, BRANCHES.length));
+  return {
+    state: 'ok',
+    branches: { branches, limit: asked, truncatedBytes: 0, truncated: false },
+  };
+}
+
+/**
+ * Worktrees: this checkout, a linked one on another branch, and one whose
+ * directory has been deleted — a state `git worktree list` keeps reporting
+ * until something prunes it, and one a row must not present as a place to go.
+ */
+const WORKTREES: GitWorktreesResponse = {
+  state: 'ok',
+  worktrees: {
+    worktrees: [
+      {
+        path: FIXTURE_ROOT,
+        branch: 'feat/repo-status',
+        current: true,
+        detached: false,
+        bare: false,
+      },
+      {
+        path: '/Users/dev/code/nession-capsule.wt/docs',
+        branch: 'docs/record-closure',
+        current: false,
+        detached: false,
+        bare: false,
+      },
+      {
+        path: '/Users/dev/code/nession-capsule.gone',
+        branch: 'chore/old-remote',
+        current: false,
+        detached: false,
+        bare: false,
+        prunable: 'gitdir file points to non-existent location',
+      },
+    ],
+    truncatedBytes: 0,
+    truncated: false,
+  },
+};
 
 function diffFor(path: string): GitDiffResponse {
   if (path.endsWith('.png')) {

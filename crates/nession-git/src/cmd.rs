@@ -68,6 +68,23 @@ const MUTATING_SUBCOMMANDS: [&str; 14] = [
     "restore",
 ];
 
+/// Subcommands that have a read form and a write form under the **same name**.
+///
+/// `MUTATING_SUBCOMMANDS` matches the first argument, which is the whole story
+/// for `commit` or `push` — but `git worktree add` and `git worktree list` begin
+/// with the same word, so a list of subcommand names cannot see the difference.
+/// For these, the second argument decides, and only the forms named here are
+/// reads: anything else fails closed rather than open, because the read set is
+/// one word and closed and a denylist would have to anticipate every future
+/// write.
+///
+/// `branch` is deliberately absent, and that is the better half of the same
+/// decision: the branch listing is asked for through `for-each-ref`, which has
+/// no write form at all. Choosing the command that cannot write beats teaching
+/// this module to tell two spellings apart — and `for-each-ref` is what git
+/// documents for exactly this.
+const READ_ONLY_SUBCOMMAND_FORMS: [(&str, &[&str]); 1] = [("worktree", &["list"])];
+
 /// Default wall-clock ceiling for one git invocation. `status` on a large
 /// repository is normally fast; this is here so a pathological repository (or a
 /// hung filesystem) returns an error instead of pinning an agent task forever.
@@ -128,6 +145,22 @@ impl GitCmd {
             anyhow::bail!(
                 "refusing mutating git subcommand `{subcommand}`: this capability is read-only"
             );
+        }
+
+        // The other half of the same guarantee. A subcommand whose name is also
+        // a write is only a read in the listed forms; `worktree add` reaches
+        // here with `subcommand == "worktree"`, which the check above cannot see.
+        if let Some((_, forms)) = READ_ONLY_SUBCOMMAND_FORMS
+            .iter()
+            .find(|(name, _)| *name == subcommand)
+        {
+            let form = args.get(1).copied().unwrap_or_default();
+            if !forms.contains(&form) {
+                anyhow::bail!(
+                    "refusing `git {subcommand} {form}`: `git {subcommand}` is read-only only as {}",
+                    forms.join(" or ")
+                );
+            }
         }
 
         // The binary is a field because a host may point the agent at a
@@ -306,6 +339,44 @@ fn is_not_a_repository(stderr: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn guard(args: &[&str]) -> Result<Command> {
+        GitCmd::new("git", "/repo").build(args)
+    }
+
+    #[test]
+    fn refuses_a_mutating_subcommand_by_name() {
+        for args in [
+            vec!["commit", "-m", "x"],
+            vec!["push"],
+            vec!["checkout", "main"],
+        ] {
+            assert!(guard(&args).is_err(), "expected {args:?} to be refused");
+        }
+    }
+
+    #[test]
+    fn allows_the_read_form_of_a_subcommand_that_can_also_write() {
+        // `git worktree list` and `git worktree add` share their first argument,
+        // so the name is not enough — this is the check that tells them apart.
+        assert!(guard(&["worktree", "list", "--porcelain"]).is_ok());
+    }
+
+    #[test]
+    fn refuses_the_write_forms_of_that_subcommand() {
+        for args in [
+            vec!["worktree", "add", "/tmp/wt"],
+            vec!["worktree", "remove", "/tmp/wt"],
+            vec!["worktree", "prune"],
+            vec!["worktree", "lock", "/tmp/wt"],
+            // A bare `git worktree` lists, but nothing here asks for that
+            // spelling, so an argument this module cannot vouch for fails closed.
+            vec!["worktree"],
+            vec!["worktree", "--help"],
+        ] {
+            assert!(guard(&args).is_err(), "expected {args:?} to be refused");
+        }
+    }
 
     #[test]
     fn recognises_gits_not_a_repository_message() {
