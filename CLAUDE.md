@@ -75,11 +75,11 @@ nession/
 │
 ├── web/                      # React frontend (Vite + TypeScript)
 │   └── src/
-│       ├── App.tsx           # Root: auth gate → SessionFirstShell or LoginPage
+│       ├── App.tsx           # Root: auth gate → Shell or LoginPage
 │       ├── main.tsx          # Entry point + Sonner Toaster
 │       ├── index.css         # Tailwind v4 + shadcn/ui dark theme
 │       ├── types.ts           # Shared TypeScript types
-│       ├── app/              # App layer (composition root): SessionFirstShell tree,
+│       ├── app/              # App layer (composition root): Shell tree,
 │       │                     #   experiences/{web,app}/, workspace/ tools, fixture/,
 │       │                     #   app hooks (useAppConnection, useDashboard, …), LoginPage
 │       ├── product/          # Nession product concepts: session/, agent/, terminal/,
