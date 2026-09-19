@@ -226,15 +226,30 @@ fn an_unknown_command_is_refused() {
 }
 
 #[test]
-fn the_extension_declares_the_message_types_the_server_routes_on() {
+fn the_extension_declares_the_wire_types_the_registry_routes_on() {
+    // The registry derives its routing table from these declarations, so this
+    // list *is* the advertised set — there is no second one to disagree with.
     let ext = extension(None);
     assert_eq!(ext.name(), "git");
-    let types = ext.message_types();
+
+    let wires: Vec<String> = ext
+        .descriptors()
+        .unwrap()
+        .into_iter()
+        .flat_map(|d| d.contracts.into_iter().flat_map(|c| c.wire))
+        .collect();
+
     for expected in [
         "extension.git.status",
         "extension.git.diff",
         "extension.git.root",
+        "extension.git.log",
+        "extension.git.branches",
+        "extension.git.worktrees",
     ] {
-        assert!(types.contains(&expected), "missing {expected}");
+        assert!(
+            wires.iter().any(|w| w == expected),
+            "missing {expected} from {wires:?}"
+        );
     }
 }

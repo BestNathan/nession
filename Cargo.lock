@@ -1887,6 +1887,7 @@ dependencies = [
  "serde_json",
  "system-configuration",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.25.0",
  "tokio-tungstenite",
