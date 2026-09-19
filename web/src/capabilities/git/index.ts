@@ -1,6 +1,11 @@
 export { GitPlugin, gitApi } from './GitPlugin';
 export { isOk } from './types';
 export type {
+  GitBranch,
+  GitBranches,
+  GitBranchesOk,
+  GitBranchesRequest,
+  GitBranchesResponse,
   GitChangedFile,
   GitChangeKind,
   GitCommit,
@@ -20,6 +25,10 @@ export type {
   GitStatusResponse,
   GitUnavailable,
   GitUnavailableState,
+  GitWorktree,
+  GitWorktrees,
+  GitWorktreesOk,
+  GitWorktreesResponse,
 } from './types';
 
 /** What this capability contributes to the shell: its presence state, its views. */

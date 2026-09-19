@@ -74,18 +74,18 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   // word "Commit" would pass the moment someone labelled the button "Stage
   // all"; counting cannot be worded around. The archetype is fixed by the
   // fixture: three tracked changes, each an opener, plus the header's controls —
-  // the Changes/History switch and Refresh.
+  // the four section tabs and Refresh.
   await expect(openers).toHaveCount(3);
-  await expect(controls).toHaveCount(6);
+  await expect(controls).toHaveCount(8);
 
-  // Naming the three that are not file openers is what keeps the count honest.
+  // Naming the five that are not file openers is what keeps the count honest.
   // A write affordance cannot hide by being counted as one of them, because
   // these two assertions say exactly which controls the extras are.
   await expect(view.getByTestId('git-refresh')).toHaveCount(1);
-  await expect(view.getByRole('tab')).toHaveCount(2);
+  await expect(view.getByRole('tab')).toHaveCount(4);
 
   await view.getByTestId('git-refresh').click();
-  await expect(controls).toHaveCount(6);
+  await expect(controls).toHaveCount(8);
 });
 
 test('History bounds what it offers, and unmounts the section it replaced (#826)', async ({
@@ -113,4 +113,49 @@ test('History bounds what it offers, and unmounts the section it replaced (#826)
   // fetching on mount, so the Changes list would still be there paying for a
   // status read nobody is looking at.
   await expect(page.getByTestId('git-change-list')).toHaveCount(0);
+});
+
+test('Branches tells apart the states that arrive identically (#846)', async ({ page }) => {
+  await gotoGit(page);
+  await page.getByRole('tab', { name: 'Branches' }).click();
+
+  // The fixture's four branches are one of each state the view must have an
+  // answer for, current first — the order the agent's `--sort=-HEAD` produces.
+  const rows = page.getByTestId('git-branch-row');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.first()).toHaveAttribute('data-current', 'true');
+  await expect(page.locator('[data-testid="git-branch-row"][data-current="true"]')).toHaveCount(
+    1,
+  );
+
+  // "In sync" and "no upstream" are `ahead: 0, behind: 0` on the wire, and they
+  // are different sentences on screen. This is the assertion that would fail if
+  // the view ever rendered the counts alone.
+  const text = await page.getByTestId('git-branch-list').innerText();
+  expect(text).toContain('origin/main');
+  expect(text).toContain('No upstream');
+  expect(text).toContain('upstream deleted');
+
+  // Four branches against a default of a hundred is a complete answer.
+  await expect(page.getByTestId('git-branches-more')).toHaveCount(0);
+});
+
+test('Worktrees marks the Session’s own checkout (#846)', async ({ page }) => {
+  await gotoGit(page);
+  await page.getByRole('tab', { name: 'Worktrees' }).click();
+
+  const rows = page.getByTestId('git-worktree-row');
+  await expect(rows).toHaveCount(3);
+  await expect(
+    page.locator('[data-testid="git-worktree-row"][data-current="true"]'),
+  ).toHaveCount(1);
+
+  // A prunable entry names a directory that is not there. It has to say so, or
+  // the row reads as somewhere the user could go.
+  await expect(page.getByTestId('git-worktree-prunable')).toHaveCount(1);
+
+  // And the section that was showing is unmounted, so its own request is not
+  // running behind this one.
+  await expect(page.getByTestId('git-change-list')).toHaveCount(0);
+  await expect(page.getByTestId('git-branch-list')).toHaveCount(0);
 });
