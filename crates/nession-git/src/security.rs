@@ -23,6 +23,25 @@ pub const MAX_DIFF_BYTES: usize = 1024 * 1024;
 /// Ceiling on `rev-parse` style one-line answers.
 pub const MAX_LINE_BYTES: usize = 8 * 1024;
 
+/// How many commits one `log` answer may carry.
+///
+/// A count rather than only a byte cap, because the interesting failure of a
+/// history view is not a huge answer — it is an answer that is *arbitrarily*
+/// long. A repository with a decade of commits returns megabytes of subjects
+/// nobody scrolled to, so the request states how many it wants and the default
+/// is what a person reads on one screen before asking for more.
+pub const DEFAULT_LOG_LIMIT: usize = 50;
+
+/// Hard ceiling on the requested count, whatever the client asks for.
+///
+/// The limit arrives from the client, so it is a request and not a guarantee:
+/// this is the number the agent will not go past.
+pub const MAX_LOG_LIMIT: usize = 500;
+
+/// Ceiling on `git log` output, alongside the count. Subjects are one line by
+/// construction, but author names and encodings are not bounded by anything.
+pub const MAX_LOG_BYTES: usize = 512 * 1024;
+
 /// Validate a client-supplied repository-relative path.
 ///
 /// Returns the path normalised to forward slashes, suitable for handing to git.

@@ -26,6 +26,18 @@ export interface GitDiffRequest {
   path: string;
 }
 
+export interface GitLogRequest {
+  agent_id: string;
+  session: string;
+  /**
+   * How many commits to return.
+   *
+   * A request, not a guarantee: the agent clamps it. Absent means the agent's
+   * default, which is what a person reads on one screen.
+   */
+  limit?: number;
+}
+
 /** Why the capability could not report on a repository. */
 export type GitUnavailableState =
   /** git is not installed on the agent host. */
@@ -110,6 +122,34 @@ export interface GitDiffOk {
 }
 
 export type GitDiffResponse = GitDiffOk | GitUnavailable;
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  /** git's own phrasing ("3 days ago"), from the agent's clock, not the browser's. */
+  relativeDate: string;
+  /** ISO-8601 with the author's offset. */
+  date: string;
+  subject: string;
+  /** Branch and tag names pointing here, as git would decorate them. */
+  refs: string;
+}
+
+export interface GitHistory {
+  commits: GitCommit[];
+  /** The count that was answered for, so "more" is offered against something real. */
+  limit: number;
+  truncatedBytes: number;
+  truncated: boolean;
+}
+
+export interface GitLogOk {
+  state: 'ok';
+  history: GitHistory;
+}
+
+export type GitLogResponse = GitLogOk | GitUnavailable;
 
 export interface GitRootOk {
   state: 'ok';

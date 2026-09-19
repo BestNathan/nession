@@ -26,7 +26,7 @@ use std::process::Command;
 
 use anyhow::{ensure, Context, Result};
 use nession_git::cmd::GitCmd;
-use nession_git::{diff, security, status};
+use nession_git::{diff, log, security, status};
 
 /// Run a git command for fixture setup. See the module comment.
 ///
@@ -258,4 +258,69 @@ fn validate_then_resolve_agree_on_a_normal_path() {
         security::resolve_within(root, &relative).unwrap(),
         Path::new("/repo/src/lib.rs")
     );
+}
+
+#[test]
+fn history_reads_the_real_log() {
+    // The unit tests parse strings this file's author wrote. This one runs git,
+    // which is the only way to know `--format` still emits what the parser
+    // expects — a format string that drifted would leave the parser reading
+    // plausible-looking garbage and every synthetic test passing.
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("tracked.txt"), "first\nsecond\n").unwrap();
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "--quiet",
+            "-am",
+            "second: a | subject — with punctuation",
+        ],
+    )
+    .unwrap();
+
+    let cmd = cmd_for(&dir);
+    let history = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { log::history(&cmd, Some(10)).await })
+        .unwrap();
+
+    assert_eq!(history.commits.len(), 2, "the fixture has two commits");
+    // Newest first, which is what `git log` gives and what a History view shows.
+    assert_eq!(
+        history.commits[0].subject, "second: a | subject — with punctuation",
+        "a subject must survive whole — separators and all"
+    );
+    assert_eq!(history.commits[1].subject, "initial");
+    assert!(!history.commits[0].author.is_empty());
+    assert!(!history.commits[0].date.is_empty());
+    assert!(history.commits[0]
+        .hash
+        .starts_with(&history.commits[0].short_hash));
+    assert!(!history.truncated);
+}
+
+#[test]
+fn history_honours_the_count_it_was_asked_for() {
+    let dir = repo().unwrap();
+    for n in 0..4 {
+        std::fs::write(dir.path().join("tracked.txt"), format!("line {n}\n")).unwrap();
+        git(
+            dir.path(),
+            &["commit", "--quiet", "-am", &format!("commit {n}")],
+        )
+        .unwrap();
+    }
+
+    let cmd = cmd_for(&dir);
+    let history = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { log::history(&cmd, Some(2)).await })
+        .unwrap();
+
+    assert_eq!(history.limit, 2);
+    assert_eq!(history.commits.len(), 2);
+    // And it says which count it answered for, so a view can offer "more"
+    // against something real rather than guessing.
+    assert!(history.commits[0].subject.starts_with("commit 3"));
 }

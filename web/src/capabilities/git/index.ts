@@ -3,6 +3,11 @@ export { isOk } from './types';
 export type {
   GitChangedFile,
   GitChangeKind,
+  GitCommit,
+  GitHistory,
+  GitLogOk,
+  GitLogRequest,
+  GitLogResponse,
   GitDiffOk,
   GitDiffRequest,
   GitDiffResponse,
