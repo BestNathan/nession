@@ -12,6 +12,11 @@ import {
   resolveClaudeCodeState,
 } from '@/capabilities/claude-code';
 import { GIT_ID, GIT_TITLE, resolveGitState } from '@/capabilities/git';
+import {
+  TERMINAL_KEYS_ID,
+  TERMINAL_KEYS_TITLE,
+  resolveTerminalKeysState,
+} from '@/product/terminal/terminalKeys';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -114,8 +119,29 @@ function gitProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
 }
 
 /**
- * Shipping Workspace capability registry: every capability the Workspace can
- * show, registered once, none of them through a compatibility path.
+ * Terminal Keys is a capability of the Terminal and nothing else (`#826` §7).
+ *
+ * It is registered here because this is the app's one capability registry —
+ * both surfaces read it, and the `Workspace` in the name is now narrower than
+ * what it holds. It appears in the capsule's `+` and nowhere in the Workspace,
+ * which falls out of the machinery rather than needing a rule: the Workspace
+ * filters its chrome to capabilities that have a `WorkspaceViewBinding`, and
+ * this one deliberately has none.
+ */
+function terminalKeysProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: TERMINAL_KEYS_ID,
+    title: TERMINAL_KEYS_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveTerminalKeysState(context.sessionId),
+    }),
+  };
+}
+
+/**
+ * Shipping capability registry: every capability the app can show, registered
+ * once, none of them through a compatibility path.
  */
 export function createWorkspaceCapabilityRegistry(
   workspaceContext: WorkspaceContext,
@@ -127,6 +153,7 @@ export function createWorkspaceCapabilityRegistry(
   }
   registry.register(claudeCodeProvider(workspaceContext));
   registry.register(gitProvider(workspaceContext));
+  registry.register(terminalKeysProvider(workspaceContext));
 
   return registry;
 }

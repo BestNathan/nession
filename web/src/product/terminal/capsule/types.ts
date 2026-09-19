@@ -63,7 +63,12 @@ export interface CapsuleCapabilityProjection {
    * the body produces: Peek lets the user pick a changed file, and that pick is
    * what the frame's Workspace handoff carries.
    */
-  body: (focus: string | undefined, setFocus: (id?: string) => void) => ReactNode;
+  body: (
+    focus: string | undefined,
+    setFocus: (id?: string) => void,
+    /** The capsule's own way of reaching the terminal, for a body that acts. */
+    actions: { sendText: (text: string) => void; disabled: boolean },
+  ) => ReactNode;
   /**
    * Signal → Peek. Absent for a capability with nothing to add at Peek.
    *

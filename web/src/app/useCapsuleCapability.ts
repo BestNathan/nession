@@ -152,8 +152,9 @@ export function useCapsuleCapability(
             // The body reports what the user picked; the frame holds it and
             // hands it to `onOpenWorkspace`, so the handoff carries the item
             // that caused it without the body knowing where it is going.
-            body: (_focus, setFocus) =>
+            body: (_focus, setFocus, actions) =>
               binding.body({
+                ...actions,
                 agentId: input.agent?.agent_id,
                 sessionId: input.session?.session_id,
                 depth: active.depth,

@@ -29,8 +29,13 @@ import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/typ
  */
 export function CapabilityProjection({
   projection,
+  sendText,
+  disabled,
 }: {
   projection: CapsuleCapabilityProjection;
+  /** How a capability's body reaches the terminal — the capsule owns this. */
+  sendText: (text: string) => void;
+  disabled: boolean;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
   const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
@@ -85,7 +90,7 @@ export function CapabilityProjection({
         </button>
       </div>
 
-      {projection.body(focus, setFocus)}
+      {projection.body(focus, setFocus, { sendText, disabled })}
 
       {showWorkspace ? (
         <div className="flex justify-end">

@@ -2,6 +2,10 @@ import type { ReactNode } from 'react';
 import type { CapabilityId, CapabilityState } from '@/product/capability';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
 import { GIT_ID, gitProjection } from '@/capabilities/git';
+import {
+  TERMINAL_KEYS_ID,
+  terminalKeysProjection,
+} from '@/product/terminal/terminalKeys';
 
 /**
  * How a capability supplies its Terminal projection body.
@@ -47,6 +51,17 @@ export interface CapsuleProjectionBinding {
      */
     state: CapabilityState;
     onFocusChange: (resourceId?: string) => void;
+    /**
+     * How a body reaches the terminal, supplied by the capsule at render time.
+     *
+     * Not resolved with the rest: the capsule owns the transport, and the
+     * registry is built in the shell where no controller exists yet. A
+     * capability that needs to *act* on the terminal — Terminal Keys sending a
+     * key sequence — gets the way to do it from the surface it is drawn on,
+     * which is also what keeps the registry free of transport.
+     */
+    sendText: (text: string) => void;
+    disabled: boolean;
   }) => ReactNode;
 }
 
@@ -62,6 +77,7 @@ export interface CapsuleProjectionBinding {
 const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
   claudeCodeProjection,
   gitProjection,
+  terminalKeysProjection,
 ];
 
 export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding | undefined {
@@ -79,4 +95,4 @@ export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIO
   (binding) => binding.id,
 );
 
-export { CLAUDE_CODE_ID, GIT_ID };
+export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };
