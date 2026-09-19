@@ -2,9 +2,9 @@ import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { toast } from 'sonner';
 import { useDashboard } from '@/app/useDashboard';
-import { useSessionFirstAttach } from '@/app/useSessionFirstAttach';
-import { useSessionFirstDeepLink } from '@/app/useSessionFirstDeepLink';
-import { useSessionFirstMobileNav } from '@/app/useSessionFirstMobileNav';
+import { useAttachFlow } from '@/app/useAttachFlow';
+import { useDeepLink } from '@/app/useDeepLink';
+import { useMobileNav } from '@/app/useMobileNav';
 import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/platform/attach/relayServerConnection';
@@ -17,7 +17,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
 
-export function useSessionFirstShellState() {
+export function useShellState() {
   const data = useDashboard();
   const {
     agents,
@@ -37,14 +37,14 @@ export function useSessionFirstShellState() {
     confirmAttach,
     cancelAttach,
     openAttachSettings,
-  } = useSessionFirstAttach();
+  } = useAttachFlow();
   const attachDialogIntent = useAtomValue(attachDialogIntentAtom);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
   const { isWide, showList, showDetail, openDetail, openList } =
-    useSessionFirstMobileNav(selectedId);
+    useMobileNav(selectedId);
 
   const selectedSession = selectedId
     ? sessions.find((session) => session.session_id === selectedId) ?? null
@@ -92,7 +92,7 @@ export function useSessionFirstShellState() {
     toast.success('Attach settings saved — applies to the next attach');
   }, [cancelAttach]);
 
-  const { isRestoringDeepLink } = useSessionFirstDeepLink({
+  const { isRestoringDeepLink } = useDeepLink({
     sessions,
     sessionsLoaded: data.sessionsLoaded,
     loadingSessions: data.loadingSessions,

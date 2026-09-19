@@ -16,8 +16,8 @@ import { probeResultsAtom } from '@/product/agent/state';
 import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
 
-/** Deep-link restore for session-first: `#/terminal/:sessionId` auto-attaches and syncs selection. */
-export function useSessionFirstDeepLink(opts: {
+/** Deep-link restore for shell: `#/terminal/:sessionId` auto-attaches and syncs selection. */
+export function useDeepLink(opts: {
   sessions: Session[];
   sessionsLoaded: boolean;
   loadingSessions: boolean;

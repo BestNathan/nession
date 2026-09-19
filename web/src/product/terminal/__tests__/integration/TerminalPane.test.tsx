@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionFirstTerminalPane } from '@/product/terminal/SessionFirstTerminalPane';
+import { TerminalPane } from '@/product/terminal/TerminalPane';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
 vi.mock('@/product/terminal/components/TerminalViewport', () => ({
@@ -15,10 +15,10 @@ function makeController(): TerminalController {
   return {} as TerminalController;
 }
 
-describe('SessionFirstTerminalPane', () => {
+describe('TerminalPane', () => {
   it('does not mount xterm before the transport viewport is ready', () => {
     render(
-      <SessionFirstTerminalPane
+      <TerminalPane
         sessionId="agent:sess"
         controller={makeController()}
         terminalState="connecting"
@@ -28,12 +28,12 @@ describe('SessionFirstTerminalPane', () => {
     );
 
     expect(screen.queryByTestId('terminal-viewport')).not.toBeInTheDocument();
-    expect(screen.getByTestId('session-first-terminal-loading')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal-loading')).toBeInTheDocument();
   });
 
   it('mounts xterm once the transport viewport is ready', () => {
     render(
-      <SessionFirstTerminalPane
+      <TerminalPane
         sessionId="agent:sess"
         controller={makeController()}
         terminalState="attached"
@@ -43,6 +43,6 @@ describe('SessionFirstTerminalPane', () => {
     );
 
     expect(screen.getByTestId('terminal-viewport')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-terminal-loading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-loading')).not.toBeInTheDocument();
   });
 });

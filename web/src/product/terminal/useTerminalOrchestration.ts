@@ -23,7 +23,7 @@ import {
 } from '@/product/session/state';
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
-import { useSessionFirstTerminalAttach } from '@/product/terminal/useSessionFirstTerminalAttach';
+import { useTerminalAttach } from '@/product/terminal/useTerminalAttach';
 import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
 import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
@@ -201,7 +201,7 @@ export function useTerminalOrchestration({
     serverConnection: relayServer,
   });
 
-  const mirroredAttach = useSessionFirstTerminalAttach({
+  const mirroredAttach = useTerminalAttach({
     sessionId,
     runtime,
   });

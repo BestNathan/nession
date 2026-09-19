@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
-import { SessionFirstShell } from '@/app/SessionFirstShell';
+import { Shell } from '@/app/Shell';
 import { sessionIdAtom } from '@/product/session/state';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
 import { probeResultsAtom, type AgentProbe } from '@/product/agent/state';
@@ -72,8 +72,8 @@ vi.mock('@/app/useDashboard', () => ({
 vi.mock('@/app/useProbePolling', () => ({
   useProbePolling: () => {},
 }));
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="terminal" />,
 }));
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
@@ -131,8 +131,8 @@ const mobileNav = vi.hoisted(() => ({
   isWide: true,
 }));
 
-vi.mock('@/app/useSessionFirstMobileNav', () => ({
-  useSessionFirstMobileNav: () => mobileNav,
+vi.mock('@/app/useMobileNav', () => ({
+  useMobileNav: () => mobileNav,
 }));
 
 const mockedSessionsApi = vi.mocked(sessionsApi);
@@ -200,7 +200,7 @@ function renderShell(initialEntry = '/', opts: { seedProbeCache?: boolean } = {}
   const view = render(
     <Provider store={store}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SessionFirstShell connectionStatus="connected" />
+        <Shell connectionStatus="connected" />
         <LocationProbe />
       </MemoryRouter>
     </Provider>,

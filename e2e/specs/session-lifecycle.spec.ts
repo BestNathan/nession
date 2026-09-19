@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForSessionFirst } from '../helpers/sessionFirst';
+import { waitForShell } from '../helpers/shell';
 
 // CI-gated like terminal-io.spec.ts: drives a real tmux-backed agent, which the
 // e2e webServer stack only provides in CI. The historical blocker ("terminal
@@ -10,7 +10,7 @@ test.describe('Session lifecycle', () => {
     // so any non-empty token is accepted.
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
     await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForSessionFirst(page);
+    await waitForShell(page);
   });
 
   test('create a session, verify it appears, then kill it', async ({ page }, testInfo) => {
@@ -22,7 +22,7 @@ test.describe('Session lifecycle', () => {
     // agent is online. In CI, cargo build + agent startup + heartbeat can
     // take 30-60 seconds. Open the sessions drawer if the list is collapsed.
     // The sidebar is always present; there is no drawer opener to click (#748).
-    const createButton = page.getByTestId('session-first-create');
+    const createButton = page.getByTestId('create-session');
     await expect(createButton).toBeEnabled({ timeout: 60_000 });
 
     // ── Create session ──

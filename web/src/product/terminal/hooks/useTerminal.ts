@@ -42,7 +42,7 @@ function isCurrentControllerGeneration(
  * never recreate the controller.
  *
  * Address switches never recreate the controller: the legacy pane passes no
- * transportEpoch to TerminalViewport, and the session-first pane gates its
+ * transportEpoch to TerminalViewport, and the shell pane gates its
  * viewport rebuild on `transportEpoch` (bumped when the runtime swaps its live
  * agent-terminal API — see useTerminalOrchestration), not on the controller.
  * Recreating the controller here would dispose xterm on every route rotation.

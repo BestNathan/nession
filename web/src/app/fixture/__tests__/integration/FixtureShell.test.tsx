@@ -7,14 +7,14 @@ vi.mock('@/app/fixture/FixtureTerminal', () => ({
 }));
 
 describe('FixtureShell', () => {
-  it('renders the deterministic session-first shell with the static terminal', () => {
+  it('renders the deterministic shell with the static terminal', () => {
     render(<FixtureShell />);
-    expect(screen.getByTestId('session-first-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('shell')).toBeInTheDocument();
     // Web has no header at all since #748 — the canonical wide screen is two
     // columns, and identity lives in the sidebar.
     expect(screen.queryByTestId('session-header-line')).not.toBeInTheDocument();
-    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
-    expect(screen.getByTestId('session-first-main-content')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId('main-content')).toBeInTheDocument();
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
     // Canonical fixture is healthy: nothing to alarm about.
     expect(screen.queryByTestId('server-connection')).not.toBeInTheDocument();
@@ -27,7 +27,7 @@ describe('FixtureShell', () => {
     // drawer-open state this fixture used to force is not one the shipped shell
     // has at this width, so the canonical screen moved with the shell.
     render(<FixtureShell />);
-    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
     expect(screen.queryByTestId('session-drawer')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('session-item-row')).toHaveLength(6);
   });

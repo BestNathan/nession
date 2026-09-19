@@ -2,22 +2,22 @@ import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProbePolling } from '@/app/useProbePolling';
-import { SessionFirstDialogs } from '@/app/SessionFirstDialogs';
-import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
-import { useSessionFirstShellState } from '@/app/useSessionFirstShellState';
+import { ShellDialogs } from '@/app/ShellDialogs';
+import { WorkspaceRegion } from '@/app/WorkspaceRegion';
+import { useShellState } from '@/app/useShellState';
 import type { ConnectionState } from '@/platform/socket';
 
-export interface SessionFirstShellProps {
+export interface ShellProps {
   connectionStatus: ConnectionState;
 }
 
-export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) {
-  const state = useSessionFirstShellState();
+export function Shell({ connectionStatus }: ShellProps) {
+  const state = useShellState();
   const { data } = state;
   useProbePolling(data.agents);
 
   const dialogs = (
-    <SessionFirstDialogs
+    <ShellDialogs
       showCreateModal={data.showCreateModal}
       setShowCreateModal={data.setShowCreateModal}
       agents={data.agents}
@@ -36,13 +36,13 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
   return (
     <>
       <div
-        data-testid="session-first-shell"
+        data-testid="shell"
         data-sf-design="polish"
-        className="session-first-shell flex h-[100dvh] flex-col bg-background"
+        className="shell flex h-[100dvh] flex-col bg-background"
       >
         {data.error ? (
           <div
-            data-testid="session-first-error"
+            data-testid="shell-error"
             className="flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive text-sm"
           >
             <span className="min-w-0 flex-1">{data.error}</span>
@@ -71,7 +71,7 @@ export function SessionFirstShell({ connectionStatus }: SessionFirstShellProps) 
             <p className="text-sm text-muted-foreground">Restoring terminal session…</p>
           </div>
         ) : (
-          <SessionFirstWorkspace
+          <WorkspaceRegion
             connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}

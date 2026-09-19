@@ -1,14 +1,14 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
-import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
+import { ShellMain } from '@/app/ShellMain';
+import { Sidebar } from '@/app/Sidebar';
 import { SessionDrawer } from '@/app/SessionDrawer';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { Session } from '@/types';
 
-type SidebarProps = ComponentProps<typeof SessionFirstSidebar>;
-type MainProps = ComponentProps<typeof SessionFirstMain>;
+type SidebarProps = ComponentProps<typeof Sidebar>;
+type MainProps = ComponentProps<typeof ShellMain>;
 
-export interface SessionFirstWebLayoutProps {
+export interface WebLayoutProps {
   /** Above the `lg` breakpoint the sidebar is a column; below it, an overlay. */
   isWide: boolean;
   /** Whether the narrow-width list overlay is open. */
@@ -22,7 +22,7 @@ export interface SessionFirstWebLayoutProps {
   /** Everything the work region needs except what differs per experience. */
   mainShared: Omit<MainProps, 'surface' | 'onOpenDrawer' | 'terminal'>;
   surface: Surface;
-  /** Fixture/testing override for the terminal surface; see SessionFirstMain. */
+  /** Fixture/testing override for the terminal surface; see ShellMain. */
   terminal?: ReactNode;
 }
 
@@ -34,28 +34,28 @@ export interface SessionFirstWebLayoutProps {
  * a wide screen, which is exactly what `docs/architecture/web.md` assigns to
  * `app/experiences/`. The App experience composes the same Product Patterns
  * into a spatial shell instead (`app/experiences/app/`); both are handed the
- * same `sidebarProps` / `mainShared` by `SessionFirstWorkspace`, so the two
+ * same `sidebarProps` / `mainShared` by `WorkspaceRegion`, so the two
  * arrangements cannot drift in what they are given.
  */
-export function SessionFirstWebLayout(props: SessionFirstWebLayoutProps) {
+export function WebLayout(props: WebLayoutProps) {
   const { isWide, showList, onCloseDrawer, onBackToSessions, sidebarProps, onSelect, onConfigure, mainShared, surface, terminal } = props;
 
   return (
     <div className="relative flex min-h-0 flex-1">
       {isWide ? (
         /* Two columns above `lg` (the breakpoint the contract schema's enum
-           permits and `useSessionFirstMobileNav` already uses). The sidebar is a
+           permits and `useMobileNav` already uses). The sidebar is a
            real column here — it used to be an overlay drawer at every width,
            which meant the work surface never actually shared the frame. */
         <div
-          data-testid="session-first-sidebar-column"
+          data-testid="sidebar-column"
           /* No border: the sidebar carries the chrome surface and the work
              region sits on the canvas, so the background shift is the
              separator (visual-language.md P7 — background shift before
              border). The mockup draws no rule here either. */
           className="flex min-h-0 w-[min(var(--shell-sidebar-width),90vw)] shrink-0"
         >
-          <SessionFirstSidebar {...sidebarProps} onSelect={onSelect} />
+          <Sidebar {...sidebarProps} onSelect={onSelect} />
         </div>
       ) : (
         /* Below `lg` the sidebar is still an overlay: there is no room for a
@@ -64,7 +64,7 @@ export function SessionFirstWebLayout(props: SessionFirstWebLayoutProps) {
           open={showList}
           onClose={() => onCloseDrawer()}
           sidebar={
-            <SessionFirstSidebar
+            <Sidebar
               {...sidebarProps}
               collapsible={false}
               onSelect={(session) => {
@@ -80,7 +80,7 @@ export function SessionFirstWebLayout(props: SessionFirstWebLayoutProps) {
         />
       )}
       <main className="flex min-h-0 flex-1 flex-col">
-        <SessionFirstMain
+        <ShellMain
           {...mainShared}
           surface={surface}
           onOpenDrawer={() => onBackToSessions?.()}

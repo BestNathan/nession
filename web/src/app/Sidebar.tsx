@@ -6,14 +6,14 @@ import { SessionListHeader } from '@/app/patterns/SessionListHeader';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import { SidebarSectionSeparator } from '@/app/patterns/SidebarSectionHead';
 import { SidebarRail } from '@/app/patterns/SidebarRail';
-import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
+import { SidebarFooter } from '@/app/SidebarFooter';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
 import type { DomainState } from '@/product/session/model/domainState';
 
-export interface SessionFirstSidebarProps {
+export interface SidebarProps {
   className?: string;
   agents: Agent[];
   filteredSessions: Session[];
@@ -55,7 +55,7 @@ export interface SessionFirstSidebarProps {
  * section above reports infrastructure, it is not a hierarchy to file Sessions
  * into.
  */
-export function SessionFirstSidebar({
+export function Sidebar({
   className,
   agents,
   filteredSessions,
@@ -79,7 +79,7 @@ export function SessionFirstSidebar({
   onSelect,
   onConfigure,
   onKill,
-}: SessionFirstSidebarProps) {
+}: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
@@ -92,7 +92,7 @@ export function SessionFirstSidebar({
   if (collapsible && collapsed) {
     return (
       <aside
-        data-testid="session-first-sidebar"
+        data-testid="sidebar"
         data-collapsed="true"
         /* No border anywhere in the collapsed state: the column wrapper no
            longer draws one, and the rail sits inside `shell.railWidth` exactly. */
@@ -108,7 +108,7 @@ export function SessionFirstSidebar({
 
   return (
     <aside
-      data-testid="session-first-sidebar"
+      data-testid="sidebar"
       className={cn('bg-sidebar flex h-full w-full shrink-0 flex-col', className)}
     >
       <SidebarAgents agents={agents} activeAgentId={activeAgentId} />
@@ -146,10 +146,10 @@ export function SessionFirstSidebar({
         />
       </div>
       <div
-        data-testid="session-first-sidebar-footer"
+        data-testid="sidebar-footer"
         className="flex shrink-0 items-center gap-[var(--shell-foot-gap)] border-t px-[var(--shell-space-3)] py-[var(--shell-foot-pad-y)] pb-[max(var(--shell-foot-pad-y),env(safe-area-inset-bottom))]"
       >
-        <SessionFirstSidebarFooter
+        <SidebarFooter
           domain={domain}
           connectionStatus={connectionStatus}
           nodeCount={agents.length}

@@ -16,7 +16,7 @@ import { loadSessionProfile, persistConfirmedChoice } from '../platform/attach/s
 import type { Session } from '../types';
 
 /** Session-first attach: profile-aware dialog bypass + explicit configure. */
-export function useSessionFirstAttach() {
+export function useAttachFlow() {
   const [attachDialogSession, setAttachDialogSession] = useAtom(attachDialogSessionAtom);
   const setAttachDialogIntent = useSetAtom(attachDialogIntentAtom);
   const attachToSession = useSetAtom(attachToSessionAtom);

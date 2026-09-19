@@ -6,7 +6,7 @@ import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
 export interface TerminalSurfaceProps {
-  /** xterm mount tree (SessionFirstTerminalPane). */
+  /** xterm mount tree (TerminalPane). */
   children: ReactNode;
   inputDisabled: boolean;
   controller: TerminalController | null;
@@ -44,7 +44,7 @@ export function TerminalSurface({
 
   return (
     <div
-      data-testid="session-first-terminal-surface"
+      data-testid="terminal-surface"
       className="relative flex min-h-0 flex-1 flex-col"
       data-terminal-capsule-host
       data-terminal-scrollback-mode="local-buffer"

@@ -106,7 +106,7 @@ export function SessionListHeader({
           'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
           shellMotionClass,
         )}
-        data-testid="session-first-create"
+        data-testid="create-session"
         aria-label="Create session"
         disabled={createDisabled}
         onClick={() => onCreate()}

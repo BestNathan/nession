@@ -12,7 +12,7 @@ describe('FixtureApp', () => {
     render(<FixtureApp />);
     expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
     // The spatial pager keeps every page mounted — the workspace page's
-    // SessionFirstMain renders its own header line, so exactly two exist.
+    // ShellMain renders its own header line, so exactly two exist.
     expect(screen.getAllByTestId('session-header-line')).toHaveLength(2);
     expect(screen.getByTestId('app-header-sessions')).toBeInTheDocument();
     expect(screen.getByTestId('app-header-workspace')).toBeInTheDocument();
@@ -39,7 +39,7 @@ describe('FixtureApp', () => {
     render(<FixtureApp />);
     const user = userEvent.setup();
     await user.click(screen.getByTestId('app-header-sessions'));
-    expect(screen.getByTestId('session-first-sidebar')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
     // The sessions page is a pager position, not a surface — the terminal
     // page must stay visible behind it.
     expect(screen.getByTestId('terminal-well').classList.contains('hidden')).toBe(false);

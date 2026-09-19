@@ -29,9 +29,9 @@ describe('SessionListHeader', () => {
     );
 
     expect(screen.getByPlaceholderText('Search agents and sessions...')).toBeInTheDocument();
-    expect(screen.getByTestId('session-first-create')).toBeEnabled();
+    expect(screen.getByTestId('create-session')).toBeEnabled();
 
-    await userEvent.click(screen.getByTestId('session-first-create'));
+    await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
 
     await userEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }));
@@ -46,7 +46,7 @@ describe('SessionListHeader', () => {
         createDisabled
       />,
     );
-    expect(screen.getByTestId('session-first-create')).toBeDisabled();
+    expect(screen.getByTestId('create-session')).toBeDisabled();
   });
 
   it('keeps search visible and hides filters until disclosure opens', async () => {
@@ -67,7 +67,7 @@ describe('SessionListHeader', () => {
 
   it('uses larger create control under max-lg', () => {
     render(<SessionListHeader {...baseProps} />);
-    expect(screen.getByTestId('session-first-create').className).toMatch(/max-lg:min-h-11/);
+    expect(screen.getByTestId('create-session').className).toMatch(/max-lg:min-h-11/);
   });
 
   it('uses design tokens for root spacing and create transition', () => {
@@ -75,7 +75,7 @@ describe('SessionListHeader', () => {
     const root = container.firstElementChild;
     expect(root).not.toBeNull();
     expect(root!.className).toMatch(/shell-space|var\(--shell-space/);
-    expect(screen.getByTestId('session-first-create').className).toMatch(
+    expect(screen.getByTestId('create-session').className).toMatch(
       /duration-\[var\(--motion-shell-duration\)\]/,
     );
   });

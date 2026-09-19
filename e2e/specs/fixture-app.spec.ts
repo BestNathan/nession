@@ -12,7 +12,7 @@ test.use({ viewport: { width: 390, height: 844 } });
 test('canonical App fixture renders the spatial terminal page', async ({ page }) => {
   await page.goto('/#/fixture/app');
 
-  await expect(page.getByTestId('session-first-shell')).toBeVisible();
+  await expect(page.getByTestId('shell')).toBeVisible();
   await expect(page.getByTestId('app-spatial-shell')).toBeVisible();
 
   // single-row header: sessions + workspace affordances, NO switcher, NO

@@ -5,7 +5,7 @@ import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';
 import { resolveSessionChrome } from '@/product/session/model/sessionChrome';
 import type { DomainState } from '@/product/session/model/domainState';
 
-export interface SessionFirstSidebarFooterProps {
+export interface SidebarFooterProps {
   /** The active Session's domain state, for the attachment/lifecycle line. */
   domain: DomainState | null;
   /** Server link state — one dimension, not a roll-up of the others. */
@@ -51,11 +51,11 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
  * dimension separately, so this does not collapse agent, session and attachment
  * into one lamp (`session-header.md`'s state-dimension rule).
  */
-export function SessionFirstSidebarFooter({
+export function SidebarFooter({
   domain,
   connectionStatus,
   nodeCount,
-}: SessionFirstSidebarFooterProps) {
+}: SidebarFooterProps) {
   const chrome = domain ? resolveSessionChrome(domain) : null;
   const healthy = connectionStatus === 'connected';
   // Built as one string, not interpolated in JSX: a single text node keeps the

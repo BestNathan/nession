@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
-import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
+import { TerminalRegion } from '@/app/TerminalRegion';
 import { TerminalWell } from '@/app/TerminalWell';
 import type { CapabilityId } from '@/product/capability';
 import type { Experience } from '@/app/workspace/workspaceContext';
@@ -13,7 +13,7 @@ import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import type { Agent, Session } from '@/types';
 
-export interface SessionFirstMainProps {
+export interface ShellMainProps {
   selectedSession: Session | null;
   selectedAgent: Agent | undefined;
   agents: Agent[];
@@ -35,7 +35,7 @@ export interface SessionFirstMainProps {
   experience?: Experience;
 }
 
-export function SessionFirstMain({
+export function ShellMain({
   selectedSession,
   selectedAgent,
   agents,
@@ -51,7 +51,7 @@ export function SessionFirstMain({
   showWorkspace = true,
   terminal,
   experience = 'web',
-}: SessionFirstMainProps) {
+}: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
   const { facts, capabilities: capsuleCapabilities } = useCapsuleCapability({
     session: selectedSession,
@@ -74,7 +74,7 @@ export function SessionFirstMain({
         onOpenWorkspace={onOpenWorkspace}
       />
       <div
-        data-testid="session-first-main-content"
+        data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
         {/* Web only: App reaches Workspace through its own spatial model and
             asserts the absence of this control. Floats, so it costs the work
@@ -98,7 +98,7 @@ export function SessionFirstMain({
                 className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
               >
                 {terminal ?? (
-                  <SessionFirstTerminal
+                  <TerminalRegion
                     hidden={surface !== 'terminal' || !selectedSession}
                     onDisconnect={() => undefined}
                     onError={() => undefined}

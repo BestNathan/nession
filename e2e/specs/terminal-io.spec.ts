@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForSessionFirst } from '../helpers/sessionFirst';
+import { waitForShell } from '../helpers/shell';
 
 /**
  * Read the xterm buffer text via the `xtermInstance` property exposed on the
@@ -45,13 +45,13 @@ async function waitForTerminal(page: import('@playwright/test').Page): Promise<v
  * opener went with the header (#748).
  */
 async function ensureSessionsList(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.getByTestId('session-first-create')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('create-session')).toBeVisible({ timeout: 10_000 });
 }
 
 /** Create a session via the UI and return its name. */
 async function createSession(page: import('@playwright/test').Page, name: string): Promise<void> {
   await ensureSessionsList(page);
-  const createButton = page.getByTestId('session-first-create');
+  const createButton = page.getByTestId('create-session');
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click();
 
@@ -61,7 +61,7 @@ async function createSession(page: import('@playwright/test').Page, name: string
   await dialog.getByRole('button', { name: 'Create' }).click();
   await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-  // Wait for session to appear in the session-first list
+  // Wait for session to appear in the shell list
   await expect(page.locator('[data-testid="session-item-row"]', { hasText: name })).toBeVisible({ timeout: 10_000 });
 }
 
@@ -71,7 +71,7 @@ async function attachToSession(
   sessionName: string,
   mode: 'Auto' | 'P2P' | 'Relay',
 ): Promise<void> {
-  // Find the session row and click it — the session-first list selects a
+  // Find the session row and click it — the shell list selects a
   // session by opening AttachDialog pre-seeded with that session.
   await ensureSessionsList(page);
   const row = page.locator('[data-testid="session-item-row"]', { hasText: sessionName });
@@ -120,7 +120,7 @@ test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
     await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForSessionFirst(page);
+    await waitForShell(page);
   });
 
   test('relay mode: echo command and verify output', async ({ page }, testInfo) => {

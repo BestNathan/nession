@@ -18,18 +18,18 @@ vi.mock('@/app/useAppConnection', () => ({
     isRestoringSession: false,
   }),
 }));
-vi.mock('@/app/SessionFirstShell', () => ({
-  SessionFirstShell: () => <div data-testid="session-first-shell" />,
+vi.mock('@/app/Shell', () => ({
+  Shell: () => <div data-testid="shell" />,
 }));
 vi.mock('@/app/LoginPage', () => ({
   LoginPage: () => <div data-testid="login-page" />,
 }));
 
 describe('App shell routing', () => {
-  it('renders the session-first shell when authenticated', () => {
+  it('renders the shell when authenticated', () => {
     auth.on = true;
     render(<App />);
-    expect(screen.getByTestId('session-first-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('shell')).toBeInTheDocument();
     expect(screen.queryByTestId('login-page')).not.toBeInTheDocument();
   });
 
@@ -37,6 +37,6 @@ describe('App shell routing', () => {
     auth.on = false;
     render(<App />);
     expect(screen.getByTestId('login-page')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shell')).not.toBeInTheDocument();
   });
 });

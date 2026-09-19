@@ -2,18 +2,18 @@ import {
   AppSpatialShell,
   type SpatialPageIndex,
 } from './AppSpatialShell';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
+import { ShellMain } from '@/app/ShellMain';
 import {
-  SessionFirstSidebar,
-  type SessionFirstSidebarProps,
-} from '@/app/SessionFirstSidebar';
+  Sidebar,
+  type SidebarProps,
+} from '@/app/Sidebar';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 
-type SidebarFields = Omit<SessionFirstSidebarProps, 'className' | 'onSelect'>;
+type SidebarFields = Omit<SidebarProps, 'className' | 'onSelect'>;
 
 interface MainShared {
   selectedSession: Session | null;
@@ -26,7 +26,7 @@ interface MainShared {
   onToolChange: (tool: CapabilityId) => void;
 }
 
-export function SessionFirstSpatialLayout(props: {
+export function SpatialLayout(props: {
   spatialIndex: SpatialPageIndex;
   onIndexChange: (index: SpatialPageIndex) => void;
   sidebarProps: SidebarFields;
@@ -42,11 +42,11 @@ export function SessionFirstSpatialLayout(props: {
         index={spatialIndex}
         onIndexChange={onIndexChange}
         sessions={
-          <SessionFirstSidebar {...sidebarProps} onSelect={onSpatialSelect} />
+          <Sidebar {...sidebarProps} onSelect={onSpatialSelect} />
         }
         terminal={
           <div className="flex h-full min-h-0 flex-col">
-            <SessionFirstMain
+            <ShellMain
               {...mainShared}
               surface="terminal"
               showWorkspace={false}
@@ -58,7 +58,7 @@ export function SessionFirstSpatialLayout(props: {
         }
         workspace={
           <div className="flex h-full min-h-0 flex-col">
-            <SessionFirstMain
+            <ShellMain
               {...mainShared}
               surface="workspace"
               showTerminal={false}

@@ -2,10 +2,10 @@ import { Loader2 } from 'lucide-react';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { TerminalInputOverlay } from '@/product/terminal/components/input/TerminalInputOverlay';
-import { isTerminalLive } from '@/product/terminal/useSessionFirstTerminalAttach';
+import { isTerminalLive } from '@/product/terminal/useTerminalAttach';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 
-interface SessionFirstTerminalPaneProps {
+interface TerminalPaneProps {
   sessionId: string;
   controller: TerminalController | null;
   terminalState: TerminalStatus;
@@ -21,25 +21,25 @@ interface SessionFirstTerminalPaneProps {
  * Session-first native terminal viewport — xterm only, no legacy relay banner.
  * Connection lifecycle is shown in SessionHeader / ConnectionStatus.
  */
-export function SessionFirstTerminalPane({
+export function TerminalPane({
   sessionId,
   controller,
   terminalState,
   viewportReady,
   transportEpoch,
-}: SessionFirstTerminalPaneProps) {
+}: TerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
   const showBlockingLoader = !controller || !viewportReady;
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-first-terminal-pane">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="terminal-pane">
       <div className="relative min-h-0 flex-1">
         {showViewport ? (
           <TerminalViewport controller={controller} transportEpoch={transportEpoch} />
         ) : null}
         {showBlockingLoader ? (
           <div
-            data-testid="session-first-terminal-loading"
+            data-testid="terminal-loading"
             className="absolute inset-0 flex items-center justify-center bg-terminal-background"
           >
             <Loader2 className="size-8 animate-spin text-muted-foreground" />
@@ -47,7 +47,7 @@ export function SessionFirstTerminalPane({
         ) : null}
         {showViewport && !isTerminalLive(terminalState) ? (
           <div
-            data-testid="session-first-terminal-connecting"
+            data-testid="terminal-connecting"
             className="pointer-events-none absolute inset-0 flex items-center justify-center bg-terminal-background/60"
           >
             <Loader2 className="size-6 animate-spin text-muted-foreground" />

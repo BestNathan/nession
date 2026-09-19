@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
-import { SessionFirstTerminal } from '@/app/SessionFirstTerminal';
+import { TerminalRegion } from '@/app/TerminalRegion';
 import { sessionIdAtom, attachInfoAtom } from '@/product/session/state';
 import { bannerAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/platform/socket/types';
@@ -18,8 +18,8 @@ vi.mock('@/product/terminal/hooks/useP2PAttachTransport', () => ({
     activeUrl: null,
   }),
 }));
-vi.mock('@/product/terminal/useSessionFirstTerminalAttach', () => ({
-  useSessionFirstTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
+vi.mock('@/product/terminal/useTerminalAttach', () => ({
+  useTerminalAttach: () => ({ terminalState: 'idle', reconnectCount: 0 }),
 }));
 vi.mock('@/product/terminal/hooks/useTerminal', () => ({ useTerminal: () => null }));
 vi.mock('@/shared/hooks/useWebSocket', () => ({
@@ -46,14 +46,14 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
     onRelayResize: vi.fn(() => () => {}),
   }),
 }));
-vi.mock('@/product/terminal/SessionFirstTerminalPane', () => ({
-  SessionFirstTerminalPane: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="session-first-terminal-pane">{sessionId}</div>
+vi.mock('@/product/terminal/TerminalPane', () => ({
+  TerminalPane: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="terminal-pane">{sessionId}</div>
   ),
 }));
 vi.mock('@/product/terminal/patterns/TerminalSurface', () => ({
   TerminalSurface: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="session-first-terminal-surface">{children}</div>
+    <div data-testid="terminal-surface">{children}</div>
   ),
 }));
 
@@ -62,7 +62,7 @@ function renderTerminal(hidden: boolean, store = createStore()) {
   const onError = vi.fn();
   const view = (
     <Provider store={store}>
-      <SessionFirstTerminal hidden={hidden} onDisconnect={onDisconnect} onError={onError} />
+      <TerminalRegion hidden={hidden} onDisconnect={onDisconnect} onError={onError} />
     </Provider>
   );
   const result = render(view);
@@ -72,40 +72,40 @@ function renderTerminal(hidden: boolean, store = createStore()) {
     rerenderHidden: (next: boolean) =>
       result.rerender(
         <Provider store={store}>
-          <SessionFirstTerminal hidden={next} onDisconnect={onDisconnect} onError={onError} />
+          <TerminalRegion hidden={next} onDisconnect={onDisconnect} onError={onError} />
         </Provider>,
       ),
   };
 }
 
-describe('SessionFirstTerminal', () => {
+describe('TerminalRegion', () => {
   beforeEach(() => {
     wsListeners.length = 0;
   });
 
   it('toggles CSS hidden without unmounting the keep-alive root', () => {
     const { rerenderHidden } = renderTerminal(false);
-    const el = screen.getByTestId('session-first-terminal');
+    const el = screen.getByTestId('terminal');
     expect(el.className).not.toMatch(/\bhidden\b/);
 
     rerenderHidden(true);
-    const still = screen.getByTestId('session-first-terminal');
+    const still = screen.getByTestId('terminal');
     expect(still).toBe(el);
     expect(still.className).toMatch(/\bhidden\b/);
   });
 
   it('shows a muted empty state when no session is selected', () => {
     renderTerminal(false);
-    const root = screen.getByTestId('session-first-terminal');
+    const root = screen.getByTestId('terminal');
     expect(root).toHaveTextContent('Select a session to open its terminal.');
-    expect(screen.queryByTestId('session-first-terminal-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
   });
 
   it('renders native TerminalSurface when a session is attached', () => {
     const store = createStore();
     store.set(sessionIdAtom, 'agent:sess');
     renderTerminal(false, store);
-    expect(screen.getByTestId('session-first-terminal-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal-surface')).toBeInTheDocument();
   });
 
   it('keeps terminal pane mounted when hidden while a session is attached', () => {
@@ -113,12 +113,12 @@ describe('SessionFirstTerminal', () => {
     store.set(sessionIdAtom, 'agent:sess');
     const { rerenderHidden } = renderTerminal(false, store);
 
-    const pane = screen.getByTestId('session-first-terminal-pane');
+    const pane = screen.getByTestId('terminal-pane');
     expect(pane).toHaveTextContent('agent:sess');
 
     rerenderHidden(true);
-    expect(screen.getByTestId('session-first-terminal').className).toMatch(/\bhidden\b/);
-    expect(screen.getByTestId('session-first-terminal-pane')).toBe(pane);
+    expect(screen.getByTestId('terminal').className).toMatch(/\bhidden\b/);
+    expect(screen.getByTestId('terminal-pane')).toBe(pane);
   });
 
   it('clears a stuck failed banner when attaching a new session after relay drop', () => {
