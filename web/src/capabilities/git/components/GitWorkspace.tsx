@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { gitApi } from '../GitPlugin';
 import { useGitStatus } from '../hooks/useGitStatus';
@@ -14,6 +15,16 @@ import {
 import type { GitDiffResponse, GitStatusResponse } from '../types';
 import { GitChangeList } from './GitChangeList';
 import { GitDiffView } from './GitDiffView';
+import { GitHistoryView } from './GitHistoryView';
+
+/**
+ * What the Git surface can show (`#826` §4).
+ *
+ * Two so far. Staging and commit authoring are the write half of that list and
+ * need their own decision — `#750`'s Non-Goals drew the read-only boundary for a
+ * reason. Branches and Worktrees are read-only and simply not built yet.
+ */
+type GitSection = 'changes' | 'history';
 
 interface GitDiffState {
   selectedPath: string | null;
@@ -111,6 +122,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   const sessionId = ctx.session?.session_id;
   const status = useGitStatus({ agentId, sessionId });
   const { state: diff, selectFile } = useGitDiff(ctx);
+  const [section, setSection] = useState<GitSection>('changes');
 
   if (!sessionId) {
     return (
@@ -122,8 +134,23 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
 
   return (
     <div data-testid="git-workspace" className="flex h-full min-h-0 flex-col">
-      <GitHeader status={status.status} loading={status.loading} onRefresh={status.refresh} />
-      <GitBody status={status} diff={diff} onSelect={selectFile} />
+      <GitHeader
+        status={status.status}
+        loading={status.loading}
+        onRefresh={status.refresh}
+        section={section}
+        onSectionChange={setSection}
+      />
+      {/*
+        History is unmounted, not hidden, when the other section is showing: its
+        hook fetches on mount, and a hidden section would run `git log` on the
+        agent for a reader who never looked at it.
+      */}
+      {section === 'history' ? (
+        <GitHistoryView ctx={ctx} />
+      ) : (
+        <GitBody status={status} diff={diff} onSelect={selectFile} />
+      )}
     </div>
   );
 }
@@ -132,10 +159,14 @@ function GitHeader({
   status,
   loading,
   onRefresh,
+  section,
+  onSectionChange,
 }: {
   status: GitStatusResponse | null;
   loading: boolean;
   onRefresh: () => void;
+  section: GitSection;
+  onSectionChange: (section: GitSection) => void;
 }) {
   const ok = status?.state === 'ok' ? status : null;
   const branch = ok?.status.detached ? 'Detached HEAD' : ok?.status.branch;
@@ -152,6 +183,17 @@ function GitHeader({
           {headerSummary(status, loading, worktree)}
         </p>
       </div>
+      {/*
+        A small, stable set for the current context — the one case
+        `workspace-navigation.md` allows segments in. It chooses what this
+        capability shows; it is not a second navigation shell.
+      */}
+      <Tabs value={section} onValueChange={(value) => onSectionChange(value as GitSection)}>
+        <TabsList>
+          <TabsTrigger value="changes">Changes</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
+      </Tabs>
       <Button
         type="button"
         data-testid="git-refresh"

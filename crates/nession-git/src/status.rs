@@ -21,7 +21,15 @@
 use serde::Serialize;
 
 /// One tracked path that differs from HEAD.
+///
+/// `camelCase` because that is what the client reads, and every other field on
+/// this wire already is: the hand-written `truncatedBytes` beside it in
+/// `agent.rs`, and every single-word field whose spelling the case rule cannot
+/// touch. Without it this struct alone emitted `original_path`, so a renamed
+/// file's tooltip read `undefined → new-name` — a field that is only populated
+/// for renames, which is exactly the case no fixture exercised over the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangedFile {
     pub path: String,
     /// Present only for renames/copies.
@@ -375,5 +383,46 @@ mod tests {
         assert!(out.is_clean());
         assert_eq!(out.branch, None);
         assert_eq!(out.ahead, 0);
+    }
+
+    #[test]
+    fn a_renamed_file_serialises_in_the_spelling_the_client_reads() {
+        // The wire is camelCase — hand-written `truncatedBytes` beside it says
+        // so — and `original_path` was the one field that was not, because it is
+        // the one multi-word field on this struct. A rename's tooltip read
+        // `undefined -> new-name` and nothing failed: no fixture carried a
+        // rename across the wire, and the client's own tests use its own
+        // spelling, so both sides agreed with themselves.
+        let file = ChangedFile {
+            path: "src/new.rs".to_string(),
+            original_path: Some("src/old.rs".to_string()),
+            kind: ChangeKind::Renamed,
+            staged: true,
+            unstaged: false,
+        };
+
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(json["originalPath"], "src/old.rs");
+        assert!(
+            json.get("original_path").is_none(),
+            "the snake_case key must not be on the wire at all, got: {json}"
+        );
+    }
+
+    #[test]
+    fn an_absent_original_path_is_omitted_rather_than_null() {
+        // `skip_serializing_if` and the case rule have to agree; a `null` here
+        // would read as "renamed from nothing".
+        let file = ChangedFile {
+            path: "src/a.rs".to_string(),
+            original_path: None,
+            kind: ChangeKind::Modified,
+            staged: false,
+            unstaged: true,
+        };
+
+        let json = serde_json::to_value(&file).unwrap();
+        assert!(json.get("originalPath").is_none());
+        assert!(json.get("original_path").is_none());
     }
 }

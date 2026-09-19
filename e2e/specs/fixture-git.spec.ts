@@ -2,7 +2,8 @@
 //
 // #750 SC2 and SC5, asserted against real DOM rather than a jsdom mock: the
 // listing groups changes and gives an untracked entry no expander, and the view
-// carries no control that could ask git to write.
+// carries no control that could ask git to write. #826's History section is
+// asserted here too — it reads the log through the same fixture surface.
 //
 // The assertions are shape-based, not copy-based. A test that looked for the
 // word "Commit" would pass the moment someone labelled the button "Stage all",
@@ -72,12 +73,44 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   // Counted whole rather than grepped for keywords. A test that looked for the
   // word "Commit" would pass the moment someone labelled the button "Stage
   // all"; counting cannot be worded around. The archetype is fixed by the
-  // fixture: three tracked changes, each an opener, plus one other control.
+  // fixture: three tracked changes, each an opener, plus the header's controls —
+  // the Changes/History switch and Refresh.
   await expect(openers).toHaveCount(3);
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(6);
 
-  // The one control that is not a file opener is Refresh — a read.
+  // Naming the three that are not file openers is what keeps the count honest.
+  // A write affordance cannot hide by being counted as one of them, because
+  // these two assertions say exactly which controls the extras are.
   await expect(view.getByTestId('git-refresh')).toHaveCount(1);
+  await expect(view.getByRole('tab')).toHaveCount(2);
+
   await view.getByTestId('git-refresh').click();
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(6);
+});
+
+test('History bounds what it offers, and unmounts the section it replaced (#826)', async ({
+  page,
+}) => {
+  await gotoGit(page);
+  await expect(page.getByTestId('git-change-list')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'History' }).click();
+
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(3);
+  // The fixture's repository has three commits; the agent's default count is
+  // 50. So this is the whole history, and the view must not offer "older
+  // commits" over a log that ends there.
+  await expect(page.getByTestId('git-history-more')).toHaveCount(0);
+
+  // Selecting a commit says which one it is — and says what it is not showing,
+  // which is the half a reader would otherwise read as a bug.
+  await page.getByTestId('git-commit-row').first().click();
+  const detail = page.getByTestId('git-commit-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText('not shown here');
+
+  // Unmounted rather than hidden: a hidden section would have its own hook
+  // fetching on mount, so the Changes list would still be there paying for a
+  // status read nobody is looking at.
+  await expect(page.getByTestId('git-change-list')).toHaveCount(0);
 });
