@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::descriptor::{Lifecycle, ProtocolDescriptor};
 use super::identity::{ContractVersion, ProtocolId};
 
-/// Which versions of one contract a provider offers.
+/// Which versions of one contract a provider offers, and what carries them.
 ///
 /// A struct rather than a bare `Vec` so the optional facts the design names —
 /// deprecation, experimental, required scope, semantic feature flags — have
@@ -23,11 +23,36 @@ use super::identity::{ContractVersion, ProtocolId};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ContractSupport {
     pub versions: Vec<ContractVersion>,
+    /// The wire message types this contract travels as.
+    ///
+    /// Carried in the manifest so that a **router which knows no concrete
+    /// provider** can still answer "can this peer carry this message?". The
+    /// alternative — deriving the protocol id from the wire string — has no
+    /// universal rule to derive it with: the registry's own strip-the-namespace
+    /// transform yields `claude_code.read` where the id is `claude-code.read`.
+    /// The mapping is the provider's to declare, so it is declared here.
+    ///
+    /// `default` so a manifest from a peer that predates this field still
+    /// parses. It then answers "no" to every wire query, which is the safe
+    /// direction: the peer is treated as one that has not said.
+    #[serde(default)]
+    pub wire: Vec<String>,
 }
 
 impl ContractSupport {
     pub fn new(versions: Vec<ContractVersion>) -> Self {
-        Self { versions }
+        Self {
+            versions,
+            wire: Vec::new(),
+        }
+    }
+
+    pub fn with_wire(versions: Vec<ContractVersion>, wire: Vec<String>) -> Self {
+        Self { versions, wire }
+    }
+
+    pub fn carries(&self, wire_type: &str) -> bool {
+        self.wire.iter().any(|w| w == wire_type)
     }
 }
 
@@ -68,9 +93,14 @@ impl ProtocolManifest {
             if descriptor.lifecycle == Lifecycle::Retired {
                 continue;
             }
+            let wire: Vec<String> = descriptor
+                .contracts
+                .iter()
+                .flat_map(|c| c.wire.iter().cloned())
+                .collect();
             protocols.insert(
                 descriptor.id.clone(),
-                ContractSupport::new(descriptor.versions()),
+                ContractSupport::with_wire(descriptor.versions(), wire),
             );
         }
         Self {
@@ -96,6 +126,30 @@ impl ProtocolManifest {
 
     pub fn is_empty(&self) -> bool {
         self.protocols.is_empty()
+    }
+
+    /// Which Protocol Unit carries `wire_type`, if this provider carries it.
+    ///
+    /// What a router asks: the Server relays `extension.git.status` to an agent
+    /// it must not know the internals of, and this is how it answers "does that
+    /// peer say it can carry this?" without a mapping of its own.
+    ///
+    /// A linear scan, deliberately. A manifest is a handful of units, and the
+    /// alternative — an index kept in step with `protocols` — is a second
+    /// structure that can disagree with the first, which is the class of bug
+    /// this whole issue exists to remove. If a manifest ever grows past the
+    /// point where this shows up in a profile, the index can be built then,
+    /// with a measurement to justify it.
+    pub fn unit_for_wire(&self, wire_type: &str) -> Option<&ProtocolId> {
+        self.protocols
+            .iter()
+            .find(|(_, support)| support.carries(wire_type))
+            .map(|(id, _)| id)
+    }
+
+    /// Whether this provider declares it can carry `wire_type`.
+    pub fn carries(&self, wire_type: &str) -> bool {
+        self.unit_for_wire(wire_type).is_some()
     }
 }
 
@@ -200,6 +254,46 @@ mod tests {
             serde_json::to_string(&build()).unwrap(),
             serde_json::to_string(&build()).unwrap()
         );
+    }
+
+    #[test]
+    fn a_wire_type_resolves_to_the_unit_that_carries_it() {
+        // What a router asks. The Server relays `extension.git.status` to an
+        // agent whose internals it must not know; this is how it checks.
+        let manifest = ProtocolManifest::from_descriptors(
+            "agent-a",
+            &[ProtocolDescriptor::new(
+                "git.status",
+                "nession-git",
+                vec![ContractDescriptor::new(V1, &["extension.git.status"])],
+            )
+            .unwrap()],
+        );
+
+        assert_eq!(
+            manifest
+                .unit_for_wire("extension.git.status")
+                .map(ProtocolId::as_str),
+            Some("git.status")
+        );
+        assert!(manifest.carries("extension.git.status"));
+        assert!(!manifest.carries("extension.git.diff"));
+        assert!(manifest.unit_for_wire("extension.git.diff").is_none());
+    }
+
+    #[test]
+    fn a_manifest_without_wire_projections_answers_no_rather_than_guessing() {
+        // A peer that predates the field sends versions only. It must not be
+        // read as carrying everything — "has not said" and "said yes" are
+        // different, and the safe direction is the one that does not relay.
+        let manifest: ProtocolManifest = serde_json::from_value(serde_json::json!({
+            "provider": "old-agent",
+            "protocols": { "git.status": { "versions": [1] } }
+        }))
+        .unwrap();
+
+        assert!(manifest.offers(&ProtocolId::new("git.status").unwrap()));
+        assert!(!manifest.carries("extension.git.status"));
     }
 
     #[test]
