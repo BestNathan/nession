@@ -13,6 +13,7 @@
 import { expect, test } from '@playwright/test';
 import {
   expectNoUnexpectedOverflow,
+  expectMaxWidth,
   expectPaddingX,
   expectRadius,
   expectSingleLine,
@@ -127,6 +128,11 @@ async function assertCapsuleControls(
   await expect(shell).toBeVisible();
   await expectRadius(shell, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
   await expectPaddingX(shell, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+  // §Web vs App: "centered with a bounded max width". Asserts the *frame*
+  // (which carries the bound), not the inner shell. No-op on App, whose block
+  // has no maxWidthToken — the doc bounds the Web placement only.
+  await expectMaxWidth(page.getByTestId('terminal-capsule'),
+    optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
 
   const controls = band.locator('button');
   expect(await controls.count()).toBeGreaterThan(0);

@@ -110,7 +110,9 @@
         "radiusToken": "semantic.radius-capsule",
         "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
         "padXToken": "experience.web.terminalCapsule.shellPadX",
+        "maxWidthToken": "experience.web.terminalCapsule.shellMaxWidth",
         "heightTokenPx": 32,
+        "maxWidthTokenPx": 672,
         "padXTokenPx": 12,
         "radiusTokenCss": "calc(var(--radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
