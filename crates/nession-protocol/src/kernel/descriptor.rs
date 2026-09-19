@@ -42,12 +42,20 @@ pub struct ContractDescriptor {
     /// transport carries yet — and it is stated rather than inferred, because
     /// "no wire types" and "wire types nobody remembered to declare" are the
     /// same emptiness with different consequences.
-    pub wire: &'static [&'static str],
+    ///
+    /// Owned rather than `&'static str` because descriptors are built at
+    /// runtime — `ProtocolId` is validated, so it cannot be a `const` — and a
+    /// `'static` bound here would force providers to leak their wire types to
+    /// satisfy a lifetime nothing needs.
+    pub wire: Vec<String>,
 }
 
 impl ContractDescriptor {
-    pub const fn new(version: ContractVersion, wire: &'static [&'static str]) -> Self {
-        Self { version, wire }
+    pub fn new(version: ContractVersion, wire: &[&str]) -> Self {
+        Self {
+            version,
+            wire: wire.iter().map(|w| (*w).to_string()).collect(),
+        }
     }
 }
 
@@ -94,7 +102,7 @@ impl ProtocolDescriptor {
     /// message was for, so the version on the wire would be decided by luck.
     pub fn validate(&self) -> Result<(), DescriptorError> {
         let mut seen_versions: Vec<ContractVersion> = Vec::new();
-        let mut seen_wire: Vec<&'static str> = Vec::new();
+        let mut seen_wire: Vec<&str> = Vec::new();
 
         for contract in &self.contracts {
             if seen_versions.contains(&contract.version) {
@@ -105,14 +113,14 @@ impl ProtocolDescriptor {
             }
             seen_versions.push(contract.version);
 
-            for wire in contract.wire {
-                if seen_wire.contains(wire) {
+            for wire in &contract.wire {
+                if seen_wire.contains(&wire.as_str()) {
                     return Err(DescriptorError::DuplicateWireType {
                         id: self.id.to_string(),
-                        wire: (*wire).to_string(),
+                        wire: wire.clone(),
                     });
                 }
-                seen_wire.push(wire);
+                seen_wire.push(wire.as_str());
             }
         }
 

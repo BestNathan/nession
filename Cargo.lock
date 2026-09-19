@@ -1976,6 +1976,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "nession-common",
+ "nession-protocol",
  "serde",
  "serde_json",
  "tempfile",
