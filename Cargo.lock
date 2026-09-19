@@ -1982,6 +1982,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-protocol"
+version = "0.35.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "nession-server"
 version = "0.35.0"
 dependencies = [

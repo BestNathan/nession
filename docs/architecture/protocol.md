@@ -1,0 +1,205 @@
+# Protocol Architecture
+
+How Nession's protocol is organised, who owns what, and where new code goes
+(#678). Product design truth lives in [`docs/design/`](../design/README.md);
+this document describes the protocol layer's vocabulary and rules.
+
+## The model
+
+Nession does not have one protocol version. It has a set of independently
+evolving **Protocol Units**:
+
+```text
+Consumer ──▶ Contract ──▶ Provider ──▶ Generation
+```
+
+| Term | Means | Lives in |
+|---|---|---|
+| **Protocol Unit** | One independently evolving, consumer-visible protocol semantic — `git.status`, `session.attach` | its owner's `protocol/` |
+| **Contract Version** | The wire/semantic version of that unit | the unit's contract |
+| **Provider** | Who implements it | a crate (`nession-git`, `nession-agent`, …) |
+| **Consumer** | Who depends on it | Web, CLI, Server, MCP |
+| **Generation** | A provider's implementation lineage under one contract version | the provider's `runtime/` |
+| **Protocol Kernel** | The stable mechanism: identity, envelope, descriptor, manifest, resolution | `crates/nession-protocol` |
+| **Protocol Manifest** | What a runtime actually offers, derived from what it composed | runtime output |
+
+### Two evolution speeds
+
+```text
+Unit   evolves by succession.   New versions are added beside old ones.
+Kernel evolves by convergence.  Its shape settles, because everything depends on it.
+```
+
+A bug fix, a race fix, a performance change: same contract version, new
+generation. A renamed field, a changed unit, a new required field, changed error
+semantics: new contract version. Collapsing those two into one number is how a
+bug fix starts looking like a breaking change.
+
+### Identity is not the message type
+
+`git.status` is the protocol. `extension.git.status` is the transport projection
+of one of its contracts. They are separately nameable so a transport rename can
+be told apart from a semantic change — only one of those is a breaking event,
+and today both would look like "the string changed".
+
+Message types therefore live on the contract as data, never as the only
+definition of a protocol.
+
+## Ownership and the dependency rule
+
+```text
+Protocol Unit  ──▶  Protocol Kernel
+Protocol Kernel ──✗──▶ concrete Protocol Unit
+```
+
+This is enforced, not documented-and-hoped:
+
+- `crates/nession-protocol`'s `Cargo.toml` has no path to `nession-common`,
+  `nession-agent`, `nession-server`, `nession-git`, `nession-claude-code`, MCP or
+  Web. A resolver that cannot name a concrete provider cannot depend on one.
+- A concrete provider owns its DTOs, operation identity, contract metadata,
+  compatibility adapters and fixtures. The kernel does not centrally own
+  extension DTOs — the crate that *implements* a contract is the only one that
+  can answer "what changed?" when it moves.
+- The Server's generic relay depends on **no** concrete provider crate. It
+  routes by manifest, not by knowing a payload schema.
+
+### What is not a Protocol Unit
+
+- **Product Capability** — a user-visible thing with a presence state (Files,
+  Git, Claude Code in the Web UI). It *consumes* contracts; it is not one.
+- **Transport Plugin** — a client-side adapter with no presence. Also not a
+  contract.
+- **Transport mechanism** — TLS, framing, serialisation. These are kernel, and
+  they do not get generations.
+
+Three concepts, three names. A sentence where "capability" could mean any of
+them is a sentence to rewrite.
+
+## Directory layout
+
+### The kernel
+
+```text
+crates/nession-protocol/src/
+├── lib.rs
+└── kernel/
+    ├── identity.rs     ProtocolId, ContractVersion
+    ├── envelope.rs     the one Message envelope
+    ├── descriptor.rs   what a unit declares about itself
+    ├── manifest.rs     what a runtime actually offers
+    ├── resolver.rs     requirements ∩ manifest
+    └── error.rs        what resolution can refuse
+```
+
+Core contracts — the units Nession itself owns — live under `contracts/`, one
+module per family (`contracts/session/`, `contracts/agent/`). A family becomes a
+version directory when it has a second version; a `v1/` directory holding the
+only version is structure without content.
+
+### A provider
+
+```text
+crates/nession-git/src/
+├── protocol/
+│   ├── status/
+│   │   └── v1.rs      typed request/response + descriptor
+│   └── diff/
+│       └── v1.rs
+├── runtime/           the provider implementation
+└── agent.rs           the erased dispatch boundary
+```
+
+Typed at the contract boundary; erased only at the dispatcher boundary. The
+outermost `handle_command(command: &str, payload: Value) -> Value` stays — it is
+how a registry dispatches without knowing every type. What changes is that the
+`Value` is decoded into a typed request **once, at the boundary**, and never
+carried through the provider as the contract.
+
+## How to evolve a Protocol Unit
+
+### Add a Protocol Unit
+
+1. Choose the canonical id: lowercase segments joined by `.`, at least two
+   segments (`unit.operation`), no underscores. `git.status`, `claude-code.read`.
+   The `protocol://` prefix is a display convention and is rejected by
+   `ProtocolId::new`.
+2. Write the contract in the **provider's** crate, not in `nession-protocol`:
+   a typed request, a typed response, and a `ProtocolDescriptor` naming the
+   owner and the contract versions.
+3. Declare the wire message types on the contract. They are the transport
+   projection and may differ from the id.
+4. Register the provider at the composition root. The manifest is derived from
+   what is composed — nothing advertises a contract no runtime serves.
+
+### Publish a new Contract Version
+
+Upgrade the version when a consumer-observable thing changes: a new **required**
+field, a removed or renamed field, a changed type or unit, changed defaults,
+changed error semantics, a new enum value that breaks an old consumer, or a
+permission change that alters observable behaviour.
+
+Do **not** upgrade for a bug fix, an internal refactor, a new optional field
+whose absence preserves the old meaning, or a new response field consumers
+already tolerate.
+
+Add the new contract **beside** the old one. Never edit a shipped version in
+place to express a new one — that is the "optional fields and serde defaults
+instead of versions" failure, and it makes the old wire shape unrepresentable.
+
+### Provide a legacy adapter
+
+A peer with no manifest is a **Legacy Peer**, not a peer that supports
+everything. Only contracts with an explicit, evidence-backed adapter are served
+to it:
+
+```text
+git.status/v1
+  legacy_wire    = extension.git.status
+  legacy_payload = flat
+```
+
+Everything else answers `protocol_not_advertised`. It is forbidden to guess a
+payload shape from a software version, to downgrade unconditionally when a
+manifest is missing, or to silently fall back semantically.
+
+### Generate consumer types
+
+Rust contracts are the source of truth. Generated TS carries the DTOs, the
+protocol id constants, the operation request/response map and manifest metadata.
+Generated output is deterministic, committed, never hand-edited, and CI
+regenerates and diffs it so drift fails the build.
+
+Product Capability UI state stays hand-written — only real wire contracts are
+generated.
+
+### Retire a contract
+
+1. Mark the descriptor `Lifecycle::Deprecated`. It stays advertised: if it
+   stopped being served at the moment you told consumers to migrate, their
+   migration would start with an outage.
+2. Move consumers. Watch the manifest to see which providers still offer it.
+3. Mark it `Lifecycle::Retired`. It leaves every manifest and stops being
+   served. **Keep the descriptor** — a retired id that disappears is an id that
+   comes back meaning something else.
+
+## Where the rules are enforced
+
+| Rule | Enforced by |
+|---|---|
+| Kernel depends on no unit | `crates/nession-protocol/Cargo.toml` |
+| Ids are canonical | `ProtocolId::new`, `#[serde(try_from)]` on the way in too |
+| One contract per version; one version per wire type | `ProtocolDescriptor::validate` |
+| Manifest lists only what was composed | `ProtocolManifest::from_descriptors` |
+| Retired units are not advertised | the same function |
+| Highest common version, not newest | `select_version` |
+| Compatibility is never read from a software version | the resolver takes no version; pinned by a test |
+| A unit with no common version does not kill the connection | `ProtocolError::is_unit_scoped` |
+
+## Related
+
+- `#678` — the requirement this document implements.
+- `#565` — shared `nession-mcp`, which consumes the same contracts rather than
+  copying Nession DTOs.
+- [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
+  client side.
