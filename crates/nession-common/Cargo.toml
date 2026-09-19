@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# Transition only (#678). The protocol DTOs currently in `src/protocol.rs` are
+# being extracted into `nession-protocol`; until that finishes this crate
+# re-exports the envelope from there so the definition has one home. The
+# direction is one-way and stays that way: `nession-protocol` has no path back
+# to this crate.
+nession-protocol = { path = "../nession-protocol" }
 anyhow.workspace = true
 async-trait.workspace = true
 serde.workspace = true

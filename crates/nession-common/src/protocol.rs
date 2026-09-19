@@ -1,25 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message<T> {
-    pub msg_type: String,
-    pub id: String,
-    pub timestamp: u64,
-    pub payload: T,
-}
-
-impl<T> Message<T> {
-    pub fn new(msg_type: String, id: String, timestamp: u64, payload: T) -> Self {
-        Self {
-            msg_type,
-            id,
-            timestamp,
-            payload,
-        }
-    }
-}
-
-pub type ProtocolMessage<T> = Message<T>;
+/// The message envelope now lives in the Protocol Kernel (#678).
+///
+/// Re-exported rather than redefined so the ~30 import sites in this workspace
+/// keep resolving while the migration runs. The definition has exactly one
+/// home, which is the property that matters: before this, `nession-common` and
+/// `nession-agent` each declared their own, field-for-field identical, kept in
+/// step by nothing.
+///
+/// New code should depend on `nession-protocol` directly; this re-export is a
+/// transition, not an interface.
+pub use nession_protocol::{Message, ProtocolMessage};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterPayload {

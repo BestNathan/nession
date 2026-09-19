@@ -154,15 +154,15 @@ pub mod msg_types {
     pub const ERROR: &str = "error";
 }
 
-/// Protocol message envelope. All messages share this shape; `payload`
-/// varies by `msg_type`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message<P> {
-    pub msg_type: String,
-    pub id: String,
-    pub timestamp: u64,
-    pub payload: P,
-}
+/// Protocol message envelope — re-exported, not redefined (#678).
+///
+/// This module used to declare its own `Message<P>` with the same four fields
+/// as `nession-common`'s. Two definitions of a framing contract are two answers
+/// to "what is a message", kept in step by nothing; the envelope now has one
+/// home in the Protocol Kernel, and this is a re-export so every existing path
+/// — including `nession_agent::server::websocket::Message` in the integration
+/// tests — keeps resolving.
+pub use nession_protocol::Message;
 
 // --- Request payloads (client → agent) ---
 

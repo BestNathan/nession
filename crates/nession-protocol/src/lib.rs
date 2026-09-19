@@ -57,7 +57,8 @@ pub mod kernel;
 // contract module does not open with five `use crate::kernel::…` lines.
 pub use kernel::{
     resolve, select_version, ContractDescriptor, ContractSupport, ContractVersion, Lifecycle,
-    Message, ProtocolDescriptor, ProtocolError, ProtocolId, ProtocolManifest, MAX_ID_LEN,
+    Message, ProtocolDescriptor, ProtocolError, ProtocolId, ProtocolManifest, ProtocolMessage,
+    MAX_ID_LEN,
 };
 
 /// The version of the Kernel's *own* mechanism — not of any protocol.
