@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileBrowser } from '@/capabilities/files/components/FileBrowser';
-import { FileViewer } from '@/capabilities/files/components/FileViewer';
-import type { FileEntry } from '@/capabilities/files';
+import { FileBrowser, FileViewer, type FileEntry } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 interface SelectedFile { path: string; filename: string; size: number; }
