@@ -3,12 +3,12 @@ import { render, screen } from '@testing-library/react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
 describe('composer token wiring', () => {
-  it('binds web field font-size class to --composer-font-size', () => {
+  it('binds web field font-size class to --terminal-capsule-font-size', () => {
     render(<TerminalCapsule experience="web" sendText={() => {}} />);
     const input = screen.getByTestId('capsule-ghost-input');
-    expect(input.className).toMatch(/composer-font-size/);
-    expect(input.className).toMatch(/composer-text-line-height/);
-    expect(input.className).not.toMatch(/text-\[length:var\(--composer-line-height\)\]/);
+    expect(input.className).toMatch(/terminal-capsule-font-size/);
+    expect(input.className).toMatch(/terminal-capsule-text-line-height/);
+    expect(input.className).not.toMatch(/text-\[length:var\(--terminal-capsule-line-height\)\]/);
   });
 
   it('remaps app experience on shell and keeps full-width flat field', () => {

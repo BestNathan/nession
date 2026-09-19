@@ -24,7 +24,7 @@ export const touchTarget = {
 export const shell = {
   iconButtonSize: 44,
 } as const;
-export const composer = {
+export const terminalCapsule = {
   fontSize: "1rem",
   textLineHeight: "1.5rem",
   lineHeight: "1.5rem",
@@ -74,6 +74,6 @@ export const composer = {
   shellSafeArea: "env(safe-area-inset-bottom, 0px)",
 } as const;
 export const motion = {
-  composer: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
+  terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
 export const dockTarget = 28 as const;
