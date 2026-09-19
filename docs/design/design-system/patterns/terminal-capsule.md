@@ -6,17 +6,17 @@ The TerminalCapsule is Nession's lightweight contextual interaction surface over
 
 It is designed to let the user express intent without turning the Terminal into a dashboard. The capsule is conversational first, extensible second, and always subordinate to the work happening in the Terminal.
 
-> **Decision (2026-09-16, #748): capability state is expressed inside the `+` expansion, not on the resting capsule.**
-> The resting state is identical whether or not a capability is active; the `+` expansion is the single place
-> capability presence appears, marking the capabilities that are relevant or active. This **revises** the `active`
-> row of the capability table below, which previously permitted presence "directly on or next to the capsule".
-> The revision is deliberate, not compliance: the shipped implementation rendered that presence and was
-> compliant with the old table. The owner's judgement was that a chip on the resting capsule reads as clutter;
-> the capsule's job at rest is intent, and capability state is a secondary question the user asks explicitly.
+> **Decision update (2026-09-19): #748 still governs the resting capsule, but no longer defines the whole capability surface.**
+> The resting capsule remains identical across capability states: no permanent capability chips or one-button-per-extension chrome.
+> The `+` expansion remains the explicit Nession capability entry. However, once a capability is selected, triggered, or earns
+> contextual presence, Nession may materialize a temporary **Signal** or **Peek** adjacent to the capsule. Rich/full capability
+> state then deepens into Workspace.
 >
-> Five other documents encode the superseded assumption, and all were updated in the same change —
-> `interaction/web.md`, `interaction/app.md`, `terminal-surface.md`, `surface-switcher.md`,
-> `information-architecture.md`. Leaving any of them would let the next reader cite one to restore the chip.
+> The stable rule is:
+>
+> **Resting capsule stays minimal. Capability state may progressively emerge around it, then deepen into Workspace.**
+>
+> See [progressive capability disclosure](../../capability-emergence.md).
 
 > **Contract:** `design/contracts/patterns/terminal-capsule.json` — measurable layout rules ([contracts.md](../contracts.md)).
 
@@ -27,8 +27,9 @@ The capsule provides one quiet place for high-level interaction with the current
 - conversational / natural-language intent;
 - direct terminal input where appropriate;
 - commands and shortcuts;
-- explicit `+` expansion for secondary actions and for capability state;
-- lightweight presence and actions from capabilities that are relevant or active now, expressed through that expansion.
+- explicit `+` expansion as the Nession capability entry;
+- lightweight capability Signal/Peek surfaces that may emerge after selection or contextual relevance;
+- context-preserving deepening from Terminal into Workspace for full capability state.
 
 The capsule is **not** a permanent toolbar or a feature catalog. A registered capability does not receive a button simply because it exists.
 
@@ -37,8 +38,8 @@ The capsule is **not** a permanent toolbar or a feature catalog. A registered ca
 The capsule implements three root Principles directly:
 
 1. **Show only what matters now.** The resting state stays minimal — and identical across capability states.
-2. **Let capabilities emerge from context.** Relevant/active capabilities gain presence in the `+` expansion, which the user opens deliberately.
-3. **Prefer progressive disclosure.** The first layer shows intent; presence and deeper controls open explicitly.
+2. **Let capabilities emerge from context.** Relevant/active capabilities may be discovered through `+`, then project only the amount of state justified by the current work.
+3. **Prefer progressive disclosure.** The first layer shows intent; Signal and Peek remain lightweight; full capability interaction belongs in Workspace.
 
 ## Anatomy
 
@@ -58,10 +59,11 @@ The exact ordering is experience-specific. The semantic regions are:
 |------|------|
 | Capsule shell | Quiet floating surface anchored to the current Session |
 | Primary input | Conversational / intent input; the main interaction |
-| `+` / expansion affordance | Explicit entry to secondary contextual capabilities and actions, **and the single place capability state is expressed**. Lists the reachable capabilities and marks the ones that are relevant or active, so one control covers a growing set and the resting capsule never grows with it |
-| Capability presence | Identity/state for a capability that has earned relevance or is active, rendered **inside the `+` expansion** as a leading marker plus full-contrast text — never on the resting capsule |
+| `+` / expansion affordance | Explicit entry to Nession capabilities. It keeps the resting capsule stable while allowing the reachable/relevant capability set to grow without one permanent button per extension |
+| Capability Signal | Minimal current-state projection that explains why a capability matters now; temporary and subordinate to Terminal |
+| Capability Peek | Small Session-scoped summary opened from a Signal or capability entry; intentionally incomplete and usually offers a path into Workspace |
 | Primary action | Send / execute current intent |
-| Secondary actions | Contextual commands, paste/copy, physical keys, history, and extension-provided actions |
+| Terminal-local accessory | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view |
 
 ## Contextual capability presence
 
@@ -71,50 +73,64 @@ Capabilities follow the lifecycle defined in [product-model.md](../../product-mo
 unavailable -> available -> relevant -> active
 ```
 
-Capsule behavior:
+Lifecycle is separate from disclosure depth:
 
-| Capability state | Capsule behavior |
-|------------------|------------------|
-| `unavailable` | Hidden; not listed in the `+` expansion |
-| `available` | Listed in the capsule's `+` expansion, unmarked, without taking a slot on the resting capsule |
-| `relevant` | Listed in `+` and marked, and may appear as a contextual action |
-| `active` | Listed in `+` and marked with its lightweight identity/state; may expose deeper state on request |
+```text
+Dormant -> Signal -> Peek -> Workspace
+```
 
-The resting capsule is byte-for-byte the same in all four states. Capability state changes only what the `+`
-expansion contains.
+See [capability-emergence.md](../../capability-emergence.md).
+
+The resting capsule is identical across lifecycle states. A capability may change what `+` contains, but the capsule does not grow permanent capability chrome.
+
+Typical progression:
+
+| Depth | TerminalCapsule behavior |
+|-------|--------------------------|
+| Dormant | No capability surface |
+| Signal | Small read-only/current-state projection adjacent to the capsule |
+| Peek | Compact Session-scoped summary with a clear path deeper |
+| Workspace | Full capability surface; outside the capsule |
 
 The capsule should not render a row of installed extensions.
 
-### Example: Claude Code
+### Example: Git
 
 ```text
-Shell only
-  -> neutral capsule
+Git available
+  -> neutral resting capsule
 
-Claude Code becomes active in this Session
-  -> the resting capsule is unchanged
-  -> `+` now marks Claude Code and exposes its actions for this Session
-  -> tapping that entry may open a deeper Session-scoped capability surface
-  -> closing the surface returns to the same Terminal
+user opens + and selects Git
+  -> compact Signal: feature/capsule · worktree capsule · 3 changed
+
+user asks for more
+  -> Peek: branch/worktree, staged/unstaged, ahead/behind, short changed-file summary
+
+Open Workspace
+  -> full Git surface: diff, staging, commit history, branches, worktrees
 ```
 
-Claude Code is a reference integration. The pattern must remain generic enough for Codex, OpenCode, Git, debugging, databases, Kubernetes, and other contextual capabilities.
+The same model must remain generic enough for Claude Code, Codex, OpenCode, debugging, databases, Kubernetes, and other contextual capabilities.
 
 ## Progressive disclosure
 
-The capsule should reveal complexity in layers:
+The capsule participates in, but does not own, the complete capability UI.
 
 ```text
 resting capsule
-    ↓ user types
-intent
-    ↓ explicit + / capability action
-contextual action surface, with marked capability state
-    ↓ explicit deeper request
-capability-specific panel / overlay / pushed view
+    ↓ + / context
+capability entry
+    ↓ select / contextual emergence
+Signal
+    ↓ ask for more
+Peek
+    ↓ Open Workspace
+full capability surface
 ```
 
-Deeper configuration, long history, complex forms, and full capability UIs do not belong permanently inside the capsule.
+Signal/Peek should answer what matters **now**. Full history, management, configuration, large diffs, graphs, forms, and complex multi-step workflows belong in Workspace.
+
+A Terminal-local capability such as Terminal Keys may stop at an interactive accessory and have no Workspace projection.
 
 ## Input modes
 
@@ -138,9 +154,9 @@ Web and App share the same semantic capsule model while presentation may differ.
 |--|-----|-----|
 | Placement | Floating over/inside Terminal well, usually centered with a bounded max width | Floating inset surface respecting safe area and thumb reach |
 | Primary interaction | Conversational / intent input | Conversational / intent input |
-| Secondary expansion | `+`, keyboard/command entry, contextual actions | `+`, touch actions, command/physical-key mode as needed |
-| Capability presence | Same semantic state | Same semantic state |
-| Deeper capability UI | Overlay, panel, popover, or contextual surface chosen by Nession | Overlay, sheet, or pushed surface chosen by Nession |
+| Secondary expansion | `+` as capability entry; compact Signal/Peek density | `+` as capability entry; touch-native Signal/Peek |
+| Capability presence | Same lifecycle/disclosure semantics | Same lifecycle/disclosure semantics |
+| Deeper capability UI | Workspace surface with preserved Session/resource context | Workspace spatial layer/push with preserved Session/resource context |
 
 Do not fork capability semantics by viewport. Experience-specific presentation is allowed; product meaning is shared.
 
@@ -152,7 +168,7 @@ Derived from [`PRINCIPLE.md`](../../../../PRINCIPLE.md) and [visual-language.md]
 
 - The current work remains visually dominant.
 - The capsule is refined and clearly interactive, but it must not outshine Terminal output in the resting state.
-- Active capability presence is intentionally lightweight and lives behind `+` until the user asks for more.
+- Capability presence is intentionally lightweight. The resting capsule stays neutral; Signal/Peek may emerge temporarily after selection or contextual relevance.
 
 ### Quality through precision
 
@@ -170,8 +186,8 @@ Minimal does not mean bare or unfinished.
 ### Information hierarchy
 
 - **Primary:** user's current intent/input.
-- **Secondary:** send/execute, and the `+` expansion through which an active capability's presence is reached.
-- **Tertiary:** history, copy/paste, commands, shortcuts, and other actions revealed contextually.
+- **Secondary:** send/execute and the `+` capability entry.
+- **Tertiary:** temporary Signal/Peek projections and Terminal-local accessories.
 
 ### Surface treatment
 
@@ -186,6 +202,8 @@ Minimal does not mean bare or unfinished.
 - A toolbar that keeps growing as Nession gains features.
 - Automatically opening a full capability panel because a tool was merely detected.
 - Treating `+` as a static feature menu unrelated to the current context.
+- Duplicating native copy/paste/selection actions as Nession capabilities.
+- Reproducing full Git/Claude/Workspace capability clients inside the Terminal Peek.
 - Multiple competing primary actions in the resting capsule.
 - Capability-specific colors/layouts that fragment Nession's visual language.
 - Large persistent chrome that reduces the Terminal viewport.
@@ -200,7 +218,9 @@ The capsule and Workspace are complementary:
 
 A capability may therefore be discoverable in Workspace before it earns Session-level presence.
 
-See [workspace.md](../../workspace.md).
+When Terminal presence is earned, Nession should deepen through Signal → Peek → Workspace while preserving context.
+
+See [workspace.md](../../workspace.md) and [capability-emergence.md](../../capability-emergence.md).
 
 ## Implementation migration
 
