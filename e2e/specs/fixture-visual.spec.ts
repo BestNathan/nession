@@ -104,6 +104,25 @@ test.describe('App 390×844', () => {
     });
   });
 
+  // #838: a capability emerging beside the capsule. It had no fixture route
+  // until the capsule rendered in one — `terminal ?? <TerminalRegion/>` meant
+  // neither fixture drew a composer at all.
+  test('Capability Signal on the Terminal', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await waitForFixtureTerminal(page);
+
+    await page.getByTestId('capsule-capability-more').click();
+    await page.getByTestId('capsule-capability-picker-git').click();
+
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
+    await expect(page.getByTestId('git-signal-body')).toContainText('worktree: nession-capsule');
+
+    await expect(page).toHaveScreenshot('app-capability-signal.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
   test('Sessions spatial page', async ({ page }) => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-sessions').first().click();

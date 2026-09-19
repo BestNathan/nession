@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps } from 'react';
 import { ShellMain } from '@/app/ShellMain';
 import { Sidebar } from '@/app/Sidebar';
 import { SessionDrawer } from '@/app/SessionDrawer';
@@ -6,7 +6,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { Session } from '@/types';
 
 type SidebarProps = ComponentProps<typeof Sidebar>;
-type MainProps = ComponentProps<typeof ShellMain>;
+export type MainProps = ComponentProps<typeof ShellMain>;
 
 export interface WebLayoutProps {
   /** Above the `lg` breakpoint the sidebar is a column; below it, an overlay. */
@@ -22,8 +22,8 @@ export interface WebLayoutProps {
   /** Everything the work region needs except what differs per experience. */
   mainShared: Omit<MainProps, 'surface' | 'onOpenDrawer' | 'terminal'>;
   surface: Surface;
-  /** Fixture/testing override for the terminal surface; see ShellMain. */
-  terminal?: ReactNode;
+  /** Fixture/testing override for the terminal; see `ShellMain.terminal`. */
+  terminal?: MainProps['terminal'];
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AppSpatialShell,
   type SpatialPageIndex,
@@ -15,7 +15,9 @@ import { ShellMain } from '@/app/ShellMain';
 import { Sidebar } from '@/app/Sidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
+import { gitApi } from '@/capabilities/git';
 import { fixtureFileOps } from './fixtureFileOps';
+import { fixtureGitSurface } from './fixtureGit';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
 // FixtureWorkspace's fixtureOps).
@@ -28,6 +30,13 @@ const fixtureOps = fixtureFileOps();
  * No network. Also the Phase 6 baseline source.
  */
 export function FixtureApp() {
+  // A capability projection has to be reachable from a fixture to be captured,
+  // and until #838 the capsule did not render here at all. This stub is what
+  // lets a Signal draw real content offline; installed for the route's lifetime
+  // and released on unmount. Nothing emerges by default, so the canonical
+  // screenshots are unaffected unless a case opens one.
+  useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+
   const [spatialIndex, setSpatialIndex] = useState<SpatialPageIndex>(1);
   // Surface derives from the pager position — page 2 is the workspace,
   // every other position is the terminal page.
@@ -113,11 +122,11 @@ export function FixtureApp() {
               experience="app"
               onOpenDrawer={() => setSpatialIndex(0)}
               onOpenWorkspace={() => setSpatialIndex(2)}
-              terminal={
+              terminal={(chrome) => (
                 <div className="relative h-full">
-                  <FixtureTerminal />
+                  <FixtureTerminal chrome={chrome} />
                 </div>
-              }
+              )}
             />
           </div>
         }

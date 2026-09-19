@@ -1,7 +1,6 @@
-import type { ReactNode } from 'react';
 import { SpatialLayout } from '@/app/experiences/app/SpatialLayout';
 import { useAppSpatialIndex } from '@/app/experiences/app/useAppSpatialIndex';
-import { WebLayout } from '@/app/experiences/web/WebLayout';
+import { WebLayout, type MainProps } from '@/app/experiences/web/WebLayout';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -46,11 +45,12 @@ export interface WorkspaceRegionProps {
   showDetail: boolean;
   onBackToSessions?: () => void;
   /**
-   * Fixture/testing override for the terminal surface. Defaults to the real
-   * attached terminal. Applies only to the wide (non-spatial) render path;
-   * the spatial layout always uses the real terminal.
+   * Fixture/testing override for the terminal. Defaults to the real attached
+   * terminal. Applies only to the wide (non-spatial) render path; the spatial
+   * layout always uses the real terminal. See `ShellMain.terminal` for the node
+   * and function forms.
    */
-  terminal?: ReactNode;
+  terminal?: MainProps['terminal'];
 }
 
 export function WorkspaceRegion(props: WorkspaceRegionProps) {

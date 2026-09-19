@@ -11,6 +11,7 @@ import {
   DEFAULT_FONT_SIZE,
 } from '@/platform/terminal-runtime/instance/TerminalInstance';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
+import type { TerminalChrome } from '@/app/ShellMain';
 
 const FIXTURE_BUFFER = [
   '$ git status --short',
@@ -39,6 +40,12 @@ const FIXTURE_BUFFER = [
  * `capsuleExperience` inside the surface follows the viewport, so one fixture
  * yields the web and app variants as the contract matrix iterates viewports.
  *
+ * The capsule's capability contribution is handed in by the shell rather than
+ * resolved here, so the fixture shows the same entry a real Session does. It
+ * used to render with none, which meant the canonical screens showed a composer
+ * no user with a Session ever sees — and left a capability projection with
+ * nowhere in the fixture to open from (#838).
+ *
  * `inputDisabled={false}` is deliberate: `disabled` reaches the capsule's
  * Buttons, which style as `disabled:opacity-50`, so a disabled capsule would
  * render half-transparent and the baselines would capture a state no user
@@ -51,7 +58,7 @@ const FIXTURE_BUFFER = [
  * — and cell metrics follow the font, so the terminal's cols/rows would be
  * measured against the wrong one.
  */
-export function FixtureTerminal() {
+export function FixtureTerminal({ chrome }: { chrome?: TerminalChrome }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,7 +122,12 @@ export function FixtureTerminal() {
   }, []);
 
   return (
-    <TerminalSurface inputDisabled={false} controller={null}>
+    <TerminalSurface
+      inputDisabled={false}
+      controller={null}
+      capsuleCapabilities={chrome?.capsuleCapabilities}
+      capsuleProjection={chrome?.capsuleProjection}
+    >
       <div data-testid="fixture-terminal" ref={ref} className="h-full w-full" />
     </TerminalSurface>
   );
