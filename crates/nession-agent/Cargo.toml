@@ -27,6 +27,9 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+# The extension registry's composition errors are a typed enum: callers match
+# on which conflict occurred, and the messages name both sides of it.
+thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 async-trait.workspace = true

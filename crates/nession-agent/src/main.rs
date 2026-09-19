@@ -206,11 +206,19 @@ async fn main() -> Result<()> {
                 Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux_for_client))),
             )),
         ];
-        let ext_registry = if extensions.is_empty() {
-            None
-        } else {
-            Some(Arc::new(ExtensionRegistry::new(extensions)))
-        };
+        // Composition is a boundary, so it is allowed to fail — and this is
+        // where the process says so rather than starting with a registry that
+        // silently dropped a provider.
+        //
+        // The `is_empty` guard that used to stand here could never fire: the vec
+        // above is a non-empty literal, so its `None` branch was unreachable
+        // code standing in for a check that did not exist. `ServerClient` still
+        // takes an `Option`, because callers that compose no extensions — the
+        // CLI, and most tests — legitimately have none; this path always does.
+        let ext_registry = Arc::new(
+            ExtensionRegistry::new(agent_id.clone(), extensions)
+                .context("cannot compose this agent's protocol providers")?,
+        );
 
         let server_client = ServerClient::new(
             &config.server_url,
@@ -225,7 +233,7 @@ async fn main() -> Result<()> {
             metadata,
             tmux_for_client,
             config.default_working_dir.clone(),
-            ext_registry,
+            Some(ext_registry),
         );
 
         // Attempt to connect with a timeout so the agent can still serve

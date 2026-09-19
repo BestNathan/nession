@@ -195,6 +195,19 @@ generated.
 | Highest common version, not newest | `select_version` |
 | Compatibility is never read from a software version | the resolver takes no version; pinned by a test |
 | A unit with no common version does not kill the connection | `ProtocolError::is_unit_scoped` |
+| Two providers cannot claim one wire type or one protocol | `ExtensionRegistry::new` → `RegistryError`, naming both claimants |
+| An extension that declares nothing is a composition mistake | the same function |
+| What is routed is what is advertised | the routes are *derived* from the descriptors — there is no second list |
+
+### What "derived" buys over "checked"
+
+The design lists *provider advertises no handler* and *handler exists but not
+advertised* as startup failures. Both are failures only while the advertised set
+and the routed set are two lists. `ExtensionRegistry` builds its routing table
+**from** the descriptors, so the two sets are one set and neither state is
+constructible. That is a stronger guarantee than detecting either after the
+fact — and it is why `AgentExtension` declares descriptors rather than the
+`message_types()` it used to, which nothing tied to the provider's own dispatch.
 
 ## Related
 

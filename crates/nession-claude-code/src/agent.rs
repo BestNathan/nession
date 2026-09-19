@@ -19,6 +19,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use nession_common::extension::AgentExtension;
+use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::debug;
@@ -189,9 +190,12 @@ impl AgentExtension for ClaudeCodeAgentExtension {
         "claude_code"
     }
 
-    /// Each wire type is named once, in the contract that owns it.
-    fn message_types(&self) -> &'static [&'static str] {
-        &[list::v1::WIRE, read::v1::WIRE]
+    /// The contracts this provider offers, from the module that owns them.
+    ///
+    /// The registry derives its routing table from these, so there is no second
+    /// list to drift: the advertised set and the routed set are the same set.
+    fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+        crate::protocol::descriptors()
     }
 
     /// Dispatch on the **command suffix**, which for this provider is not the
@@ -230,9 +234,19 @@ mod tests {
     }
 
     #[test]
-    fn the_advertised_message_types_are_the_contracts_own_wire_types() {
-        let extension = ClaudeCodeAgentExtension::new();
-        assert_eq!(extension.message_types(), &[list::v1::WIRE, read::v1::WIRE]);
+    fn the_advertised_wire_types_are_the_contracts_own() {
+        // "Advertised" and "routed" are one set now — the registry derives its
+        // table from these — so this asserts the set is what the contracts name.
+        let advertised: Vec<String> = ClaudeCodeAgentExtension::new()
+            .descriptors()
+            .unwrap()
+            .into_iter()
+            .flat_map(|d| d.contracts.into_iter().flat_map(|c| c.wire))
+            .collect();
+        assert_eq!(
+            advertised,
+            vec![list::v1::WIRE.to_string(), read::v1::WIRE.to_string()]
+        );
     }
 
     #[test]

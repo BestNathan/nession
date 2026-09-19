@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nession_common::extension::AgentExtension;
+use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
@@ -283,22 +284,12 @@ impl AgentExtension for GitAgentExtension {
         "git"
     }
 
-    /// Each wire type is named **once**, in the contract that owns it.
+    /// The contracts this provider offers, from the module that owns them.
     ///
-    /// This used to be a literal list here plus a second list of bare suffixes
-    /// in the dispatch below, linked by nothing. Now the list borrows the
-    /// contracts' own `WIRE` constants and the dispatch matches on their `ID`
-    /// constants, and `the_wire_projection_strips_to_the_protocol_id` asserts
-    /// the relation the registry silently depends on.
-    fn message_types(&self) -> &'static [&'static str] {
-        &[
-            crate::protocol::status::v1::WIRE,
-            crate::protocol::diff::v1::WIRE,
-            crate::protocol::root::v1::WIRE,
-            crate::protocol::log::v1::WIRE,
-            crate::protocol::branches::v1::WIRE,
-            crate::protocol::worktrees::v1::WIRE,
-        ]
+    /// The registry derives its routing table from these, so there is no second
+    /// list to drift: the advertised set and the routed set are the same set.
+    fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+        crate::protocol::descriptors()
     }
 
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
@@ -355,12 +346,21 @@ mod tests {
     }
 
     #[test]
-    fn the_advertised_message_types_are_the_contracts_own_wire_types() {
-        // The list is what the registry routes on and what a manifest is built
-        // from; a contract that exists but is missing here is one nobody can
-        // reach, and one listed but absent is a message type nothing handles.
-        let advertised = extension().message_types().to_vec();
-        let expected: Vec<&str> = contracts().into_iter().map(|(wire, _)| wire).collect();
+    fn the_advertised_wire_types_are_the_contracts_own() {
+        // The registry routes on these and the manifest is built from them, so
+        // "advertised" and "routed" are one set. This asserts the set is the
+        // one the contracts name — a contract missing from `descriptors()` is
+        // one nobody can reach.
+        let advertised: Vec<String> = extension()
+            .descriptors()
+            .unwrap()
+            .into_iter()
+            .flat_map(|d| d.contracts.into_iter().flat_map(|c| c.wire))
+            .collect();
+        let expected: Vec<String> = contracts()
+            .into_iter()
+            .map(|(wire, _)| wire.to_string())
+            .collect();
         assert_eq!(advertised, expected);
     }
 
