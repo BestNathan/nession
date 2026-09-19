@@ -2005,6 +2005,7 @@ dependencies = [
  "futures-util",
  "nession-agent",
  "nession-common",
+ "nession-protocol",
  "rand 0.8.7",
  "rustls 0.22.4",
  "rustls-pemfile",

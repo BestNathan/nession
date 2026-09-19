@@ -32,6 +32,7 @@ fn test_agent_register_payload_serialization() {
         display_name: None,
         connect_url: Some("wss://agent.example.com/ws".to_string()),
         addresses: vec![],
+        protocol_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -40,6 +41,107 @@ fn test_agent_register_payload_serialization() {
     assert_eq!(decoded.hostname, "server1");
     assert_eq!(decoded.port, 9090);
     assert_eq!(decoded.connect_url.unwrap(), "wss://agent.example.com/ws");
+}
+
+#[test]
+fn a_pre_678_agent_registers_exactly_as_it_always_did() {
+    // #678 put the manifest in `agent.register` rather than a separate discovery
+    // message, and the design's condition for that was that an old agent's
+    // register still parses. This is that condition, as a test: the payload has
+    // no `protocol_manifest` key at all.
+    let from_an_old_agent = serde_json::json!({
+        "agent_id": "legacy",
+        "hostname": "old-box",
+        "ip_address": "10.0.0.9",
+        "port": 8080,
+        "auth_token": "tok",
+        "metadata": {
+            "tmux_version": "3.3",
+            "os_version": "Linux",
+            "nession_version": "0.30.0",
+            "image_tag": "test"
+        },
+        "protocol_version": "1.0",
+    });
+
+    let decoded: AgentRegisterPayload = serde_json::from_value(from_an_old_agent).unwrap();
+    assert_eq!(decoded.agent_id, "legacy");
+    assert!(
+        decoded.protocol_manifest.is_none(),
+        "an absent manifest means Legacy Peer — never 'supports everything'"
+    );
+}
+
+#[test]
+fn an_absent_manifest_is_omitted_from_the_wire_rather_than_null() {
+    // `null` would read as "this agent has a manifest and it is empty", which is
+    // a different claim from "this agent predates manifests". The server
+    // resolves the two differently, so the wire must distinguish them.
+    let payload = AgentRegisterPayload {
+        agent_id: "a".to_string(),
+        hostname: "h".to_string(),
+        ip_address: "1.2.3.4".to_string(),
+        port: 8080,
+        auth_token: "t".to_string(),
+        metadata: AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        },
+        protocol_version: "1.0".to_string(),
+        display_name: None,
+        connect_url: None,
+        addresses: vec![],
+        protocol_manifest: None,
+    };
+
+    let json = serde_json::to_value(&payload).unwrap();
+    assert!(json.get("protocol_manifest").is_none(), "got {json}");
+}
+
+#[test]
+fn a_manifest_rides_along_in_the_register_payload() {
+    // The composed manifest, as an agent would send it. One unit, one version —
+    // and the version comes back as an integer, so a peer reading this in any
+    // language sees the same thing.
+    let manifest: nession_protocol::ProtocolManifest = serde_json::from_value(serde_json::json!({
+        "provider": "agent-1",
+        "protocols": { "git.status": { "versions": [1] } }
+    }))
+    .unwrap();
+
+    let payload = AgentRegisterPayload {
+        agent_id: "agent-1".to_string(),
+        hostname: "h".to_string(),
+        ip_address: "1.2.3.4".to_string(),
+        port: 8080,
+        auth_token: "t".to_string(),
+        metadata: AgentMetadata {
+            tmux_version: "3.3".to_string(),
+            os_version: "Linux".to_string(),
+            nession_version: "0.1.0".to_string(),
+            image_tag: "test".to_string(),
+        },
+        protocol_version: "1.0".to_string(),
+        display_name: None,
+        connect_url: None,
+        addresses: vec![],
+        protocol_manifest: Some(manifest),
+    };
+
+    let json = serde_json::to_value(&payload).unwrap();
+    assert_eq!(
+        json["protocol_manifest"]["protocols"]["git.status"]["versions"][0],
+        1
+    );
+
+    let decoded: AgentRegisterPayload = serde_json::from_value(json).unwrap();
+    let manifest = decoded
+        .protocol_manifest
+        .expect("the manifest survives the round trip");
+    let id = nession_protocol::ProtocolId::new("git.status").unwrap();
+    assert!(manifest.offers(&id), "and still names the unit it carried");
 }
 
 #[test]
@@ -73,6 +175,7 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
                 priority: 30,
             },
         ],
+        protocol_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -137,6 +240,7 @@ fn test_agent_register_payload_without_connect_url() {
         display_name: None,
         connect_url: None,
         addresses: vec![],
+        protocol_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -359,6 +463,7 @@ fn test_message_wrapped_in_protocol_envelope() {
             display_name: None,
             connect_url: None,
             addresses: vec![],
+            protocol_manifest: None,
         },
     };
 
