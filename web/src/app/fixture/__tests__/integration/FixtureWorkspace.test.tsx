@@ -66,4 +66,25 @@ describe('FixtureWorkspace', () => {
 
     expect(screen.queryByTestId('workspace-tool-claude-code')).not.toBeInTheDocument();
   });
+
+  it('keeps Git out of direct chrome on the canonical route', () => {
+    // Presence is earned, not granted: registering Git must not grow the dock,
+    // which is also why the golden screenshots do not move.
+    renderFixture('/fixture/workspace');
+
+    expect(screen.queryByTestId('workspace-tool-git')).not.toBeInTheDocument();
+  });
+
+  it('renders the Git view when the route opens it', async () => {
+    renderFixture('/fixture/workspace?capability=git');
+
+    // The stub stands in for the agent, so this is the real view over canned
+    // answers — which is what makes the e2e assertions about it meaningful.
+    expect(await screen.findByTestId('git-workspace')).toBeInTheDocument();
+    // The listing is what the status answer produces; waiting for it is what
+    // makes the header assertions below about a resolved state, not a pending one.
+    await screen.findByTestId('git-change-list');
+    expect(screen.getByTestId('git-branch')).toHaveTextContent('feat/repo-status');
+    expect(screen.getByTestId('git-summary')).toHaveTextContent('2 ahead, 1 behind');
+  });
 });

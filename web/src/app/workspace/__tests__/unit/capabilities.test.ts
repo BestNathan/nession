@@ -30,11 +30,27 @@ function snapshotFor(id: CapabilityId, ctx: WorkspaceContext) {
 describe('workspace capability providers', () => {
   it('registers every workspace capability once, in a stable order', () => {
     // One registry, no compatibility path: Files/Session/Agent/Env each state
-    // what they are, and Claude Code joins them through the same provider shape
-    // even though its state comes from observation rather than environment.
+    // what they are, and Claude Code and Git join them through their own
+    // provider shapes — observation for one, the Session alone for the other.
     const registry = createWorkspaceCapabilityRegistry(workspaceContext());
 
-    expect(registry.listIds()).toEqual(['files', 'session', 'agent', 'env', 'claude-code']);
+    expect(registry.listIds()).toEqual([
+      'files',
+      'session',
+      'agent',
+      'env',
+      'claude-code',
+      'git',
+    ]);
+  });
+
+  it('reports Git as available for a Session and unavailable without one', () => {
+    // Presence deliberately does not guess whether the directory is a
+    // repository — that answer costs a round trip and belongs to the view, so
+    // #750 SC4's four failure states stay reachable instead of collapsing into
+    // a hidden capability.
+    expect(snapshotFor('git', workspaceContext())?.state).toBe('available');
+    expect(snapshotFor('git', workspaceContext({ session: null }))?.state).toBe('unavailable');
   });
 
   it('resolves scope from the workspace context, not from the provider', () => {

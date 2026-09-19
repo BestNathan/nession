@@ -1,5 +1,6 @@
 import { FileCog, FileText, Settings2, UserRound, type LucideIcon } from 'lucide-react';
 import { claudeCodeView } from '@/capabilities/claude-code';
+import { gitView } from '@/capabilities/git';
 import { APP_WORKSPACE_VIEWS } from '../experiences/app/workspaceViews';
 import { WEB_WORKSPACE_VIEWS } from '../experiences/web/workspaceViews';
 import type { WorkspaceViewBinding, WorkspaceViewId } from './workspaceContext';
@@ -31,9 +32,9 @@ const WORKSPACE_VIEWS: readonly { id: WorkspaceViewId; icon: LucideIcon }[] = [
  *
  * Two kinds sit here, and the difference is the point. The four above differ
  * per experience, so each experience supplies half of the binding. Claude Code
- * draws the same view in both, so it contributes its binding whole
- * (`capabilities/claude-code/contribution.tsx`) — a capability whose view has
- * no experience difference does not need the app layer to write one for it.
+ * and Git draw the same view in both, so they contribute their binding whole
+ * (`capabilities/<name>/contribution.tsx`) — a capability whose view has no
+ * experience difference does not need the app layer to write one for it.
  */
 export const WORKSPACE_VIEW_BINDINGS: readonly WorkspaceViewBinding[] = [
   ...WORKSPACE_VIEWS.map(({ id, icon }) => ({
@@ -42,4 +43,5 @@ export const WORKSPACE_VIEW_BINDINGS: readonly WorkspaceViewBinding[] = [
     layout: { web: WEB_WORKSPACE_VIEWS[id], app: APP_WORKSPACE_VIEWS[id] },
   })),
   claudeCodeView,
+  gitView,
 ];
