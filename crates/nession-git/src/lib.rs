@@ -33,6 +33,7 @@ pub mod branches;
 pub mod cmd;
 pub mod diff;
 pub mod log;
+pub mod protocol;
 pub mod security;
 pub mod status;
 pub mod worktrees;

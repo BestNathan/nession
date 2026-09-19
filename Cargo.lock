@@ -1877,6 +1877,7 @@ dependencies = [
  "nession-claude-code",
  "nession-common",
  "nession-git",
+ "nession-protocol",
  "nession-server",
  "portable-pty",
  "rand 0.8.7",
@@ -1904,6 +1905,7 @@ dependencies = [
  "chrono",
  "dirs",
  "nession-common",
+ "nession-protocol",
  "serde",
  "serde_json",
  "tempfile",
@@ -1956,6 +1958,7 @@ dependencies = [
  "dirs",
  "hostname",
  "libc",
+ "nession-protocol",
  "serde",
  "serde_json",
  "tempfile",
@@ -1974,11 +1977,21 @@ dependencies = [
  "anyhow",
  "async-trait",
  "nession-common",
+ "nession-protocol",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "nession-protocol"
+version = "0.35.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

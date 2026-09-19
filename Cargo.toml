@@ -3,6 +3,7 @@ members = [
     "crates/nession-claude-code",
     "crates/nession-common",
     "crates/nession-git",
+    "crates/nession-protocol",
     "crates/nession-server",
     "crates/nession-agent",
     "crates/nession-cli",
