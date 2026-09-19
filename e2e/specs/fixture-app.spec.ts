@@ -43,7 +43,7 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
   await page.goto('/#/fixture/app');
   await expect(page.getByTestId('app-spatial-page-terminal')).toBeInViewport();
 
-  const geometry = () =>
+  const read = () =>
     page.evaluate(() => {
       const host = document.querySelector('[data-terminal-capsule-host]')!;
       const well = document.querySelector('[data-testid="terminal-well"]')!;
@@ -59,6 +59,28 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
       };
     });
 
+  /**
+   * Read only once the numbers have stopped moving.
+   *
+   * The clearance is published by a layout effect and then re-published by a
+   * ResizeObserver, and the spatial pager mounts three pages that settle a
+   * frame or two after the route renders. A single read can therefore catch a
+   * transient value — which is a fault in this test, not in the product: the
+   * claim is about the settled geometry on both sides of the emergence.
+   */
+  const geometry = async () => {
+    let previous = await read();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await page.waitForTimeout(50);
+      const next = await read();
+      if (JSON.stringify(next) === JSON.stringify(previous)) {
+        return next;
+      }
+      previous = next;
+    }
+    return previous;
+  };
+
   const dormant = await geometry();
 
   await page.getByTestId('capsule-capability-more').click();
@@ -67,12 +89,15 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 
   const emerged = await geometry();
 
-  // The work surface is where it was, to the pixel.
-  expect(emerged.well).toBe(dormant.well);
-  expect(emerged.xterm).toBe(dormant.xterm);
+  // The work surface is where it was, to the pixel. Compared with both sides in
+  // the message: a bare mismatch here says nothing about which side moved.
+  expect({ well: emerged.well, xterm: emerged.xterm }).toEqual({
+    well: dormant.well,
+    xterm: dormant.xterm,
+  });
   // …and so is the height the terminal reserves, because a projection floats
   // over the scrollback rather than being laid out beside it.
-  expect(emerged.occlusion).toBe(dormant.occlusion);
+  expect({ occlusion: emerged.occlusion }).toEqual({ occlusion: dormant.occlusion });
   expect(emerged.occlusion).not.toBe('0px');
 
   // Dismissal returns to the same numbers, which is what "continuity" means.
