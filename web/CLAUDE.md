@@ -64,7 +64,13 @@ src/
 │                          #   experiences/{web,app}/ own each experience's
 │                          #   frame and its Workspace layouts
 ├── product/               # Nession product concepts + their Product Patterns
-│                          #   (target owner; see the migration map in web.md)
+│                          #   <concept>/patterns/ holds a component that
+│                          #   implements a named canonical pattern
+│                          #   (docs/design/design-system/patterns/*.md) and its
+│                          #   contract; ordinary feature UI stays in components/.
+│                          #   A pattern whose styling vocabulary is shell chrome
+│                          #   lives in the shell instead — see web.md on
+│                          #   SessionHeader, which the layer rule settled.
 ├── capabilities/          # discoverable / activatable / contributable
 │                          #   capabilities, as vertical slices; one that
 │                          #   contributes to the shell declares it in its own

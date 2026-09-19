@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { renderSlot } from '@/extensions/registry';
-import { AgentDetail } from '@/product/agent/components/AgentDetail';
+import { AgentDetail } from '@/product/agent/patterns/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
 import type { Agent, Session } from '@/types';
 import type { DomainState } from '@/product/session/model/domainState';

@@ -1,5 +1,5 @@
 import { Menu, PanelRight } from 'lucide-react';
-import { ConnectionStatus as SessionConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import { ConnectionStatus as SessionConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import { Button } from '@/components/ui/button';
 import { shellIconButtonClass } from '@/app/shellStyles';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
