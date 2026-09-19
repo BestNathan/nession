@@ -27,13 +27,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-f13a139
+  newTag: agent-ac8ef6f
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-f13a139
+  newTag: server-ac8ef6f
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-f13a139
+  newTag: ui-ac8ef6f
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
