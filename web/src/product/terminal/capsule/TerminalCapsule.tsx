@@ -66,7 +66,11 @@ export function TerminalCapsule({
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRowRef = useRef<HTMLDivElement>(null);
 
-  useCapsuleDockClearance(dockRef);
+  // The shell, not the dock: the dock also carries a capability projection when
+  // one has emerged, and reserving terminal height for a temporary surface
+  // reflows the work surface every time it appears and goes away
+  // (see the hook).
+  useCapsuleDockClearance(shellRef);
 
   const showModeToggle = Boolean(isApp && onModeChange && experienceConfig.inputControls.modeToggle);
   const {
