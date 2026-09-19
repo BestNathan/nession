@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { ShellMain } from '@/app/ShellMain';
+import { ShellMain, type TerminalChrome } from '@/app/ShellMain';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 
@@ -80,6 +80,63 @@ describe('ShellMain', () => {
 
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
     expect(screen.queryByTestId('terminal')).not.toBeInTheDocument();
+  });
+
+  it('hands a function terminal the chrome the shell resolved (#838)', () => {
+    // A supplied terminal draws its own surface — `FixtureTerminal` does — so
+    // what it cannot resolve for itself is the capability contribution. The
+    // shell resolves it here and passes it down; without this the fixture's
+    // capsule had no capability entry, and a projection had nowhere to open
+    // from.
+    // It is a render prop, so it runs on every render of the shell — the
+    // contribution is fresh each time by design, not captured once.
+    let latest: TerminalChrome | undefined;
+    render(
+      <ShellMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        agents={[agent]}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        terminal={(chrome) => {
+          latest = chrome;
+          return <div data-testid="fixture-terminal" />;
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+    // A Session with reachable capabilities yields an entry to open them from.
+    expect(latest?.capsuleCapabilities?.disclosure?.entries.length).toBeGreaterThan(0);
+    // Nothing has emerged, so there is no projection to hand over yet.
+    expect(latest?.capsuleProjection).toBeUndefined();
+  });
+
+  it('still accepts a plain node, which gets no chrome', () => {
+    // The node form replaces the region rather than drawing a surface, so
+    // there is nothing to hand chrome to — and it must not be called as a
+    // function.
+    render(
+      <ShellMain
+        selectedSession={sess}
+        selectedAgent={agent}
+        agents={[agent]}
+        domain={domain}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={vi.fn()}
+        onToolChange={vi.fn()}
+        terminal={<div data-testid="fixture-terminal" />}
+      />,
+    );
+
+    expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-capsule')).not.toBeInTheDocument();
   });
 
   it('falls back to the attached terminal when no override is given', () => {

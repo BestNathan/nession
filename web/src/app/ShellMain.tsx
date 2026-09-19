@@ -3,6 +3,8 @@ import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { TerminalRegion } from '@/app/TerminalRegion';
+import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
+import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import { TerminalWell } from '@/app/TerminalWell';
 import type { CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
@@ -29,10 +31,45 @@ export interface ShellMainProps {
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
   showWorkspace?: boolean;
-  /** Fixture/testing override for the terminal surface. Defaults to the real attached terminal. */
-  terminal?: ReactNode;
+  /**
+   * Fixture/testing override for the terminal. Defaults to the real attached
+   * terminal.
+   *
+   * A node replaces the terminal region; a **function** receives the chrome the
+   * shell resolved — the capsule's capability contribution and any projection —
+   * so a supplied terminal can draw the same surface the product does rather
+   * than a capsule with no capability entry in it (#838).
+   *
+   * It has to be handed down rather than resolved by the caller: the
+   * contribution comes from `useCapsuleCapability` here, and a caller that
+   * rendered its own `TerminalSurface` around the node would nest a second
+   * surface inside this one's.
+   */
+  terminal?: ReactNode | ((chrome: TerminalChrome) => ReactNode);
   /** App experience: the SessionHeader renders no Terminal|Workspace switcher. */
   experience?: Experience;
+}
+
+/**
+ * The capsule chrome the shell resolves, for a caller that supplies a terminal.
+ *
+ * Both fields are optional because a capability contribution is: a Session with
+ * nothing reachable yields none, and a node-rendering caller ignores this
+ * entirely.
+ */
+export interface TerminalChrome {
+  capsuleCapabilities?: CapsuleCapabilityContribution;
+  capsuleProjection?: CapsuleCapabilityProjection;
+}
+
+function renderTerminal(
+  terminal: ShellMainProps['terminal'],
+  chrome: TerminalChrome,
+): ReactNode {
+  if (typeof terminal === 'function') {
+    return terminal(chrome);
+  }
+  return terminal ?? null;
 }
 
 export function ShellMain({
@@ -115,7 +152,10 @@ export function ShellMain({
               <TerminalWell
                 className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
               >
-                {terminal ?? (
+                {renderTerminal(terminal, {
+                  capsuleCapabilities,
+                  capsuleProjection: projection,
+                }) ?? (
                   <TerminalRegion
                     hidden={surface !== 'terminal' || !selectedSession}
                     onDisconnect={() => undefined}
