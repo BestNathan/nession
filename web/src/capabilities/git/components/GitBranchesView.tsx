@@ -137,21 +137,8 @@ function BranchRow({ branch }: { branch: GitBranch }) {
  * being absent is the thing that separates them.
  */
 function BranchTracking({ branch }: { branch: GitBranch }) {
-  const parts: string[] = [];
-  if (branch.upstream) {
-    parts.push(branch.upstream);
-  }
-  if (branch.upstreamGone) {
-    parts.push('upstream deleted');
-  } else {
-    if (branch.ahead > 0) {
-      parts.push(`${branch.ahead} ahead`);
-    }
-    if (branch.behind > 0) {
-      parts.push(`${branch.behind} behind`);
-    }
-  }
-
+  // First, because it is the case the counts cannot express: no upstream and a
+  // level branch both arrive as zero and zero.
   if (!branch.upstream) {
     return (
       <span
@@ -163,12 +150,24 @@ function BranchTracking({ branch }: { branch: GitBranch }) {
     );
   }
 
+  const parts = [branch.upstream];
+  if (branch.upstreamGone) {
+    parts.push('upstream deleted');
+  } else {
+    if (branch.ahead > 0) {
+      parts.push(`${branch.ahead} ahead`);
+    }
+    if (branch.behind > 0) {
+      parts.push(`${branch.behind} behind`);
+    }
+  }
+
   return (
     <span
       data-testid="git-branch-tracking"
-      className="flex items-center gap-2 text-xs text-muted-foreground"
+      className="truncate text-xs text-muted-foreground"
     >
-      <span className="truncate">{parts.join(' · ')}</span>
+      {parts.join(' · ')}
     </span>
   );
 }
