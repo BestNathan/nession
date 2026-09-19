@@ -96,8 +96,21 @@ export const capsuleShellPillRadiusClass = 'rounded-[var(--terminal-capsule-shel
 export const capsuleShellInnerClass =
   'pointer-events-auto w-full overflow-hidden';
 
+/**
+ * Web outer frame — margins, then a bound, then centred.
+ *
+ * `mx-auto` is what centres it: both insets are pinned, so the element's used
+ * width is `min(available, max-width)` and the leftover is split evenly between
+ * the two auto margins. Without the bound the capsule simply filled the
+ * viewport minus margins — ~84rem on a 1440px screen — while
+ * `terminal-capsule.md` §Web vs App says the Web capsule is *"usually centered
+ * with a bounded max width"*, and `experience.web.terminalCapsule.shellMaxWidth`
+ * (42rem, owned by `pattern.terminal-capsule`) sat unused. The token and the
+ * config field both existed; only the render omitted them. The doc is upstream
+ * here, so the code was the convergence debt.
+ */
 export const capsuleShellWebOuterClass =
-  'inset-x-[length:var(--terminal-capsule-shell-margin-x)] flex flex-col items-stretch pointer-events-none';
+  'inset-x-[length:var(--terminal-capsule-shell-margin-x)] max-w-[length:var(--terminal-capsule-shell-max-width)] mx-auto flex flex-col items-stretch pointer-events-none';
 
 export const capsuleShellAppOuterClass =
   'inset-x-[length:var(--terminal-capsule-shell-inset)] flex justify-center pointer-events-none';
