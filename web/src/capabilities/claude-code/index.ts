@@ -10,6 +10,7 @@ export type {
 export {
   CLAUDE_CODE_ID,
   CLAUDE_CODE_TITLE,
+  claudeCodeProjection,
   claudeCodeView,
   resolveClaudeCodeState,
 } from './contribution';

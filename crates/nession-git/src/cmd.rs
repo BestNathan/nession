@@ -34,6 +34,8 @@ use anyhow::{Context, Result};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+use crate::security::MAX_LINE_BYTES;
+
 /// Environment variables that describe a repository we are not addressing.
 /// Stripped from every child so behaviour never depends on inheritance.
 const INHERITED_REPO_VARS: [&str; 6] = [
@@ -251,20 +253,30 @@ impl GitCmd {
         self.run_line(&["--version"]).await.is_ok()
     }
 
-    /// Whether `workdir` is inside a work tree.
+    /// Whether `workdir` is inside a work tree, and the root of it when it is.
     ///
     /// "Not a repository" is an **answer**, not a failure: outside a work tree
     /// git exits 128 with `fatal: not a git repository ...`. Reporting that as
     /// an error would collapse it into the same bucket as a permission problem
     /// or a missing git, and #750 SC4 requires the four states stay tellable
-    /// apart. So that one message becomes `Ok(false)`; anything else propagates.
-    pub async fn is_repository(&self) -> Result<bool> {
-        match self
-            .run(&["rev-parse", "--is-inside-work-tree"], 4096)
-            .await
-        {
-            Ok(out) => Ok(out.stdout_string().trim() == "true"),
-            Err(err) if is_not_a_repository(&err.to_string()) => Ok(false),
+    /// apart. So that one message becomes `Ok(None)`; anything else propagates.
+    ///
+    /// The root comes back from the same probe rather than a second one. Every
+    /// caller needs it — the Workspace header, and the Terminal Signal's
+    /// worktree identity (`capability-emergence.md`) — and asking git twice for
+    /// two facts one command already knows is a second chance to fail.
+    /// `--show-toplevel` fails on exactly the directories `--is-inside-work-tree`
+    /// answers `false` for, so it decides both questions.
+    pub async fn resolve_root(&self) -> Result<Option<PathBuf>> {
+        match self.run(&["rev-parse", "--show-toplevel"], 4096).await {
+            Ok(out) => {
+                let root = out.stdout_string().trim().to_string();
+                if root.len() > MAX_LINE_BYTES {
+                    anyhow::bail!("repository root path is implausibly long");
+                }
+                Ok(Some(PathBuf::from(root)))
+            }
+            Err(err) if is_not_a_repository(&err.to_string()) => Ok(None),
             Err(err) => Err(err),
         }
     }

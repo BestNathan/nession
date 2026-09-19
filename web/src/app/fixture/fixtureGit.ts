@@ -49,8 +49,12 @@ export function fixtureGitSurface(search: string): PluginSurface {
   };
 }
 
+/** The work tree the fixture pretends to be in — a Signal names its basename. */
+const FIXTURE_ROOT = '/Users/dev/code/nession-capsule';
+
 const CLEAN_STATUS: GitStatusResponse = {
   state: 'ok',
+  root: FIXTURE_ROOT,
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -72,6 +76,7 @@ const CLEAN_STATUS: GitStatusResponse = {
  */
 const CHANGED_STATUS: GitStatusResponse = {
   state: 'ok',
+  root: FIXTURE_ROOT,
   truncated: false,
   truncatedBytes: 0,
   status: {

@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import type { DomainState } from '@/product/session/model/domainState';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import { TerminalWell } from '@/app/TerminalWell';
 import type { CapabilityId } from '@/product/capability';
-import type { Experience } from '@/app/workspace/workspaceContext';
+import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
 import { SurfaceSwitcher } from '@/product/workspace/patterns/SurfaceSwitcher';
@@ -53,15 +53,33 @@ export function ShellMain({
   experience = 'web',
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
-  const { facts, capabilities: capsuleCapabilities } = useCapsuleCapability({
+  // What opened the Workspace, when the entry carried something with it. Cleared
+  // when the user opens a capability by any other route — a stale focus would
+  // silently redirect a later visit to whatever they happened to look at before.
+  const [focus, setFocus] = useState<CapabilityFocus | undefined>(undefined);
+  const openTool = useCallback(
+    (id: CapabilityId) => {
+      setFocus(undefined);
+      onToolChange(id);
+    },
+    [onToolChange],
+  );
+  const { facts, capabilities: capsuleCapabilities, projection } = useCapsuleCapability({
     session: selectedSession,
     agent: selectedAgent,
     agents,
     domain,
     fileOps,
     experience,
-    onToolChange,
+    onToolChange: openTool,
     onSurfaceChange: () => onSurfaceChange('workspace'),
+    onOpenWorkspace: (id, resourceId) => {
+      // `#826`: the context that caused the emergence travels with it, so the
+      // Workspace opens on the item rather than on a landing page.
+      setFocus({ capabilityId: id, resourceId });
+      onToolChange(id);
+      onSurfaceChange('workspace');
+    },
   });
 
   return (
@@ -103,6 +121,7 @@ export function ShellMain({
                     onDisconnect={() => undefined}
                     onError={() => undefined}
                     capsuleCapabilities={capsuleCapabilities}
+                    capsuleProjection={projection}
                   />
                 )}
               </TerminalWell>
@@ -119,7 +138,8 @@ export function ShellMain({
                 experience={experience}
                 facts={facts}
                 onSurfaceChange={onSurfaceChange}
-                onToolChange={onToolChange}
+                onToolChange={openTool}
+                focus={focus}
               />
             ) : null}
           </>

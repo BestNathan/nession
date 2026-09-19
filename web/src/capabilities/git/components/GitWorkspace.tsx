@@ -3,26 +3,26 @@ import { GitBranch, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { gitApi } from '../GitPlugin';
-import { describeStatus, describeUnavailable, formatBytes, statusRows } from '../state';
+import { useGitStatus } from '../hooks/useGitStatus';
+import {
+  describeStatus,
+  describeUnavailable,
+  formatBytes,
+  statusRows,
+  worktreeName,
+} from '../state';
 import type { GitDiffResponse, GitStatusResponse } from '../types';
 import { GitChangeList } from './GitChangeList';
 import { GitDiffView } from './GitDiffView';
 
-interface GitWorkspaceState {
-  status: GitStatusResponse | null;
-  loading: boolean;
-  /** A transport failure — distinct from a state the agent answered with. */
-  error: string | null;
+interface GitDiffState {
   selectedPath: string | null;
   diff: GitDiffResponse | null;
   diffLoading: boolean;
   diffError: string | null;
 }
 
-const INITIAL: GitWorkspaceState = {
-  status: null,
-  loading: true,
-  error: null,
+const NO_DIFF: GitDiffState = {
   selectedPath: null,
   diff: null,
   diffLoading: false,
@@ -34,109 +34,83 @@ function message(error: unknown): string {
 }
 
 /**
- * Repository state for the current Session (#750).
+ * The file the entry said to open, if any (`#826`).
  *
- * Freshness is pull-on-open plus an explicit refresh (the model the issue's
- * Open Question 3 recommends, and the one `claude_code.list` already uses):
- * this asks when the Session changes and when the user asks, and never polls.
- * The repository is resolved agent-side from the Session's live working
- * directory each time, so a `cd` inside the Session is picked up by the next
- * request rather than needing to be pushed.
+ * The Terminal Peek hands over what the user picked there, and arriving on a
+ * landing page instead would make them find it again — which is the context
+ * loss the criterion exists to prevent.
  */
-function useGitWorkspace(ctx: WorkspaceContext) {
+function focusedPath(ctx: WorkspaceContext): string | null {
+  return ctx.focus?.capabilityId === 'git' ? (ctx.focus.resourceId ?? null) : null;
+}
+
+function useGitDiff(ctx: WorkspaceContext) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
-  const [state, setState] = useState<GitWorkspaceState>(INITIAL);
+  const [state, setState] = useState<GitDiffState>(NO_DIFF);
 
-  // Bumped whenever the Session changes; a response that arrives after the
-  // context moved on is dropped rather than written over the new one.
+  // One request per opened file, and a response is dropped when the Session
+  // moved on or the user has since picked something else.
   const generation = useRef(0);
-  const targetRef = useRef<{ agent_id: string; session: string } | null>(null);
+  const target = useRef<{ agent_id: string; session: string } | null>(null);
 
-  const loadStatus = useCallback(async (forGeneration: number) => {
-    const current = targetRef.current;
+  const selectFile = useCallback(async (path: string) => {
+    const current = target.current;
     if (!current) {
       return;
     }
-    setState((previous) => ({ ...previous, loading: true, error: null }));
+    const forGeneration = generation.current;
+    setState({ selectedPath: path, diff: null, diffLoading: true, diffError: null });
     try {
-      const response = await gitApi.gitStatus(current);
+      const response = await gitApi.gitDiff({ ...current, path });
       if (generation.current !== forGeneration) {
         return;
       }
-      setState((previous) => ({ ...previous, status: response, loading: false, error: null }));
+      setState((previous) =>
+        previous.selectedPath === path
+          ? { selectedPath: path, diff: response, diffLoading: false, diffError: null }
+          : previous,
+      );
     } catch (error) {
       if (generation.current !== forGeneration) {
         return;
       }
-      setState((previous) => ({
-        ...previous,
-        status: null,
-        loading: false,
-        error: message(error),
-      }));
+      setState((previous) =>
+        previous.selectedPath === path
+          ? { ...previous, diffLoading: false, diffError: message(error) }
+          : previous,
+      );
     }
   }, []);
 
+  // Read out here rather than inside the effect: `ctx` is rebuilt on every
+  // render, so depending on it would re-run this without anything changing.
+  const handedOver = focusedPath(ctx);
+
   useEffect(() => {
     generation.current += 1;
-    const forGeneration = generation.current;
-    targetRef.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
-    setState({ ...INITIAL, loading: Boolean(targetRef.current) });
-    if (targetRef.current) {
-      void loadStatus(forGeneration);
+    target.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
+    setState(NO_DIFF);
+    if (target.current && handedOver) {
+      void selectFile(handedOver);
     }
-    // The two ids are the dependencies, not a `target` object rebuilt on every
-    // render: identity would re-run this effect without anything having changed.
-  }, [loadStatus, agentId, sessionId]);
+  }, [agentId, sessionId, handedOver, selectFile]);
 
-  const refresh = useCallback(() => {
-    void loadStatus(generation.current);
-  }, [loadStatus]);
-
-  const selectFile = useCallback(
-    async (path: string) => {
-      const current = targetRef.current;
-      if (!current) {
-        return;
-      }
-      const forGeneration = generation.current;
-      setState((previous) => ({
-        ...previous,
-        selectedPath: path,
-        diff: null,
-        diffLoading: true,
-        diffError: null,
-      }));
-      try {
-        const response = await gitApi.gitDiff({ ...current, path });
-        if (generation.current !== forGeneration) {
-          return;
-        }
-        setState((previous) =>
-          previous.selectedPath === path
-            ? { ...previous, diff: response, diffLoading: false, diffError: null }
-            : previous,
-        );
-      } catch (error) {
-        if (generation.current !== forGeneration) {
-          return;
-        }
-        setState((previous) =>
-          previous.selectedPath === path
-            ? { ...previous, diffLoading: false, diffError: message(error) }
-            : previous,
-        );
-      }
-    },
-    [],
-  );
-
-  return { sessionId, state, refresh, selectFile };
+  return { state, selectFile };
 }
 
+/**
+ * Repository state for the current Session (#750), at the depth the Workspace
+ * gives it (`#826` L3).
+ *
+ * Freshness is pull-on-open plus an explicit refresh — the shared
+ * `useGitStatus` model — and the diff is fetched per file on selection.
+ */
 export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
-  const { sessionId, state, refresh, selectFile } = useGitWorkspace(ctx);
+  const agentId = ctx.agent?.agent_id;
+  const sessionId = ctx.session?.session_id;
+  const status = useGitStatus({ agentId, sessionId });
+  const { state: diff, selectFile } = useGitDiff(ctx);
 
   if (!sessionId) {
     return (
@@ -148,8 +122,8 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
 
   return (
     <div data-testid="git-workspace" className="flex h-full min-h-0 flex-col">
-      <GitHeader status={state.status} loading={state.loading} onRefresh={refresh} />
-      <GitBody state={state} onSelect={selectFile} />
+      <GitHeader status={status.status} loading={status.loading} onRefresh={status.refresh} />
+      <GitBody status={status} diff={diff} onSelect={selectFile} />
     </div>
   );
 }
@@ -163,8 +137,9 @@ function GitHeader({
   loading: boolean;
   onRefresh: () => void;
 }) {
-  const ok = status?.state === 'ok' ? status.status : null;
-  const branch = ok?.detached ? 'Detached HEAD' : (ok?.branch ?? null);
+  const ok = status?.state === 'ok' ? status : null;
+  const branch = ok?.status.detached ? 'Detached HEAD' : ok?.status.branch;
+  const worktree = worktreeName(ok?.root);
 
   return (
     <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
@@ -174,7 +149,7 @@ function GitHeader({
           {branch ?? 'Repository'}
         </p>
         <p data-testid="git-summary" className="truncate text-xs text-muted-foreground">
-          {headerSummary(status, loading)}
+          {headerSummary(status, loading, worktree)}
         </p>
       </div>
       <Button
@@ -193,7 +168,18 @@ function GitHeader({
   );
 }
 
-function headerSummary(status: GitStatusResponse | null, loading: boolean): string {
+/**
+ * The header's second line.
+ *
+ * Names the work tree as well as the branch: the same repository checked out
+ * twice is two different places to be, and the Signal already says which one
+ * (`capability-emergence.md` lists worktree identity as part of the model).
+ */
+function headerSummary(
+  status: GitStatusResponse | null,
+  loading: boolean,
+  worktree: string | null,
+): string {
   if (loading) {
     return 'Reading repository…';
   }
@@ -203,64 +189,61 @@ function headerSummary(status: GitStatusResponse | null, loading: boolean): stri
   if (status.state !== 'ok') {
     return describeUnavailable(status).title;
   }
+  const parts = [describeStatus(status.status), worktree && `worktree: ${worktree}`];
+  let summary = parts.filter(Boolean).join(' · ');
   if (status.truncated) {
     // A partial listing presented as a whole one is the failure C3 names; the
     // count is the first thing that would be wrong, so it says so here.
-    return `${describeStatus(status.status)} — listing truncated, ${formatBytes(status.truncatedBytes)} not read`;
+    summary += ` — listing truncated, ${formatBytes(status.truncatedBytes)} not read`;
   }
-  return describeStatus(status.status);
+  return summary;
 }
 
 function GitBody({
-  state,
+  status,
+  diff,
   onSelect,
 }: {
-  state: GitWorkspaceState;
+  status: ReturnType<typeof useGitStatus>;
+  diff: GitDiffState;
   onSelect: (path: string) => void;
 }) {
-  if (state.loading) {
-    return (
-      <GitNotice testId="git-loading">Reading repository state…</GitNotice>
-    );
+  if (status.loading) {
+    return <GitNotice testId="git-loading">Reading repository state…</GitNotice>;
   }
-  if (state.error) {
+  if (status.error) {
     return (
       <GitNotice testId="git-transport-error" destructive>
-        {state.error}
+        {status.error}
       </GitNotice>
     );
   }
-  if (!state.status) {
+  if (!status.status) {
     return <GitNotice testId="git-empty">No repository state yet.</GitNotice>;
   }
-  if (state.status.state !== 'ok') {
-    const copy = describeUnavailable(state.status);
+  if (status.status.state !== 'ok') {
+    const copy = describeUnavailable(status.status);
     return (
       <div
         data-testid="git-unavailable"
-        data-state={state.status.state}
+        data-state={status.status.state}
         className="flex h-full min-h-0 items-center justify-center px-6 text-center"
       >
         <div className="max-w-sm space-y-1.5">
           <p className="text-sm font-medium text-foreground">{copy.title}</p>
-          {copy.detail ? (
-            <p className="text-xs text-muted-foreground">{copy.detail}</p>
-          ) : null}
+          {copy.detail ? <p className="text-xs text-muted-foreground">{copy.detail}</p> : null}
         </div>
       </div>
     );
   }
 
-  const { status } = state.status;
-  const rows = statusRows(status);
+  const rows = statusRows(status.status.status);
   if (rows.length === 0) {
     // A clean tree is healthy, so it says so plainly and offers nothing —
     // `visual-language.md` P6. And with nothing to open, the diff pane has no
     // subject: the layout drops rather than sitting there empty.
     return (
-      <GitNotice testId="git-clean">
-        Nothing has changed since the last commit.
-      </GitNotice>
+      <GitNotice testId="git-clean">Nothing has changed since the last commit.</GitNotice>
     );
   }
 
@@ -276,18 +259,10 @@ function GitBody({
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
       <aside className="max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r">
-        <GitChangeList
-          rows={rows}
-          selectedPath={state.selectedPath}
-          onSelect={onSelect}
-        />
+        <GitChangeList rows={rows} selectedPath={diff.selectedPath} onSelect={onSelect} />
       </aside>
       <main className="flex min-h-0 flex-1 flex-col lg:flex-none">
-        <GitDiffView
-          response={state.diff}
-          loading={state.diffLoading}
-          error={state.diffError}
-        />
+        <GitDiffView response={diff.diff} loading={diff.diffLoading} error={diff.diffError} />
       </main>
     </div>
   );

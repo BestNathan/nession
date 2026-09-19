@@ -111,6 +111,13 @@ fn status_on_a_real_repository_returns_branch_and_changes() {
     assert_eq!(result["status"]["branch"], "main");
     assert_eq!(result["status"]["modified"][0]["path"], "a.txt");
     assert_eq!(result["truncated"], false);
+    // The work tree the listing describes, so a Signal can name where it is
+    // without a second request (`capability-emergence.md`).
+    assert!(
+        result["root"].as_str().is_some_and(|root| !root.is_empty()),
+        "status carries the work tree root, got {:?}",
+        result.get("root")
+    );
 }
 
 #[test]

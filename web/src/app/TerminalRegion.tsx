@@ -2,6 +2,7 @@ import { cn } from '@/shared/lib/utils';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
+import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
 
 export interface TerminalRegionProps {
@@ -10,6 +11,7 @@ export interface TerminalRegionProps {
   onError: (error: Error) => void;
   /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
+  capsuleProjection?: CapsuleCapabilityProjection;
 }
 
 /**
@@ -21,6 +23,7 @@ export function TerminalRegion({
   onDisconnect,
   onError,
   capsuleCapabilities,
+  capsuleProjection,
 }: TerminalRegionProps) {
   const {
     sessionId,
@@ -47,6 +50,7 @@ export function TerminalRegion({
           controller={controller}
           isSwitching={isSwitching}
           capsuleCapabilities={capsuleCapabilities}
+          capsuleProjection={capsuleProjection}
         >
           <TerminalPane
             sessionId={sessionId}

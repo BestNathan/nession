@@ -8,7 +8,7 @@ import { AppToolHeader } from '@/app/patterns/AppToolHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
-import type { Experience, WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type { CapabilityFocus, Experience, WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 export interface WorkspacePanelProps {
   selectedSession: Session;
@@ -22,6 +22,8 @@ export interface WorkspacePanelProps {
   facts: CapabilityFacts | undefined;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
+  /** What opened this view, when the entry carried context (`#826`). */
+  focus?: CapabilityFocus;
 }
 
 export function WorkspacePanel({
@@ -36,6 +38,7 @@ export function WorkspacePanel({
   facts,
   onSurfaceChange,
   onToolChange,
+  focus,
 }: WorkspacePanelProps) {
   const ctx: WorkspaceContext = useMemo(
     () => ({
@@ -47,6 +50,7 @@ export function WorkspacePanel({
       experience,
       onToolChange,
       facts,
+      focus,
     }),
     [
       selectedSession,
@@ -57,6 +61,7 @@ export function WorkspacePanel({
       experience,
       onToolChange,
       facts,
+      focus,
     ],
   );
 

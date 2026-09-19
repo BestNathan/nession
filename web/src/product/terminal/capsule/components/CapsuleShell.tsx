@@ -28,6 +28,15 @@ interface CapsuleShellProps {
   shellRef?: React.Ref<HTMLDivElement>;
   contentRef?: React.Ref<HTMLDivElement>;
   measureMirror?: React.ReactNode;
+  /**
+   * Something emerging above the capsule — a capability Signal or Peek.
+   *
+   * A slot rather than a capability concept: the shell renders what it is
+   * given and knows nothing about what it means. It sits outside the shell
+   * surface, so the capsule's own box is unaffected by whether anything is
+   * there.
+   */
+  projection?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -40,6 +49,7 @@ export function CapsuleShell({
   shellRef,
   contentRef,
   measureMirror,
+  projection,
   children,
 }: CapsuleShellProps) {
   const { commandsOpen } = useCapsuleContext();
@@ -65,6 +75,7 @@ export function CapsuleShell({
         isApp ? capsuleShellAppDockBottomClass : capsuleShellDockBottomClass,
       )}
     >
+      {projection}
       <div
         ref={shellRef}
         data-testid="capsule-shell"

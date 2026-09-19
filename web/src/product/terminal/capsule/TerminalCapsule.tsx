@@ -9,9 +9,11 @@ import { CapsuleCommandsHostOverlays } from '@/product/terminal/capsule/componen
 import { CapsuleProvider } from '@/product/terminal/capsule/state/CapsuleProvider';
 import { useComposerMeasure } from '@/product/terminal/capsule/state/useComposerMeasure';
 import { useCapsuleState } from '@/product/terminal/capsule/state/useCapsuleState';
+import { CapabilityProjection } from '@/product/terminal/capsule/components/CapabilityProjection';
 import {
   layoutFromLineCount,
   type CapsuleCapabilityDisclosure,
+  type CapsuleCapabilityProjection,
   type CapsuleExperience,
   type CapsuleMode,
 } from '@/product/terminal/capsule/types';
@@ -26,6 +28,13 @@ export interface TerminalCapsuleProps {
   onModeChange?: (mode: CapsuleMode) => void;
   /** Capabilities that earned no chip, reachable through the disclosure entry. */
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
+  /**
+   * A capability emerging beside the capsule, if Nession decided one should.
+   *
+   * Absent in the resting state — which is the state the capsule is designed
+   * around, and the one the golden screenshots capture.
+   */
+  capabilityProjection?: CapsuleCapabilityProjection;
 }
 
 export function TerminalCapsule({
@@ -35,6 +44,7 @@ export function TerminalCapsule({
   mode = 'input',
   onModeChange,
   capabilityDisclosure,
+  capabilityProjection,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
   const experienceConfig = CAPSULE_EXPERIENCE[resolvedExperience];
@@ -118,6 +128,15 @@ export function TerminalCapsule({
         shellRef={shellRef}
         contentRef={contentRef}
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
+        projection={
+          capabilityProjection ? (
+            <CapabilityProjection
+              projection={capabilityProjection}
+              sendText={sendText}
+              disabled={disabled}
+            />
+          ) : null
+        }
       >
         {isCommandsMode && onModeChange ? (
           <>

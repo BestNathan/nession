@@ -25,7 +25,7 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 
 interface CapsuleChainBarProps {
-  buffer: string[];
+  buffer: readonly string[];
   onCancel: () => void;
   onSend: () => void;
 }

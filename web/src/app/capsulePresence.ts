@@ -27,7 +27,7 @@ function capsuleDisclosure(snapshots: readonly CapabilitySnapshot[]) {
   return resolveCapabilityDisclosure(presences, { directLimit: 0 });
 }
 
-/** Everything the capsule presence needs from the shell, plus its two actions. */
+/** Everything the capsule presence needs from the shell, plus its three actions. */
 /** What the capsule renders: no resting slot; every present capability is in `+`. */
 export interface CapsuleCapabilityContribution {
   /** Reachable capabilities, each carrying its state so `+` can mark it. */
@@ -45,6 +45,12 @@ export interface CapsuleCapabilityInput {
   onToolChange: (id: CapabilityId) => void;
   /** Reveal the surface the capability lives on. */
   onSurfaceChange: () => void;
+  /**
+   * Deepen a capability into its Workspace view, carrying what caused it to
+   * emerge. `#826`: entering Workspace from a Peek lands on the focused item,
+   * not on a capability landing page.
+   */
+  onOpenWorkspace: (id: CapabilityId, resourceId?: string) => void;
 }
 
 /**
@@ -59,9 +65,18 @@ export interface CapsuleCapabilityInput {
  * that something is relevant here; opening it belongs to the surface that owns
  * the capability's view.
  */
+export interface CapsuleCapabilityResolution {
+  /** Reachable capabilities, each carrying its state so `+` can mark it. */
+  entries: readonly CapabilityDisclosureEntry[];
+  /** The capability layer's answer for this Session, which the projection reads. */
+  snapshots: readonly CapabilitySnapshot[];
+  /** A capability's title, so the capsule never invents one. */
+  titleFor: (id: CapabilityId) => string;
+}
+
 export function resolveCapsuleCapabilities(
   input: CapsuleCapabilityInput,
-): CapsuleCapabilityContribution {
+): CapsuleCapabilityResolution {
   const { snapshots } = resolveWorkspaceCapabilities({
     session: input.session,
     agent: input.agent,
@@ -75,17 +90,16 @@ export function resolveCapsuleCapabilities(
 
   const disclosure = capsuleDisclosure(snapshots);
 
-  const activate = (id: CapabilityId) => {
-    input.onToolChange(id);
-    input.onSurfaceChange();
-  };
-
   const entries: CapabilityDisclosureEntry[] = disclosure.discoverable.flatMap((presence) => {
     const snapshot = snapshots.find((candidate) => candidate.id === presence.capabilityId);
     return snapshot ? [{ id: snapshot.id, title: snapshot.title, state: snapshot.state }] : [];
   });
 
   return {
-    disclosure: entries.length > 0 ? { entries, onSelect: activate } : undefined,
+    entries,
+    snapshots,
+    // A view binding carries no name of its own — the capability does. Same rule
+    // the Workspace shell follows for an unavailable-state title.
+    titleFor: (id) => snapshots.find((snapshot) => snapshot.id === id)?.title ?? id,
   };
 }

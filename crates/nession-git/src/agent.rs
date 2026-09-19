@@ -28,7 +28,7 @@ use tracing::debug;
 
 use crate::cmd::GitCmd;
 use crate::diff;
-use crate::security::{MAX_LINE_BYTES, MAX_STATUS_BYTES};
+use crate::security::MAX_STATUS_BYTES;
 use crate::status;
 
 /// Resolves a Session identifier to its current working directory, or `None`
@@ -80,21 +80,24 @@ impl GitAgentExtension {
     /// and is this directory a repository? #750 requires these be reported
     /// separately — "no git installed" and "not a repository" are different
     /// problems with different fixes.
-    async fn ready(&self, cmd: &GitCmd) -> Option<Value> {
+    ///
+    /// `Ok` carries the work tree root, because every caller needs it and the
+    /// probe that answers "is this a repository" already knows it.
+    async fn ready(&self, cmd: &GitCmd) -> Result<PathBuf, Value> {
         if !cmd.available().await {
-            return Some(json!({
+            return Err(json!({
                 "state": "unavailable",
                 "reason": "git_not_installed",
                 "message": "git is not available on this host.",
             }));
         }
-        match cmd.is_repository().await {
-            Ok(true) => None,
-            Ok(false) => Some(json!({
+        match cmd.resolve_root().await {
+            Ok(Some(root)) => Ok(root),
+            Ok(None) => Err(json!({
                 "state": "not_a_repository",
                 "message": "This Session's working directory is not a git repository.",
             })),
-            Err(err) => Some(json!({
+            Err(err) => Err(json!({
                 "state": "error",
                 "message": err.to_string(),
             })),
@@ -106,9 +109,10 @@ impl GitAgentExtension {
             Ok(cmd) => cmd,
             Err(body) => return Ok(body),
         };
-        if let Some(body) = self.ready(&cmd).await {
-            return Ok(body);
-        }
+        let root = match self.ready(&cmd).await {
+            Ok(root) => root,
+            Err(body) => return Ok(body),
+        };
 
         let out = cmd
             .run(
@@ -127,6 +131,11 @@ impl GitAgentExtension {
         Ok(json!({
             "state": "ok",
             "status": parsed,
+            // The work tree this status describes. Terminal Signal identity
+            // needs it (`capability-emergence.md` names the worktree), and the
+            // Workspace header shows it, so it rides along rather than costing
+            // a second request.
+            "root": root.to_string_lossy(),
             // Present so a partial listing is never presented as a whole one.
             "truncated": out.truncated(),
             "truncatedBytes": out.truncated_bytes,
@@ -144,7 +153,7 @@ impl GitAgentExtension {
             Ok(cmd) => cmd,
             Err(body) => return Ok(body),
         };
-        if let Some(body) = self.ready(&cmd).await {
+        if let Err(body) = self.ready(&cmd).await {
             return Ok(body);
         }
 
@@ -152,22 +161,18 @@ impl GitAgentExtension {
         Ok(json!({ "state": "ok", "diff": result }))
     }
 
-    /// Resolve the repository root, for the Workspace handoff (#826: entering
-    /// the Workspace from a Peek must preserve repo/worktree context).
+    /// The work tree root on its own, for a caller that wants the address and
+    /// not the listing (#826: entering the Workspace from a Peek preserves
+    /// repo/worktree context without re-fetching the status).
     async fn handle_root(&self, payload: Value) -> anyhow::Result<Value> {
         let cmd = match self.cmd_for(&payload).await {
             Ok(cmd) => cmd,
             Err(body) => return Ok(body),
         };
-        if let Some(body) = self.ready(&cmd).await {
-            return Ok(body);
+        match self.ready(&cmd).await {
+            Ok(root) => Ok(json!({ "state": "ok", "root": root.to_string_lossy() })),
+            Err(body) => Ok(body),
         }
-
-        let root = cmd.run_line(&["rev-parse", "--show-toplevel"]).await?;
-        if root.len() > MAX_LINE_BYTES {
-            anyhow::bail!("repository root path is implausibly long");
-        }
-        Ok(json!({ "state": "ok", "root": root }))
     }
 }
 

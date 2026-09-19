@@ -236,3 +236,38 @@ export const capsuleInlineFieldRowClass =
 
 export const capsuleModeToggleItemClass =
   'min-h-[length:var(--control-md)] min-w-[length:var(--control-md)] [&_svg]:size-[length:var(--icon-md)]';
+
+/**
+ * An emerged capability projection — the Signal and Peek frame (`#826`).
+ *
+ * Its own token group rather than borrowed popover values: a projection is a
+ * smaller, less permanent surface than a popover, and pointing at the popover's
+ * geometry would have made the two move together for no reason. The typography
+ * is a step below the capsule's own scale, because a Signal that arrived at the
+ * composer's text size would read as a second composer.
+ */
+export const capsuleProjectionClass =
+  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--radius-lg)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
+
+/** Above the capsule, never over it: the resting capsule's box does not move. */
+export const capsuleProjectionDockClass =
+  'mb-[length:var(--terminal-capsule-projection-margin-bottom)]';
+
+/**
+ * The ceiling, and it scrolls its own overflow (#826 Q5).
+ *
+ * A projection is a small surface floating over the work; it stops well short of
+ * the terminal and never becomes the thing that owns the scroll.
+ */
+export const capsuleProjectionScrollClass =
+  'max-h-[length:var(--terminal-capsule-projection-max-height)] overflow-y-auto';
+
+export const capsuleProjectionTextClass =
+  'font-sans text-[length:var(--terminal-capsule-projection-font-size)] leading-[length:var(--terminal-capsule-projection-line-height)]';
+
+export const capsuleProjectionItemClass =
+  'flex w-full items-center gap-[length:var(--terminal-capsule-projection-item-gap)] rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] py-[length:var(--terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** The change letter's column, fixed so the filenames beside it share an edge. */
+export const capsuleProjectionMarkClass =
+  'w-[length:var(--terminal-capsule-projection-mark-width)] shrink-0 font-mono';
