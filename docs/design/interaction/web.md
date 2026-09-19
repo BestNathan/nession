@@ -75,11 +75,17 @@ Web presentation should follow the same semantics:
 - unavailable capabilities remain hidden;
 - available capabilities may be discoverable in Workspace or explicit expansion;
 - relevant capabilities can gain contextual presence;
-- active capabilities can gain lightweight Session presence, expressed inside the capsule's `+` expansion, plus contextual actions;
-- deeper views are opened explicitly.
+- active capabilities can gain lightweight Session presence without modifying the resting capsule;
+- `+` is the explicit Nession capability entry, while selected/relevant capabilities may materialize as temporary Signal/Peek surfaces;
+- deeper views are opened explicitly in Workspace with context preserved.
 
-For example, when Claude Code is detected as active in the current Session, Nession may mark it in the capsule's
-`+` expansion and expose session-scoped actions/history/state without replacing the Terminal by default.
+The shared disclosure model is defined in [capability-emergence.md](../capability-emergence.md):
+
+```text
+Dormant -> Signal -> Peek -> Workspace
+```
+
+For example, Git may show branch/worktree/change state in a compact Terminal Signal, then a short changed-file Peek. Full diff, history, staging, branches, and worktree management belong in Workspace.
 
 ## Workspace capability navigation
 
