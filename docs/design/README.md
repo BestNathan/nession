@@ -58,6 +58,7 @@ The key downstream interpretation of the Principles is:
 | [product-model.md](product-model.md) | Canonical | Product concepts and relationships: Workspace, Workspace Location, Session, Terminal, Agent, contextual capabilities |
 | [information-architecture.md](information-architecture.md) | Canonical | Session-first IA, progressive disclosure, contextual capability presence, Workspace depth |
 | [workspace.md](workspace.md) | Canonical | Logical Workspace semantics, locations, capability contribution and visibility rules |
+| [capability-emergence.md](capability-emergence.md) | Canonical | Progressive capability disclosure across Terminal and Workspace; Signal / Peek / Workspace depth and context-preserving deepening |
 | [interaction/web.md](interaction/web.md) | Canonical | Web realization of the product model |
 | [interaction/app.md](interaction/app.md) | Canonical | App spatial model, gestures, capsule, contextual capability surfaces |
 | [visual-language.md](visual-language.md) | Canonical | What dominates and recedes; typography, surfaces, density, emphasis |
@@ -106,7 +107,7 @@ The exact detection mechanism is an implementation concern. Product presence fol
 - active capabilities may surface in the current Session and interaction capsule;
 - deeper views and configuration are explicitly opened rather than permanently occupying the work surface.
 
-Claude Code is the first reference integration for validating this model, not a special-case product direction.
+Git is the first complete reference flow for progressive disclosure across Terminal and Workspace; Claude Code remains a reference integration for active workload state. See [capability-emergence.md](capability-emergence.md).
 
 ## Multi-location design rule
 

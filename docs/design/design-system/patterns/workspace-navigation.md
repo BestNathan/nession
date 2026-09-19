@@ -52,7 +52,7 @@ Nession owns how the currently useful Workspace set is presented. Acceptable pat
 - an explicit `+` / capability picker;
 - search / command palette;
 - native navigation stack on App;
-- focused entry from an active Session capability;
+- focused entry from a Terminal capability Signal/Peek, preserving capability context;
 - location/resource-driven navigation when the Workspace contains multiple physical contexts.
 
 The implementation may combine these patterns. No one widget is the product model.
@@ -96,6 +96,8 @@ Workspace
 ```
 
 A Workspace with only Files should not look like a five-tool product with four missing buttons. A Workspace with Git and an active coding agent may surface those because the work context justifies them.
+
+When Workspace is entered from a Terminal Signal/Peek, navigation should open directly at the corresponding capability and focus, not at a generic Workspace home. For example, selecting `TerminalCapsule.tsx` from a Git Peek should open Git → Changes → that file's diff with the same repo/worktree/session context. See [../../capability-emergence.md](../../capability-emergence.md).
 
 ## Web
 
