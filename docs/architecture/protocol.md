@@ -84,6 +84,7 @@ them is a sentence to rewrite.
 crates/nession-protocol/src/
 ├── lib.rs
 └── kernel/
+    ├── mod.rs
     ├── identity.rs     ProtocolId, ContractVersion
     ├── envelope.rs     the one Message envelope
     ├── descriptor.rs   what a unit declares about itself
@@ -92,10 +93,40 @@ crates/nession-protocol/src/
     └── error.rs        what resolution can refuse
 ```
 
-Core contracts — the units Nession itself owns — live under `contracts/`, one
-module per family (`contracts/session/`, `contracts/agent/`). A family becomes a
-version directory when it has a second version; a `v1/` directory holding the
-only version is structure without content.
+### Core contracts
+
+The units Nession itself owns live under `contracts/` — one module per family,
+one file per contract version:
+
+```text
+crates/nession-protocol/src/contracts/
+├── agent/v1.rs       agent.register, agent.heartbeat, agent.address.update
+├── session/v1.rs     session.create, session.attach, session.env.apply
+├── env/v1.rs         env.{list,get,write,delete} at both ends
+├── commands/v1.rs    commands.{list,add,remove,update}
+└── server/v1.rs      server.info
+```
+
+The family is the segment the protocol id names: `client.session.attach`
+belongs to `session`, `server.env.list` to `env`. Placement is then a lookup
+rather than a judgement, which is what keeps the directory from decaying into a
+`misc/`. A cross-family reference is normal and expected — an attach response
+carries env snapshots — and it is an ordinary `use` that the compiler checks.
+
+A family becomes a version *directory* when it holds a second version; a `v1/`
+directory holding the only version is structure without content. So each family
+is a directory today (it will grow one day) and each version is a single file —
+the same rule as the provider layout below, applied to the units Nession owns.
+
+A contract's tests live beside it, in `contracts/<family>/tests.rs`. A contract
+whose tests sit in a shared file two directories up is one that can change
+without its tests being read.
+
+`contracts/` is not a central DTO repository, and the distinction is the whole
+point of the ownership rule: `nession-protocol` owns the units *Nession itself*
+serves, and a concrete provider owns its own. What makes them different is not
+who reads them but who can answer "what changed?" — for `session.attach` that
+is Nession, for `git.diff` it is `nession-git`.
 
 ### A provider
 
@@ -124,9 +155,13 @@ carried through the provider as the contract.
    segments (`unit.operation`), no underscores. `git.status`, `claude-code.read`.
    The `protocol://` prefix is a display convention and is rejected by
    `ProtocolId::new`.
-2. Write the contract in the **provider's** crate, not in `nession-protocol`:
-   a typed request, a typed response, and a `ProtocolDescriptor` naming the
-   owner and the contract versions.
+2. Write the contract **where its provider lives** — a typed request, a typed
+   response, and a `ProtocolDescriptor` naming the owner and the contract
+   versions. For an extension that is the provider's crate
+   (`nession-git/src/protocol/<unit>/v1.rs`); for a unit Nession itself serves
+   it is `nession-protocol/src/contracts/<family>/v1.rs`. What does **not** go
+   in `nession-protocol` is another crate's DTOs — see "What this crate is not"
+   in `lib.rs`, and the ownership test below.
 3. Declare the wire message types on the contract. They are the transport
    projection and may differ from the id.
 4. Register the provider at the composition root. The manifest is derived from
@@ -143,9 +178,15 @@ Do **not** upgrade for a bug fix, an internal refactor, a new optional field
 whose absence preserves the old meaning, or a new response field consumers
 already tolerate.
 
-Add the new contract **beside** the old one. Never edit a shipped version in
-place to express a new one — that is the "optional fields and serde defaults
-instead of versions" failure, and it makes the old wire shape unrepresentable.
+Add the new contract **beside** the old one: a new `v2.rs` next to `v1.rs`,
+both listed in the family's `mod.rs`. Never edit a shipped version in place to
+express a new one — that is the "optional fields and serde defaults instead of
+versions" failure, and it makes the old wire shape unrepresentable.
+
+A family whose versions diverge — `session.create/v2` while `session.attach`
+is still v1 — promotes its version files to directories, `session/v1/` and
+`session/v2/`, so a version is one addressable thing rather than a suffix
+scattered across a file. Until then the files stay files.
 
 ### Provide a legacy adapter
 
@@ -188,6 +229,7 @@ generated.
 | Rule | Enforced by |
 |---|---|
 | Kernel depends on no unit | `crates/nession-protocol/Cargo.toml` |
+| A core contract cannot reach a concrete provider either | the same file — `contracts/` sits inside that crate, so the rule covers it without a second mechanism |
 | Ids are canonical | `ProtocolId::new`, `#[serde(try_from)]` on the way in too |
 | One contract per version; one version per wire type | `ProtocolDescriptor::validate` |
 | Manifest lists only what was composed | `ProtocolManifest::from_descriptors` |

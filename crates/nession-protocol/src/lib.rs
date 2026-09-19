@@ -44,13 +44,14 @@
 //!
 //! ## Where the code goes
 //!
-//! [`kernel`] holds the mechanism. Core contracts — the Protocol Units Nession
-//! itself owns, such as `session.attach` or `agent.register` — will live beside
-//! it under `contracts/`, one module per family. See
-//! `docs/architecture/protocol.md` for the layout rules and for how to add a
-//! Protocol Unit, publish a new contract version, provide a legacy adapter,
+//! [`kernel`] holds the mechanism. [`contracts`] holds the core contracts —
+//! the Protocol Units Nession itself owns, such as `session.attach` or
+//! `agent.register` — one module per family, one file per contract version.
+//! See `docs/architecture/protocol.md` for the layout rules and for how to add
+//! a Protocol Unit, publish a new contract version, provide a legacy adapter,
 //! generate consumer types and retire a contract.
 
+pub mod contracts;
 pub mod kernel;
 
 // Flat re-exports for the handful of names almost every caller needs, so a
