@@ -9,7 +9,9 @@
 import { GitBranch } from 'lucide-react';
 import type { CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
+import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import { GitWorkspace } from './components/GitWorkspace';
+import { GitProjection } from './components/GitProjection';
 
 export const GIT_ID = 'git';
 export const GIT_TITLE = 'Git';
@@ -52,4 +54,24 @@ export const gitView: WorkspaceViewBinding = {
   id: GIT_ID,
   icon: GitBranch,
   layout: { web: GitWorkspace, app: GitWorkspace },
+};
+
+/**
+ * How Git says something in the Terminal.
+ *
+ * Declared here rather than in the app layer for the same reason `gitView` is:
+ * what Git can say is Git's, and the app layer only decides whether it gets to
+ * say it. The binding type is imported **type-only** — it belongs to the app
+ * layer's registry, which sits above this one.
+ */
+export const gitProjection: CapsuleProjectionBinding = {
+  id: GIT_ID,
+  body: ({ agentId, sessionId, depth, onFocusChange }) => (
+    <GitProjection
+      agentId={agentId}
+      sessionId={sessionId}
+      depth={depth}
+      onFocusChange={onFocusChange}
+    />
+  ),
 };

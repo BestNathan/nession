@@ -197,11 +197,34 @@ fn a_non_repository_directory_is_distinguishable_from_a_missing_tool() {
         runtime.block_on(async { cmd.available().await }),
         "git is installed here"
     );
-    assert!(
-        !runtime
-            .block_on(async { cmd.is_repository().await })
+    assert_eq!(
+        runtime
+            .block_on(async { cmd.resolve_root().await })
             .unwrap(),
+        None,
         "a bare temp directory is not a repository"
+    );
+}
+
+#[test]
+fn the_root_names_the_work_tree_the_status_describes() {
+    // The Signal's worktree identity and the Workspace header both read this,
+    // and it comes from the same probe that decides "is this a repository" —
+    // so a regression here is a regression in both.
+    let dir = repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .expect("a real repository resolves to a root");
+
+    // The tempdir may be a symlink on macOS (/var → /private/var), so compare
+    // the tail the user would recognise rather than the whole path.
+    assert_eq!(
+        root.file_name(),
+        dir.path().file_name(),
+        "root {root:?} should name the fixture repository"
     );
 }
 
@@ -215,14 +238,14 @@ fn repository_discovery_ignores_an_inherited_git_dir() {
     std::env::set_var("GIT_DIR", elsewhere.path());
 
     let cmd = cmd_for(&dir);
-    let is_repo = tokio::runtime::Runtime::new()
+    let root = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(async { cmd.is_repository().await })
+        .block_on(async { cmd.resolve_root().await })
         .unwrap();
     std::env::remove_var("GIT_DIR");
 
     assert!(
-        is_repo,
+        root.is_some(),
         "GIT_DIR must not redirect the probe away from the working directory"
     );
 }

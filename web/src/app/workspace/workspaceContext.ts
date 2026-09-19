@@ -19,6 +19,21 @@ export type Experience = CapsuleExperience;
  */
 export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env';
 
+/**
+ * What caused the Workspace to open, when something did.
+ *
+ * `#826` requires the Terminal → Workspace transition to preserve context: a
+ * user who picked a changed file in a Git Peek lands on that file's diff, not
+ * on a capability landing page. The focus is how that survives the surface
+ * change — it names the item, and the capability's view decides what naming it
+ * means.
+ */
+export interface CapabilityFocus {
+  capabilityId: CapabilityId;
+  /** The item within the capability, if the user had picked one. */
+  resourceId?: string;
+}
+
 /** Everything a Workspace view layout needs from the workspace framework. */
 export interface WorkspaceContext {
   session: Session | null;
@@ -30,6 +45,8 @@ export interface WorkspaceContext {
   onToolChange: (id: CapabilityId) => void;
   /** Observations about the session, supplied by the app layer (never probed here). */
   facts?: CapabilityFacts;
+  /** What opened this view, when the entry carried context (`#826`). */
+  focus?: CapabilityFocus;
 }
 
 /**
