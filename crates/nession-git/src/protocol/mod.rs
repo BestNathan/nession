@@ -120,6 +120,20 @@ impl GitFailure {
     }
 }
 
+/// A git invocation that failed is this provider's `error` state.
+///
+/// Only for the *unexpected* kind. The expected outcomes — not a repository, no
+/// workdir, git absent — are constructed as their own variants and never routed
+/// through here, which is what keeps "we could not find your directory" from
+/// reading as "something went wrong".
+impl From<anyhow::Error> for GitFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
 /// Every contract this provider offers.
 ///
 /// The list is what a runtime derives its manifest from, so a contract that is
