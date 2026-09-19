@@ -8,8 +8,12 @@ app shell, plus the shared CRUD/attach dialogs). It also owns the
 and the **filter vocabulary** (`StatusFilter`/`SortField`/`SortDirection`,
 declared in `types.ts`) shared with app-layer composers.
 
-It does **not** own the attach/terminal runtime — that lives in `atoms/` +
-`runtime/` + `core/terminal-runtime` (connectivity domain). The Dashboard
+It **does** own the attachment's model — `state/` holds which Session is
+attached, the choice it was attached with, its route, and the attach dialog.
+That was written as a disclaimer while those atoms lived in `atoms/` as shared
+state; #801 Phase 5 moved them here, because a Session atom belongs to the
+Session owner. It still does **not** own the attach/terminal *runtime* — that is
+`platform/{session-runtime,attach,terminal-runtime}/`. The Dashboard
 predecessor shell (with its own `components/SessionList` + `SessionsSection`
 rows and preview dialogs) was deleted in Phase 5 (#655).
 
@@ -39,7 +43,7 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 | Filter/sort/search state | `app/useDashboardFilter` | Per mount; types (`StatusFilter`/`SortField`/`SortDirection`) declared in `features/sessions/types.ts` and consumed by `SearchBar` + sidebar chrome `SessionListHeader` |
 | Dialog targets (create/kill/attach) | `app/useDashboardModals` | Per mount; wired by `SessionFirstShell` through `SessionFirstDialogs` |
 | Wire registration | `SessionsPlugin` instance (module singleton `sessionsApi`) | One binding per WebSocketService lifetime; `WebSocketService.use()` re-installs after reconnect with generation-tagged teardown (`SessionsPlugin.ts`) |
-| Attach identity (`clientSessionId`, attach in-flight/failed, dialog session) | `atoms/session.ts` (shared) | Connectivity domain — NOT sessions-list domain; stays in `atoms/` alongside `atoms/connection.ts` |
+| Attach identity (session id/name, attach choice, route, dialog session) | `product/session/state/` | The Session's own model — moved out of `atoms/` in #801 Phase 5. Route derivation lives in `state/route.ts`; the transport atoms it reads are `platform/attach/state` |
 | Per-row `DomainState` | `model/domainState` `mapDomainState` | Pure function of (session, agent, attachment) inputs; no stored state |
 
 ## Cross-feature dependency

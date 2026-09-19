@@ -3,7 +3,7 @@ import 'highlight.js/styles/github-dark-dimmed.css';
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Info } from 'lucide-react';
-import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/markdown';
+import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/shared/markdown';
 
 /** Props for MarkdownPreview */
 interface MarkdownPreviewProps {
@@ -54,7 +54,7 @@ const LARGE_FILE_THRESHOLD = 1_048_576; // 1MB
 
 /**
  * Renders markdown content with GFM, LaTeX math, YAML/TOML frontmatter, and
- * syntax highlighting. The plugin chain lives in `@/markdown/previewPlugins`.
+ * syntax highlighting. The plugin chain lives in `@/shared/markdown/previewPlugins`.
  * Code blocks use highlight.js github-dark-dimmed theme.
  */
 export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {

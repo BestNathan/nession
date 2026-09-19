@@ -1,5 +1,5 @@
-import { cn } from '@/lib/utils';
-import { agentDisplayName } from '@/lib/format';
+import { cn } from '@/shared/lib/utils';
+import { agentDisplayName } from '@/shared/lib/format';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { Agent } from '@/types';
 

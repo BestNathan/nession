@@ -8,6 +8,17 @@ import type { Agent, Session } from '@/types';
 
 export type Experience = CapsuleExperience;
 
+/**
+ * The capabilities that draw a different Workspace view per experience.
+ *
+ * Each experience supplies a layout for every member (`experiences/{web,app}/workspaceViews.tsx`),
+ * so naming them as a union makes a missing one a compile error rather than a
+ * binding that resolves to `undefined` at render. Claude Code is deliberately
+ * absent: it draws the same view in both experiences, so its binding is
+ * contributed whole by the capability instead.
+ */
+export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env';
+
 /** Everything a Workspace view layout needs from the workspace framework. */
 export interface WorkspaceContext {
   session: Session | null;

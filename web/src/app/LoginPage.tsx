@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ConnectionStatus } from '@/app/patterns/ConnectionStatus';
-import { getRememberPreference, setRememberPreference } from '../lib/auth';
-import type { ConnectionState } from '@/services/socket';
+import { LoginConnectionBadge } from '@/app/LoginConnectionBadge';
+import { getRememberPreference, setRememberPreference } from './auth';
+import type { ConnectionState } from '@/platform/socket';
 
 interface LoginPageProps {
   connectionStatus: ConnectionState;
@@ -56,7 +56,7 @@ export function LoginPage({
           <CardTitle>Connect to Server</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <ConnectionStatus status={connectionStatus} />
+          <LoginConnectionBadge status={connectionStatus} />
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="serverUrl">Server URL</Label>

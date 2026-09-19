@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 export interface ImageViewerProps {
   blobUrl: string;

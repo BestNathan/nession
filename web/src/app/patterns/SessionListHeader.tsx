@@ -4,7 +4,7 @@ import { SearchBar } from '@/product/session/components/SearchBar';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
@@ -106,7 +106,7 @@ export function SessionListHeader({
           'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
           shellMotionClass,
         )}
-        data-testid="session-first-create"
+        data-testid="create-session"
         aria-label="Create session"
         disabled={createDisabled}
         onClick={() => onCreate()}

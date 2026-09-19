@@ -65,7 +65,7 @@ export async function openFixtureFile(page: Page): Promise<void> {
 
 export async function gotoFixtureShell(page: Page): Promise<void> {
   await page.goto('/#/fixture');
-  await page.getByTestId('session-first-shell').waitFor();
+  await page.getByTestId('shell').waitFor();
 }
 
 export async function gotoFixtureWorkspace(page: Page): Promise<void> {

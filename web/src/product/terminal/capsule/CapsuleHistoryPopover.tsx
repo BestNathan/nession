@@ -9,7 +9,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import {
   capsuleCaptionTextClass,
   capsuleEmptyStatePadClass,

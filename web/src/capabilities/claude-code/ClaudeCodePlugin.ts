@@ -1,14 +1,13 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { ClaudeCodeListRequest, ClaudeCodeListResponse, ClaudeCodeReadRequest, ClaudeCodeReadResponse } from './types';
 
 /**
  * claude-code capability — the Claude Code config-browser extension
  * (`extension.claude_code.list|read`, issue #593). The request objects are
  * forwarded whole — the transport never sees individual fields. Wire strings
- * live only in this file; the typed API is what consumers import (module
- * singleton in index.ts).
+ * live only in this file; the typed API is what consumers import.
  */
-export class ClaudeCodePlugin implements CapabilityPlugin {
+export class ClaudeCodePlugin implements TransportPlugin {
   readonly name = 'claude-code';
 
   private connection: PluginSurface | null = null;
@@ -53,3 +52,14 @@ export class ClaudeCodePlugin implements CapabilityPlugin {
     return this.connection;
   }
 }
+
+/**
+ * App-level singleton — one claude-code binding per WebSocketService lifetime.
+ *
+ * It lives here rather than in `index.ts` so that the capability's own UI can
+ * import it without reaching back through the public barrel: `index` re-exports
+ * the contribution, the contribution imports the component, and the component
+ * imports this module. Defining the singleton in the barrel would close that
+ * into a cycle.
+ */
+export const claudeCodeApi = new ClaudeCodePlugin();

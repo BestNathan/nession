@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   CommandsAddResponse,
   CommandsListResponse,
@@ -18,7 +18,7 @@ interface GenerationEntry<T> {
   generation: number;
 }
 
-export class CommandsPlugin implements CapabilityPlugin {
+export class CommandsPlugin implements TransportPlugin {
   readonly name = 'commands';
 
   private connection: PluginSurface | null = null;

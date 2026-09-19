@@ -151,8 +151,10 @@ html {
   overflow-wrap: anywhere;
 }
 
-/* Session-first ChatGPT shell (#492 V1) */
-.session-first-shell {
+/* The shell root (#492 V1, renamed from `.session-first-shell` in #801 Phase 6 —
+   `SessionFirst` disambiguated against the Dashboard shell, which Phase 5
+   deleted, so the prefix distinguished nothing) */
+.shell {
   /* Chrome is light-only; pin the scheme so form controls and scrollbars match
      even if a parent adds .dark later. Token values come from
      design/generated/web.css — do not restate them here, or the token source
@@ -162,7 +164,7 @@ html {
   color: var(--foreground);
 }
 
-.session-first-shell :focus-visible {
+.shell :focus-visible {
   outline: var(--focus-ring-width) solid var(--ring);
   outline-offset: var(--focus-ring-offset);
 }
@@ -208,26 +210,26 @@ html {
 }
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */
-.session-first-shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
+.shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
   font-size: var(--composer-font-size);
   line-height: var(--composer-text-line-height);
 }
 
 /* Capsule add-command dialog sits above composer popovers (z-index 100). */
-.session-first-shell [data-slot='dialog-portal']:has([data-slot='dialog-content'].z-\[110\]) [data-slot='dialog-overlay'],
-.session-first-shell [data-slot='dialog-content'].z-\[110\] {
+.shell [data-slot='dialog-portal']:has([data-slot='dialog-content'].z-\[110\]) [data-slot='dialog-overlay'],
+.shell [data-slot='dialog-content'].z-\[110\] {
   z-index: 110;
 }
 
 /* Capsule composer: no focus ring on the inline textarea (ChatGPT-style) */
-.session-first-shell [data-testid='capsule-ghost-input']:focus,
-.session-first-shell [data-testid='capsule-ghost-input']:focus-visible {
+.shell [data-testid='capsule-ghost-input']:focus,
+.shell [data-testid='capsule-ghost-input']:focus-visible {
   outline: none;
   box-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-first-shell {
+  .shell {
     --motion-shell-duration: 0ms;
   }
 }

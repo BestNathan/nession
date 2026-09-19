@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   AttachInfo,
   CreateSessionResponse,
@@ -22,7 +22,7 @@ interface GenerationEntry<T> {
  * session list fresh. Wire strings live only in this file; the typed API is
  * what consumers import (module singleton in index.ts).
  */
-export class SessionsPlugin implements CapabilityPlugin {
+export class SessionsPlugin implements TransportPlugin {
   readonly name = 'sessions';
 
   private connection: PluginSurface | null = null;
@@ -176,7 +176,7 @@ export class SessionsPlugin implements CapabilityPlugin {
     if (response.ansi_b64 === null || response.ansi_b64 === undefined) {
       throw new Error('Capture failed: no data returned');
     }
-    const { decodeBase64Utf8 } = await import('@/lib/encoding');
+    const { decodeBase64Utf8 } = await import('@/shared/lib/encoding');
     return {
       ansi: decodeBase64Utf8(response.ansi_b64),
       cols: response.cols,

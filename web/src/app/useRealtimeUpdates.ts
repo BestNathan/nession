@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import type { WebSocketService } from '../services/socket';
+import type { WebSocketService } from '../platform/socket';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
 import type { useAgentData } from '@/product/agent/hooks/useAgentData';

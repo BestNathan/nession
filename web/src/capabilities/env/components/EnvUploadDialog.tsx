@@ -1,6 +1,6 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type RefObject } from 'react';
 import { Upload, FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import {
   Dialog,
   DialogContent,

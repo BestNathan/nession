@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { ChunkedReadResult, FileData, FileEntry, FileOps } from './types';
 
 /**
@@ -91,11 +91,11 @@ export function readFileChunked(
 }
 
 /**
- * Files capability plugin — speaks the `file.*` request family. No
+ * Files transport plugin — speaks the `file.*` request family. No
  * install-time subscriptions: every method is a plain request, so a binding
  * is exactly "the surface used for requests".
  */
-export class FilesPlugin implements CapabilityPlugin, FileApi {
+export class FilesPlugin implements TransportPlugin, FileApi {
   readonly name = 'files';
 
   private connection: PluginSurface | null = null;

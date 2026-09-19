@@ -56,7 +56,7 @@
 // empty and deleted, so the allowance is gone with it, exactly as its comment
 // promised: the layers are related by this table alone.
 const ALLOWED_IMPORTS = {
-  'app': ['product', 'capabilities', 'platform', 'extensions', 'core', 'shared'],
+  'app': ['product', 'capabilities', 'platform', 'extensions', 'shared'],
   // `capabilities` is #801's second target layer: a unit that can be
   // discovered, activated and contributed (Files, Env, Commands, Claude Code)
   // as a vertical slice, rather than a chunk of the product.
@@ -70,41 +70,45 @@ const ALLOWED_IMPORTS = {
   // appearing inside a capability. If a capability ever needs a Product
   // Pattern, that is the same decision `extensions ↔ capabilities` already
   // records, and it should be made then rather than pre-granted here.
-  'capabilities': ['platform', 'core', 'shared'],
+  'capabilities': ['platform', 'shared'],
   // `product` is #801's first target layer: a module that means something in
   // Nession's product vocabulary (Session, Terminal, Workspace, Agent) rather
   // than one that merely implements something. It sits below `app` (the shell
-  // composes it) and above the infrastructure. `core` is listed because it is
-  // the pre-Phase-5 name for `platform` — when that convergence lands this
-  // becomes `['platform', 'shared']` and nothing else about the layer changes.
+  // composes it) and above the infrastructure.
   // `extensions` is in this list because the registry *is* the contribution
   // contract, not a peer to reach into: a Product Pattern rendering a slot
   // (`AgentDetail` renders `agent-detail`) is PRINCIPLE #5 working as designed —
   // Nession owns the structure, the contribution fills a hole in it. Reaching
   // into a capability's internals is the inversion; asking the registry for a
   // slot is not.
-  'product': ['capabilities', 'platform', 'extensions', 'core', 'shared'],
+  'product': ['capabilities', 'platform', 'extensions', 'shared'],
   // `platform` is #801's fourth layer: the machinery beneath the product —
   // transport, runtime, attach, and framework-level code that carries no
   // product semantics (the Explorer file-tree framework, the Server plugin).
   // It sits above `shared` and below everything that means anything.
   //
-  // It is not React-free as a layer; `core/terminal-runtime` is React-free as a
-  // module, and that property is worth keeping where it already holds. Widening
-  // the layer's definition to admit a UI framework is deliberate: #801's §7
-  // convergence list describes where `platform` will *come from*
+  // It is not React-free as a layer; `platform/terminal-runtime` is React-free
+  // as a module, and that property is worth keeping where it already holds.
+  // Widening the layer's definition to admit a UI framework is deliberate:
+  // #801's §7 convergence list describes where `platform` will *come from*
   // (`core/` + `runtime/` + `services/` + `atoms/` + owner-specific `lib/`),
-  // not the whole of what it may hold.
-  'platform': ['core', 'shared'],
+  // not the whole of what it may hold. All five have now arrived: `core/`,
+  // `runtime/` and `services/` as directories, `atoms/` as state moved to its
+  // owners, and the owner-specific `lib/` modules to theirs — of which
+  // `resolveAutoP2pUrl` (attach address planning) landed here.
+  //
+  // `core` is gone from this list, and from every other, in the same change
+  // that emptied it — it was the pre-Phase-5 name for this layer, so leaving it
+  // allowed would have been an allowance for a layer nothing can be in.
+  'platform': ['shared'],
   // `extensions/` is a rung of its own. It may reach `capabilities` because an
   // extension is the UI contribution *for* a capability —
   // `extensions/claude-code` renders the Claude Code capability. The mutual
   // allowance is deliberate and documented in docs/architecture/web.md: the
   // registry is consumed by app and capability code, and an extension composes
   // what it extends. A sanctioned cycle, not an oversight — do not "fix" it by
-  // folding extensions into a layer, which would wrongly let `core` reach it.
-  'extensions': ['capabilities', 'core', 'shared'],
-  'core': ['shared'],
+  // folding extensions into a layer, which would wrongly let `platform` reach it.
+  'extensions': ['capabilities', 'shared'],
   'shared': [], // shared cannot import any business layer
 };
 
@@ -113,26 +117,48 @@ const ALLOWED_IMPORTS = {
 // components/ now holds only the shared shadcn ui/ primitives.
 //
 // Verified against who *consumes* each directory, so these are not guesses:
-// features import `atoms` (9 files) and `runtime` (8 files), so both must sit
-// below features — which is where they already are. The reverse imports found
-// by fixing this rule are real, not a mis-classification (#783).
+// the reverse imports found by fixing this rule are real, not a
+// mis-classification (#783).
 //
-// `markdown` is `shared`, decided by the same test rather than by its name: its
-// consumers are `capabilities/files` (3 edges) *and* `lib/languageId` (2 edges), and
-// a `shared` module importing it forces it to `shared` — shared is the bottom.
-// The `markdown ↔ lib` cycle that results is deliberate and both files say so:
-// general language detection needs markdown's ranked signals, and markdown
-// cannot host the general tables without importing them back. Same layer, so
-// the rule permits it; this entry is what makes that a decision rather than an
-// accident (#793).
+// `markdown` and `lib` have no rows because they have no directories: Phase 5
+// moved both *inside* the layer they were always classified as —
+// `markdown/` -> `shared/markdown/`, `lib/`'s generic helpers ->
+// `shared/lib/`. They were `shared` before and are `shared` now; only the path
+// changed, so the first-segment lookup reaches the `shared` row below and both
+// rows would be rows for a directory nothing can be in.
+//
+// That classification was decided by the consumer test rather than by name
+// (#793), and the move is what makes it structural rather than a table entry:
+// markdown's consumers are `capabilities/files` *and* `lib/languageId`, and a
+// `shared` module importing it forces it to `shared` — shared is the bottom.
+// The `markdown ↔ lib` cycle is deliberate and both files say so: general
+// language detection needs markdown's ranked signals, and markdown cannot host
+// the general tables without importing them back. It is now genuinely
+// intra-layer (`shared/lib` ↔ `shared/markdown`), so the rule permits it by
+// construction instead of by an entry asserting that it should.
 const LEGACY_TO_LAYER = {
   'components': 'shared', // components/ui only
-  'lib': 'shared',
-  'atoms': 'shared', // atoms are shared state
-  'markdown': 'shared', // markdown pipeline — rationale in the note above
-  'services': 'core', // services/socket, attachPrefs, deepLinkAttach
-  'runtime': 'core',
-  'core': 'core',
+  // `lib` is gone as a directory: its generic helpers are `shared/lib/` and its
+  // owner-specific modules (auth, hashRouterUrl, envParser,
+  // languageIdToCodeMirror, resolveAutoP2pUrl) went to the owners that use them.
+  // The split is the point — a module under `shared/` may import nothing, so
+  // every one of those five would have been unmovable while it sat in `lib/`,
+  // exactly as the `atoms` row below records for state. `addressSelection` is
+  // the counter-example that stayed: `shared/hooks/useAddressPlan` consumes it,
+  // and `shared` cannot reach `platform`, so its owner really is shared.
+  // `atoms` is gone: its state moved to the owners that own it — session and
+  // route atoms to `product/session/state`, probe atoms to
+  // `product/agent/state`, transport atoms to `platform/attach/state`, and the
+  // terminal status atom to `product/terminal/state`. The old row mapped the
+  // directory to `shared`, which is exactly what made the cluster unmovable:
+  // `shared` may import nothing, so a Session atom could not live with the
+  // Session. "It is a Jotai atom" was never an owner.
+  // `core` the layer is gone entirely: its three members converged in Phase 5
+  // (`core/terminal-runtime` -> `platform/terminal-runtime`, `runtime/` ->
+  // `platform/{session-runtime,attach}`, `services/` -> `platform/{socket,attach}`).
+  // With no directory mapping to it and no entry in ALLOWED_IMPORTS, it is no
+  // longer a layer at all — a `src/core/` reappearing now resolves to `unknown`
+  // and fails the completeness fixture rather than silently becoming one again.
   'shared': 'shared',
   // `features` is deliberately absent: the directory is gone. A row for it would
   // be a layer that nothing can be in — and if someone recreates `src/features/`,

@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -21,17 +21,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import type { AttachInfo, AttachMode, AddressLatency, Session, EnvFileInfo, EnvFileRef } from '@/types';
-import { envApi } from '@/capabilities/env';
+import { EnvFileMultiSelect, envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
-import { loadAttachPrefs } from '@/services/attachPrefs';
+import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
 import {
   candidateUrlsOf,
   loadSessionProfile,
   type SessionAttachProfile,
-} from '@/services/sessionAttachProfile';
-import { detectWebGLSupport } from '@/core/terminal-runtime/Renderer';
-import { probeResultsAtom, probeRefreshRequestAtom } from '@/atoms/probe';
-import { EnvFileMultiSelect } from '@/capabilities/env/components/EnvFileMultiSelect';
+} from '@/platform/attach/sessionAttachProfile';
+import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
+import { probeResultsAtom, probeRefreshRequestAtom } from '@/product/agent/state';
 
 /** Result handed back to the flow once the user confirms an attach. */
 export interface AttachChoice {

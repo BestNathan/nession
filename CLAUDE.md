@@ -75,32 +75,27 @@ nession/
 │
 ├── web/                      # React frontend (Vite + TypeScript)
 │   └── src/
-│       ├── App.tsx           # Root: auth gate → SessionFirstShell or LoginPage
+│       ├── App.tsx           # Root: auth gate → Shell or LoginPage
 │       ├── main.tsx          # Entry point + Sonner Toaster
 │       ├── index.css         # Tailwind v4 + shadcn/ui dark theme
 │       ├── types.ts           # Shared TypeScript types
-│       ├── app/              # App layer (composition root): SessionFirstShell tree,
-│       │                     #   app-spatial/, workspace/ tools, fixture/, app hooks
-│       │                     #   (useAppConnection, useDashboard, …), LoginPage
-│       ├── features/         # Feature layer (see features/*/README.md ownership maps)
-│       │   ├── terminal/     # Terminal feature: plugins, viewport, hooks, state, capsule
-│       │   ├── explorer/     # Extensible file-tree framework (Explorer, ExplorerStore, registry)
-│       │   ├── files/        # Files feature: RPC capability, browser/viewer UI, file hooks
-│       │   ├── sessions/     # Sessions feature: session list/details UI, CRUD dialogs, attach
-│       │   ├── agents/       # Agents feature: workspace agent page, agent data hooks
-│       │   ├── env/          # Env files: capability plugin + env manager UI/dialogs
-│       │   ├── commands/     # Quick commands: capability plugin + presets
-│       │   ├── server/       # Server capability plugin + ServerInfoMenu
-│       │   └── claude-code/  # Claude Code capability plugin
+│       ├── app/              # App layer (composition root): Shell tree,
+│       │                     #   experiences/{web,app}/, workspace/ tools, fixture/,
+│       │                     #   app hooks (useAppConnection, useDashboard, …), LoginPage
+│       ├── product/          # Nession product concepts: session/, agent/, terminal/,
+│       │                     #   capability/ (the generic capability model)
+│       ├── capabilities/     # Discoverable/activatable capabilities, as vertical slices:
+│       │                     #   files/, env/, commands/, claude-code/
+│       ├── platform/         # transport/runtime/attach + framework-level code with no
+│       │                     #   product semantics: socket/, server/, explorer/,
+│       │                     #   terminal-runtime/ (React-free), session-runtime/, attach/
+│       │                     #   state lives in <owner>/state/ — product/*/state,
+│       │                     #   platform/attach/state (no central atoms/ — #801 Phase 5)
 │       ├── shared/           # Shared layer: hooks/ (generic React hooks importable by all layers)
 │       ├── components/
 │       │   └── ui/           # shadcn/ui primitives + wrappers (shared, added via CLI)
-│       ├── core/terminal-runtime/  # React-free terminal runtime (controller, transport, input)
-│       ├── runtime/          # SessionRuntime ownership + attach state machines (core layer)
-│       ├── atoms/            # Shared Jotai atoms (connection, session, probe) (shared layer)
 │       ├── lib/              # Pure helpers (shared layer)
-│       ├── services/         # WS client, attach prefs, deep link (core layer)
-│       └── extensions/       # Extension registry (e.g. claude-code UI contributions)
+│       └── extensions/       # Generic UI-slot registry (no contributor today)
 │
 ├── deploy/                   # Docker runtime scripts & configs
 │   ├── docker-compose.yml
@@ -147,9 +142,9 @@ tmux sessions (per-node)
 
 ### Frontend Conventions
 
-- **hooks placement**: shared hooks in `shared/hooks/`, feature hooks in `features/<feature>/hooks/`, app-composition hooks in `app/`. Never place hooks in `components/`.
-- **components/**: only the shared `ui/` shadcn primitives live under `components/ui/`; feature UI belongs in `features/<feature>/components/`, shell UI in `app/`.
-- **services/socket/**: WebSocket functionality is plugin-based. A new capability is a `CapabilityPlugin` (`services/socket/types.ts`) implemented inside its own feature and registered in `app/useAppConnection.ts` — never added to the core `WebSocketService`.
+- **hooks placement**: shared hooks in `shared/hooks/`, owner hooks in `<owner>/hooks/` (`product/<concept>/`, `capabilities/<name>/`, `platform/<domain>/`), app-composition hooks in `app/`. Never place hooks in `components/`.
+- **components/**: only the shared `ui/` shadcn primitives live under `components/ui/`; owner UI belongs in `<owner>/components/`, shell UI in `app/`.
+- **platform/socket/**: WebSocket functionality is plugin-based. A new wire-protocol family is a `TransportPlugin` (`platform/socket/types.ts`) implemented inside its owner layer and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`) — never added to the core `WebSocketService`. **Not to be confused with a Product Capability**, which has a presence state (`product/capability`); a transport plugin has none and is user-invisible.
 - **Type organization**: Core types in `types.ts`, domain types in `{domain}/types.ts`. Re-export domain types from `types.ts` for backward compatibility.
 
 ### Key Design Decisions

@@ -49,9 +49,9 @@ export function FixtureWorkspace() {
   };
   return (
     <div
-      data-testid="session-first-shell"
+      data-testid="shell"
       data-sf-design="polish"
-      className="session-first-shell flex h-[100dvh] flex-col bg-background"
+      className="shell flex h-[100dvh] flex-col bg-background"
     >
       <WorkspaceShell ctx={ctx} activeCapabilityId="files" />
     </div>

@@ -35,7 +35,7 @@ export interface FileData {
 /**
  * Legacy FileOps shape (plaintext `writeFile`, `uploadFile`, base64 helpers
  * as members) — produced by {@link FilesPlugin.toFileOps} until the
- * session-first tool UI migrates to the typed API.
+ * shell tool UI migrates to the typed API.
  */
 export interface FileOps {
   listDir(path: string): Promise<{ entries: FileEntry[] }>;

@@ -4,7 +4,7 @@ import {
   CapabilityDisclosureMenu,
   type CapabilityDisclosureMenuEntry,
 } from '@/product/capability/components/CapabilityDisclosureMenu';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import {
   buildWorkspacePresentationModel,

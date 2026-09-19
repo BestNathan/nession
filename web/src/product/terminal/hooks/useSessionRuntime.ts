@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { attachInfoAtom, forcedRelayAtom, manualOverrideAtom, orderedUrlsAtom, sessionIdAtom, sessionNameAtom } from '@/atoms/session';
-import { effectiveModeAtom, routeIntentEpochAtom, transportGenerationAtom, p2pStateAtom } from '@/atoms/connection';
+import {
+  attachInfoAtom, effectiveModeAtom, forcedRelayAtom, manualOverrideAtom,
+  orderedUrlsAtom, sessionIdAtom, sessionNameAtom,
+} from '@/product/session/state';
+import { p2pStateAtom, routeIntentEpochAtom, transportGenerationAtom } from '@/platform/attach/state';
 import { terminalSessionStateAtom, lastResizeAtom, terminalTransportReadyAtom } from '@/product/terminal/state';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
-import { sessionRuntimeRegistry } from '@/runtime/SessionRuntimeRegistry';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { createFilesApi, type FileOps } from '@/capabilities/files';
 import { createTerminalAgentApi, type TerminalAgentApi } from '@/product/terminal';
-import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/runtime/SessionRuntime';
-import type { ConnectionState } from '@/services/socket/types';
-import type { RelayServerHandle } from '@/runtime/relayServerConnection';
+import type { SessionRuntime, SessionRuntimeConfig, SessionRuntimeSnapshot } from '@/platform/session-runtime/SessionRuntime';
+import type { ConnectionState } from '@/platform/socket/types';
+import type { RelayServerHandle } from '@/platform/attach/relayServerConnection';
 
 export interface UseSessionRuntimeOptions {
   /** When true, this hook instance drives registry.update (single config owner). */
@@ -111,7 +114,7 @@ interface RuntimeConnectionSyncResult {
 }
 
 function applyRuntimeMirrorSnapshot(opts: {
-  snapshot: import('@/runtime/SessionRuntime').RuntimeMirrorSnapshot;
+  snapshot: import('@/platform/session-runtime/SessionRuntime').RuntimeMirrorSnapshot;
   inP2PTransport: boolean;
   setTerminalState: (s: import('@/product/terminal/state/session').TerminalStatus) => void;
   setTransportGeneration: (n: number) => void;
@@ -136,7 +139,7 @@ function applyRuntimeMirrorSnapshot(opts: {
 }
 
 function handleRuntimeEvent(
-  event: import('@/runtime/SessionRuntime').SessionRuntimeEvent,
+  event: import('@/platform/session-runtime/SessionRuntime').SessionRuntimeEvent,
   ctx: {
     runtime: SessionRuntime;
     inP2PTransport: boolean;

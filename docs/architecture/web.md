@@ -15,10 +15,18 @@ the design system, the source layout and the lint gate all use one language.
 |---|---|---|---|
 | **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
 | **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
-| **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`api/ model/ components/ contribution.ts`) | `capabilities/<name>/` |
+| **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`Plugin.ts`, `types.ts`, `components/`, `contribution.tsx`) | `capabilities/<name>/` |
 | **platform** | How does the machinery work? | transport, runtime, attach, persistence — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin) | `platform/<domain>/` |
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
+
+**"Capability" means one thing here: the Product Capability** — discoverable,
+activatable, with a presence state, met by a user in the UI (Files, Env,
+Commands, Claude Code). The wire-protocol adapters on `WebSocketService` used to
+be called `CapabilityPlugin` too; they are now `TransportPlugin`
+(`platform/socket/types.ts`), because they have no presence, are never
+activated, and are invisible to the user. Any sentence where "capability" could
+mean either is a sentence to rewrite.
 
 ### Dependency direction
 
@@ -49,7 +57,7 @@ Two constraints that are *not* expressible as a direction and stay prose:
 PRINCIPLE #5 — a capability may contribute views and state but must not define
 global structure, so `capabilities/*` reaches the shell only through a
 contribution contract (`app/workspace/capabilities.ts` +
-`viewBindings.ts`), never by importing `app/` internals. And `core/terminal-runtime`
+`viewBindings.ts`), never by importing `app/` internals. And `platform/terminal-runtime`
 is React-free; that is a property of the module, not of `platform`, and the
 layer rule cannot enforce either.
 
@@ -64,8 +72,8 @@ the honest answer to "where does this go today" until the row moves.
 | `app/experiences/app/` — App experience: spatial shell, gestures, page index | **done** | 2 |
 | `app/experiences/web/` — Web experience: the frame, list column vs overlay | **done** | 2 |
 | `app/workspace/` | `app/` | 2 |
-| `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **3 (started)** |
-| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | 3 |
+| `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **done** | 3 |
+| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | **done** | 3 |
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
@@ -73,12 +81,17 @@ the honest answer to "where does this go today" until the row moves.
 | `capabilities/{files,env,commands,claude-code}/` — the four contributable capabilities | **done** | 4 |
 | `platform/server/` — the Server transport plugin + its menu | **done** | 3 |
 | `platform/explorer/` — the file-tree framework | **done** | 5 |
-| `extensions/` | `capabilities/*/contribution.ts` + a registry | 4 |
-| `core/`, `runtime/`, `services/` | `platform/<domain>/` | 5 |
-| `atoms/` | follows its owner (`product/*/state`, `platform/*/state`) | 5 |
-| `lib/` — generic | `shared/lib/` | 5 |
-| `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | 5 |
-| `markdown/` | `shared/` (already the rule's model) | 5 |
+| `app/workspace/views/claudeCodeView.tsx` — the Claude Code view binding | **done** | 4 |
+| `extensions/claude-code/` — the retired UI-section registration | **deleted** | 4 |
+| `app/workspace/views/` — the other four Web/App layouts | **split into the experiences** — `experiences/{web,app}/workspaceViews.tsx` | **done (finishes 2)** |
+| `app/workspace/AppToolScroll.tsx` — App scroll chrome | `app/experiences/app/AppToolScroll.tsx` | **done (finishes 2)** |
+| `core/terminal-runtime/` — the React-free terminal runtime | `platform/terminal-runtime/` | **done** | 5 |
+| `runtime/` — SessionRuntime + the attach machinery | `platform/{session-runtime,attach}/` | **done** | 5 |
+| `services/` — the WS client + attach prefs/profile | `platform/{socket,attach}/` | **done** | 5 |
+| `atoms/` — the state cluster | `product/{session,agent}/state`, `platform/attach/state` | **done** | 5 |
+| `lib/` — generic (`utils`, `format`, `encoding`, `errorHelpers`, `languageId`, `clipboard`, `addressSelection`) | `shared/lib/` | **done** | 5 |
+| `lib/` — owner-specific (`auth`, `hashRouterUrl`, `envParser`, `languageIdToCodeMirror`, `resolveAutoP2pUrl`) | that owner | **done** | 5 |
+| `markdown/` | `shared/markdown/` (the rule already classified it `shared`) | **done** | 5 |
 | `components/ui/`, `shared/`, `test/` | unchanged | — |
 
 ### How the migration was allowed to proceed
@@ -120,14 +133,28 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 
 ### Naming collisions found while surveying (unresolved)
 
-- Two different components are both called `ConnectionStatus`.
-  `product/session/components/ConnectionStatus.tsx` is the canonical pattern —
-  it implements the three independent dimensions
-  (`patterns/connection-status.md`: Agent / Workspace Location connectivity,
-  Session lifecycle, this-client attachment).
-  `app/patterns/ConnectionStatus.tsx` is a single-dimension client badge used
-  only by `LoginPage`. The canonical owner is the former; the latter needs a
-  name that says what it is.
+- ~~Two different components are both called `ConnectionStatus`.~~
+  **Resolved.** The canonical pattern — the three independent dimensions of
+  `patterns/connection-status.md` (Agent / Workspace Location connectivity,
+  Session lifecycle, this-client attachment) — is now
+  `product/session/patterns/ConnectionStatus.tsx`. The other one was a
+  single-dimension badge whose only consumer is `LoginPage`; it is now
+  `app/LoginConnectionBadge.tsx` and sits next to that consumer, being
+  single-consumer UI rather than a pattern.
+
+- **`SessionHeader` is `app` chrome, not a Product Pattern — and the layer gate
+  is what settled it.** It was moved to `product/session/patterns/` with the
+  other canonical patterns and
+  `nession/no-reverse-imports` rejected it: `product` may not import `app`, and
+  `SessionHeader` imports `shellIconButtonClass` from `app/shellStyles.ts`. That
+  turns out to be the correct reading rather than an obstacle — `shellStyles` is
+  *"session-first shell chrome — token vars only"* and 4 of its 5 consumers are
+  `app` chrome; `SessionHeader` was the only product-layer file reaching for it.
+  `patterns/session-header.md`'s own contract agrees, describing it as
+  inheriting *chrome band rules*. So the design system's pattern list and the
+  code's layer model genuinely differ here, and the layer model wins: a pattern
+  whose styling vocabulary is shell chrome lives in the shell. Recorded because
+  the next `patterns/` move will meet the same question.
 - **Resolved:** the generic capability lifecycle (`discovery` / `presence` /
   `registry` / `model` / `facts`) used to sit at `features/capabilities/` while
   appearing in neither module map. It was never a feature — it is the model every
@@ -151,32 +178,61 @@ Two other rules decide the ambiguous cases, both from #801's principles:
 
   Widening `platform` to admit a UI framework is deliberate: #801's §7
   convergence list says where `platform` will *come from*, not the whole of what
-  it may hold, and "React-free" is a property of `core/terminal-runtime` rather
+  it may hold, and "React-free" is a property of `platform/terminal-runtime` rather
   than a precondition for the layer.
 - **`product → extensions` is a real edge, not a leak.** Moving `AgentDetail`
   into `product/agent/` surfaced it: the pattern renders the `agent-detail`
   slot through the registry. That is PRINCIPLE #5 working — Nession owns the
   structure, the contribution fills a hole in it — so the registry is treated as
   a contract the product layer may call, distinct from reaching into a
-  capability's internals. Phase 4 inherits the distinction when `extensions/`
-  becomes `capabilities/*/contribution.ts`.
+  capability's internals. Phase 4 kept the distinction: the registry is the
+  generic mechanism, a capability's contribution is a separate thing that now
+  lives with its capability (see `extensions/` below).
 
-### `extensions/` today
+### `extensions/` — a mechanism with no content
 
-`extensions/` (extension registry + `claude-code` UI contributions) sits outside
-the ladder: it is imported by app and capability code through the registry
-contract and composes what it extends. The rule models it as a rung of its own
-(`extensions`) rather than folding it into a layer, so that
+`extensions/` now holds only `registry.ts` and `types.ts`: the generic slot
+mechanism. It sits outside the ladder as a rung of its own, so that
 `extensions → capabilities` is allowed while `platform → extensions` stays
-forbidden. The mutual `capabilities ↔ extensions` allowance is deliberate —
-an extension is the UI contribution *for* a capability. Phase 4 absorbs it into
-`capabilities/*/contribution.ts`.
+forbidden.
 
-`markdown/` is `shared`. Its consumers are `capabilities/files` *and*
-`lib/languageId`, and a `shared` module importing it pins it to the bottom rung.
-The resulting `markdown ↔ lib` cycle is deliberate — both files document it;
-general language detection needs markdown's ranked signals, and markdown cannot
-host the general extension/basename tables without importing them back.
+Its one registered extension, `extensions/claude-code/`, was **deleted** in
+Phase 4. It declared `slots: {}` and contributed nothing: the 2026-09-06
+claude-code-workspace spec removed its AgentDetail section and its
+terminal-header tab, moving Claude Code to a Workspace tool, and the empty
+registration outlived the removal. A directory that exists to register an
+extension which contributes nothing is the same failure as a rule that protects
+nothing — it reads as coverage. Nothing was lost: `renderSlot` returned `[]`
+before the deletion and returns `[]` after.
+
+**The mechanism itself stays.** `docs/design/design-system/patterns/agent-detail.md`
+sanctions it — "Extensions may contribute diagnostic data or actions for this
+detail view" — so it is a designed extension point that currently has no
+contributor, which is a different thing from a dead one. That also means Phase 4
+did *not* absorb `extensions/` into `capabilities/*/contribution.ts` as this
+document previously predicted: the slot registry is a generic mechanism, not a
+capability's contribution, and the two are not the same thing. Where the
+registry ends up is still open — it is framework-level code with no product
+semantics, which is the `platform` definition, but its slot props name `Agent`,
+a Product Model concept, so the move is not free and is not made here.
+
+Claude Code's own contribution — its presence state and its Workspace view —
+does live with the capability, at `capabilities/claude-code/contribution.tsx`.
+
+`shared/markdown/` is `shared` — and that is now structural rather than a table
+entry. Its consumers are `capabilities/files` *and* `languageId`, and a `shared`
+module importing it pins it to the bottom rung, so Phase 5 moved it inside the
+layer it was already classified as. The `markdown ↔ languageId` cycle is
+deliberate — both files document it; general language detection needs markdown's
+ranked signals, and markdown cannot host the general extension/basename tables
+without importing them back. It is now genuinely intra-layer
+(`shared/markdown` ↔ `shared/lib`), so the rule permits it by construction.
+
+`shared/lib/` holds what is left of `lib/`: the generic helpers every layer may
+use. The owner-specific modules could not stay — a module under `shared/` may
+import nothing, so each was unmovable until it moved to the layer that consumes
+it. `addressSelection` is the one that stayed, and by the same test: its consumer
+is `shared/hooks/useAddressPlan`, and `shared` cannot reach `platform`.
 
 > Every directory under `web/src/` is either mapped in the rule's
 > `LEGACY_TO_LAYER` or listed in `NON_LAYER_DIRS` with a reason, and a fixture
@@ -188,95 +244,167 @@ host the general extension/basename tables without importing them back.
 
 ```text
 src/
-├── App.tsx                 # auth gate → SessionFirstShell (authenticated) or LoginPage
+├── App.tsx                 # auth gate → Shell (authenticated) or LoginPage
 ├── main.tsx                # entry, initExtensions(), toaster
 ├── types.ts                # shared root type barrel
 ├── app/                    # app layer — shell (see app/public.ts)
-│   ├── SessionFirstShell.tsx        # the one authenticated shell
-│   ├── SessionFirstWorkspace/Sidebar/Main/Terminal/SpatialLayout…
+│   ├── Shell/ShellMain/ShellDialogs.tsx  # the shell and its regions
+│   ├── Sidebar/SidebarFooter/TerminalRegion/WorkspaceRegion.tsx
 │   ├── SessionDrawer.tsx, TerminalWell.tsx, shellStyles.ts
-│   ├── useSessionFirstShellState.ts # shell state composer
-│   ├── patterns/            # SessionHeader, SessionListHeader, AppToolHeader, …
-│   ├── app-spatial/         # mobile 3-page pager (Sessions ← Terminal → Workspace)
+│   ├── useShellState.ts     # shell state composer
+│   ├── patterns/            # shell chrome: SessionHeader, SessionListHeader,
+│   │                        #   SidebarRail, AppToolHeader, AppBackButton, …
+│   │                        #   NOTE: the name is now wider than its contents —
+│   │                        #   every Product Pattern moved to product/*/patterns/,
+│   │                        #   so this holds chrome only. A rename to `chrome/`
+│   │                        #   is available and deliberately not taken here.
+│   ├── experiences/         # per-experience composition
+│   │   ├── web/             #   WebLayout + workspaceViews
+│   │   └── app/             #   spatial shell, gestures, AppToolScroll, workspaceViews
 │   ├── workspace/           # WorkspaceShell, capabilities.ts, viewBindings.ts,
-│   │                        #   workspaceContext.ts, views/{files,session,agent,env,claudeCode}
+│   │                        #   workspaceContext.ts, presentation.ts
 │   ├── fixture/             # deterministic screens for /fixture visual tests
 │   ├── useAppConnection.ts / useDashboard.ts / useDashboardFilter.ts /
 │   │   useDashboardModals.ts / useProbePolling.ts / useRealtimeUpdates.ts /
 │   │   useVisibilityReconnect.ts / useDeepLinkRestore.ts /
-│   │   useSessionFirst{Attach,DeepLink,MobileNav}.ts
+│   │   use{AttachFlow,DeepLink,MobileNav}.ts
 │   └── LoginPage.tsx
-├── features/                # one dir per capability (README.md = ownership map)
-│   ├── terminal/            # capability plugin, viewport, hooks, state/, capsule/
-│   ├── explorer/            # extensible file-tree framework
-│   ├── files/               # file RPC + browser/viewer UI
-│   ├── sessions/            # list/details, CRUD dialogs, AttachDialog, domainState model
-│   ├── agents/              # workspace agent page, AgentContext, data hooks
-│   ├── env/                 # env capability plugin + manager UI/dialogs
+├── product/                 # Nession product concepts + their Product Patterns
+│   ├── session/             # the Session concept: model, state/, UI, hooks
+│   │                        #   state/    = identity, the attach choice, route, dialog
+│   │                        #   patterns/ = SessionItem, SessionList, ConnectionStatus
+│   ├── agent/               # the Agent concept
+│   │                        #   state/    = the browser-latency probe, keyed by agent
+│   │                        #   patterns/ = AgentContext, AgentDetail
+│   ├── terminal/            # the Terminal concept, incl. capsule/ and state/
+│   │                        #   patterns/ = TerminalSurface
+│   └── capability/          # the generic capability model (singular: the model,
+│                            #   not a capability): discovery, presence, registry, facts
+├── capabilities/            # discoverable / activatable capabilities, vertical slices
+│   ├── files/               # file RPC + browser/viewer UI (+ adapters/)
+│   ├── env/                 # env capability + manager UI/dialogs
 │   ├── commands/            # quick-command capability + presets
-│   ├── server/              # server capability + ServerInfoMenu
-│   └── claude-code/         # Claude Code capability plugin
-├── core/terminal-runtime/   # React-free runtime: controller, transports, input, xterm
-├── runtime/                 # SessionRuntime registry + attach state machines
-├── services/                # socket/ (WebSocketService, MessageRouter, clientId) +
-│                            #   attachPrefs, sessionAttachProfile, deepLinkAttach, addressSelection
-│                            #   — capability plugins live in features/, not here
+│   └── claude-code/         # transport, UI, and contribution.tsx (presence + view)
+├── platform/                # transport, runtime, attach — and framework-level code
+│   ├── socket/              # WebSocketService, MessageRouter, clientId, wire types
+│   ├── server/              # the Server transport plugin + its menu
+│   ├── explorer/            # the file-tree framework (no Nession product semantics)
+│   ├── terminal-runtime/    # React-free runtime: controller, transports, input, xterm
+│   ├── session-runtime/     # SessionRuntime + its registry (acquire/release leases)
+│   └── attach/              # attach state machine, controller, address policy,
+│                            #   relay connection, attach prefs/profile, state/
+│                            #   (state/ = p2p status, route epoch, transport generation)
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
+├── shared/lib/              # generic pure helpers (cn, format, encoding, languageId,
+│                            #   errorHelpers, clipboard, addressSelection)
+├── shared/markdown/         # markdown pipeline (its consumers pin it to this layer)
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
-├── lib/                     # pure helpers (cn, format, encoding, session-first-free utils)
-├── atoms/                   # shared jotai atoms (connection, session, probe)
-├── extensions/              # registry + extension contributions (own rung)
-├── markdown/                # markdown pipeline (shared)
+├── extensions/              # the generic UI-slot registry (no contributor today)
 └── test/                    # vitest setup + shared mocks (not a layer)
 ```
 
-## Feature layout & ownership
+## Capability layout & ownership
 
-Each feature mirrors the same skeleton (see `features/{sessions,agents}/README.md`
-for the exemplars and `capabilities/files/README.md` for the original):
+A capability is a vertical slice (`capabilities/files/README.md` is the
+original, and the closest thing to an exemplar):
 
 ```text
-features/<feature>/
-├── <Feature>Plugin.ts   # class implements CapabilityPlugin; generation-tagged
+capabilities/<name>/
+├── <Name>Plugin.ts      # class implements TransportPlugin; generation-tagged
 │                        #   install(connection) — StrictMode-safe
 ├── types.ts             # wire request/response types
-├── index.ts             # re-exports + `export const xxxApi = new XPlugin()`
-│                        #   (module singleton; FilesPlugin is a per-runtime factory)
-├── components/          # feature UI (+ __tests__/integration/)
-├── hooks/               # feature hooks (+ tests)
+├── index.ts             # the public surface
+├── contribution.tsx     # presence state + the view it contributes, if it has one
+├── components/          # capability UI (+ __tests__/integration/)
+├── hooks/               # capability hooks (+ tests)
 ├── model/               # pure domain model, if any
-└── README.md            # ownership, module map, state ownership, cross-feature deps
+└── README.md            # ownership, module map, state ownership, cross-capability deps
 ```
 
-Cross-feature imports are allowed through the peer's public surface and are
-recorded in each README — e.g. `agents → sessions` (`model/domainState`
-channel vocabulary, `ConnectionStatus`), `sessions → env`
-(`EnvFileMultiSelect`), `terminal → commands` (presets/`useQuickCommands`).
+Claude Code is the reference for the whole slice: transport, wire types, UI,
+presence state and its Workspace view are all in `capabilities/claude-code/`,
+and the app layer only registers what the contribution hands it.
+
+**A capability keeps its view only when it draws the same one in both
+experiences.** Claude Code does, so its `contribution.tsx` supplies a whole
+binding. The other four do not — every one of them is drawn differently by Web
+and App — so their layouts belong to the experiences
+(`experiences/{web,app}/workspaceViews.tsx`) and `viewBindings.ts` pairs the two
+halves up. The deciding fact is not taste: `FilesAppLayout` and the App scroll
+chrome import `AppBackButton`/`AppToolScroll` from the app layer, so a
+capability owning them would be a reverse import, and pushing App chrome down
+into `components/ui` would put experience geometry in a layer that is meant to
+be product-agnostic. `#801` §6's sketch describes the Claude Code case; this is
+the case it does not cover, and the acceptance criterion settles it — "Web/App
+差异主要通过 Experience Composition 表达".
+
+For the same reason the web/app pairs used to be written side by side in one
+file as a `{ web, app }` object whose two halves were the same element with and
+without a wrapper. Expressing that as composition — each experience owning its
+own file — is what stops it from becoming a flag on a shared component.
+
+The singleton convention differs where a cycle would otherwise close: `envApi`
+and the others are declared in `index.ts`, while `claudeCodeApi` is declared in
+`ClaudeCodePlugin.ts`, because `index` re-exports the contribution, the
+contribution imports the component, and the component needs the singleton.
+Declaring it in the barrel would close that into a cycle.
+
+Cross-capability imports go through the peer's public surface and are recorded
+in each README — e.g. `files → explorer` (the file-tree framework),
+`env → session` (`EnvFileMultiSelect`), `terminal → commands`
+(presets/`useQuickCommands`).
 
 ### State ownership
 
-Rules follow #649 (per-feature READMEs hold the detailed table):
+State follows **ownership, not state-management technology**. "It is a Jotai
+atom" is not an architectural boundary: a Session atom belongs to the Session
+owner, wherever that owner sits. `src/atoms/` was a directory named after a
+library, which is why it had to be `shared` — and `shared` may import nothing,
+which is what made the cluster impossible to move. It is gone; `product/*/state`
+and `platform/*/state` are where state lives now.
 
-- transient / short-lived UI state → component state or a feature hook
-- capability state shared across components → feature `model/`/`hooks/` (per
+Rules follow #649 (the owner's README holds the detailed table):
+
+- transient / short-lived UI state → component state or an owner hook
+- capability state shared across components → capability `model/`/`hooks/` (per
   mount; session-list state is deliberately **not** hoisted to a global atom)
-- transport / connection / terminal lifecycle → core (`core/terminal-runtime`,
-  `services/socket`) and shared atoms (`atoms/`)
+- transport / connection / terminal lifecycle → `platform/<domain>`
+  (`socket/`, `attach/state/`, `session-runtime/`, `terminal-runtime/`)
+- **the attachment's own model** — which Session, over which route, with which
+  choice → `product/session/state/`. It cannot be `platform`: its route
+  derivation reads Session identity, and a platform module may not reach up.
+  That constraint, not taste, is what fixes the boundary between
+  `product/session/state` and `platform/attach/state`.
 - current page, layout, selected workspace → app layer (`app/`)
 
 ### Extension points
 
-- **Capability plugins** (wire APIs): each feature's `*Api` singleton is
-  registered centrally in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`)
-  and installed on every `WebSocketService` connection.
-- **`extensions/registry`**: UI slots (e.g. `agent-detail`) contributed by
-  extensions such as claude-code; consumed by feature components.
-- **Workspace capabilities**: `app/workspace/capabilities.ts` registers what the
-  Workspace can show and when each is available; `app/workspace/viewBindings.ts`
-  registers how each is drawn (`app/workspace/views/`). A capability's name and
+- **Transport plugins** (wire APIs): each owner's `*Api` singleton is registered
+  centrally in `app/useAppConnection.ts` (`SERVER_PLUGINS`) and installed on
+  every `WebSocketService` connection. Renamed from `CapabilityPlugin` in #801:
+  one word was carrying both this and Product Capability, and the two share
+  nothing — a transport plugin has no presence, is never activated, and is
+  invisible to the user.
+- **`extensions/registry`**: UI slots (e.g. `agent-detail`, `terminal-header`)
+  that an extension may contribute into a product pattern. The mechanism is
+  live but has **no contributor today** — Claude Code's sections were retired
+  when it became a Workspace tool, and its empty registration was deleted with
+  them. Adding one means adding `extensions/<name>/index.ts`, which the
+  registry discovers by glob.
+- **Capability contributions**: a capability declares its presence state in its
+  own `contribution.tsx`, and its Workspace view too *when the two experiences
+  draw it the same way* (`capabilities/claude-code/` is the reference). The app
+  layer registers what it receives: `app/workspace/capabilities.ts` for
+  presence, `app/workspace/viewBindings.ts` for views. A capability's name and
   state come from its provider, never from its view — see
   `docs/design/workspace.md`, "Contribution model".
+- **Experience views**: when Web and App draw a capability differently, the
+  layouts belong to the experiences —
+  `app/experiences/{web,app}/workspaceViews.tsx`, keyed by capability id, with
+  `viewBindings.ts` supplying the icon and pairing the halves. Moving a
+  capability's view *out* of here and into the capability is only correct if
+  both experiences would render the same thing.
 - **Fixture screens**: `app/fixture/` powers the `/fixture*` routes used by
   e2e visual baselines.
 
@@ -284,12 +412,21 @@ Rules follow #649 (per-feature READMEs hold the detailed table):
 
 The v2 (session-first) information architecture is the product target
 (`docs/design/information-architecture.md`, `docs/design/migration.md`). The
-predecessor Dashboard shell — agents-grid-first, with its own terminal
-layouts and agent/session preview dialogs — was deleted in **#655** (Phase 5)
-and the default flipped to `SessionFirstShell`; the `nession_session_first`
-localStorage flag was removed. No new parallel shell should be introduced;
-session-first patterns are canonical (name-collision policy: legacy copies
-are deleted, not kept in coexistence).
+predecessor Dashboard shell — agents-grid-first, with its own terminal layouts
+and agent/session preview dialogs — was deleted in **#655** (Phase 5), the
+default flipped to the session-first shell, and the `nession_session_first`
+localStorage flag was removed.
+
+> The shell was called `SessionFirstShell` then — the prefix disambiguated it
+> against the Dashboard. Phase 6 (#801) dropped it, since a disambiguator with
+> nothing left to disambiguate is just a longer name. It is `Shell` now.
+> "Session-first" survives as *product* vocabulary for the v2 information
+> architecture, which is what this section is about; it is no longer a code
+> prefix.
+
+No new parallel shell should be introduced; session-first patterns are
+canonical (name-collision policy: legacy copies are deleted, not kept in
+coexistence).
 
 ## Quality gates
 

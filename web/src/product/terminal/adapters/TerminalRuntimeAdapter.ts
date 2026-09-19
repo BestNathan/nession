@@ -1,9 +1,9 @@
 import { getDefaultStore } from 'jotai';
-import type { TerminalControllerEvents } from '@/core/terminal-runtime/controller/TerminalController';
+import type { TerminalControllerEvents } from '@/platform/terminal-runtime/controller/TerminalController';
 import { inputModeAtomFamily } from '../state/input';
 import { lastResizeAtom } from '../state/terminal';
 import { terminalTransportReadyAtom } from '../state/transport';
-import type { SessionRuntime } from '@/runtime/SessionRuntime';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 
 /**
  * Mirrors imperative TerminalController events into Jotai atoms for React UI.
@@ -18,12 +18,18 @@ export function createTerminalRuntimeAdapter(runtime?: SessionRuntime | null): T
   const store = getDefaultStore();
   return {
     onTransportReady: (ready) => {
+      // Both sinks, always. `useSessionRuntime` reads this atom and feeds it
+      // into the runtime config, which `updateContext` applies back onto the
+      // runtime — so publishing to only one of them lets that config sync
+      // clobber what this adapter just set. That is what pinned the attach phase
+      // at 'connecting' after a successful relay attach: the adapter set
+      // ready=true on the runtime, the next config update pushed the atom's
+      // stale `false` back over it, and `driveRelayAttach` then early-returned
+      // on `!transportReady` forever — so every keystroke sat in
+      // ConnectionManager's inputBuffer and was never sent.
+      store.set(terminalTransportReadyAtom, ready);
       if (runtime) {
         runtime.setTransportReady(ready);
-      } else {
-        // Compatibility for isolated controller consumers. Production terminal
-        // paths always inject their SessionRuntime.
-        store.set(terminalTransportReadyAtom, ready);
       }
     },
     onInputModeChange: (sid, mode) => {

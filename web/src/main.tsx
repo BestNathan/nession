@@ -5,7 +5,7 @@ import App from './App.tsx'
 import { initExtensions } from './extensions/registry'
 import './index.css'
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery'
-import { normalizeHashRouterLocation } from './lib/hashRouterUrl'
+import { normalizeHashRouterLocation } from './app/hashRouterUrl'
 
 function Root() {
   // Mobile browser bottom bar + terminal BottomBar sheet can cover a

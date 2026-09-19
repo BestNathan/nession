@@ -1,4 +1,4 @@
-import type { CapabilityPlugin, PluginSurface } from '@/services/socket/types';
+import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { Agent } from '@/types';
 import type { AgentDeleteResponse, AgentRenameResponse, AgentsListResponse } from './types';
 
@@ -16,7 +16,7 @@ interface GenerationEntry<T> {
  * agent list fresh. Wire strings live only in this file; the typed API is
  * what consumers import (module singleton in index.ts).
  */
-export class AgentsPlugin implements CapabilityPlugin {
+export class AgentsPlugin implements TransportPlugin {
   readonly name = 'agents';
 
   private connection: PluginSurface | null = null;

@@ -33,7 +33,7 @@ Do not infer permanent product boundaries from today's component tree or transpo
 | Hooks | Shared hooks in `src/shared/hooks/`, capability/product hooks in `<owner>/hooks/`, app-composition hooks in `src/app/`. Never put `use*` modules under `components/` or `components/ui/`. |
 | Components | Shared generic UI infrastructure lives in `src/components/ui/`; capability/product UI belongs in `<owner>/components/`; shell/composition UI belongs in `src/app/`. UI design/component-selection rules live in `nession-web-design`. |
 | Layers | The vocabulary is `app` composes `product` / `capabilities` / `platform` / `shared`, over generic `components/ui`; `features/` no longer exists. Rule: `nession/no-reverse-imports`; full model, ownership per layer, and migration state: `docs/architecture/web.md`. |
-| WebSocket | A new capability is a `CapabilityPlugin` (`src/services/socket/types.ts`) implemented inside its own layer (`capabilities/<name>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_CAPABILITIES`). Do not add capability-specific transport logic to core `WebSocketService`. |
+| WebSocket | A new wire-protocol family is a `TransportPlugin` (`src/platform/socket/types.ts`) implemented inside its own layer (`<owner>/<Name>Plugin.ts`) and registered in `app/useAppConnection.ts` (`SERVER_PLUGINS`). **"Transport plugin" is not "Product Capability"** — the latter is the discoverable/activatable concept with presence (`product/capability`); a transport plugin has no presence and is user-invisible. Do not add protocol-specific transport logic to core `WebSocketService`. |
 | Types | Core types in `src/types.ts`; domain types in `{domain}/types.ts`; re-export from `types.ts` only when needed for compatibility. |
 | CSS | Tailwind v4 via `@tailwindcss/vite`. Global CSS stays in `src/index.css`; component styling follows the existing component model. UI styling policy and design values live in `nession-web-design`. |
 | Alias | `@/` → `src/` (see `vite.config.ts`). |
@@ -61,21 +61,32 @@ src/
 ├── index.css              # Global CSS / Tailwind entry
 ├── types.ts               # Shared TS types
 ├── app/                   # App composition, shell, workspace, app-level hooks
+│                          #   experiences/{web,app}/ own each experience's
+│                          #   frame and its Workspace layouts
 ├── product/               # Nession product concepts + their Product Patterns
-│                          #   (target owner; see the migration map in web.md)
+│                          #   <concept>/patterns/ holds a component that
+│                          #   implements a named canonical pattern
+│                          #   (docs/design/design-system/patterns/*.md) and its
+│                          #   contract; ordinary feature UI stays in components/.
+│                          #   A pattern whose styling vocabulary is shell chrome
+│                          #   lives in the shell instead — see web.md on
+│                          #   SessionHeader, which the layer rule settled.
 ├── capabilities/          # discoverable / activatable / contributable
-│                          #   capabilities, as vertical slices
+│                          #   capabilities, as vertical slices; one that
+│                          #   contributes to the shell declares it in its own
+│                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
-│                          #   code with no product semantics
-├── shared/                # Shared hooks and generic helpers
+│                          #   code with no product semantics: socket/, server/,
+│                          #   explorer/, terminal-runtime/ (React-free),
+│                          #   session-runtime/, attach/
+├── shared/                # Shared layer: hooks/, lib/ (generic pure helpers),
+│                          #   markdown/. May import nothing above it.
 ├── components/ui/         # Shared generic UI infrastructure
-├── core/terminal-runtime/ # React-free terminal runtime
-├── runtime/               # SessionRuntime ownership + attach state machines
-├── atoms/                 # Jotai atoms split by domain
-├── services/              # WS client and other core services
-├── lib/                   # Pure helpers
-├── markdown/              # Markdown preview pipeline
-├── extensions/            # Extension registry / UI contributions
+├── (no atoms/)            # state lives with its owner: product/*/state,
+│                          #   platform/attach/state
+├── (no lib/)              # generic helpers are shared/lib/; owner-specific ones
+│                          #   live with the owner that consumes them
+├── extensions/            # the generic UI-slot registry (no contributor today)
 └── test/                  # Vitest setup
 ```
 
@@ -85,10 +96,10 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 ## 4. State and data
 
-- Jotai atoms live under `src/atoms/` and feature-owned state directories such as `src/product/terminal/state/`. Prefer small domain atoms over mega-stores.
-- Session / attach / file flows go through app-composition and feature hooks rather than embedding WebSocket calls deep in presentational components.
+- Jotai atoms live in their owner's `state/` (`product/<concept>/state/`, `platform/<domain>/state/`). `src/atoms/` is gone. Prefer small domain atoms over mega-stores. **State follows ownership, not state-management technology** — "it is a Jotai atom" is not a boundary, and there is no central state directory to default into (#801 Phase 5).
+- Session / attach / file flows go through app-composition and owner hooks rather than embedding WebSocket calls deep in presentational components.
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
-- New feature capabilities should expose a feature-owned API/plugin boundary rather than leaking transport concerns into UI composition.
+- A new capability should expose an owner-owned API/plugin boundary rather than leaking transport concerns into UI composition.
 
 ---
 

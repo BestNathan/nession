@@ -3,11 +3,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
-import { SessionFirstShell } from '@/app/SessionFirstShell';
-import { sessionIdAtom } from '@/atoms/session';
+import { Shell } from '@/app/Shell';
+import { sessionIdAtom } from '@/product/session/state';
 import { terminalSessionStateAtom } from '@/product/terminal/state/session';
-import { probeResultsAtom, type AgentProbe } from '@/atoms/probe';
-import { buildOptionsFingerprint } from '@/services/sessionAttachProfile';
+import { probeResultsAtom, type AgentProbe } from '@/product/agent/state';
+import { buildOptionsFingerprint } from '@/platform/attach/sessionAttachProfile';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';
@@ -72,12 +72,11 @@ vi.mock('@/app/useDashboard', () => ({
 vi.mock('@/app/useProbePolling', () => ({
   useProbePolling: () => {},
 }));
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="terminal" />,
 }));
-vi.mock('@/app/workspace/views/filesWeb', () => ({
+vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
-  FilesAppLayout: () => <div data-testid="file-workspace" />,
 }));
 vi.mock('@/capabilities/env/components/EnvManager', () => ({
   EnvManager: ({ embedded }: { embedded?: boolean }) => (
@@ -100,7 +99,7 @@ vi.mock('sonner', () => ({
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
-// onConnectionStateChange + connectionState (runtime/relayServerConnection.ts).
+// onConnectionStateChange + connectionState (platform/attach/relayServerConnection.ts).
 // 'connected' mirrors the shell's post-handshake render state.
 vi.mock('@/shared/hooks/useWebSocket', () => ({
   useWebSocket: () => ({
@@ -118,7 +117,9 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
-vi.mock('@/capabilities/env', () => ({
+// Partial mock — see CreateSessionDialog.test.tsx.
+vi.mock('@/capabilities/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: { listEnvFiles: vi.fn() },
 }));
 
@@ -130,8 +131,8 @@ const mobileNav = vi.hoisted(() => ({
   isWide: true,
 }));
 
-vi.mock('@/app/useSessionFirstMobileNav', () => ({
-  useSessionFirstMobileNav: () => mobileNav,
+vi.mock('@/app/useMobileNav', () => ({
+  useMobileNav: () => mobileNav,
 }));
 
 const mockedSessionsApi = vi.mocked(sessionsApi);
@@ -199,7 +200,7 @@ function renderShell(initialEntry = '/', opts: { seedProbeCache?: boolean } = {}
   const view = render(
     <Provider store={store}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SessionFirstShell connectionStatus="connected" />
+        <Shell connectionStatus="connected" />
         <LocationProbe />
       </MemoryRouter>
     </Provider>,

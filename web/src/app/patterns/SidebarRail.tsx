@@ -1,7 +1,7 @@
 import { PanelLeftOpen, Server, ListTree } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { shellIconButtonClass, shellMotionClass } from '@/app/shellStyles';
-import type { ConnectionState } from '@/services/socket';
+import type { ConnectionState } from '@/platform/socket';
 
 export interface SidebarRailProps {
   /**

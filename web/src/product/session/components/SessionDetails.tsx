@@ -1,5 +1,5 @@
-import { formatRelativeTime } from '@/lib/format';
-import { ConnectionStatus } from '@/product/session/components/ConnectionStatus';
+import { formatRelativeTime } from '@/shared/lib/format';
+import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
 

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { ArrowLeft, Plus, RefreshCw, Upload, Trash2, Search, FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';

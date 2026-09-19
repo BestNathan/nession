@@ -4,32 +4,30 @@ import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTran
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { envApi } from '@/capabilities/env';
 import type { TerminalAgentApi } from '@/product/terminal/agent';
-import type { ConnectionState } from '@/services/socket/types';
+import type { ConnectionState } from '@/platform/socket/types';
 import {
   relayServerHandle,
   type RelayServerHandle,
   type RelayServerTransport,
-} from '@/runtime/relayServerConnection';
+} from '@/platform/attach/relayServerConnection';
 import type { EnvFileRef } from '@/types';
 import {
-  sessionIdAtom,
-  sessionNameAtom,
   attachInfoAtom,
+  effectiveModeAtom,
+  envRefsAtom,
+  isSwitchingAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
-  envRefsAtom,
-} from '@/atoms/session';
-import {
-  effectiveModeAtom,
-  isSwitchingAtom,
-} from '@/atoms/connection';
+  sessionIdAtom,
+  sessionNameAtom,
+} from '@/product/session/state';
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
-import { useSessionFirstTerminalAttach } from '@/product/terminal/useSessionFirstTerminalAttach';
-import { ConnectionManager } from '@/core/terminal-runtime/ConnectionManager';
-import { createAttachGate } from '@/core/terminal-runtime/adapters/TransportAttachGate';
-import { detectProfile, PROFILES } from '@/core/terminal-runtime/DeviceProfile';
-import type { TerminalTransport } from '@/core/terminal-runtime/transport/TerminalTransport';
+import { useTerminalAttach } from '@/product/terminal/useTerminalAttach';
+import { ConnectionManager } from '@/platform/terminal-runtime/ConnectionManager';
+import { createAttachGate } from '@/platform/terminal-runtime/adapters/TransportAttachGate';
+import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
+import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import { bannerAtomFamily, bannerAttemptAtomFamily, type ReconnectBanner } from '@/product/terminal/state/ui';
 
@@ -203,7 +201,7 @@ export function useTerminalOrchestration({
     serverConnection: relayServer,
   });
 
-  const mirroredAttach = useSessionFirstTerminalAttach({
+  const mirroredAttach = useTerminalAttach({
     sessionId,
     runtime,
   });

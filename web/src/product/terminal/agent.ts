@@ -1,9 +1,9 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
-import type { PluginSurface } from '@/services/socket/types';
+import type { PluginSurface } from '@/platform/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 
 /**
- * Default attach timeout — must mirror `runtime/AttachStateMachine.ts`
+ * Default attach timeout — must mirror `platform/attach/AttachStateMachine.ts`
  * (controller-level budget kept there for the old consumer; this one serves
  * the feature API). Do not import from the feature into runtime.
  */

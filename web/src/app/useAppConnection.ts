@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { WebSocketService } from '../services/socket';
-import type { ConnectionState } from '../services/socket/types';
+import { WebSocketService } from '../platform/socket';
+import type { ConnectionState } from '../platform/socket/types';
 import type { AuthResponse } from '../types';
 import { agentsApi } from '@/product/agent';
 import { sessionsApi } from '@/product/session';
@@ -10,16 +10,21 @@ import { envApi } from '@/capabilities/env';
 import { commandsApi } from '@/capabilities/commands';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { terminalServerApi } from '@/product/terminal';
-import { getToken, setToken, clearToken, getRememberPreference } from '../lib/auth';
-import { getOrCreateClientId } from '../services/socket/clientId';
+import { getToken, setToken, clearToken, getRememberPreference } from './auth';
+import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
-// Every capability this app knows how to speak. The feature singletons bind
+// Every wire-protocol family this app knows how to speak. The singletons bind
 // to whichever service instance installs them (use() in the service
 // constructor); a later service simply re-installs them with its surface.
-const SERVER_CAPABILITIES = [
+//
+// Not to be confused with the app's Product Capabilities — what the Workspace
+// can show and when, which lives in `product/capability` and
+// `app/workspace/capabilities.ts`. These are transport plugins; see
+// `services/socket/types.ts`.
+const SERVER_PLUGINS = [
   agentsApi,
   sessionsApi,
   serverApi,
@@ -79,7 +84,7 @@ export function useAppConnection() {
       // stop before the new one opens — two transports would race the state.
       serviceRef.current?.dispose();
       const clientId = getOrCreateClientId();
-      service = new WebSocketService(serverUrl, SERVER_CAPABILITIES, {
+      service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
         maxReconnectAttempts: 5,
         handshake: (surface) => surface
           .request<AuthResponse>('client.auth', { auth_token: authToken, client_id: clientId })

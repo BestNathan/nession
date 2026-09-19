@@ -6,7 +6,7 @@ import {
 import { Keyboard, PenLine } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { CapsuleMode } from '@/product/terminal/capsule/types';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/lib/utils';
 
 interface CapsuleModeToggleProps {
   mode: CapsuleMode;

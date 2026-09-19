@@ -6,11 +6,11 @@ import {
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
 import { mapDomainState } from '@/product/session/model/domainState';
-import { SessionFirstWorkspace } from '@/app/SessionFirstWorkspace';
+import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 
 /**
  * Canonical Active Terminal screen (#561 Phase 2A): the real
- * session-first composition rendered with deterministic data and a
+ * shell composition rendered with deterministic data and a
  * static terminal. No network, no auth. Also the Phase 6 baseline source.
  *
  * Above `lg` the shell is two columns, so the canonical wide screen shows the
@@ -39,12 +39,12 @@ export function FixtureShell() {
 
   return (
     <div
-      data-testid="session-first-shell"
+      data-testid="shell"
       data-sf-design="polish"
-      className="session-first-shell flex h-[100dvh] flex-col bg-background"
+      className="shell flex h-[100dvh] flex-col bg-background"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <SessionFirstWorkspace
+        <WorkspaceRegion
           agents={FIXTURE_AGENTS}
           filteredSessions={FIXTURE_SESSIONS}
           staleAgents={[]}

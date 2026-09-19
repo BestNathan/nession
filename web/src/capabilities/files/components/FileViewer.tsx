@@ -20,7 +20,7 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import { type ViewerType } from '../model/viewerRegistry';
-import { formatSize } from '@/lib/format';
+import { formatSize } from '@/shared/lib/format';
 import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
 
@@ -61,7 +61,7 @@ function FileViewerToolbar({
     <div className="flex flex-shrink-0 items-center justify-between gap-[var(--shell-space-2)] border-b border-border/60 px-[var(--workspace-editor-head-pad-x)] py-[var(--shell-space-1)]">
       <div className="flex min-w-0 items-center gap-[var(--shell-space-2)] font-mono text-[length:var(--workspace-editor-head-font-size)] text-muted-foreground">
         {/* The path, not the basename. The mockup's head reads
-            `web/src/core/terminal-runtime/ThemeManager.ts` — with a tree beside
+            `web/src/platform/terminal-runtime/ThemeManager.ts` — with a tree beside
             it, a bare filename does not say which of several `index.css` is
             open. */}
         <span className="truncate">{path || filename}</span>

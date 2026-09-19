@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { testAddresses } from '@/lib/addressSelection';
+import { testAddresses } from '@/shared/lib/addressSelection';
 import {
   resolveDeepLinkAttachChoice,
   resolveProfileAttach,
@@ -9,18 +9,18 @@ import {
   buildOptionsFingerprint,
   type PersistedAttachChoice,
   type SessionAttachProfile,
-} from '@/services/sessionAttachProfile';
+} from '@/platform/attach/sessionAttachProfile';
 import type { Session } from '@/types';
 
-vi.mock('@/services/attachPrefs', () => ({
+vi.mock('@/platform/attach/attachPrefs', () => ({
   loadAttachPrefs: () => ({ mode: 'auto', renderer: 'webgl' }),
 }));
 
-vi.mock('@/core/terminal-runtime/Renderer', () => ({
+vi.mock('@/platform/terminal-runtime/Renderer', () => ({
   detectWebGLSupport: () => true,
 }));
 
-vi.mock('@/lib/addressSelection', () => ({
+vi.mock('@/shared/lib/addressSelection', () => ({
   testAddresses: vi.fn().mockResolvedValue([
     { url: 'ws://fast/ws', latencyMs: 10 },
     { url: 'ws://slow/ws', latencyMs: 100 },

@@ -12,7 +12,13 @@ const { createSessionMock, listEnvFilesMock } = vi.hoisted(() => ({
 vi.mock('@/product/session', () => ({
   sessionsApi: { createSession: createSessionMock },
 }));
-vi.mock('@/capabilities/env', () => ({
+// Partial mock. The barrel now also exports the capability's components, and
+// this dialog renders `EnvFileMultiSelect` from it — so a mock supplying only
+// `envApi` leaves the component undefined. Spreading the real module keeps it
+// real, which is what these tests had when it was deep-imported, and keeps the
+// mock correct as the barrel grows.
+vi.mock('@/capabilities/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/capabilities/env')>()),
   envApi: { listEnvFiles: listEnvFilesMock },
 }));
 
