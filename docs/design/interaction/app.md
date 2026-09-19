@@ -47,8 +47,15 @@ The capsule must not become a permanent toolbar that accumulates every registere
 
 ### Capability presence
 
-When a capability becomes active in the current Session, it may earn lightweight presence inside the capsule's `+`
-expansion rather than forcing navigation. The resting capsule does not change.
+The resting capsule does not change when a capability becomes available, relevant, or active.
+
+The App uses the disclosure model from [capability-emergence.md](../capability-emergence.md):
+
+```text
+Dormant -> Signal -> Peek -> Workspace
+```
+
+`+` remains the explicit Nession capability entry. After the user selects a capability, or after context gives it a strong reason to emerge, the App may show a temporary Signal/Peek above the capsule.
 
 For example:
 
@@ -56,13 +63,17 @@ For example:
 Terminal running a shell
     -> neutral capsule
 
-Claude Code becomes active
-    -> the resting capsule is unchanged
-    -> `+` marks Claude Code and makes its contextual actions available
-    -> user may explicitly open a deeper Claude Code Session surface
+Git becomes relevant
+    -> resting capsule remains unchanged
+    -> Git may be discovered/selected through `+`
+    -> compact Git Signal: branch / worktree / changes
+    -> tap for Git Peek
+    -> Open Workspace for full Git
 ```
 
-The deeper surface is session-scoped and should open as a contextual overlay/layer where practical. Closing it returns the user to the same Terminal without changing the active Session.
+Signal/Peek is session-scoped and intentionally shallow. Rich state, history, management, and capability-specific workflows belong in Workspace.
+
+Opening Workspace must preserve the originating Session and capability context. Closing/dismissing returns the user to the same Terminal without rebuilding context.
 
 ## Gestures and visible alternatives
 
@@ -98,7 +109,7 @@ App presentation should normally map it as follows:
 - `unavailable`: no presence;
 - `available`: optionally discoverable in Workspace / explicit expansion;
 - `relevant`: contextual Workspace or capsule affordance may appear;
-- `active`: marked in the `+` expansion, plus optional deeper view.
+- `active`: may be marked/discoverable in `+`, and may project a temporary Signal/Peek without changing the resting capsule.
 
 Exact detection is implementation-specific.
 
