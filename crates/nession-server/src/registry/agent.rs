@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use nession_common::protocol::{
     AddressStatus, AgentAddress, AgentMetadata, NetworkType, ProbedAddress,
 };
+use nession_protocol::ProtocolManifest;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -29,6 +30,16 @@ pub struct AgentInfo {
     pub metadata: AgentMetadata,
     pub session_count: u32,
     pub active_sessions: u32,
+    /// What this agent reported it can serve, from its own composition
+    /// (`#678`).
+    ///
+    /// **Not persisted**, deliberately. The manifest describes what an agent can
+    /// serve *now*, and an agent that is not connected can serve nothing — a
+    /// stored copy would let this server claim support on behalf of a process
+    /// that is not running. `None` also covers the agent that never sent one,
+    /// which the design calls a **Legacy Peer**: not "supports everything", and
+    /// resolvable only through contracts with an explicit legacy adapter.
+    pub protocol_manifest: Option<ProtocolManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +99,9 @@ impl AgentRegistry {
                         metadata,
                         session_count: 0,
                         active_sessions: 0,
+                        // Restored agents have no manifest until they register
+                        // again — see the field's note on why it is not stored.
+                        protocol_manifest: None,
                     };
                     agents.insert(row.agent_id, info);
                 }

@@ -261,6 +261,10 @@ impl ConnectionHandler {
             metadata: payload.metadata,
             session_count: 0,
             active_sessions: 0,
+            // What the agent says it can serve, taken from its own composition.
+            // An older agent sends nothing and registers exactly as before —
+            // that is a Legacy Peer, not a peer that supports everything.
+            protocol_manifest: payload.protocol_manifest,
         };
 
         self.agent_registry.register(agent_info).await;

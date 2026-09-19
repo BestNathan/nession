@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use nession_protocol::ProtocolManifest;
+
 /// The message envelope now lives in the Protocol Kernel (#678).
 ///
 /// Re-exported rather than redefined so the ~30 import sites in this workspace
@@ -36,6 +38,19 @@ pub struct AgentRegisterPayload {
     /// from `ip_address`/`port`/`connect_url` for backward compatibility.
     #[serde(default)]
     pub addresses: Vec<AgentAddress>,
+    /// What this agent actually offers (`#678`).
+    ///
+    /// Optional, and that is the design's answer to "manifest in `agent.register`
+    /// or a separate discovery message": putting it here costs no extra round
+    /// trip, and making it optional means an **old agent registers exactly as it
+    /// always did**. An absent manifest is not "supports everything" — it makes
+    /// the agent a *Legacy Peer*, resolved only through contracts that declare an
+    /// explicit legacy adapter.
+    ///
+    /// The manifest is derived from the providers an agent actually composed, so
+    /// it cannot advertise a contract no handler serves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_manifest: Option<ProtocolManifest>,
 }
 
 fn default_protocol_version() -> String {
@@ -849,6 +864,7 @@ mod tests {
             display_name: Some("my-agent".to_string()),
             connect_url: None,
             addresses: vec![],
+            protocol_manifest: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let deserialized: AgentRegisterPayload = serde_json::from_str(&json).unwrap();

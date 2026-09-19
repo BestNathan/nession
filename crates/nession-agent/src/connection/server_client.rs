@@ -450,6 +450,14 @@ impl ServerClient {
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
             addresses: self.addresses.clone(),
+            // Derived from the providers this agent actually composed. `None`
+            // when it composed none — which is a real state (the CLI's path),
+            // and the server reads it as a Legacy Peer rather than as a peer
+            // that supports everything.
+            protocol_manifest: self
+                .extension_registry
+                .as_ref()
+                .map(|registry| registry.manifest().clone()),
         };
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;
