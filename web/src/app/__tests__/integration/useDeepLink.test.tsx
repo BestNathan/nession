@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
-import { useSessionFirstDeepLink } from '@/app/useSessionFirstDeepLink';
+import { useDeepLink } from '@/app/useDeepLink';
 import { sessionIdAtom } from '@/product/session/state';
 import type { Session } from '@/types';
 
@@ -37,7 +37,7 @@ function wrapper(initialEntry: string) {
   };
 }
 
-describe('useSessionFirstDeepLink', () => {
+describe('useDeepLink', () => {
   const confirmAttach = vi.fn();
   const onRestoreSession = vi.fn();
 
@@ -47,7 +47,7 @@ describe('useSessionFirstDeepLink', () => {
 
   it('reports restoring when on terminal route without active attach', () => {
     const { result } = renderHook(
-      () => useSessionFirstDeepLink({
+      () => useDeepLink({
         sessions: [makeSession()],
         sessionsLoaded: true,
         loadingSessions: false,
@@ -63,7 +63,7 @@ describe('useSessionFirstDeepLink', () => {
 
   it('delegates restore to useDeepLinkRestore with URL session id', () => {
     renderHook(
-      () => useSessionFirstDeepLink({
+      () => useDeepLink({
         sessions: [makeSession()],
         sessionsLoaded: true,
         loadingSessions: false,
@@ -96,7 +96,7 @@ describe('useSessionFirstDeepLink', () => {
     }
 
     renderHook(
-      () => useSessionFirstDeepLink({
+      () => useDeepLink({
         sessions: [makeSession()],
         sessionsLoaded: true,
         loadingSessions: false,

@@ -511,7 +511,7 @@ export class SessionRuntime {
       return; // P2P transport active — nothing to drive
     }
     if (!this.transportReady) {
-      return; // session-first waits for the xterm viewport
+      return; // shell waits for the xterm viewport
     }
     const phase = this.attachState.phase;
     if (phase === 'attached' || phase === 'idle') {

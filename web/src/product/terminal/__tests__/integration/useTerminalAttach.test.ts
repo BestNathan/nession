@@ -3,10 +3,10 @@ import { renderHook, act } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import {
-  useSessionFirstTerminalAttach,
+  useTerminalAttach,
   P2P_MAX_RECONNECT,
   ATTACH_TIMEOUT_MS,
-} from '@/product/terminal/useSessionFirstTerminalAttach';
+} from '@/product/terminal/useTerminalAttach';
 import {
   sessionIdAtom,
   sessionNameAtom,
@@ -203,7 +203,7 @@ function renderAttachHook(opts: {
     : makeRelayRuntime());
   return renderHook(
     () =>
-      useSessionFirstTerminalAttach({
+      useTerminalAttach({
         sessionId: store.get(sessionIdAtom),
         runtime: asSessionRuntime(runtime),
       }),
@@ -214,7 +214,7 @@ function renderAttachHook(opts: {
   );
 }
 
-describe('useSessionFirstTerminalAttach', () => {
+describe('useTerminalAttach', () => {
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });

@@ -9,7 +9,7 @@ import {
 
 export { P2P_MAX_RECONNECT, ATTACH_TIMEOUT_MS } from '@/platform/attach/AttachStateMachine';
 
-export interface UseSessionFirstTerminalAttachOptions {
+export interface UseTerminalRegionAttachOptions {
   sessionId: string;
   runtime?: SessionRuntime | null;
 }
@@ -77,10 +77,10 @@ function useAttachSessionLifecycle(opts: {
  * (client.attach retry, relay begin/fallback); this hook only mirrors
  * controller outcomes and attach-phase snapshots into Jotai.
  */
-export function useSessionFirstTerminalAttach({
+export function useTerminalAttach({
   sessionId,
   runtime,
-}: UseSessionFirstTerminalAttachOptions) {
+}: UseTerminalRegionAttachOptions) {
   const [terminalState, setTerminalState] = useAtom(terminalSessionStateAtom);
   const setForcedRelay = useSetAtom(forcedRelayAtom);
 

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
+import { ShellMain } from '@/app/ShellMain';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent } from '@/types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -12,8 +12,8 @@ vi.mock('@/app/workspace/WorkspaceShell', () => ({
     return <div data-testid="mock-workspace-shell" />;
   },
 }));
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="mock-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="mock-terminal" />,
 }));
 
 const domain: DomainState = {
@@ -36,14 +36,14 @@ const base = {
   connectionStatus: 'connected' as const,
 };
 
-describe('SessionFirstMain experience threading', () => {
+describe('ShellMain experience threading', () => {
   beforeEach(() => {
     lastCtx = null;
   });
 
   it('passes experience="app" into the workspace ctx', () => {
     render(
-      <SessionFirstMain
+      <ShellMain
         {...base}
         domain={domain}
         experience="app"
@@ -54,7 +54,7 @@ describe('SessionFirstMain experience threading', () => {
   });
 
   it('defaults to experience="web"', () => {
-    render(<SessionFirstMain {...base} domain={domain} />);
+    render(<ShellMain {...base} domain={domain} />);
     expect(screen.getByTestId('mock-workspace-shell')).toBeInTheDocument();
     expect(lastCtx?.experience).toBe('web');
   });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 
 /** Mobile shell: full-width session list XOR active session detail below lg. Above lg the list is hidden (sessions live in the drawer); showDetail stays true. */
-export function useSessionFirstMobileNav(selectedId: string | null) {
+export function useMobileNav(selectedId: string | null) {
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [mobilePane, setMobilePane] = useState<'list' | 'detail'>('list');
   const wasWideRef = useRef(isWide);

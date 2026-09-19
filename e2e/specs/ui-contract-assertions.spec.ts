@@ -160,7 +160,7 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     // is the selected row, and the only floating control over the work surface
     // is the surface capsule.
     await expect(page.getByTestId('session-header-line')).toHaveCount(0);
-    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+    await expect(page.getByTestId('sidebar-column')).toBeVisible();
     await expect(page.getByTestId('sidebar-agents')).toBeVisible();
 
     // Healthy infrastructure is not permanent chrome — a member that carries

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
+import { ShellMain } from '@/app/ShellMain';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 
@@ -31,18 +31,18 @@ const domain: DomainState = {
   attachment: { channel: 'attached', copy: null },
 };
 
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="terminal" />,
 }));
 
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
 }));
 
-describe('SessionFirstMain', () => {
+describe('ShellMain', () => {
   it('uses a full-bleed content column (no inset padding)', () => {
     render(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
@@ -55,7 +55,7 @@ describe('SessionFirstMain', () => {
       />,
     );
 
-    const content = screen.getByTestId('session-first-main-content');
+    const content = screen.getByTestId('main-content');
     expect(content.className).not.toMatch(/\bp-\d+\b/);
     expect(content.className).not.toMatch(/\bpt-\d+\b/);
     expect(content.className).toMatch(/flex-1/);
@@ -64,7 +64,7 @@ describe('SessionFirstMain', () => {
 
   it('renders the fixture terminal override instead of the attached terminal', () => {
     render(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
@@ -79,12 +79,12 @@ describe('SessionFirstMain', () => {
     );
 
     expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal')).not.toBeInTheDocument();
   });
 
   it('falls back to the attached terminal when no override is given', () => {
     render(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
@@ -97,12 +97,12 @@ describe('SessionFirstMain', () => {
       />,
     );
 
-    expect(screen.getByTestId('session-first-terminal')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal')).toBeInTheDocument();
   });
 
   it('threads experience to the header: switcher shows in web, hidden in app', () => {
     const view = render(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
@@ -117,7 +117,7 @@ describe('SessionFirstMain', () => {
     expect(screen.getByTestId('surface-switcher')).toBeInTheDocument();
 
     view.rerender(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={sess}
         selectedAgent={agent}
         agents={[agent]}
@@ -135,7 +135,7 @@ describe('SessionFirstMain', () => {
 
   it('shows the empty state when no session is selected', () => {
     render(
-      <SessionFirstMain
+      <ShellMain
         selectedSession={null}
         selectedAgent={undefined}
         agents={[]}
@@ -158,7 +158,7 @@ describe('SessionFirstMain', () => {
     expect(screen.getByTestId('session-empty-state')).toHaveTextContent(
       'Select a session to start working',
     );
-    expect(screen.queryByTestId('session-first-terminal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal')).not.toBeInTheDocument();
   });
 
 });

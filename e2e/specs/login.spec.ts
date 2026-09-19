@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitForSessionFirst } from '../helpers/sessionFirst';
+import { waitForShell } from '../helpers/shell';
 import { resetAuth } from '../helpers/reset';
 
 /**
@@ -26,8 +26,8 @@ test.describe('Login', () => {
     // The server_url param is the direct WS URL — bypasses vite preview proxy.
     await page.goto(`/?token=e2e-test-token&server_url=${encodeURIComponent(DIRECT_WS)}`);
 
-    // Should skip the login page and go directly to the session-first shell
-    await waitForSessionFirst(page);
-    await expect(page.locator('[data-testid="session-first-shell"]')).toBeVisible();
+    // Should skip the login page and go directly to the shell
+    await waitForShell(page);
+    await expect(page.locator('[data-testid="shell"]')).toBeVisible();
   });
 });

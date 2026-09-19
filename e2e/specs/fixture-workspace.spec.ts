@@ -12,7 +12,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test('canonical Workspace fixture renders the plugin shell', async ({ page }) => {
   await page.goto('/#/fixture/workspace');
 
-  await expect(page.getByTestId('session-first-shell')).toBeVisible();
+  await expect(page.getByTestId('shell')).toBeVisible();
   await expect(page.getByTestId('workspace-shell')).toBeVisible();
   await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
 
@@ -36,7 +36,7 @@ test('the sessions sidebar is present in the resting shell', async ({ page }) =>
   await page.goto('/#/fixture');
   // Above `lg` the sidebar is a column, not an overlay drawer (#748): there is
   // nothing to "open", and the drawer state no longer exists at this width.
-  await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+  await expect(page.getByTestId('sidebar-column')).toBeVisible();
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);
   await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 });

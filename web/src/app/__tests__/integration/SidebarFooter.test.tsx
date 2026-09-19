@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { SessionFirstSidebarFooter } from '@/app/SessionFirstSidebarFooter';
+import { SidebarFooter } from '@/app/SidebarFooter';
 import type { ConnectionState } from '@/platform/socket/types';
 
 vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
@@ -9,7 +9,7 @@ vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
 
 function renderFooter(overrides: Partial<{ connectionStatus: ConnectionState; nodeCount: number }> = {}) {
   return render(
-    <SessionFirstSidebarFooter
+    <SidebarFooter
       domain={null}
       connectionStatus={overrides.connectionStatus ?? 'connected'}
       nodeCount={overrides.nodeCount ?? 3}
@@ -17,11 +17,11 @@ function renderFooter(overrides: Partial<{ connectionStatus: ConnectionState; no
   );
 }
 
-describe('SessionFirstSidebarFooter', () => {
+describe('SidebarFooter', () => {
   it('shows the server info row directly (no overflow menu, no legacy switch)', () => {
     renderFooter();
     expect(screen.getByTestId('server-info-menu')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-overflow')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shell-overflow')).not.toBeInTheDocument();
     expect(screen.queryByTestId('use-legacy-dashboard')).not.toBeInTheDocument();
   });
 

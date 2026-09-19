@@ -4,7 +4,7 @@ import { AttachDialog, type AttachChoice } from '@/product/session/components/At
 import { useDashboard } from '@/app/useDashboard';
 import type { Session } from '@/types';
 
-export function SessionFirstDialogs({
+export function ShellDialogs({
   showCreateModal,
   setShowCreateModal,
   agents,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSessionFirstMobileNav } from '@/app/useSessionFirstMobileNav';
+import { useMobileNav } from '@/app/useMobileNav';
 
 function mockMatchMedia(matches: boolean) {
   const listeners = new Set<(e: MediaQueryListEvent) => void>();
@@ -24,14 +24,14 @@ function mockMatchMedia(matches: boolean) {
   return mql;
 }
 
-describe('useSessionFirstMobileNav', () => {
+describe('useMobileNav', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it('shows list only on narrow viewports until detail is opened', () => {
     mockMatchMedia(false);
-    const { result } = renderHook(() => useSessionFirstMobileNav(null));
+    const { result } = renderHook(() => useMobileNav(null));
     expect(result.current.showList).toBe(true);
     expect(result.current.showDetail).toBe(false);
 
@@ -45,7 +45,7 @@ describe('useSessionFirstMobileNav', () => {
   it('shows detail when opened with a selected session', () => {
     mockMatchMedia(false);
     const { result, rerender } = renderHook(
-      ({ id }: { id: string | null }) => useSessionFirstMobileNav(id),
+      ({ id }: { id: string | null }) => useMobileNav(id),
       { initialProps: { id: null as string | null } },
     );
 
@@ -59,7 +59,7 @@ describe('useSessionFirstMobileNav', () => {
 
   it('returns to list on openList without clearing selection visibility rules', () => {
     mockMatchMedia(false);
-    const { result } = renderHook(() => useSessionFirstMobileNav('a1:s1'));
+    const { result } = renderHook(() => useMobileNav('a1:s1'));
     act(() => {
       result.current.openDetail();
     });
@@ -73,14 +73,14 @@ describe('useSessionFirstMobileNav', () => {
 
   it('hides the list on wide viewports (drawer replaces the list pane)', () => {
     mockMatchMedia(true);
-    const { result } = renderHook(() => useSessionFirstMobileNav('a1:s1'));
+    const { result } = renderHook(() => useMobileNav('a1:s1'));
     expect(result.current.showList).toBe(false);
     expect(result.current.showDetail).toBe(true);
   });
 
   it('opens detail when resizing from wide to narrow with a selection', () => {
     const mql = mockMatchMedia(true);
-    const { result } = renderHook(() => useSessionFirstMobileNav('a1:s1'));
+    const { result } = renderHook(() => useMobileNav('a1:s1'));
     expect(result.current.isWide).toBe(true);
 
     act(() => {

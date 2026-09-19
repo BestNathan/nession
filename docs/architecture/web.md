@@ -244,14 +244,14 @@ is `shared/hooks/useAddressPlan`, and `shared` cannot reach `platform`.
 
 ```text
 src/
-├── App.tsx                 # auth gate → SessionFirstShell (authenticated) or LoginPage
+├── App.tsx                 # auth gate → Shell (authenticated) or LoginPage
 ├── main.tsx                # entry, initExtensions(), toaster
 ├── types.ts                # shared root type barrel
 ├── app/                    # app layer — shell (see app/public.ts)
-│   ├── SessionFirstShell.tsx        # the one authenticated shell
-│   ├── SessionFirstWorkspace/Sidebar/Main/Terminal/SpatialLayout…
+│   ├── Shell/ShellMain/ShellDialogs.tsx  # the shell and its regions
+│   ├── Sidebar/SidebarFooter/TerminalRegion/WorkspaceRegion.tsx
 │   ├── SessionDrawer.tsx, TerminalWell.tsx, shellStyles.ts
-│   ├── useSessionFirstShellState.ts # shell state composer
+│   ├── useShellState.ts     # shell state composer
 │   ├── patterns/            # shell chrome: SessionHeader, SessionListHeader,
 │   │                        #   SidebarRail, AppToolHeader, AppBackButton, …
 │   │                        #   NOTE: the name is now wider than its contents —
@@ -259,7 +259,7 @@ src/
 │   │                        #   so this holds chrome only. A rename to `chrome/`
 │   │                        #   is available and deliberately not taken here.
 │   ├── experiences/         # per-experience composition
-│   │   ├── web/             #   SessionFirstWebLayout + workspaceViews
+│   │   ├── web/             #   WebLayout + workspaceViews
 │   │   └── app/             #   spatial shell, gestures, AppToolScroll, workspaceViews
 │   ├── workspace/           # WorkspaceShell, capabilities.ts, viewBindings.ts,
 │   │                        #   workspaceContext.ts, presentation.ts
@@ -267,7 +267,7 @@ src/
 │   ├── useAppConnection.ts / useDashboard.ts / useDashboardFilter.ts /
 │   │   useDashboardModals.ts / useProbePolling.ts / useRealtimeUpdates.ts /
 │   │   useVisibilityReconnect.ts / useDeepLinkRestore.ts /
-│   │   useSessionFirst{Attach,DeepLink,MobileNav}.ts
+│   │   use{AttachFlow,DeepLink,MobileNav}.ts
 │   └── LoginPage.tsx
 ├── product/                 # Nession product concepts + their Product Patterns
 │   ├── session/             # the Session concept: model, state/, UI, hooks
@@ -412,12 +412,21 @@ Rules follow #649 (the owner's README holds the detailed table):
 
 The v2 (session-first) information architecture is the product target
 (`docs/design/information-architecture.md`, `docs/design/migration.md`). The
-predecessor Dashboard shell — agents-grid-first, with its own terminal
-layouts and agent/session preview dialogs — was deleted in **#655** (Phase 5)
-and the default flipped to `SessionFirstShell`; the `nession_session_first`
-localStorage flag was removed. No new parallel shell should be introduced;
-session-first patterns are canonical (name-collision policy: legacy copies
-are deleted, not kept in coexistence).
+predecessor Dashboard shell — agents-grid-first, with its own terminal layouts
+and agent/session preview dialogs — was deleted in **#655** (Phase 5), the
+default flipped to the session-first shell, and the `nession_session_first`
+localStorage flag was removed.
+
+> The shell was called `SessionFirstShell` then — the prefix disambiguated it
+> against the Dashboard. Phase 6 (#801) dropped it, since a disambiguator with
+> nothing left to disambiguate is just a longer name. It is `Shell` now.
+> "Session-first" survives as *product* vocabulary for the v2 information
+> architecture, which is what this section is about; it is no longer a code
+> prefix.
+
+No new parallel shell should be introduced; session-first patterns are
+canonical (name-collision policy: legacy copies are deleted, not kept in
+coexistence).
 
 ## Quality gates
 

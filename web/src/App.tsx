@@ -10,7 +10,7 @@ import { useAppConnection } from './app/useAppConnection';
 import { FixtureApp } from './app/fixture/FixtureApp';
 import { FixtureShell } from './app/fixture/FixtureShell';
 import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
-import { SessionFirstShell } from './app/SessionFirstShell';
+import { Shell } from './app/Shell';
 
 // Module-stable (static element, immutable) — safe to create once at module
 // scope and reuse in both routers without a useMemo dependency.
@@ -72,7 +72,7 @@ function App() {
         path: '/',
         element: (
           <WebSocketContext.Provider value={wsService!}>
-            <SessionFirstShell connectionStatus={connectionStatus} />
+            <Shell connectionStatus={connectionStatus} />
           </WebSocketContext.Provider>
         ),
         children: [

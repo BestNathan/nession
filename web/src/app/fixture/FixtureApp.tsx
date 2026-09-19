@@ -11,8 +11,8 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
-import { SessionFirstMain } from '@/app/SessionFirstMain';
-import { SessionFirstSidebar } from '@/app/SessionFirstSidebar';
+import { ShellMain } from '@/app/ShellMain';
+import { Sidebar } from '@/app/Sidebar';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { fixtureFileOps } from './fixtureFileOps';
@@ -90,23 +90,23 @@ export function FixtureApp() {
 
   return (
     <div
-      data-testid="session-first-shell"
+      data-testid="shell"
       data-sf-design="polish"
       data-experience="app"
-      className="session-first-shell flex h-[100dvh] flex-col bg-background"
+      className="shell flex h-[100dvh] flex-col bg-background"
     >
       <AppSpatialShell
         index={spatialIndex}
         onIndexChange={setSpatialIndex}
         sessions={
-          <SessionFirstSidebar
+          <Sidebar
             {...sidebarProps}
             onSelect={() => setSpatialIndex(1)}
           />
         }
         terminal={
           <div className="flex h-full min-h-0 flex-col">
-            <SessionFirstMain
+            <ShellMain
               {...mainShared}
               surface={surface}
               showWorkspace={false}
@@ -123,7 +123,7 @@ export function FixtureApp() {
         }
         workspace={
           <div className="flex h-full min-h-0 flex-col">
-            <SessionFirstMain
+            <ShellMain
               {...mainShared}
               surface={surface}
               showTerminal={false}

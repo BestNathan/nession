@@ -12,12 +12,12 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test('canonical Active Terminal fixture renders the terminal-native shell', async ({ page }, testInfo) => {
   await page.goto('/#/fixture');
 
-  await expect(page.getByTestId('session-first-shell')).toBeVisible();
+  await expect(page.getByTestId('shell')).toBeVisible();
   // Web has no Session header at all since #748: the canonical wide screen is
   // two columns, and Session identity is the selected row in the sidebar.
   await expect(page.getByTestId('session-header-line')).toHaveCount(0);
-  await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
-  await expect(page.getByTestId('session-first-main-content')).toBeVisible();
+  await expect(page.getByTestId('sidebar-column')).toBeVisible();
+  await expect(page.getByTestId('main-content')).toBeVisible();
   await expect(page.getByTestId('terminal-well')).toBeVisible();
   await expect(page.getByTestId('fixture-terminal')).toBeVisible();
   // Renderer-agnostic: headless xterm may use the DOM renderer (no canvas).

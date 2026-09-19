@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  SessionFirstSidebar,
-  type SessionFirstSidebarProps,
-} from '@/app/SessionFirstSidebar';
+  Sidebar,
+  type SidebarProps,
+} from '@/app/Sidebar';
 import type { Agent, Session } from '@/types';
 
 const agents: Agent[] = [
@@ -39,7 +39,7 @@ const sessions: Session[] = [
   } as unknown as Session,
 ];
 
-function props(overrides: Partial<SessionFirstSidebarProps> = {}): SessionFirstSidebarProps {
+function props(overrides: Partial<SidebarProps> = {}): SidebarProps {
   return {
     agents,
     filteredSessions: sessions,
@@ -68,15 +68,15 @@ function props(overrides: Partial<SessionFirstSidebarProps> = {}): SessionFirstS
 
 describe('sidebar sections (SC2)', () => {
   it('shows Agents, Sessions and service status at once when expanded', () => {
-    render(<SessionFirstSidebar {...props()} />);
+    render(<Sidebar {...props()} />);
 
     expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
     expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
-    expect(screen.getByTestId('session-first-sidebar-footer')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-footer')).toBeInTheDocument();
   });
 
   it('marks the active node and leaves the others unmarked', () => {
-    render(<SessionFirstSidebar {...props()} />);
+    render(<Sidebar {...props()} />);
 
     // Location context lives here now that Web has no header. Only the node the
     // active Session runs on is marked — this is not a navigation hierarchy.
@@ -86,7 +86,7 @@ describe('sidebar sections (SC2)', () => {
 
   it('does not file sessions under their agent', () => {
     // `session-list.md` anti-pattern 1: flat by default, Agent is not a parent.
-    render(<SessionFirstSidebar {...props()} />);
+    render(<Sidebar {...props()} />);
 
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
     const rows = screen.getAllByTestId('session-item-row');
@@ -94,7 +94,7 @@ describe('sidebar sections (SC2)', () => {
   });
 
   it('collapses to a rail and offers a way back', async () => {
-    render(<SessionFirstSidebar {...props()} />);
+    render(<Sidebar {...props()} />);
 
     await userEvent.click(screen.getByTestId('sidebar-collapse'));
 
@@ -113,7 +113,7 @@ describe('sidebar sections (SC2)', () => {
     // One node is offline above. That must not alarm the shell:
     // `session-list.md` names a global health indicator that collapses
     // independent state dimensions an anti-pattern.
-    render(<SessionFirstSidebar {...props({ connectionStatus: 'reconnecting' })} />);
+    render(<Sidebar {...props({ connectionStatus: 'reconnecting' })} />);
 
     await userEvent.click(screen.getByTestId('sidebar-collapse'));
 
@@ -124,7 +124,7 @@ describe('sidebar sections (SC2)', () => {
   });
 
   it('cannot be collapsed when it is an overlay drawer', () => {
-    render(<SessionFirstSidebar {...props({ collapsible: false })} />);
+    render(<Sidebar {...props({ collapsible: false })} />);
 
     expect(screen.queryByTestId('sidebar-collapse')).not.toBeInTheDocument();
   });

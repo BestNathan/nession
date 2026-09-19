@@ -24,15 +24,15 @@ export const rendererAtom = atom<'webgl' | 'canvas'>('webgl');
 /** Env files this attachment was opened with, from its AttachChoice. */
 export const envRefsAtom = atom<EnvFileRef[]>([]);
 
-/** Currently open attach dialog session (the session-first shell's attach flow). */
+/** Currently open attach dialog session (the shell's attach flow). */
 export const attachDialogSessionAtom = atom<Session | null>(null);
 
 /** Why the attach dialog is open: 'attach' (confirm → attach) or 'configure'
  *  (Save → persist the profile only, never attach/reconnect).
  *  Invariant: reset to 'attach' wherever `attachDialogSessionAtom` is cleared —
- *  `attachToSessionAtom`, `disconnectAtom`, and `useSessionFirstAttach.cancelAttach`.
+ *  `attachToSessionAtom`, `disconnectAtom`, and `useAttachFlow.cancelAttach`.
  *  Every dialog opener sets the intent explicitly when opening: requestAttach /
- *  openAttachSettings (useSessionFirstAttach) and useSessionFirstDeepLink's
+ *  openAttachSettings (useAttachFlow) and useDeepLink's
  *  restore opener (requestConfigForRestore). */
 export type AttachDialogIntent = 'attach' | 'configure';
 

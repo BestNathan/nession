@@ -26,7 +26,7 @@ test.describe('Web 1440×900', () => {
     // Above `lg` the sidebar is a column, not an overlay drawer (#748). The
     // drawer-open screen this used to pin is not one the shipped shell has at
     // this width, so the canonical screenshot moves with the shell.
-    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+    await expect(page.getByTestId('sidebar-column')).toBeVisible();
     await expect(page.getByTestId('session-drawer')).toHaveCount(0);
     await waitForFixtureTerminal(page);
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);

@@ -17,8 +17,8 @@ test.describe('Web compact 1024×768', () => {
   test('Active Terminal fixture renders at compact desktop width', async ({ page }, testInfo) => {
     await page.goto('/#/fixture');
 
-    await expect(page.getByTestId('session-first-shell')).toBeVisible();
-    await expect(page.getByTestId('session-first-sidebar-column')).toBeVisible();
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await expect(page.getByTestId('sidebar-column')).toBeVisible();
     await expect(page.getByTestId('terminal-well')).toBeVisible();
     await expect(page.getByTestId('fixture-terminal')).toBeVisible();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
@@ -53,7 +53,7 @@ test.describe('App Sessions 390×844', () => {
 
     const sessionsPage = page.getByTestId('app-spatial-page-sessions');
     await expect(sessionsPage).toBeInViewport();
-    await expect(page.getByTestId('session-first-sidebar')).toBeVisible();
+    await expect(page.getByTestId('sidebar')).toBeVisible();
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
     await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 

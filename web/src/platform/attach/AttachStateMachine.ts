@@ -32,7 +32,7 @@ export interface AttachTransitionResult {
 }
 
 /**
- * Pure attach phase reducer shared by session-first and legacy attach drivers.
+ * Pure attach phase reducer shared by shell and legacy attach drivers.
  */
 export class AttachStateMachine {
   phase: AttachPhase = 'idle';

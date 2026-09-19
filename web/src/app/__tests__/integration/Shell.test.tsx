@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
-import { SessionFirstShell } from '@/app/SessionFirstShell';
+import { Shell } from '@/app/Shell';
 import { sessionIdAtom } from '@/product/session/state';
 import { toast } from 'sonner';
 import type { Agent, Session } from '@/types';
@@ -64,8 +64,8 @@ vi.mock('@/app/useDashboard', () => ({
 vi.mock('@/app/useProbePolling', () => ({
   useProbePolling: () => {},
 }));
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="terminal" />,
 }));
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
   FilesWebLayout: () => <div data-testid="file-workspace" />,
@@ -143,8 +143,8 @@ const deepLink = vi.hoisted(() => ({
 
 // Faithful to the real hook: a sessionIdFromUrl restores that session's
 // selection (guarded so the render-phase restore runs once per id).
-vi.mock('@/app/useSessionFirstDeepLink', () => ({
-  useSessionFirstDeepLink: (opts: {
+vi.mock('@/app/useDeepLink', () => ({
+  useDeepLink: (opts: {
     sessions: Session[];
     onRestoreSession: (session: Session) => void;
   }) => {
@@ -175,8 +175,8 @@ const mobileNav = vi.hoisted(() => ({
   isWide: true,
 }));
 
-vi.mock('@/app/useSessionFirstMobileNav', () => ({
-  useSessionFirstMobileNav: () => mobileNav,
+vi.mock('@/app/useMobileNav', () => ({
+  useMobileNav: () => mobileNav,
 }));
 
 function renderShell(initialEntry = '/') {
@@ -184,7 +184,7 @@ function renderShell(initialEntry = '/') {
   const view = render(
     <Provider store={store}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SessionFirstShell connectionStatus="connected" />
+        <Shell connectionStatus="connected" />
       </MemoryRouter>
     </Provider>,
   );
@@ -208,7 +208,7 @@ async function clickDisclosedCapability(name: string) {
   await userEvent.click(item);
 }
 
-describe('SessionFirstShell', () => {
+describe('Shell', () => {
   beforeEach(() => {
     // confirmAttach persists per-Session attach profiles on confirm; clear
     // them so a confirm in one test cannot seed the next test's dialog-vs-fast-path.
@@ -232,16 +232,16 @@ describe('SessionFirstShell', () => {
     };
   });
 
-  it('applies session-first-shell class for light chrome lock', () => {
+  it('applies shell class for light chrome lock', () => {
     renderShell();
-    expect(screen.getByTestId('session-first-shell').className).toMatch(
-      /session-first-shell/,
+    expect(screen.getByTestId('shell').className).toMatch(
+      /shell/,
     );
   });
 
   it('applies data-sf-design polish token overlay on shell root', () => {
     renderShell();
-    expect(screen.getByTestId('session-first-shell')).toHaveAttribute(
+    expect(screen.getByTestId('shell')).toHaveAttribute(
       'data-sf-design',
       'polish',
     );
@@ -250,7 +250,7 @@ describe('SessionFirstShell', () => {
   it('applies safe-area padding to sidebar footer', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    const footer = screen.getByTestId('session-first-sidebar-footer');
+    const footer = screen.getByTestId('sidebar-footer');
     // The floor is the foot's own token, so the inset still wins on a device
     // that has one and the padding stays on the design system's scale where it
     // does not.
@@ -266,7 +266,7 @@ describe('SessionFirstShell', () => {
     // Sessions are still not filed under their Agent.
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
     expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
@@ -339,7 +339,7 @@ describe('SessionFirstShell', () => {
     };
     deepLink.sessionIdFromUrl = sess.session_id;
     renderShell();
-    expect(screen.getByTestId('session-first-create')).toBeDisabled();
+    expect(screen.getByTestId('create-session')).toBeDisabled();
   });
 
   it('opens env files from workspace dock when a session is selected', async () => {
@@ -353,7 +353,7 @@ describe('SessionFirstShell', () => {
 
   it('renders without the global chrome bar', () => {
     renderShell();
-    expect(screen.queryByTestId('session-first-chrome')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shell-chrome')).not.toBeInTheDocument();
     expect(screen.queryByText('Nession')).not.toBeInTheDocument();
   });
 
@@ -363,7 +363,7 @@ describe('SessionFirstShell', () => {
       error: 'load failed',
     };
     renderShell();
-    expect(screen.getByTestId('session-first-error')).toHaveTextContent('load failed');
+    expect(screen.getByTestId('shell-error')).toHaveTextContent('load failed');
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
     expect(dashboard.current.clearError).toHaveBeenCalledTimes(1);
   });
@@ -430,7 +430,7 @@ describe('SessionFirstShell', () => {
 
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-back-to-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
   it('does not mount AppSpatialShell on desktop after selecting a session', async () => {

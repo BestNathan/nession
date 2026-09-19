@@ -3,9 +3,9 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
-  SessionFirstWorkspace,
-  type SessionFirstWorkspaceProps,
-} from '@/app/SessionFirstWorkspace';
+  WorkspaceRegion,
+  type WorkspaceRegionProps,
+} from '@/app/WorkspaceRegion';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -38,8 +38,8 @@ const domain: DomainState = {
   attachment: { channel: 'attached', copy: null },
 };
 
-vi.mock('@/app/SessionFirstTerminal', () => ({
-  SessionFirstTerminal: () => <div data-testid="session-first-terminal" />,
+vi.mock('@/app/TerminalRegion', () => ({
+  TerminalRegion: () => <div data-testid="terminal" />,
 }));
 
 vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
@@ -51,8 +51,8 @@ vi.mock('@/app/experiences/app/FilesAppLayout', () => ({
 }));
 
 function baseProps(
-  overrides: Partial<SessionFirstWorkspaceProps> = {},
-): SessionFirstWorkspaceProps {
+  overrides: Partial<WorkspaceRegionProps> = {},
+): WorkspaceRegionProps {
   return {
     connectionStatus: 'connected',
     agents: [agent],
@@ -97,7 +97,7 @@ function AppNavigationHarness() {
   const [tool, setTool] = useState<CapabilityId>('files');
 
   return (
-    <SessionFirstWorkspace
+    <WorkspaceRegion
       {...baseProps({
         isWide: false,
         selectedId: sess.session_id,
@@ -148,14 +148,14 @@ function expectActiveAppPage(page: AppSpatialPage) {
   );
 }
 
-describe('SessionFirstWorkspace spatial shell', () => {
+describe('WorkspaceRegion spatial shell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('mounts app-spatial-shell when mobile and a session is selected', () => {
     render(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: false,
           selectedId: sess.session_id,
@@ -168,12 +168,12 @@ describe('SessionFirstWorkspace spatial shell', () => {
       />,
     );
     expect(screen.getByTestId('app-spatial-shell')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-first-back-to-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
   it('does not mount app-spatial-shell when mobile and no session selected', () => {
     render(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: false,
           selectedId: null,
@@ -188,7 +188,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
 
   it('does not mount app-spatial-shell on desktop even with a selection', () => {
     render(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: true,
           selectedId: sess.session_id,
@@ -201,7 +201,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
     expect(screen.queryByTestId('app-spatial-shell')).not.toBeInTheDocument();
     // Desktop is two columns: the Session's identity is its row in the sidebar,
     // not a heading above the work area (the header is gone — #748).
-    expect(screen.getByTestId('session-first-sidebar-column')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
     expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
   });
 
@@ -209,7 +209,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
     const onSurfaceChange = vi.fn();
     const user = userEvent.setup();
     render(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: false,
           selectedId: sess.session_id,
@@ -229,7 +229,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
 
   it('surface workspace shows file workspace content on spatial page', async () => {
     const { rerender } = render(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: false,
           selectedId: sess.session_id,
@@ -244,7 +244,7 @@ describe('SessionFirstWorkspace spatial shell', () => {
     );
 
     rerender(
-      <SessionFirstWorkspace
+      <WorkspaceRegion
         {...baseProps({
           isWide: false,
           selectedId: sess.session_id,

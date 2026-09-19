@@ -35,10 +35,10 @@ describe('TerminalSurface', () => {
       </TerminalSurface>,
     );
 
-    expect(screen.getByTestId('session-first-terminal-surface')).toHaveAttribute(
+    expect(screen.getByTestId('terminal-surface')).toHaveAttribute(
       'data-terminal-capsule-host',
     );
-    expect(screen.getByTestId('session-first-terminal-surface')).toHaveAttribute(
+    expect(screen.getByTestId('terminal-surface')).toHaveAttribute(
       'data-terminal-scrollback-mode',
       'local-buffer',
     );

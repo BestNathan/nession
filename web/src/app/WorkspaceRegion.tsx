@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { SessionFirstSpatialLayout } from '@/app/experiences/app/SessionFirstSpatialLayout';
+import { SpatialLayout } from '@/app/experiences/app/SpatialLayout';
 import { useAppSpatialIndex } from '@/app/experiences/app/useAppSpatialIndex';
-import { SessionFirstWebLayout } from '@/app/experiences/web/SessionFirstWebLayout';
+import { WebLayout } from '@/app/experiences/web/WebLayout';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -10,7 +10,7 @@ import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
 
-export interface SessionFirstWorkspaceProps {
+export interface WorkspaceRegionProps {
   connectionStatus: ConnectionState;
   agents: Agent[];
   filteredSessions: Session[];
@@ -53,7 +53,7 @@ export interface SessionFirstWorkspaceProps {
   terminal?: ReactNode;
 }
 
-export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
+export function WorkspaceRegion(props: WorkspaceRegionProps) {
   const {
     connectionStatus, agents, filteredSessions, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
@@ -89,7 +89,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   // below it is a composition that lives in its own directory.
   if (useSpatial) {
     return (
-      <SessionFirstSpatialLayout
+      <SpatialLayout
         spatialIndex={spatialIndex}
         onIndexChange={onIndexChange}
         sidebarProps={sidebarProps}
@@ -100,7 +100,7 @@ export function SessionFirstWorkspace(props: SessionFirstWorkspaceProps) {
   }
 
   return (
-    <SessionFirstWebLayout
+    <WebLayout
       isWide={isWide}
       showList={showList}
       onCloseDrawer={onCloseDrawer}

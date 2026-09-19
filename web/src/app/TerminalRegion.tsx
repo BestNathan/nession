@@ -1,10 +1,10 @@
 import { cn } from '@/shared/lib/utils';
-import { SessionFirstTerminalPane } from '@/product/terminal/SessionFirstTerminalPane';
+import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import { useTerminalOrchestration } from '@/product/terminal/useTerminalOrchestration';
 
-export interface SessionFirstTerminalProps {
+export interface TerminalRegionProps {
   hidden: boolean;
   onDisconnect: () => void;
   onError: (error: Error) => void;
@@ -16,12 +16,12 @@ export interface SessionFirstTerminalProps {
  * Session-first terminal entry — native surface + shared xterm engine.
  * Does not use legacy TerminalLayout / dashboard terminal chrome.
  */
-export function SessionFirstTerminal({
+export function TerminalRegion({
   hidden,
   onDisconnect,
   onError,
   capsuleCapabilities,
-}: SessionFirstTerminalProps) {
+}: TerminalRegionProps) {
   const {
     sessionId,
     controller,
@@ -34,7 +34,7 @@ export function SessionFirstTerminal({
 
   return (
     <div
-      data-testid="session-first-terminal"
+      data-testid="terminal"
       className={cn('flex min-h-0 flex-1 flex-col', hidden && 'hidden')}
     >
       {!sessionId ? (
@@ -48,7 +48,7 @@ export function SessionFirstTerminal({
           isSwitching={isSwitching}
           capsuleCapabilities={capsuleCapabilities}
         >
-          <SessionFirstTerminalPane
+          <TerminalPane
             sessionId={sessionId}
             controller={controller}
             terminalState={terminalState}
