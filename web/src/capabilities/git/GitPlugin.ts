@@ -1,5 +1,7 @@
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
+  GitBranchesRequest,
+  GitBranchesResponse,
   GitDiffRequest,
   GitDiffResponse,
   GitLogRequest,
@@ -7,6 +9,7 @@ import type {
   GitRootResponse,
   GitStatusRequest,
   GitStatusResponse,
+  GitWorktreesResponse,
 } from './types';
 
 /**
@@ -78,6 +81,30 @@ export class GitPlugin implements TransportPlugin {
    */
   async gitLog(req: GitLogRequest): Promise<GitLogResponse> {
     return this.requireConnection().request<GitLogResponse>('extension.git.log', {
+      ...req,
+    });
+  }
+
+  /**
+   * Local branches and their tracking state.
+   *
+   * Answers what the Workspace header cannot: the header knows the current
+   * branch and how far it is from its upstream, and nothing about the others.
+   */
+  async gitBranches(req: GitBranchesRequest): Promise<GitBranchesResponse> {
+    return this.requireConnection().request<GitBranchesResponse>('extension.git.branches', {
+      ...req,
+    });
+  }
+
+  /**
+   * The repository's worktrees, with the Session's own marked.
+   *
+   * `current` is decided agent-side, where the Session's working directory is
+   * known, rather than here by comparing a path the view was handed.
+   */
+  async gitWorktrees(req: GitStatusRequest): Promise<GitWorktreesResponse> {
+    return this.requireConnection().request<GitWorktreesResponse>('extension.git.worktrees', {
       ...req,
     });
   }

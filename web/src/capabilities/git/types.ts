@@ -158,6 +158,79 @@ export interface GitRootOk {
 
 export type GitRootResponse = GitRootOk | GitUnavailable;
 
+export interface GitBranchesRequest {
+  agent_id: string;
+  session: string;
+  /** A request the agent clamps, like `GitLogRequest.limit`. */
+  limit?: number;
+}
+
+export interface GitBranch {
+  name: string;
+  /** HEAD points here. Exactly one branch in a non-detached listing has this. */
+  current: boolean;
+  /**
+   * The configured upstream, absent when the branch has none. Still present
+   * when the upstream has been deleted — that is `upstreamGone`.
+   */
+  upstream?: string;
+  /** Commits this branch has that its upstream does not. */
+  ahead: number;
+  /** Commits the upstream has that this branch does not. */
+  behind: number;
+  /**
+   * The configured upstream no longer exists.
+   *
+   * Carried separately because it is the one state an empty track string cannot
+   * express: "in sync" and "tracks nothing" both arrive as `ahead: 0, behind: 0`.
+   */
+  upstreamGone: boolean;
+}
+
+export interface GitBranches {
+  branches: GitBranch[];
+  /** The count that was answered for, so "more" is offered against something real. */
+  limit: number;
+  truncatedBytes: number;
+  truncated: boolean;
+}
+
+export interface GitBranchesOk {
+  state: 'ok';
+  branches: GitBranches;
+}
+
+export type GitBranchesResponse = GitBranchesOk | GitUnavailable;
+
+export interface GitWorktree {
+  /** Absolute path as git records it. */
+  path: string;
+  /** The branch checked out there, without `refs/heads/`. */
+  branch?: string;
+  /** The work tree the Session itself is sitting in. */
+  current: boolean;
+  detached: boolean;
+  /** A bare repository: git lists the repository itself, which has no work tree. */
+  bare: boolean;
+  /** A lock reason. An empty string means locked with no reason given. */
+  locked?: string;
+  /** The directory is gone and the entry awaits `git worktree prune`. */
+  prunable?: string;
+}
+
+export interface GitWorktrees {
+  worktrees: GitWorktree[];
+  truncatedBytes: number;
+  truncated: boolean;
+}
+
+export interface GitWorktreesOk {
+  state: 'ok';
+  worktrees: GitWorktrees;
+}
+
+export type GitWorktreesResponse = GitWorktreesOk | GitUnavailable;
+
 export function isOk<T extends { state: string }>(
   response: T | GitUnavailable,
 ): response is T & { state: 'ok' } {

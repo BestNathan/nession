@@ -26,7 +26,7 @@ use std::process::Command;
 
 use anyhow::{ensure, Context, Result};
 use nession_git::cmd::GitCmd;
-use nession_git::{diff, log, security, status};
+use nession_git::{branches, diff, log, security, status, worktrees};
 
 /// Run a git command for fixture setup. See the module comment.
 ///
@@ -323,4 +323,232 @@ fn history_honours_the_count_it_was_asked_for() {
     // And it says which count it answered for, so a view can offer "more"
     // against something real rather than guessing.
     assert!(history.commits[0].subject.starts_with("commit 3"));
+}
+
+/// A runtime for the async entry points. Returns `Result` rather than
+/// unwrapping, because the `unwrap` exemption in `clippy.toml` covers `#[test]`
+/// functions and not the helpers they call — see the module comment.
+fn runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Runtime::new().context("tokio runtime")
+}
+
+/// A repository with a remote, the current branch pushed and tracking it.
+fn repo_with_remote() -> Result<(tempfile::TempDir, tempfile::TempDir)> {
+    let dir = repo()?;
+    let remote = tempfile::tempdir().context("remote tempdir")?;
+    git(remote.path(), &["init", "--quiet", "--bare"])?;
+    let url = remote.path().to_str().context("remote path is utf-8")?;
+    git(dir.path(), &["remote", "add", "origin", url])?;
+    git(
+        dir.path(),
+        &["push", "--quiet", "-u", "origin", "feature/capsule"],
+    )?;
+    Ok((dir, remote))
+}
+
+#[test]
+fn branches_read_the_real_refs() {
+    // The unit tests parse a stream this file's author wrote. `for-each-ref`'s
+    // format string is the thing most likely to have drifted, and a drifted one
+    // leaves the parser reading plausible-looking garbage while every synthetic
+    // test passes.
+    let (dir, _remote) = repo_with_remote().unwrap();
+    git(dir.path(), &["branch", "no-upstream"]).unwrap();
+
+    let cmd = cmd_for(&dir);
+    let out = runtime()
+        .unwrap()
+        .block_on(async { branches::branches(&cmd, Some(10)).await })
+        .unwrap();
+
+    let names: Vec<&str> = out.branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(names.contains(&"feature/capsule"), "got {names:?}");
+    assert!(names.contains(&"no-upstream"), "got {names:?}");
+    assert_eq!(out.limit, 10);
+    assert!(!out.truncated);
+
+    let current = out
+        .branches
+        .iter()
+        .find(|b| b.current)
+        .expect("one branch is HEAD");
+    assert_eq!(current.name, "feature/capsule");
+    assert_eq!(current.upstream.as_deref(), Some("origin/feature/capsule"));
+
+    let other = out
+        .branches
+        .iter()
+        .find(|b| b.name == "no-upstream")
+        .expect("the created branch is listed");
+    assert!(!other.current);
+    assert_eq!(other.upstream, None);
+}
+
+#[test]
+fn branches_put_the_current_one_first_even_when_the_count_is_small() {
+    // `--sort=-HEAD` is what makes `--count` safe: git emits the branch you are
+    // on first, so the bound can never cut it off. Alphabetically, the current
+    // branch here sorts third of four — a count of 1 would hide where you are,
+    // which is worse than no bound at all.
+    let (dir, _remote) = repo_with_remote().unwrap();
+    for name in ["aaa", "bbb", "zzz"] {
+        git(dir.path(), &["branch", name]).unwrap();
+    }
+
+    let cmd = cmd_for(&dir);
+    let out = runtime()
+        .unwrap()
+        .block_on(async { branches::branches(&cmd, Some(1)).await })
+        .unwrap();
+
+    assert_eq!(out.branches.len(), 1);
+    assert_eq!(out.branches[0].name, "feature/capsule");
+    assert!(out.branches[0].current);
+    // The answer is full to the limit, which is the state in which the view
+    // says the listing was cut.
+    assert_eq!(out.limit, 1);
+}
+
+#[test]
+fn branches_report_the_counts_and_a_deleted_upstream() {
+    let (dir, _remote) = repo_with_remote().unwrap();
+    git(
+        dir.path(),
+        &["commit", "--quiet", "--allow-empty", "-m", "one"],
+    )
+    .unwrap();
+    git(
+        dir.path(),
+        &["commit", "--quiet", "--allow-empty", "-m", "two"],
+    )
+    .unwrap();
+
+    let cmd = cmd_for(&dir);
+    let out = runtime()
+        .unwrap()
+        .block_on(async { branches::branches(&cmd, Some(10)).await })
+        .unwrap();
+    let current = out.branches.iter().find(|b| b.current).unwrap();
+    assert_eq!(current.ahead, 2, "two commits the upstream does not have");
+    assert_eq!(current.behind, 0);
+    assert!(!current.upstream_gone);
+
+    // Now delete the upstream ref. git keeps the configured upstream name and
+    // reports `[gone]` — the case that is indistinguishable from "in sync" if
+    // the track string is read on its own.
+    git(
+        dir.path(),
+        &["push", "--quiet", "origin", "--delete", "feature/capsule"],
+    )
+    .unwrap();
+
+    let out = runtime()
+        .unwrap()
+        .block_on(async { branches::branches(&cmd, Some(10)).await })
+        .unwrap();
+    let current = out.branches.iter().find(|b| b.current).unwrap();
+    assert!(current.upstream_gone, "the upstream was deleted");
+    assert_eq!(
+        current.upstream.as_deref(),
+        Some("origin/feature/capsule"),
+        "the configured name survives, and naming it is the useful half"
+    );
+}
+
+#[test]
+fn worktrees_list_this_checkout_and_mark_it() {
+    let dir = repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let root = runtime()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .expect("a real repository resolves to a root");
+
+    let out = runtime()
+        .unwrap()
+        .block_on(async { worktrees::worktrees(&cmd, &root).await })
+        .unwrap();
+
+    assert_eq!(
+        out.worktrees.len(),
+        1,
+        "a fresh repository has one worktree"
+    );
+    assert!(out.worktrees[0].current);
+    assert_eq!(out.worktrees[0].branch.as_deref(), Some("feature/capsule"));
+    assert!(!out.worktrees[0].detached);
+    assert!(!out.worktrees[0].bare);
+    assert!(!out.truncated);
+}
+
+#[test]
+fn a_linked_worktree_is_listed_and_exactly_one_is_current() {
+    // The comparison that decides `current` runs against two different git
+    // answers: `worktree list` prints the path as recorded, `rev-parse
+    // --show-toplevel` prints the resolved one. On macOS a tempdir is reached
+    // through `/var`, so if those two disagree this is where it shows.
+    let dir = repo().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let linked = other.path().join("linked");
+    let linked_arg = linked.to_str().unwrap();
+    git(
+        dir.path(),
+        &["worktree", "add", "--quiet", "-b", "second", linked_arg],
+    )
+    .unwrap();
+
+    let cmd = cmd_for(&dir);
+    let root = runtime()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .expect("a real repository resolves to a root");
+    let out = runtime()
+        .unwrap()
+        .block_on(async { worktrees::worktrees(&cmd, &root).await })
+        .unwrap();
+
+    assert_eq!(out.worktrees.len(), 2, "got {:?}", out.worktrees);
+    assert_eq!(
+        out.worktrees.iter().filter(|w| w.current).count(),
+        1,
+        "exactly one entry is the place this ran from: {:?}",
+        out.worktrees
+    );
+    assert!(
+        out.worktrees
+            .iter()
+            .any(|w| w.branch.as_deref() == Some("second")),
+        "the linked worktree names its own branch: {:?}",
+        out.worktrees
+    );
+}
+
+#[test]
+fn the_write_forms_of_a_two_sided_subcommand_are_refused() {
+    // `worktree` is not in `MUTATING_SUBCOMMANDS` because `worktree list` is a
+    // read; the form is what decides. This runs it for real, since the unit
+    // tests call the builder directly and a future edit could route around it.
+    let dir = repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let target = dir.path().join("elsewhere");
+    let target = target.to_str().unwrap();
+
+    let result = runtime()
+        .unwrap()
+        .block_on(async { cmd.run(&["worktree", "add", target], 4096).await });
+    assert!(
+        result.is_err(),
+        "`git worktree add` creates a checkout; it must be refused"
+    );
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("read-only"),
+        "the refusal should say why, got: {message}"
+    );
+    assert!(
+        !dir.path().join("elsewhere").exists(),
+        "and nothing should have been created"
+    );
 }

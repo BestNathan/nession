@@ -42,6 +42,30 @@ pub const MAX_LOG_LIMIT: usize = 500;
 /// construction, but author names and encodings are not bounded by anything.
 pub const MAX_LOG_BYTES: usize = 512 * 1024;
 
+/// How many branches one listing may carry.
+///
+/// Larger than the commit default because a branch row is one short line that
+/// is *scanned* rather than read — a person looks for a name, not for content —
+/// and because a branch listing is the thing people actually have a hundred of.
+/// The count, not the byte cap, is what makes the answer have a size at all.
+pub const DEFAULT_BRANCH_LIMIT: usize = 100;
+
+/// Hard ceiling on the requested branch count, whatever the client asks for.
+pub const MAX_BRANCH_LIMIT: usize = 500;
+
+/// Ceiling on the branch listing's output, alongside the count. Branch names
+/// and upstream names are arbitrary strings; the count does not bound their
+/// length.
+pub const MAX_BRANCH_BYTES: usize = 256 * 1024;
+
+/// Ceiling on `git worktree list --porcelain`.
+///
+/// No count to go with it: a worktree is a directory someone made by hand, so
+/// the number of them is small in a way a branch count is not, and inventing a
+/// limit for it would be a bound that never fires. The byte cap is still here
+/// because a path and a lock reason are unbounded strings.
+pub const MAX_WORKTREES_BYTES: usize = 256 * 1024;
+
 /// Validate a client-supplied repository-relative path.
 ///
 /// Returns the path normalised to forward slashes, suitable for handing to git.

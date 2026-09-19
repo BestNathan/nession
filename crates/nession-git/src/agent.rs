@@ -26,11 +26,13 @@ use nession_common::extension::AgentExtension;
 use serde_json::{json, Value};
 use tracing::debug;
 
+use crate::branches;
 use crate::cmd::GitCmd;
 use crate::diff;
 use crate::log;
 use crate::security::MAX_STATUS_BYTES;
 use crate::status;
+use crate::worktrees;
 
 /// Resolves a Session identifier to its current working directory, or `None`
 /// when the session is unknown. Injected by the agent.
@@ -188,6 +190,44 @@ impl GitAgentExtension {
         Ok(json!({ "state": "ok", "history": history }))
     }
 
+    /// Local branches and their tracking state (#846).
+    ///
+    /// Bounded by count and by bytes, on the same terms as `log`: the limit is
+    /// the client's to ask for and this crate's to clamp.
+    async fn handle_branches(&self, payload: Value) -> anyhow::Result<Value> {
+        let cmd = match self.cmd_for(&payload).await {
+            Ok(cmd) => cmd,
+            Err(body) => return Ok(body),
+        };
+        if let Err(body) = self.ready(&cmd).await {
+            return Ok(body);
+        }
+
+        // `try_from` for the reason `handle_log` records: the client picks this
+        // number, and a cast would wrap a value that does not fit.
+        let limit = payload
+            .get("limit")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+        let branches = branches::branches(&cmd, limit).await?;
+        Ok(json!({ "state": "ok", "branches": branches }))
+    }
+
+    /// The repository's worktrees, with the Session's own marked (#846).
+    async fn handle_worktrees(&self, payload: Value) -> anyhow::Result<Value> {
+        let cmd = match self.cmd_for(&payload).await {
+            Ok(cmd) => cmd,
+            Err(body) => return Ok(body),
+        };
+        let root = match self.ready(&cmd).await {
+            Ok(root) => root,
+            Err(body) => return Ok(body),
+        };
+
+        let worktrees = worktrees::worktrees(&cmd, &root).await?;
+        Ok(json!({ "state": "ok", "worktrees": worktrees }))
+    }
+
     /// The work tree root on its own, for a caller that wants the address and
     /// not the listing (#826: entering the Workspace from a Peek preserves
     /// repo/worktree context without re-fetching the status).
@@ -215,6 +255,8 @@ impl AgentExtension for GitAgentExtension {
             "extension.git.diff",
             "extension.git.root",
             "extension.git.log",
+            "extension.git.branches",
+            "extension.git.worktrees",
         ]
     }
 
@@ -224,6 +266,8 @@ impl AgentExtension for GitAgentExtension {
             "git.diff" => self.handle_diff(payload).await,
             "git.root" => self.handle_root(payload).await,
             "git.log" => self.handle_log(payload).await,
+            "git.branches" => self.handle_branches(payload).await,
+            "git.worktrees" => self.handle_worktrees(payload).await,
             other => anyhow::bail!("unknown git command: {other}"),
         }
     }

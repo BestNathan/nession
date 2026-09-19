@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { useGitHistory } from '../hooks/useGitHistory';
 import { describeUnavailable, formatBytes } from '../state';
+import { GitNotice } from './GitNotice';
 import type { GitCommit } from '../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
@@ -25,23 +26,23 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
-  // Enabled unconditionally: this is mounted only when the section is showing,
-  // so mounting *is* the request. The Git view keeps it unmounted otherwise.
-  const { history, loading, error } = useGitHistory({ agentId, sessionId, enabled: true });
+  // Mounted only when this section is showing, so mounting *is* the request —
+  // the Git view keeps it unmounted otherwise and the agent runs no log.
+  const { history, loading, error } = useGitHistory({ agentId, sessionId });
   const [selected, setSelected] = useState<string | null>(null);
 
   if (loading) {
-    return <GitHistoryNotice testId="git-history-loading">Reading history…</GitHistoryNotice>;
+    return <GitNotice testId="git-history-loading">Reading history…</GitNotice>;
   }
   if (error) {
     return (
-      <GitHistoryNotice testId="git-history-error" destructive>
+      <GitNotice testId="git-history-error" destructive>
         {error}
-      </GitHistoryNotice>
+      </GitNotice>
     );
   }
   if (!history) {
-    return <GitHistoryNotice testId="git-history-empty">No history yet.</GitHistoryNotice>;
+    return <GitNotice testId="git-history-empty">No history yet.</GitNotice>;
   }
   if (history.state !== 'ok') {
     return (
@@ -64,9 +65,9 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
     // A repository with no commits is a real state — `git init` and nothing
     // else — and it is not an error.
     return (
-      <GitHistoryNotice testId="git-history-none">
+      <GitNotice testId="git-history-none">
         This repository has no commits yet.
-      </GitHistoryNotice>
+      </GitNotice>
     );
   }
 
@@ -169,30 +170,6 @@ function CommitDetail({ commit }: { commit: GitCommit | null }) {
       </dl>
       <p className="text-xs text-muted-foreground">
         What this commit changed is not shown here.
-      </p>
-    </div>
-  );
-}
-
-function GitHistoryNotice({
-  testId,
-  destructive,
-  children,
-}: {
-  testId: string;
-  destructive?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className="flex h-full min-h-0 items-center justify-center px-6 text-center"
-    >
-      <p
-        role={destructive ? 'alert' : undefined}
-        className={destructive ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
-      >
-        {children}
       </p>
     </div>
   );
