@@ -159,8 +159,21 @@ const COMMITS = [
   },
 ];
 
+/**
+ * What the agent uses when the caller asks for no particular count — the
+ * `DEFAULT_LOG_LIMIT` in `crates/nession-git/src/security.rs`.
+ *
+ * Modelled rather than echoed back as the commit count, because the view's
+ * "showing the most recent N" rule reads the count the *answer* reports. A
+ * fixture that answered `limit: 3` would have that rule announce older commits
+ * in a repository that has exactly three, which is a state the real agent
+ * cannot produce for this request.
+ */
+const DEFAULT_HISTORY_LIMIT = 50;
+
 function historyFor(limit: unknown): GitLogResponse {
-  const asked = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : COMMITS.length;
+  const asked =
+    typeof limit === 'number' && limit > 0 ? Math.floor(limit) : DEFAULT_HISTORY_LIMIT;
   const commits = COMMITS.slice(0, Math.min(asked, COMMITS.length));
   return {
     state: 'ok',
