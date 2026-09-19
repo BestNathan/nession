@@ -1,4 +1,4 @@
-//! The agent-side extension: `extension.git.status` and `extension.git.diff`.
+//! The agent-side extension: `extension.git.{status,diff,root,log}`.
 //!
 //! ## The working directory is resolved here, not sent by the client
 //!
@@ -28,6 +28,7 @@ use tracing::debug;
 
 use crate::cmd::GitCmd;
 use crate::diff;
+use crate::log;
 use crate::security::MAX_STATUS_BYTES;
 use crate::status;
 
@@ -161,6 +162,32 @@ impl GitAgentExtension {
         Ok(json!({ "state": "ok", "diff": result }))
     }
 
+    /// Recent commits on the current branch (#826 §4: History).
+    ///
+    /// The limit is the client's to ask for and the agent's to bound — a request
+    /// is not a guarantee, and `MAX_LOG_LIMIT` is the number this will not go
+    /// past whatever arrives.
+    async fn handle_log(&self, payload: Value) -> anyhow::Result<Value> {
+        let cmd = match self.cmd_for(&payload).await {
+            Ok(cmd) => cmd,
+            Err(body) => return Ok(body),
+        };
+        if let Err(body) = self.ready(&cmd).await {
+            return Ok(body);
+        }
+
+        // `try_from` rather than `as`: the client picks this number, and a cast
+        // would wrap a value that does not fit — turning "give me everything"
+        // into "give me four". An unusable number is treated as absent, which
+        // falls back to the default.
+        let limit = payload
+            .get("limit")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+        let history = log::history(&cmd, limit).await?;
+        Ok(json!({ "state": "ok", "history": history }))
+    }
+
     /// The work tree root on its own, for a caller that wants the address and
     /// not the listing (#826: entering the Workspace from a Peek preserves
     /// repo/worktree context without re-fetching the status).
@@ -187,6 +214,7 @@ impl AgentExtension for GitAgentExtension {
             "extension.git.status",
             "extension.git.diff",
             "extension.git.root",
+            "extension.git.log",
         ]
     }
 
@@ -195,6 +223,7 @@ impl AgentExtension for GitAgentExtension {
             "git.status" => self.handle_status(payload).await,
             "git.diff" => self.handle_diff(payload).await,
             "git.root" => self.handle_root(payload).await,
+            "git.log" => self.handle_log(payload).await,
             other => anyhow::bail!("unknown git command: {other}"),
         }
     }

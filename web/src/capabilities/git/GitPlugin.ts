@@ -2,6 +2,8 @@ import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   GitDiffRequest,
   GitDiffResponse,
+  GitLogRequest,
+  GitLogResponse,
   GitRootResponse,
   GitStatusRequest,
   GitStatusResponse,
@@ -64,6 +66,18 @@ export class GitPlugin implements TransportPlugin {
   /** The repository root — the context a Workspace handoff carries (#826). */
   async gitRoot(req: GitStatusRequest): Promise<GitRootResponse> {
     return this.requireConnection().request<GitRootResponse>('extension.git.root', {
+      ...req,
+    });
+  }
+
+  /**
+   * Recent commits on the current branch.
+   *
+   * `limit` is a request the agent clamps, not a guarantee — a caller cannot
+   * ask a remote host to build an unbounded answer.
+   */
+  async gitLog(req: GitLogRequest): Promise<GitLogResponse> {
+    return this.requireConnection().request<GitLogResponse>('extension.git.log', {
       ...req,
     });
   }
