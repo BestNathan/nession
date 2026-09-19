@@ -63,12 +63,55 @@ describe('capability projection frame', () => {
     expect(onDeeper).not.toHaveBeenCalled();
   });
 
-  it('offers the Workspace only from a Peek', async () => {
+  it('offers the Workspace only from a Peek, when a Peek is what comes next', async () => {
     const { rerender } = render(<CapabilityProjection projection={projection()} />);
     expect(screen.queryByTestId('capsule-capability-open-workspace')).toBeNull();
 
     rerender(<CapabilityProjection projection={projection({ depth: 'peek' })} />);
     expect(screen.getByTestId('capsule-capability-open-workspace')).toBeInTheDocument();
+  });
+
+  it('reaches the Workspace from the Signal when there is no Peek', async () => {
+    // Claude Code's shape: it has one Terminal depth, so hiding the way in
+    // behind a step that does not exist would leave the Workspace unreachable
+    // from the Terminal entirely.
+    const onOpenWorkspace = vi.fn();
+    render(
+      <CapabilityProjection projection={projection({ onDeeper: undefined, onOpenWorkspace })} />,
+    );
+
+    expect(screen.getByTestId('capsule-capability-title')).toBeDisabled();
+    await userEvent.click(screen.getByTestId('capsule-capability-open-workspace'));
+
+    expect(onOpenWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes the title inert rather than opening an empty Peek', async () => {
+    const onOpenWorkspace = vi.fn();
+    render(
+      <CapabilityProjection projection={projection({ onDeeper: undefined, onOpenWorkspace })} />,
+    );
+
+    const title = screen.getByTestId('capsule-capability-title');
+    expect(title).toBeDisabled();
+    await userEvent.click(title);
+
+    // Nothing deeper happened — no Workspace either, since that is a separate
+    // decision the user makes with a control that says so.
+    expect(onOpenWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('still dismisses a Signal with no Peek', async () => {
+    const onDismiss = vi.fn();
+    render(
+      <CapabilityProjection
+        projection={projection({ onDeeper: undefined, onDismiss })}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('capsule-capability-dismiss'));
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   it('carries what the body reported into the Workspace handoff', async () => {

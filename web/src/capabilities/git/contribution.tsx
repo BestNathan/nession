@@ -66,6 +66,9 @@ export const gitView: WorkspaceViewBinding = {
  */
 export const gitProjection: CapsuleProjectionBinding = {
   id: GIT_ID,
+  // A changed-file summary is what sits between "3 changed" and a full diff,
+  // so Git has a Peek of its own.
+  supportsPeek: true,
   body: ({ agentId, sessionId, depth, onFocusChange }) => (
     <GitProjection
       agentId={agentId}

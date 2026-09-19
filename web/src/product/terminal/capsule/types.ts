@@ -64,8 +64,16 @@ export interface CapsuleCapabilityProjection {
    * what the frame's Workspace handoff carries.
    */
   body: (focus: string | undefined, setFocus: (id?: string) => void) => ReactNode;
-  /** Signal → Peek. */
-  onDeeper: () => void;
+  /**
+   * Signal → Peek. Absent for a capability with nothing to add at Peek.
+   *
+   * The second implementation settled this. Git has two Terminal depths and
+   * deepens by tapping its title; a capability whose Signal already says
+   * everything the Terminal can say has no Peek to open, and offering one would
+   * open an empty surface. The frame drops the step and reaches the Workspace
+   * from the Signal instead.
+   */
+  onDeeper?: () => void;
   onDismiss: () => void;
   /** Present when the capability has somewhere deeper to go. */
   onOpenWorkspace?: (resourceId?: string) => void;

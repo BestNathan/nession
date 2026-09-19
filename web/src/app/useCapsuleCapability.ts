@@ -128,6 +128,8 @@ export function useCapsuleCapability(
   }, []);
 
   const binding = active ? projectionBindingFor(active.capabilityId) : undefined;
+  const stateOf = (id: CapabilityId) =>
+    resolution.snapshots.find((snapshot) => snapshot.id === id)?.state ?? 'available';
 
   return {
     facts,
@@ -141,7 +143,9 @@ export function useCapsuleCapability(
             id: active.capabilityId,
             title: resolution.titleFor(active.capabilityId),
             depth: active.depth,
-            onDeeper,
+            // Absent when the capability declared it has no Peek: the frame
+            // reads that as an inert title rather than a step into nothing.
+            onDeeper: binding.supportsPeek ? onDeeper : undefined,
             onDismiss,
             onOpenWorkspace: (resourceId) =>
               input.onOpenWorkspace(active.capabilityId, resourceId),
@@ -153,6 +157,9 @@ export function useCapsuleCapability(
                 agentId: input.agent?.agent_id,
                 sessionId: input.session?.session_id,
                 depth: active.depth,
+                // The state the registry resolved, read back rather than
+                // re-derived — one decision, one place.
+                state: stateOf(active.capabilityId),
                 onFocusChange: setFocus,
               }),
           }

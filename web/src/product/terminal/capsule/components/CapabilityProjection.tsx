@@ -35,6 +35,11 @@ export function CapabilityProjection({
   const [focus, setFocus] = useState<string | undefined>(undefined);
   const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
   const isPeek = depth === 'peek';
+  const hasDeeper = Boolean(onDeeper);
+
+  // A Signal with no Peek behind it still has somewhere to go — its Workspace
+  // view — so the path hangs off the Signal rather than behind an empty step.
+  const showWorkspace = Boolean(onOpenWorkspace) && (isPeek || !hasDeeper);
 
   return (
     <div
@@ -52,13 +57,15 @@ export function CapabilityProjection({
         <button
           type="button"
           data-testid="capsule-capability-title"
-          // At Signal depth the whole title is the way in; at Peek it is already
-          // as deep as the Terminal goes.
-          onClick={isPeek ? undefined : () => onDeeper()}
-          disabled={isPeek}
+          // At Signal depth the title is the way in; at Peek it is already as
+          // deep as the Terminal goes, and a capability with no Peek has
+          // nothing behind it to open.
+          onClick={isPeek || !hasDeeper ? undefined : () => onDeeper?.()}
+          disabled={isPeek || !hasDeeper}
           className={cn(
             'min-w-0 flex-1 truncate text-left font-semibold text-foreground',
             !isPeek &&
+              hasDeeper &&
               'rounded transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
         >
@@ -80,12 +87,12 @@ export function CapabilityProjection({
 
       {projection.body(focus, setFocus)}
 
-      {isPeek && onOpenWorkspace ? (
+      {showWorkspace ? (
         <div className="flex justify-end">
           <button
             type="button"
             data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace(focus)}
+            onClick={() => onOpenWorkspace?.(focus)}
             className="rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] font-medium text-foreground transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Open in Workspace →
