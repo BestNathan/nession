@@ -445,7 +445,7 @@ fn now_timestamp() -> u64 {
 
 /// Extract the tmux session name from a web UI session_id.
 /// Web UI uses "agent_id:session_name" format; strip the prefix if present.
-fn extract_session_name(session_id: &str) -> String {
+pub(crate) fn extract_session_name(session_id: &str) -> String {
     session_id
         .split_once(':')
         .map(|(_, name)| name.to_string())

@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use nession_agent::connection::ServerClient;
 use nession_agent::extension::ExtensionRegistry;
+use nession_agent::git_workdir::TmuxWorkdirResolver;
 use nession_agent::identity;
 use nession_agent::netdetect::build_advertised_addresses;
 use nession_agent::netwatch;
@@ -26,6 +27,7 @@ use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_common::extension::AgentExtension;
 use nession_common::protocol::AgentMetadata;
 use nession_common::system;
+use nession_git::GitAgentExtension;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -195,8 +197,15 @@ async fn main() -> Result<()> {
             "[DIAGNOSTIC] Connecting to central server at {}...",
             config.server_url
         );
-        let extensions: Vec<Box<dyn AgentExtension>> =
-            vec![Box::new(ClaudeCodeAgentExtension::new())];
+        let extensions: Vec<Box<dyn AgentExtension>> = vec![
+            Box::new(ClaudeCodeAgentExtension::new()),
+            // #750. The resolver is what keeps git inside the Session's own
+            // working directory: the client names a session, never a path.
+            Box::new(GitAgentExtension::new(
+                "git",
+                Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux_for_client))),
+            )),
+        ];
         let ext_registry = if extensions.is_empty() {
             None
         } else {
