@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 nession-common = { path = "../nession-common" }
+nession-protocol = { path = "../nession-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

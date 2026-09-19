@@ -1905,6 +1905,7 @@ dependencies = [
  "chrono",
  "dirs",
  "nession-common",
+ "nession-protocol",
  "serde",
  "serde_json",
  "tempfile",
