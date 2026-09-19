@@ -198,6 +198,32 @@ generated.
 | Two providers cannot claim one wire type or one protocol | `ExtensionRegistry::new` → `RegistryError`, naming both claimants |
 | An extension that declares nothing is a composition mistake | the same function |
 | What is routed is what is advertised | the routes are *derived* from the descriptors — there is no second list |
+| A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
+| A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
+| A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
+
+### Why the manifest carries the wire projection
+
+The Server relays `extension.git.status` without knowing what `git` is. To gate
+that relay it must answer "does this peer carry this message?", and it cannot
+turn the wire string into the protocol id `git.status` on its own — there is no
+universal rule: the registry's own strip-the-namespace transform yields
+`claude_code.read` where the id is `claude-code.read`. So the mapping is
+**declared** by the provider that owns it and travels in the manifest.
+
+A manifest whose `wire` is absent — a peer predating the field — answers *no* to
+every wire query. That is the safe direction: **has not said** is not **said
+yes**, and the relay gate is skipped entirely for such a peer rather than
+refusing on its silence.
+
+### Where a target's support is served
+
+`client.agents.list` carries each agent's manifest as `protocols`, `null` for a
+peer that advertised none. It is served from the list rather than a query of its
+own because that is already the discover-agents call — a consumer resolving per
+target gets every manifest without a second round trip per agent. The CLI's
+`agents list` reads the same field and prints `legacy` rather than `0 units` for
+a peer without one, because those two resolve differently.
 
 ### What "derived" buys over "checked"
 
