@@ -27,21 +27,41 @@ pub async fn list_agents(server_url: &str, auth_token: &str) -> Result<()> {
     println!();
     println!("Agents:");
     println!(
-        "{:<16}{:<18}{:<10}{:<12}{:<15}",
-        "ID", "HOSTNAME", "STATUS", "SESSIONS", "LAST HEARTBEAT"
+        "{:<16}{:<18}{:<10}{:<12}{:<10}{:<15}",
+        "ID", "HOSTNAME", "STATUS", "SESSIONS", "PROTOCOLS", "LAST HEARTBEAT"
     );
 
     for agent in &agents {
         let heartbeat_ago = format_time_ago(&agent.last_heartbeat);
         println!(
-            "{:<16}{:<18}{:<10}{:<12}{:<15}",
-            agent.agent_id, agent.hostname, agent.status, agent.session_count, heartbeat_ago,
+            "{:<16}{:<18}{:<10}{:<12}{:<10}{:<15}",
+            agent.agent_id,
+            agent.hostname,
+            agent.status,
+            agent.session_count,
+            protocol_summary(agent),
+            heartbeat_ago,
         );
     }
     println!();
     println!("{} agent(s) total", agents.len());
 
     Ok(())
+}
+
+/// How an agent's advertised protocol set reads in one column (`#678`).
+///
+/// `legacy` rather than `0`: an agent that advertised no manifest is a **Legacy
+/// Peer** — one that predates manifests — not a peer serving nothing. Printing
+/// `0` would report the second as the first, and they resolve differently.
+///
+/// `None` also covers the agent that composed no providers, which is the same
+/// absence for the same reason: nothing to serve.
+fn protocol_summary(agent: &crate::client::connection::AgentInfo) -> String {
+    match &agent.protocols {
+        Some(manifest) => format!("{} units", manifest.protocols.len()),
+        None => "legacy".to_string(),
+    }
 }
 
 /// List sessions from the server and display them in a formatted table.

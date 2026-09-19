@@ -577,6 +577,21 @@ impl ConnectionHandler {
                     "last_heartbeat": a.last_heartbeat.to_rfc3339(),
                     "registered_at": a.registered_at.to_rfc3339(),
                     "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
+                    // What this agent reported it can serve (`#678`).
+                    //
+                    // Served from the agents list rather than a query of its
+                    // own: this is already the "discover agents" call the
+                    // design's data flow names, so a consumer resolving per
+                    // target has the manifests in hand without a second round
+                    // trip per agent.
+                    //
+                    // `null` — not an absent key, and not an empty object —
+                    // when the agent advertised none. A consumer must be able
+                    // to tell "this peer predates manifests" from "this peer
+                    // has an empty protocol set", because the design resolves
+                    // the first as a Legacy Peer and would resolve the second
+                    // as a peer that serves nothing.
+                    "protocols": a.protocol_manifest.as_ref(),
                     "metadata": {
                         "nession_version": a.metadata.nession_version,
                         "tmux_version": a.metadata.tmux_version,
@@ -3498,6 +3513,52 @@ mod tests {
         let payload = relay(&mut h, "extension.git.diff").await;
         assert_ne!(payload["error"], "contract_not_supported");
         assert_eq!(payload["error"], "agent_disconnected");
+    }
+
+    // ---- the target's protocol support is queryable (#678, Phase 3) ----
+
+    /// List agents and return the first agent's `protocols` field.
+    async fn listed_protocols(h: &mut ConnectionHandler) -> serde_json::Value {
+        h.authenticated_client = true;
+        let action = h
+            .handle_message(proto_msg("client.agents.list", json!({})))
+            .await
+            .unwrap();
+        parse_reply(action)["payload"]["agents"][0]["protocols"].clone()
+    }
+
+    #[tokio::test]
+    async fn the_agents_list_carries_what_each_agent_can_serve() {
+        // Served from the list rather than a query of its own: it is already
+        // the discover-agents call, so a consumer resolving per target has the
+        // manifests in hand without a second round trip per agent.
+        let mut h = test_handler("").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let protocols = listed_protocols(&mut h).await;
+        assert_eq!(protocols["provider"], "agent-a");
+        assert_eq!(protocols["protocols"]["git.status"]["versions"][0], 1);
+        assert_eq!(
+            protocols["protocols"]["git.status"]["wire"][0],
+            "extension.git.status"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agent_without_a_manifest_reports_null_rather_than_an_empty_set() {
+        // The distinction the whole legacy rule rests on. `{}` would say "this
+        // peer has a protocol set and it is empty" — a peer that serves
+        // nothing. `null` says "this peer predates manifests", which the design
+        // resolves as a Legacy Peer. A consumer that collapsed the two would
+        // refuse to talk to every old agent.
+        let mut h = test_handler("").await;
+        register_agent(&h, None).await;
+
+        let protocols = listed_protocols(&mut h).await;
+        assert!(
+            protocols.is_null(),
+            "expected null for a legacy peer, got {protocols}"
+        );
     }
 
     #[tokio::test]

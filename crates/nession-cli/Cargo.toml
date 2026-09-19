@@ -9,6 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 nession-common = { path = "../nession-common" }
+# The CLI is a protocol consumer, and the kernel is what a consumer reads.
+nession-protocol = { path = "../nession-protocol" }
 nession-agent = { path = "../nession-agent" }
 nession-server = { path = "../nession-server" }
 tokio.workspace = true

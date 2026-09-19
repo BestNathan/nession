@@ -1930,6 +1930,7 @@ dependencies = [
  "libc",
  "nession-agent",
  "nession-common",
+ "nession-protocol",
  "nession-server",
  "nix 0.27.1",
  "reqwest",
