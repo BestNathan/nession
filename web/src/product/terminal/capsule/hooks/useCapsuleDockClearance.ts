@@ -22,7 +22,7 @@ export function useCapsuleDockClearance(dockRef: RefObject<HTMLElement | null>):
     const update = () => {
       const hostRect = host.getBoundingClientRect();
       const dockRect = dock.getBoundingClientRect();
-      const gapRaw = getComputedStyle(host).getPropertyValue('--composer-terminal-clearance-gap');
+      const gapRaw = getComputedStyle(host).getPropertyValue('--terminal-capsule-terminal-clearance-gap');
       const gap = Number.parseFloat(gapRaw) || 0;
       const clearance = Math.max(0, hostRect.bottom - dockRect.top + gap);
       host.style.setProperty('--terminal-capsule-occlusion', `${clearance}px`);

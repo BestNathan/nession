@@ -84,7 +84,7 @@ describe('TerminalCapsule', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const shell = screen.getByTestId('capsule-shell');
     expect(shell.className).toMatch(/terminal-capsule-surface/);
-    expect(shell.className).toMatch(/composer-shell-pill-radius/);
+    expect(shell.className).toMatch(/terminal-capsule-shell-pill-radius/);
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
   });
 
@@ -92,11 +92,11 @@ describe('TerminalCapsule', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} />);
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'web');
-    expect(root.className).toMatch(/composer-shell-margin-x/);
+    expect(root.className).toMatch(/terminal-capsule-shell-margin-x/);
     expect(root.className).toMatch(/items-stretch/);
     const shell = screen.getByTestId('capsule-shell');
     expect(shell.className).toMatch(/w-full/);
-    expect(shell.className).not.toMatch(/composer-shell-max-width/);
+    expect(shell.className).not.toMatch(/terminal-capsule-shell-max-width/);
   });
 
   it('uses inset positioning on app', () => {
@@ -105,7 +105,7 @@ describe('TerminalCapsule', () => {
     );
     const root = screen.getByTestId('terminal-capsule');
     expect(root).toHaveAttribute('data-experience', 'app');
-    expect(root.className).toMatch(/composer-shell-inset/);
+    expect(root.className).toMatch(/terminal-capsule-shell-inset/);
   });
 
   it('does not draw a focus ring class on the ghost input', () => {
@@ -142,7 +142,7 @@ describe('TerminalCapsule', () => {
       />,
     );
     expect(screen.getByTestId('terminal-capsule')).toHaveAttribute('data-shell-shape', 'pill');
-    expect(screen.getByTestId('capsule-shell').className).toMatch(/composer-shell-pill-radius/);
+    expect(screen.getByTestId('capsule-shell').className).toMatch(/terminal-capsule-shell-pill-radius/);
   });
 
   it('defaults to the web experience when none is given', () => {

@@ -11,15 +11,15 @@ import {
 
 describe('capsuleStyles', () => {
   it('caps the token-sized popover to the viewport inset', () => {
-    expect(capsulePopoverPanelClass).toContain('w-[length:var(--composer-popover-width)]');
+    expect(capsulePopoverPanelClass).toContain('w-[length:var(--terminal-capsule-popover-width)]');
     expect(capsulePopoverPanelClass).toContain(
-      'max-w-[calc(100vw-var(--composer-popover-viewport-inset))]',
+      'max-w-[calc(100vw-var(--terminal-capsule-popover-viewport-inset))]',
     );
-    expect(capsulePopoverPanelClass).toContain('var(--composer-popover-zindex)');
+    expect(capsulePopoverPanelClass).toContain('var(--terminal-capsule-popover-zindex)');
   });
 
   it('provides the shared physical-key grid gap token', () => {
-    expect(capsulePhysKeyGridGapClass).toContain('var(--composer-phys-key-grid-gap)');
+    expect(capsulePhysKeyGridGapClass).toContain('var(--terminal-capsule-phys-key-grid-gap)');
   });
 
   it('keeps physical-key labels on a five-character touch target', () => {
@@ -31,10 +31,10 @@ describe('capsuleStyles', () => {
     expect(capsulePhysKeyRowClass).toContain('flex-row');
     expect(capsulePhysKeyRowClass).toContain('items-center');
     expect(capsulePhysKeyButtonClass).toContain(
-      'text-[length:var(--composer-phys-key-font-size)]',
+      'text-[length:var(--terminal-capsule-phys-key-font-size)]',
     );
     expect(capsulePhysKeyIconClass).toContain(
-      'var(--composer-phys-key-icon-size)',
+      'var(--terminal-capsule-phys-key-icon-size)',
     );
   });
 

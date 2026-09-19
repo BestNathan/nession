@@ -49,7 +49,7 @@
       "ref": "experience.app.control.md"
     }
   },
-  "composer": {
+  "terminalCapsule": {
     "$owner": "pattern.terminal-capsule",
     "fontSize": {
       "ref": "primitive.typography.size"
@@ -58,7 +58,7 @@
       "ref": "primitive.typography.lineHeight"
     },
     "lineHeight": {
-      "ref": "experience.app.composer.textLineHeight"
+      "ref": "experience.app.terminalCapsule.textLineHeight"
     },
     "fieldInsetX": {
       "value": "0.75rem"
@@ -194,7 +194,7 @@
     }
   },
   "motion": {
-    "composer": {
+    "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"
     }
   },

@@ -18,12 +18,12 @@ const NON_COLOR_SEMANTIC = new Set(['radius', 'radius-capsule', 'elevation-float
 const THEME_SIZE_PREFIXES = [
   'control-',
   'row-',
-  'composer-',
+  'terminal-capsule-',
   'shell-space-',
   'shell-icon-button-size',
   'focus-ring-',
   'radius-capsule',
-  'motion-composer',
+  'motion-terminal-capsule',
   'motion-shell-',
   'touch-target-min',
 ];

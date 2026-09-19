@@ -12,7 +12,7 @@ const RULES = [
   {
     id: 'tailwind-text-scale',
     re: /\btext-(?:xs|sm|base|lg|xl|2xl|3xl|\[[0-9])/,
-    message: 'Use composer font tokens via capsuleStyles (text-[length:var(--composer-font-size)]).',
+    message: 'Use terminal-capsule font tokens via capsuleStyles (text-[length:var(--terminal-capsule-font-size)]).',
   },
   {
     id: 'tailwind-metric-scale',
@@ -32,12 +32,12 @@ const RULES = [
   {
     id: 'numeric-arbitrary',
     re: /\[(?!length:var\()[0-9]+(?:\.\d+)?(?:px|rem|vh|vw|%)\]/,
-    message: 'Arbitrary numeric dimensions forbidden — use length:var(--composer-*|--control-*|--icon-*).',
+    message: 'Arbitrary numeric dimensions forbidden — use length:var(--terminal-capsule-*|--control-*|--icon-*).',
   },
   {
     id: 'font-via-line-height',
-    re: /text-\[length:var\(--composer-line-height\)\]/,
-    message: 'Font size must use --composer-font-size, not --composer-line-height.',
+    re: /text-\[length:var\(--terminal-capsule-line-height\)\]/,
+    message: 'Font size must use --terminal-capsule-font-size, not --terminal-capsule-line-height.',
   },
 ];
 
@@ -86,7 +86,7 @@ export default function noCapsuleMagicMetrics() {
       messages: {
         violation: '{{message}}\n\nnession/no-capsule-magic-metrics ({{ruleId}})',
         sideOffset:
-          'Popover sideOffset must read --composer-popover-side-offset via readPopoverSideOffset(), not a numeric literal.',
+          'Popover sideOffset must read --terminal-capsule-popover-side-offset via readPopoverSideOffset(), not a numeric literal.',
       },
     },
     create(context) {

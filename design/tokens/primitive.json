@@ -87,7 +87,7 @@
   },
   "radius": { "value": "0.625rem" },
   "typography": {
-    "$description": "Shared body scale for composer/capsule — web and app consume via experience composer refs, not directly.",
+    "$description": "Shared body scale for the terminal capsule — web and app consume via experience terminalCapsule refs, not directly.",
     "size": { "value": "1rem" },
     "lineHeight": { "value": "1.5rem" }
   }

@@ -62,7 +62,7 @@ test('checkInventory rejects dangling token references', () => {
 test('checkOwnership accepts only owners that name a real pattern doc', () => {
   const inventory = (owner) => ({
     scope: { patternDocs: ['pattern.session-item', 'pattern.terminal-capsule'] },
-    tokens: { records: [{ id: 'experience.web.composer.tabHeight', owner }] },
+    tokens: { records: [{ id: 'experience.web.terminalCapsule.tabHeight', owner }] },
   });
 
   assert.deepEqual(checkOwnership(inventory('pattern.terminal-capsule')), []);
@@ -71,7 +71,7 @@ test('checkOwnership accepts only owners that name a real pattern doc', () => {
 
   const [problem] = checkOwnership(inventory('pattern.workspace-tree'));
   assert.match(problem, /unknown token owner/);
-  assert.match(problem, /experience\.web\.composer\.tabHeight/);
+  assert.match(problem, /experience\.web\.terminalCapsule\.tabHeight/);
   assert.match(problem, /pattern\.workspace-tree/);
   assert.match(problem, /patterns\/\*\.md/);
 });
@@ -135,8 +135,8 @@ test('one role can own a size for two different components', () => {
 test('$owner inherits down its group, and absent means generic platform', () => {
   const byId = new Map(buildInventory().tokens.records.map((r) => [r.id, r]));
   // Group annotation reaches every leaf under it.
-  assert.equal(byId.get('experience.web.composer.tabHeight').owner, 'pattern.terminal-capsule');
-  assert.equal(byId.get('experience.app.composer.physKeyPadY').owner, 'pattern.terminal-capsule');
+  assert.equal(byId.get('experience.web.terminalCapsule.tabHeight').owner, 'pattern.terminal-capsule');
+  assert.equal(byId.get('experience.app.terminalCapsule.physKeyPadY').owner, 'pattern.terminal-capsule');
   assert.equal(byId.get('experience.web.workspace.editorFontSize').owner, 'pattern.file-workspace');
   // Leaf annotation inside an unowned family.
   assert.equal(byId.get('experience.web.shell.sessionRowPadY').owner, 'pattern.session-item');

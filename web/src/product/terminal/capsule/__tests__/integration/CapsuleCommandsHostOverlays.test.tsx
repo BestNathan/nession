@@ -65,7 +65,7 @@ function HostFixture({
       style={{
         position: 'relative',
         height: 400,
-        ['--composer-commands-panel-max-height' as string]: '40vh',
+        ['--terminal-capsule-commands-panel-max-height' as string]: '40vh',
       }}
     >
       <div ref={dockRef} data-testid="mock-dock" style={{ position: 'absolute', bottom: 0, height: 48, width: '100%' }} />
