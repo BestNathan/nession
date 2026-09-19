@@ -107,7 +107,13 @@
         "alignY": "middle",
         "heightToken": "experience.web.control.md",
         "justify": "space-between",
-        "heightTokenPx": 32
+        "radiusToken": "semantic.radius-capsule",
+        "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
+        "padXToken": "experience.web.terminalCapsule.shellPadX",
+        "heightTokenPx": 32,
+        "padXTokenPx": 12,
+        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "pillRadiusTokenCss": "9999px"
       },
       "app": {
         "overflow": "sheet",
@@ -116,8 +122,14 @@
         "touchTargetToken": "experience.app.touchTarget.min",
         "heightToken": "experience.app.control.md",
         "justify": "space-between",
+        "radiusToken": "semantic.radius-capsule",
+        "pillRadiusToken": "experience.app.terminalCapsule.shellPillRadius",
+        "padXToken": "experience.app.terminalCapsule.shellPadX",
         "heightTokenPx": 44,
-        "touchTargetTokenPx": 44
+        "touchTargetTokenPx": 44,
+        "padXTokenPx": 10,
+        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "pillRadiusTokenCss": "9999px"
       }
     },
     "pattern.workspace-navigation": {

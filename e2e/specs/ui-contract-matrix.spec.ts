@@ -13,6 +13,8 @@
 import { expect, test } from '@playwright/test';
 import {
   expectNoUnexpectedOverflow,
+  expectPaddingX,
+  expectRadius,
   expectSingleLine,
   expectTokenHeight,
   expectTouchTarget,
@@ -116,6 +118,15 @@ async function assertCapsuleControls(
   await expectTokenHeight(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
   await expectSingleLine(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
   await expectNoUnexpectedOverflow(band, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+
+  // §Visual contract, promoted from prose to assertions (#825 Goal 2):
+  // "capsule radius from semantic design tokens" and "exact spacing and
+  // alignment". Both were unverifiable before — the contract had no field for
+  // either, so nothing could fail when they drifted.
+  const shell = page.getByTestId('capsule-shell');
+  await expect(shell).toBeVisible();
+  await expectRadius(shell, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
+  await expectPaddingX(shell, optsFor(PATTERN_TERMINAL_CAPSULE, experience, viewportId));
 
   const controls = band.locator('button');
   expect(await controls.count()).toBeGreaterThan(0);

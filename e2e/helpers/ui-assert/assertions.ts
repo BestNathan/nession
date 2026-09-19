@@ -157,6 +157,99 @@ export async function expectTokenHeight(locator: Locator, opts: AssertOptions): 
   }
 }
 
+/** Computed horizontal padding must match the contract's padXToken (± tolerance). */
+export async function expectPaddingX(locator: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.padXTokenPx === undefined) return;
+  const paddingLeft = await locator.evaluate((el) =>
+    Number.parseFloat(getComputedStyle(el).paddingLeft),
+  );
+  const delta = diffTolerance(paddingLeft, block.padXTokenPx, opts.tolerance ?? 1);
+  if (delta > 0) {
+    violation(
+      opts,
+      'pad-x',
+      `${block.padXToken} (${block.padXTokenPx}px)`,
+      `${paddingLeft.toFixed(1)}px`,
+      `computedPaddingLeft: ${paddingLeft.toFixed(1)}px`,
+    );
+  }
+}
+
+/** Computed max-width must match the contract's maxWidthToken (± tolerance). */
+export async function expectMaxWidth(locator: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.maxWidthTokenPx === undefined) return;
+  const maxWidth = await locator.evaluate((el) =>
+    Number.parseFloat(getComputedStyle(el).maxWidth),
+  );
+  // `max-width: none` parses to NaN — an unbounded surface where the contract
+  // says the width is bounded. Treat it as a violation, not as "no measurement".
+  const bounded = Number.isFinite(maxWidth);
+  const actual = bounded ? `${maxWidth.toFixed(1)}px` : 'none';
+  if (!bounded || diffTolerance(maxWidth, block.maxWidthTokenPx, opts.tolerance ?? 1) > 0) {
+    violation(
+      opts,
+      'max-width',
+      `${block.maxWidthToken} (${block.maxWidthTokenPx}px)`,
+      actual,
+      `computedMaxWidth: ${actual}`,
+    );
+  }
+}
+
+/**
+ * Corner radius must be the contract's radiusToken.
+ *
+ * The token is `calc(var(--radius) * 2.2)`, so there is no px to compare — the
+ * assertion builds a probe element from the resolved expression and compares
+ * computed radii, letting the browser do the arithmetic. The probe is appended
+ * to the page under test, so it resolves `var(--radius)` exactly as the pattern
+ * does.
+ *
+ * What this does **not** catch on its own: a hard-coded radius whose resolved
+ * value happens to equal the token's. That side is covered by
+ * `nession/no-capsule-magic-metrics`, which forbids arbitrary numeric
+ * dimensions on the capsule path — together they pin both name and value.
+ */
+export async function expectRadius(locator: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  // The capsule ships two shapes and switches between them on
+  // `data-shell-shape` (CapsuleShell.tsx). Asserting one radius unconditionally
+  // would be wrong half the time, so the element's own shape picks the token.
+  //
+  // The attribute is on the *root* (`terminal-capsule`), while the radius class
+  // is on the inner `capsule-shell` — so read it from the nearest ancestor that
+  // carries it rather than from the element itself, which would always be null
+  // and silently assert the non-pill token.
+  const shape = await locator.evaluate((el) =>
+    el.closest('[data-shell-shape]')?.getAttribute('data-shell-shape') ?? null,
+  );
+  const isPill = shape === 'pill';
+  const css = isPill ? block.pillRadiusTokenCss : block.radiusTokenCss;
+  const token = isPill ? block.pillRadiusToken : block.radiusToken;
+  if (css === undefined) return;
+  const actual = await locator.evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+  const expected = await locator.evaluate((el, value) => {
+    const probe = el.ownerDocument.createElement('div');
+    probe.style.position = 'absolute';
+    probe.style.borderRadius = value;
+    el.ownerDocument.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).borderTopLeftRadius;
+    probe.remove();
+    return resolved;
+  }, css);
+  if (actual !== expected) {
+    violation(
+      opts,
+      'radius',
+      `${token} (${css} → ${expected}) for shape "${shape ?? 'capsule'}"`,
+      actual,
+      `computedBorderTopLeftRadius: ${actual}`,
+    );
+  }
+}
+
 /**
  * Content must not overflow the element's own bounds beyond the contract's
  * overflow strategy. `clip` = no measurable overflow; `scroll` = the element

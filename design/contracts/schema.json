@@ -6,8 +6,8 @@
   "$defs": {
     "tokenRef": {
       "type": "string",
-      "pattern": "^(experience|domain|semantic|primitive)\\.[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$",
-      "description": "Dotted id into design/tokens/ (e.g. experience.web.control.md). Unknown or non-resolvable ids fail resolve-contracts."
+      "pattern": "^(experience|domain|semantic|primitive)\\.[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*$",
+      "description": "Dotted id into design/tokens/ (e.g. experience.web.control.md). Unknown or non-resolvable ids fail resolve-contracts. Segments may contain hyphens — `semantic.radius-capsule`, `experience.app.touchTarget.min`-style camelCase and kebab keys both occur. NOTE: nothing currently validates source contracts against this file; it is documentation, and `resolve-contracts.mjs` keeps its own BLOCK_FIELDS in sync by hand. The hyphen omission was live for as long as that has been true."
     },
     "overflow": {
       "type": "string",
@@ -52,6 +52,18 @@
         },
         "minWidthToken": { "$ref": "#/$defs/tokenRef" },
         "maxWidthToken": { "$ref": "#/$defs/tokenRef" },
+        "padXToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Horizontal padding. Resolved value must be px-measurable. Asserted so 'exact spacing' (terminal-capsule.md §Visual contract) is checkable rather than an adjective."
+        },
+        "pillRadiusToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Corner radius for the pill shape, which the capsule takes in some layouts. Separate from radiusToken because the shipped component switches between the two on `data-shell-shape`; declaring one would make the assertion wrong half the time."
+        },
+        "radiusToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Corner radius. Unlike the *Token fields this need not be px-measurable — `semantic.radius-capsule` is `calc(var(--radius) * 2.2)` — so the resolved expression is carried through and the browser evaluates it at assertion time."
+        },
         "scrollOwner": {
           "oneOf": [
             { "type": "boolean", "description": "true = the pattern element itself scrolls." },

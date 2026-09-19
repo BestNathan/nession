@@ -1,12 +1,18 @@
 {
   "id": "pattern.terminal-capsule",
-  "$description": "Terminal capsule contextual interaction surface (prose: terminal-capsule.md). The capsule carries the Session's direct terminal input plus contextual capability interaction — it is not a permanent toolbar, and a capability earns presence by context rather than by registration. The measurable fields constrain the chrome band: single line, control.md density, overflow collapses into a popover (web) / sheet (app).",
+  "$description": "Terminal capsule contextual interaction surface (prose: terminal-capsule.md). The capsule carries the Session's direct terminal input plus contextual capability interaction — it is not a permanent toolbar, and a capability earns presence by context rather than by registration. The measurable fields constrain the chrome band: single line, control.md density, overflow collapses into a popover (web) / sheet (app). radiusToken / padXToken / maxWidthToken carry §Visual contract's 'capsule radius from semantic design tokens', 'exact spacing and alignment', and the Web placement row's 'bounded max width' — the three parts of that section that are measurable, promoted from prose so they can fail.",
   "extends": ["category.chrome", "category.control"],
   "patternRef": "docs/design/design-system/patterns/terminal-capsule.md",
   "web": {
-    "justify": "space-between"
+    "justify": "space-between",
+    "radiusToken": "semantic.radius-capsule",
+    "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
+    "padXToken": "experience.web.terminalCapsule.shellPadX"
   },
   "app": {
-    "justify": "space-between"
+    "justify": "space-between",
+    "radiusToken": "semantic.radius-capsule",
+    "pillRadiusToken": "experience.app.terminalCapsule.shellPillRadius",
+    "padXToken": "experience.app.terminalCapsule.shellPadX"
   }
 }
