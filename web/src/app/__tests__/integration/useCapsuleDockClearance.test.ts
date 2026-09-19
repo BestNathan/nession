@@ -30,7 +30,7 @@ describe('useCapsuleDockClearance', () => {
   it('publishes clearance on the capsule host from dock geometry', () => {
     const host = document.createElement('div');
     host.dataset.terminalCapsuleHost = '';
-    host.style.setProperty('--composer-terminal-clearance-gap', '8px');
+    host.style.setProperty('--terminal-capsule-terminal-clearance-gap', '8px');
     document.body.appendChild(host);
 
     const dock = document.createElement('div');

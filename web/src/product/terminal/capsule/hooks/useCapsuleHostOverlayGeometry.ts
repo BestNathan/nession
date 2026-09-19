@@ -8,7 +8,7 @@ export interface CapsuleHostOverlayGeometry {
 }
 
 function readPanelHeightPx(host: HTMLElement): number {
-  const raw = getComputedStyle(host).getPropertyValue('--composer-commands-panel-max-height').trim();
+  const raw = getComputedStyle(host).getPropertyValue('--terminal-capsule-commands-panel-max-height').trim();
   if (raw.endsWith('vh')) {
     const vh = Number.parseFloat(raw);
     if (!Number.isNaN(vh)) {

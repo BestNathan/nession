@@ -81,7 +81,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
         {fieldFirstLayout ? (
           <div
             data-testid="capsule-input-toolbar-row"
-            className="flex min-w-0 items-center justify-between gap-[length:var(--composer-control-gap)]"
+            className="flex min-w-0 items-center justify-between gap-[length:var(--terminal-capsule-control-gap)]"
           >
             <div
               data-testid="capsule-input-leading-slot"

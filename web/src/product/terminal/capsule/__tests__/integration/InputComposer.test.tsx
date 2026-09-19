@@ -127,7 +127,7 @@ describe('InputComposer', () => {
   it('uses token font-size classes on the field', () => {
     renderWebCapsule();
     const input = screen.getByTestId('capsule-ghost-input');
-    expect(input.className).toMatch(/composer-font-size/);
+    expect(input.className).toMatch(/terminal-capsule-font-size/);
   });
 
   it('renders every capsule control at the control token, never a smaller band', () => {
@@ -188,6 +188,11 @@ describe('InputComposer', () => {
     Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
       configurable: true,
       get(this: HTMLTextAreaElement) {
+        // Implementation name, deliberately not the product one: this testid
+        // belongs to the `measure/` subsystem (readComposerMetrics), not to the
+        // design system's token vocabulary. `terminal-capsule.md` §Implementation
+        // migration treats InputComposer/measure as assets to converge, not as
+        // the product boundary — so the token rename does not reach here.
         if (this.dataset.testid === 'capsule-composer-measure-mirror') {
           return this.value.length >= 24 ? 64 : 32;
         }

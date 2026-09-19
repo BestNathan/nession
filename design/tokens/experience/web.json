@@ -152,7 +152,7 @@
       "value": "2px"
     }
   },
-  "composer": {
+  "terminalCapsule": {
     "$owner": "pattern.terminal-capsule",
     "fontSize": {
       "ref": "primitive.typography.size"
@@ -161,7 +161,7 @@
       "ref": "primitive.typography.lineHeight"
     },
     "lineHeight": {
-      "ref": "experience.web.composer.textLineHeight"
+      "ref": "experience.web.terminalCapsule.textLineHeight"
     },
     "fieldInsetX": {
       "value": "0.75rem"
@@ -291,7 +291,7 @@
     }
   },
   "motion": {
-    "composer": {
+    "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"
     },
     "shellDuration": {

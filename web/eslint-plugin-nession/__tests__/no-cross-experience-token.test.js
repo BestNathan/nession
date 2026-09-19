@@ -33,7 +33,7 @@ test('the app-only token list is derived from the token source, not hand-listed'
   assert.ok(Array.isArray(vars) && vars.length > 0, 'experienceAppVars is empty or missing');
 
   // Present in experience/app.json only — emitted solely under [data-experience="app"].
-  for (const appOnly of ['touch-target-min', 'touch-target-compact', 'composer-shell-inset']) {
+  for (const appOnly of ['touch-target-min', 'touch-target-compact', 'terminal-capsule-shell-inset']) {
     assert.ok(vars.includes(appOnly), `expected ${appOnly} in experienceAppVars`);
   }
 
@@ -46,16 +46,16 @@ test('the app-only token list is derived from the token source, not hand-listed'
 
 test('findCrossExperienceVars matches the var() form and ignores shared tokens', () => {
   assert.deepEqual(
-    findCrossExperienceVars('inset-x-[length:var(--composer-shell-inset)]', lintMetadata),
-    ['composer-shell-inset'],
+    findCrossExperienceVars('inset-x-[length:var(--terminal-capsule-shell-inset)]', lintMetadata),
+    ['terminal-capsule-shell-inset'],
   );
   assert.deepEqual(
-    findCrossExperienceVars('bottom-[max(var(--composer-shell-inset),var(--composer-shell-safe-area))]', lintMetadata),
-    ['composer-shell-inset', 'composer-shell-safe-area'],
+    findCrossExperienceVars('bottom-[max(var(--terminal-capsule-shell-inset),var(--terminal-capsule-shell-safe-area))]', lintMetadata),
+    ['terminal-capsule-shell-inset', 'terminal-capsule-shell-safe-area'],
   );
   // Shared and web-only tokens resolve in both experiences.
   assert.deepEqual(findCrossExperienceVars('h-[length:var(--control-md)]', lintMetadata), []);
-  assert.deepEqual(findCrossExperienceVars('var(--composer-shell-margin-x)', lintMetadata), []);
+  assert.deepEqual(findCrossExperienceVars('var(--terminal-capsule-shell-margin-x)', lintMetadata), []);
   assert.deepEqual(findCrossExperienceVars(undefined, lintMetadata), []);
 });
 
@@ -80,11 +80,11 @@ test('no-cross-experience-token fails an App-only token outside an App-scoped bi
   ruleTester.run('no-cross-experience-token', nessionPlugin.rules['no-cross-experience-token'], {
     valid: [
       {
-        code: 'export const capsuleShellAppOuterClass = "inset-x-[length:var(--composer-shell-inset)]";',
+        code: 'export const capsuleShellAppOuterClass = "inset-x-[length:var(--terminal-capsule-shell-inset)]";',
         filename: CAPSULE,
       },
       {
-        code: 'export const capsuleShellWebOuterClass = "inset-x-[length:var(--composer-shell-margin-x)]";',
+        code: 'export const capsuleShellWebOuterClass = "inset-x-[length:var(--terminal-capsule-shell-margin-x)]";',
         filename: CAPSULE,
       },
       {
@@ -97,14 +97,14 @@ test('no-cross-experience-token fails an App-only token outside an App-scoped bi
       {
         // The shape the rename corrected: App-only token, binding name silent
         // about the experience it belongs to.
-        code: 'export const capsuleQuickKeyRowClass = "gap-[length:var(--composer-quick-key-gap)]";',
+        code: 'export const capsuleQuickKeyRowClass = "gap-[length:var(--terminal-capsule-quick-key-gap)]";',
         filename: CAPSULE,
         errors: [{ messageId: 'violation' }],
       },
       {
         // No named binding at all — the author has not said which experience
         // this class belongs to, so the rule cannot clear it.
-        code: 'export function Probe() { return <div className="inset-x-[length:var(--composer-shell-inset)]" />; }',
+        code: 'export function Probe() { return <div className="inset-x-[length:var(--terminal-capsule-shell-inset)]" />; }',
         filename: CAPSULE,
         errors: [{ messageId: 'violation' }],
       },

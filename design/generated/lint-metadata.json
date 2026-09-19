@@ -160,11 +160,11 @@
   "experienceAppVars": [
     "touch-target-min",
     "touch-target-compact",
-    "composer-quick-key-pad-x",
-    "composer-quick-key-gap",
-    "composer-commands-panel-max-height",
-    "composer-phys-key-arrow-width",
-    "composer-shell-inset",
-    "composer-shell-safe-area"
+    "terminal-capsule-quick-key-pad-x",
+    "terminal-capsule-quick-key-gap",
+    "terminal-capsule-commands-panel-max-height",
+    "terminal-capsule-phys-key-arrow-width",
+    "terminal-capsule-shell-inset",
+    "terminal-capsule-shell-safe-area"
   ]
 }

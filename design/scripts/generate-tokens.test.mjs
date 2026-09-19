@@ -162,13 +162,13 @@ test('production web.css uses one composer body size on web and app', () => {
     join(dirname(fileURLToPath(import.meta.url)), '../generated/web.css'),
     'utf8',
   );
-  const rootMatch = generatedCss.match(/:root \{[\s\S]*?--composer-font-size: ([^;]+);/);
+  const rootMatch = generatedCss.match(/:root \{[\s\S]*?--terminal-capsule-font-size: ([^;]+);/);
   const appBlock = generatedCss.match(/\[data-experience="app"\] \{([\s\S]*?)\n\}/);
   assert.equal(rootMatch?.[1]?.trim(), '1rem');
-  assert.match(appBlock?.[1] ?? '', /--composer-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--composer-quick-key-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--composer-phys-key-font-size: 1rem/);
-  assert.match(appBlock?.[1] ?? '', /--composer-caption-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-quick-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-phys-key-font-size: 1rem/);
+  assert.match(appBlock?.[1] ?? '', /--terminal-capsule-caption-font-size: 1rem/);
 });
 
 test('generateTerminalTs fills every xterm ITheme colour slot', () => {

@@ -211,8 +211,8 @@ html {
 
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */
 .shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
-  font-size: var(--composer-font-size);
-  line-height: var(--composer-text-line-height);
+  font-size: var(--terminal-capsule-font-size);
+  line-height: var(--terminal-capsule-text-line-height);
 }
 
 /* Capsule add-command dialog sits above composer popovers (z-index 100). */
