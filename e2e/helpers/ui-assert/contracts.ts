@@ -28,6 +28,19 @@ export interface ContractBlock {
   minWidthTokenPx?: number;
   maxWidthToken?: string;
   maxWidthTokenPx?: number;
+  padXToken?: string;
+  padXTokenPx?: number;
+  /**
+   * Corner radius. Carried as a CSS **expression**, not px: the token is
+   * `calc(var(--radius) * 2.2)`, which `parseCssPx` cannot measure. The
+   * assertion builds a probe element from this string and compares computed
+   * radii, so the browser does the arithmetic.
+   */
+  radiusToken?: string;
+  radiusTokenCss?: string;
+  /** Radius for the pill shape; the component switches on `data-shell-shape`. */
+  pillRadiusToken?: string;
+  pillRadiusTokenCss?: string;
   scrollOwner?: boolean | string;
   touchTargetToken?: string;
   touchTargetTokenPx?: number;

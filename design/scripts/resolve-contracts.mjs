@@ -21,6 +21,17 @@ const BLOCK_FIELDS = {
   justify: 'enum:start,center,end,space-between,space-around',
   minWidthToken: 'token',
   maxWidthToken: 'token',
+  padXToken: 'token',
+  // A token whose value is a CSS expression rather than a plain length —
+  // `semantic.radius-capsule` is `calc(var(--radius) * 2.2)`. It cannot go
+  // through `parseCssPx`, and resolving it here would mean re-deriving the
+  // generator's css-var naming rule to substitute `var(--radius)`. So the
+  // resolved *expression* is carried through and the **browser** evaluates it:
+  // the e2e assertion compares the pattern's computed value against a probe
+  // element that names the same token, which is both stronger and cheaper than
+  // a px number nobody can check by hand.
+  radiusToken: 'cssToken',
+  pillRadiusToken: 'cssToken',
   scrollOwner: 'scrollOwner',
   touchTargetToken: 'token',
   visibility: 'visibility',
@@ -32,7 +43,11 @@ const TOKEN_TARGET_FIELDS = new Set([
   'touchTargetToken',
   'minWidthToken',
   'maxWidthToken',
+  'padXToken',
 ]);
+
+/** Fields emitted as a resolved CSS expression (`<field>Css`), not as px. */
+const CSS_TOKEN_FIELDS = new Set(['radiusToken', 'pillRadiusToken']);
 
 // ── Token index ─────────────────────────────────────────────────────────────
 
@@ -106,6 +121,25 @@ function pxForTokenId(index, tokens, id) {
   return { known: true, px: parseCssPx(value) };
 }
 
+/**
+ * A token's value as a CSS expression, for tokens `parseCssPx` cannot measure —
+ * `calc()`, and anything else the browser resolves rather than us. Numbers are
+ * stringified so a bare `22` still yields usable CSS.
+ */
+function cssForTokenId(index, tokens, id) {
+  const node = index.get(id);
+  if (!node) return { known: false, css: null };
+  let value;
+  try {
+    value = resolveRef(node, tokens, new Set(), 'light').value;
+  } catch {
+    return { known: true, css: null };
+  }
+  if (typeof value === 'number') return { known: true, css: String(value) };
+  if (typeof value === 'string' && value.trim() !== '') return { known: true, css: value };
+  return { known: true, css: null };
+}
+
 // ── Validation ──────────────────────────────────────────────────────────────
 
 function readJson(path, label) {
@@ -176,6 +210,19 @@ function validateBlock(block, where, index, tokens) {
       } else if (TOKEN_TARGET_FIELDS.has(field) && px === null) {
         errors.push(
           `✗ token "${value}" in ${ctx} does not resolve to a px/rem value (got ${JSON.stringify(resolveRef(index.get(value), tokens, new Set(), 'light').value)})\n  Fix: reference a size/density token; colors are not measurable heights`,
+        );
+      }
+    } else if (kind === 'cssToken') {
+      if (typeof value !== 'string') {
+        errors.push(`✗ ${ctx} must be a token id string (got ${JSON.stringify(value)})\n  Fix: reference a design/tokens id like "semantic.radius-capsule"`);
+        continue;
+      }
+      const { known, css } = cssForTokenId(index, tokens, value);
+      if (!known) {
+        errors.push(`✗ unknown token id "${value}" in ${ctx}\n  Fix: reference an existing token id (design/tokens/*) or add the token first`);
+      } else if (css === null) {
+        errors.push(
+          `✗ token "${value}" in ${ctx} does not resolve to a CSS expression\n  Fix: reference a token whose value is a length or calc() expression`,
         );
       }
     }
@@ -332,6 +379,13 @@ function enrichPx(block, tokens, index) {
     if (typeof id === 'string') {
       const { known, px } = pxForTokenId(index, tokens, id);
       if (known && px !== null) out[`${field}Px`] = px;
+    }
+  }
+  for (const field of CSS_TOKEN_FIELDS) {
+    const id = out[field];
+    if (typeof id === 'string') {
+      const { known, css } = cssForTokenId(index, tokens, id);
+      if (known && css !== null) out[`${field}Css`] = css;
     }
   }
   return out;
