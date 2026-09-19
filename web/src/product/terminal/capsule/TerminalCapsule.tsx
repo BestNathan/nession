@@ -130,7 +130,11 @@ export function TerminalCapsule({
         measureMirror={<ComposerMeasureMirror mirrorRef={measureMirrorRef} />}
         projection={
           capabilityProjection ? (
-            <CapabilityProjection projection={capabilityProjection} />
+            <CapabilityProjection
+              projection={capabilityProjection}
+              sendText={sendText}
+              disabled={disabled}
+            />
           ) : null
         }
       >

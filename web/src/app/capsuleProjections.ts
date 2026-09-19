@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react';
-import type { CapabilityId } from '@/product/capability';
+import type { CapabilityId, CapabilityState } from '@/product/capability';
+import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
 import { GIT_ID, gitProjection } from '@/capabilities/git';
+import {
+  TERMINAL_KEYS_ID,
+  terminalKeysProjection,
+} from '@/product/terminal/terminalKeys';
 
 /**
  * How a capability supplies its Terminal projection body.
@@ -18,11 +23,45 @@ import { GIT_ID, gitProjection } from '@/capabilities/git';
  */
 export interface CapsuleProjectionBinding {
   id: CapabilityId;
+  /**
+   * Whether this capability has anything to add at Peek.
+   *
+   * Declared by the capability, because only it knows. Git has a changed-file
+   * summary worth a level of its own; Claude Code's richer surface is its
+   * Workspace view, so its Signal is where the Terminal stops. The frame turns
+   * an absent Peek into an inert title and reaches the Workspace from the
+   * Signal, rather than opening a surface with nothing in it.
+   *
+   * Defaults to false — a capability that has not said it can go deeper has
+   * not earned a step that opens onto nothing.
+   */
+  supportsPeek?: boolean;
   body: (props: {
     agentId: string | undefined;
     sessionId: string | undefined;
     depth: 'signal' | 'peek';
+    /**
+     * The lifecycle state Nession resolved for this capability.
+     *
+     * The second implementation asked for it. Claude Code's Signal says
+     * "running now" or "ran earlier", and that is the capability layer's
+     * decision — a body re-deriving it from the same facts would be a second
+     * copy of `resolveClaudeCodeState` free to disagree with the one the
+     * registry used to decide the capability was worth showing at all.
+     */
+    state: CapabilityState;
     onFocusChange: (resourceId?: string) => void;
+    /**
+     * How a body reaches the terminal, supplied by the capsule at render time.
+     *
+     * Not resolved with the rest: the capsule owns the transport, and the
+     * registry is built in the shell where no controller exists yet. A
+     * capability that needs to *act* on the terminal — Terminal Keys sending a
+     * key sequence — gets the way to do it from the surface it is drawn on,
+     * which is also what keeps the registry free of transport.
+     */
+    sendText: (text: string) => void;
+    disabled: boolean;
   }) => ReactNode;
 }
 
@@ -35,7 +74,11 @@ export interface CapsuleProjectionBinding {
  * deepen into, which is exactly what `capability-emergence.md` means by a
  * Terminal-local capability stopping at the Terminal.
  */
-const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [gitProjection];
+const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
+  claudeCodeProjection,
+  gitProjection,
+  terminalKeysProjection,
+];
 
 export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding | undefined {
   return CAPSULE_PROJECTIONS.find((binding) => binding.id === id);
@@ -52,4 +95,4 @@ export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIO
   (binding) => binding.id,
 );
 
-export { GIT_ID };
+export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };

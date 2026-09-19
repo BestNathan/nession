@@ -22,7 +22,7 @@ export interface CapsuleCommandsPanelBodyProps {
   listClassName?: string;
   allCommands: ReturnType<typeof useCapsuleCommands>['allCommands'];
   presetIds: ReturnType<typeof useCapsuleCommands>['presetIds'];
-  chainBuffer: string[];
+  chainBuffer: readonly string[];
   isChaining: boolean;
   handleRun: ReturnType<typeof useCapsuleCommands>['handleRun'];
   handlePhysKey: ReturnType<typeof useCapsuleCommands>['handlePhysKey'];

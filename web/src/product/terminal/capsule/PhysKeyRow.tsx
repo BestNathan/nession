@@ -19,7 +19,7 @@ import { cn } from '@/shared/lib/utils';
 interface PhysKeyRowProps {
   onKey: (seq: string) => void;
   disabled: boolean;
-  chainBuffer: string[];
+  chainBuffer: readonly string[];
   isChaining: boolean;
   onChainStart: (seq: string) => void;
   onChainAdd: (seq: string) => void;

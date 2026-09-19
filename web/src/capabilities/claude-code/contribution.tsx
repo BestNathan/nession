@@ -19,7 +19,9 @@
 import { Bot } from 'lucide-react';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
+import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import { ClaudeCodeWorkspace } from './components/ClaudeCodeWorkspace';
+import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
 
 export const CLAUDE_CODE_ID = 'claude-code';
 export const CLAUDE_CODE_TITLE = 'Claude Code';
@@ -82,4 +84,25 @@ export const claudeCodeView: WorkspaceViewBinding = {
     web: ({ ctx }) => <ClaudeCodeWorkspace ctx={ctx} />,
     app: ({ ctx }) => <ClaudeCodeWorkspace ctx={ctx} />,
   },
+};
+
+/**
+ * How Claude Code says something in the Terminal.
+ *
+ * **Signal only.** It is the capability whose state comes from observation, so
+ * it is the one that emerges on its own — a pane running `claude.exe` gets this
+ * without anyone choosing it, which is Q1's second input made real. What it
+ * reports is the state the capability layer already resolved plus one fact the
+ * pane in front of the user does not show: how much project config this Session
+ * is running with.
+ *
+ * It has no Peek. `onDeeper` is left absent on purpose — its richer surface is
+ * the Workspace config browser, and a Peek would summarise a list the Workspace
+ * already draws better.
+ */
+export const claudeCodeProjection: CapsuleProjectionBinding = {
+  id: CLAUDE_CODE_ID,
+  body: ({ agentId, sessionId, state }) => (
+    <ClaudeCodeProjection agentId={agentId} sessionId={sessionId} state={state} />
+  ),
 };

@@ -1,12 +1,15 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { PRESETS, useQuickCommands, type QuickCommand } from '@/capabilities/commands';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
+import { usePhysKeyChain } from '@/product/terminal/capsule/usePhysKeyChain';
 
 export function useCapsuleCommands(sendText: (text: string) => void) {
   const { userCommands, addCommand, deleteCommand } = useQuickCommands();
   const { addEntry } = useCommandHistory();
-  const [chainBuffer, setChainBuffer] = useState<string[]>([]);
-  const [isChaining, setIsChaining] = useState(false);
+  // The key row's chord lives beside it rather than here, because since #826
+  // the key row is also a Terminal capability and both entries must behave
+  // identically (`usePhysKeyChain`).
+  const keys = usePhysKeyChain(sendText);
 
   const allCommands = useMemo(
     () => [...PRESETS, ...userCommands],
@@ -27,46 +30,11 @@ export function useCapsuleCommands(sendText: (text: string) => void) {
     [sendText, addEntry],
   );
 
-  const handlePhysKey = useCallback(
-    (seq: string) => {
-      sendText(seq);
-      setIsChaining(false);
-      setChainBuffer([]);
-    },
-    [sendText],
-  );
-
-  const handleChainStart = useCallback((seq: string) => {
-    setIsChaining(true);
-    setChainBuffer([seq]);
-  }, []);
-
-  const handleChainAdd = useCallback((seq: string) => {
-    setChainBuffer((prev) => [...prev, seq]);
-  }, []);
-
-  const cancelChain = useCallback(() => {
-    setIsChaining(false);
-    setChainBuffer([]);
-  }, []);
-
-  const sendChain = useCallback(() => {
-    sendText(chainBuffer.join(''));
-    setIsChaining(false);
-    setChainBuffer([]);
-  }, [sendText, chainBuffer]);
-
   return {
     allCommands,
     presetIds,
-    chainBuffer,
-    isChaining,
+    ...keys,
     handleRun,
-    handlePhysKey,
-    handleChainStart,
-    handleChainAdd,
-    cancelChain,
-    sendChain,
     addCommand,
     deleteCommand,
   };

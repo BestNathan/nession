@@ -73,7 +73,7 @@ describe('capsule emergence', () => {
     const { result, choose } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper());
+    act(() => result.current.projection?.onDeeper?.());
 
     expect(result.current.projection?.depth).toBe('peek');
   });
@@ -84,7 +84,7 @@ describe('capsule emergence', () => {
     const { result, choose } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper());
+    act(() => result.current.projection?.onDeeper?.());
     act(() => result.current.projection?.onDismiss());
 
     expect(result.current.projection?.depth).toBe('signal');
@@ -99,25 +99,38 @@ describe('capsule emergence', () => {
     expect(result.current.projection).toBeUndefined();
   });
 
-  it('leaves an observed capability dormant while it has nothing to draw', () => {
-    // The observed-command path is live and claude-code *is* `active` here, but
-    // it has no Terminal projection yet, so nothing may emerge: selecting it
-    // would pick a depth nothing renders and swallow the capability silently.
-    // It stays reachable through the entry, which is what choosing it does.
-    const { result, choose, onToolChange, onSurfaceChange } = setup({
-      session: session('s1', 'claude.exe'),
-    });
+  it('emerges on its own for a capability the Session is observed running', () => {
+    // Q1's second input, live for the first time: nobody chose anything, and a
+    // pane running `claude.exe` gets a Signal anyway.
+    const { result, onSurfaceChange } = setup({ session: session('s1', 'claude.exe') });
 
-    expect(result.current.projection).toBeUndefined();
-    expect(
-      result.current.capabilities.disclosure?.entries.find((e) => e.id === 'claude-code')?.state,
-    ).toBe('active');
+    expect(result.current.projection?.id).toBe('claude-code');
+    expect(result.current.projection?.depth).toBe('signal');
+    // Emerging is not opening: the work surface is not taken.
+    expect(onSurfaceChange).not.toHaveBeenCalled();
+  });
 
-    choose('claude-code');
+  it('gives a capability with nothing to add at Peek no deeper step', () => {
+    // Claude Code's richer surface is its Workspace view, so its Signal is
+    // where the Terminal stops. `onDeeper` absent is how that is said, and the
+    // frame turns it into an inert title rather than an empty Peek.
+    const { result } = setup({ session: session('s1', 'claude.exe') });
 
-    expect(result.current.projection).toBeUndefined();
-    expect(onToolChange).toHaveBeenCalledWith('claude-code');
+    expect(result.current.projection?.onDeeper).toBeUndefined();
+    // …and the way in is offered from the Signal instead of from behind an
+    // empty step.
+    expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
+  });
+
+  it('leaves a capability with no Terminal depth to the Workspace', () => {
+    // Files has no Signal to emerge; the entry keeps doing what it always did.
+    const { result, choose, onToolChange, onSurfaceChange } = setup();
+
+    choose('files');
+
+    expect(onToolChange).toHaveBeenCalledWith('files');
     expect(onSurfaceChange).toHaveBeenCalledTimes(1);
+    expect(result.current.projection).toBeUndefined();
   });
 
   it('keeps a dismissed Signal dismissed', () => {
@@ -135,22 +148,11 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.id).toBe('git');
   });
 
-  it('hands a capability with no Terminal depth to the Workspace, as before', () => {
-    // Files has no Signal to emerge; the entry keeps doing what it always did.
-    const { result, choose, onToolChange, onSurfaceChange } = setup();
-
-    choose('files');
-
-    expect(onToolChange).toHaveBeenCalledWith('files');
-    expect(onSurfaceChange).toHaveBeenCalledTimes(1);
-    expect(result.current.projection).toBeUndefined();
-  });
-
   it('carries the focused item into the Workspace', () => {
     const { result, choose, onOpenWorkspace } = setup();
 
     choose('git');
-    act(() => result.current.projection?.onDeeper());
+    act(() => result.current.projection?.onDeeper?.());
     // The capability has somewhere deeper to go — a projection with no
     // Workspace view would carry nothing, and this is where that would show.
     expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
