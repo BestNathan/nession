@@ -144,6 +144,59 @@ export function classifyDiffLine(line: string): 'meta' | 'added' | 'removed' | '
   return 'context';
 }
 
+/**
+ * The work tree's name — what a Signal calls it.
+ *
+ * The basename of the root rather than the whole path: a Signal has room for an
+ * identity, not an address, and the directory name is what the user calls the
+ * checkout (`capsule`, not `/Users/…/worktrees/capsule`). Trailing separators
+ * are dropped first so a root of `/repo/` still reads `repo`.
+ */
+export function worktreeName(root: string | undefined): string | null {
+  if (!root) {
+    return null;
+  }
+  const trimmed = root.replace(/\/+$/, '');
+  const name = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  return name.length > 0 ? name : null;
+}
+
+/** How many changed files sit in the index, and how many do not. */
+export function stagedSplit(status: GitStatus): { staged: number; unstaged: number } {
+  return {
+    staged: status.modified.filter((file) => file.staged).length,
+    unstaged: status.modified.filter((file) => file.unstaged).length,
+  };
+}
+
+/** The porcelain-ish letter a compact listing leads with. */
+export function changeLetter(kind: GitChangedFile['kind']): string {
+  switch (kind) {
+    case 'added':
+      return 'A';
+    case 'deleted':
+      return 'D';
+    case 'renamed':
+      return 'R';
+    case 'copied':
+      return 'C';
+    case 'typechanged':
+      return 'T';
+    case 'unmerged':
+      return 'U';
+    case 'modified':
+      return 'M';
+    default:
+      return '?';
+  }
+}
+
+/** A path's last segment — what a compact listing has room for. */
+export function basename(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return name.length > 0 ? name : path;
+}
+
 /** Bytes as a size a person reads. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) {

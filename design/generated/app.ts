@@ -72,6 +72,17 @@ export const terminalCapsule = {
   maxLines: 5,
   shellInset: "0.75rem",
   shellSafeArea: "env(safe-area-inset-bottom, 0px)",
+  projectionMarginBottom: "0.5rem",
+  projectionPad: "0.75rem",
+  projectionGap: "0.5rem",
+  projectionRadius: "0.75rem",
+  projectionMaxHeight: "16rem",
+  projectionFontSize: "0.75rem",
+  projectionLineHeight: "1rem",
+  projectionItemGap: "0.125rem",
+  projectionItemPadX: "0.25rem",
+  projectionItemPadY: "0.125rem",
+  projectionMarkWidth: "0.75rem",
 } as const;
 export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",

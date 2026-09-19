@@ -80,6 +80,12 @@ export interface GitStatus {
 export interface GitStatusOk {
   state: 'ok';
   status: GitStatus;
+  /**
+   * The work tree this status describes. The Terminal Signal names it
+   * (`capability-emergence.md` lists worktree identity as part of a Git Signal)
+   * and the Workspace header shows it.
+   */
+  root: string;
   /** True when the listing itself was cut off; the view must say so. */
   truncated: boolean;
   truncatedBytes: number;

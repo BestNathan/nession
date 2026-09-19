@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
 
 export type CapsuleMode = 'input' | 'commands';
@@ -40,4 +41,32 @@ export interface CapsuleCapabilityPresence {
   label: string;
   state: 'relevant' | 'active';
   onActivate: () => void;
+}
+
+/**
+ * A capability emerging beside the capsule (`docs/design/capability-emergence.md`).
+ *
+ * The capsule draws the frame and the capability supplies the body, so the
+ * capability states what it is and Nession decides that it appears at all, at
+ * which depth, and where. `depth` is an input rather than capsule state: the
+ * decision was `resolveCapabilityProjection`'s, and a component free to change
+ * it would be a second copy of that rule.
+ */
+export interface CapsuleCapabilityProjection {
+  id: CapabilityId;
+  title: string;
+  depth: 'signal' | 'peek';
+  /**
+   * The capability's own content for this depth.
+   *
+   * A render prop rather than an element because the frame owns the selection
+   * the body produces: Peek lets the user pick a changed file, and that pick is
+   * what the frame's Workspace handoff carries.
+   */
+  body: (focus: string | undefined, setFocus: (id?: string) => void) => ReactNode;
+  /** Signal → Peek. */
+  onDeeper: () => void;
+  onDismiss: () => void;
+  /** Present when the capability has somewhere deeper to go. */
+  onOpenWorkspace?: (resourceId?: string) => void;
 }

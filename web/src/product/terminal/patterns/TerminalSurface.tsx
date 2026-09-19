@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { TerminalCapsule, type CapsuleMode } from '@/product/terminal/capsule/TerminalCapsule';
+import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
@@ -14,6 +15,8 @@ export interface TerminalSurfaceProps {
   isSwitching?: boolean;
   /** What the capsule may show: every reachable capability, marked by state, in `+`. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
+  /** A capability emerging beside the capsule, if Nession decided one should. */
+  capsuleProjection?: CapsuleCapabilityProjection;
 }
 
 /**
@@ -26,6 +29,7 @@ export function TerminalSurface({
   controller,
   isSwitching = false,
   capsuleCapabilities,
+  capsuleProjection,
 }: TerminalSurfaceProps) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [capsuleMode, setCapsuleMode] = useState<CapsuleMode>('input');
@@ -64,6 +68,7 @@ export function TerminalSurface({
         sendText={capsuleSendText}
         disabled={inputDisabled}
         capabilityDisclosure={capsuleCapabilities?.disclosure}
+        capabilityProjection={capsuleProjection}
       />
     </div>
   );

@@ -191,6 +191,43 @@
     },
     "shellSafeArea": {
       "value": "env(safe-area-inset-bottom, 0px)"
+    },
+    "projectionMarginBottom": {
+      "$description": "Gap between an emerged projection and the capsule below it. Close enough to read as attached to it, far enough that the two surfaces do not merge.",
+      "value": "0.5rem"
+    },
+    "projectionPad": {
+      "value": "0.75rem"
+    },
+    "projectionGap": {
+      "value": "0.5rem"
+    },
+    "projectionRadius": {
+      "value": "0.75rem"
+    },
+    "projectionMaxHeight": {
+      "$description": "Ceiling for an emerged projection (#826 Q5). Lower than Web's: the App capsule sits closer to the bottom edge and its projection has less room above it for the same content.",
+      "value": "16rem"
+    },
+    "projectionFontSize": {
+      "$description": "One step below the capsule's own scale. A Signal is the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
+      "value": "0.75rem"
+    },
+    "projectionLineHeight": {
+      "value": "1rem"
+    },
+    "projectionItemGap": {
+      "value": "0.125rem"
+    },
+    "projectionItemPadX": {
+      "value": "0.25rem"
+    },
+    "projectionItemPadY": {
+      "value": "0.125rem"
+    },
+    "projectionMarkWidth": {
+      "$description": "The change letter's column (M/A/D/?) in a compact listing. Fixed so the filenames beside it share a left edge.",
+      "value": "0.75rem"
     }
   },
   "motion": {
