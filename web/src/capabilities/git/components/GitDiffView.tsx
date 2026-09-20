@@ -14,10 +14,16 @@ const LINE_CLASS: Record<ReturnType<typeof classifyDiffLine>, string> = {
 /**
  * One file's diff against HEAD.
  *
- * `text` is already capped by the agent, and `truncatedBytes` says how much it
+ * `text` is already capped by the agent, and `truncated_bytes` says how much it
  * dropped. #750 C3 is explicit that a truncated diff must say so — a half diff
  * presented as a whole one invites the reader to conclude the rest is unchanged,
  * which is the one wrong conclusion available.
+ *
+ * `truncated_bytes` is snake_case and every sibling field on this wire is
+ * camelCase; that is the contract's doing, not a typo here. `FileDiff` is the
+ * one git type with no `rename_all`, so its key is the Rust field name. The
+ * generated type is what keeps this line honest — before it, the hand-written
+ * mirror said `truncatedBytes`, which is `undefined` on every real answer.
  */
 export function GitDiffView({
   response,
@@ -69,7 +75,7 @@ export function GitDiffView({
         ) : null}
         {diff.truncated ? (
           <p data-testid="git-diff-truncated" className="text-xs text-muted-foreground">
-            Diff truncated: {formatBytes(diff.truncatedBytes)} left out of a large change.
+            Diff truncated: {formatBytes(diff.truncated_bytes)} left out of a large change.
           </p>
         ) : null}
       </div>

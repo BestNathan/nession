@@ -119,7 +119,10 @@ describe('describeUnavailable', () => {
       reason: 'git_not_installed',
       message: 'git is not available on this host.',
     };
-    const noRepo: GitUnavailable = { state: 'not_a_repository' };
+    const noRepo: GitUnavailable = {
+      state: 'not_a_repository',
+      message: 'not a git repository',
+    };
 
     const tool = describeUnavailable(noTool);
     const repo = describeUnavailable(noRepo);
@@ -128,13 +131,23 @@ describe('describeUnavailable', () => {
     // Different problems, different fixes — the tool one points at the host,
     // the repository one at the directory.
     expect(tool.detail).toMatch(/install git/i);
-    expect(repo.detail).toMatch(/directory/i);
+    expect(repo.detail).not.toBe(tool.detail);
+
+    // This used to assert `repo.detail` matched /directory/i, which came from
+    // `UNAVAILABLE_DETAILS` — reachable only while `message` was optional in
+    // the hand-written mirror. The contract requires it on every non-ok answer,
+    // so the agent's own message is what a reader sees. Whether Nession's
+    // curated copy is better than git's is a product question, and
+    // `UNAVAILABLE_DETAILS` is now the fallback for a peer that omits the
+    // field rather than the usual path.
+    expect(repo.detail).toBe('not a git repository');
   });
 
   it('tells an unresolvable session apart from both', () => {
     const copy = describeUnavailable({
       state: 'unavailable',
       reason: 'session_workdir_unknown',
+      message: "could not resolve this Session's working directory",
     });
     expect(copy.title).toMatch(/can't find this Session's directory/i);
     expect(copy.detail).toMatch(/may have exited/i);
@@ -149,8 +162,16 @@ describe('describeUnavailable', () => {
   });
 
   it('gives every state a non-empty title', () => {
-    for (const state of ['unavailable', 'not_a_repository', 'error'] as const) {
-      expect(describeUnavailable({ state }).title.length).toBeGreaterThan(0);
+    // `message` is required on every non-ok variant — the contract says the
+    // agent always explains itself, and the hand-written mirror this replaced
+    // had it optional, which is why these could be built without one.
+    const answers: GitUnavailable[] = [
+      { state: 'unavailable', reason: 'other', message: 'unknown' },
+      { state: 'not_a_repository', message: 'not a git repository' },
+      { state: 'error', message: 'fatal: something' },
+    ];
+    for (const answer of answers) {
+      expect(describeUnavailable(answer).title.length).toBeGreaterThan(0);
     }
   });
 });

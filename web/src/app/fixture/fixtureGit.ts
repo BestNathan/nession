@@ -308,11 +308,11 @@ function diffFor(path: string): GitDiffResponse {
   if (path.endsWith('.png')) {
     return {
       state: 'ok',
-      diff: { path, text: '', binary: true, truncatedBytes: 0, truncated: false },
+      diff: { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
     };
   }
   return {
     state: 'ok',
-    diff: { path, text: TEXT_DIFF, binary: false, truncatedBytes: 0, truncated: false },
+    diff: { path, text: TEXT_DIFF, binary: false, truncated_bytes: 0, truncated: false },
   };
 }

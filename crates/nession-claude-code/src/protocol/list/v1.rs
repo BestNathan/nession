@@ -14,6 +14,7 @@ pub struct ListRequestV1 {
     #[serde(default)]
     pub scope: Scope,
     #[serde(default)]
+    #[cfg_attr(feature = "codegen", ts(optional))]
     pub session_id: Option<String>,
 }
 

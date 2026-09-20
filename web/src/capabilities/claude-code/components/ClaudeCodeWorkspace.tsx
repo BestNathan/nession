@@ -3,7 +3,11 @@ import { FileText, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
-import type { ClaudeCodeListResponse, ClaudeCodeReadResponse } from '../types';
+import type {
+  ClaudeCodeListResponse,
+  ClaudeCodeReadOk,
+  ClaudeCodeReadResponse,
+} from '../types';
 import { cn } from '@/shared/lib/utils';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
@@ -80,7 +84,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to load Claude Code files';
 }
 
-function responseNextOffset(response: ClaudeCodeReadResponse): number {
+/**
+ * Where the next chunk starts.
+ *
+ * Takes the ok half, not the union: `offset` and `content` exist on the success
+ * shape alone, and the union has no discriminator to narrow on — which is
+ * precisely what the flattened mirror hid by declaring both optional on one
+ * interface.
+ */
+function responseNextOffset(response: ClaudeCodeReadOk): number {
   return response.offset + new TextEncoder().encode(response.content).length;
 }
 
@@ -297,7 +309,11 @@ function useScopeLoader({
         categories: response.categories,
         available: response.available,
         loading: false,
-        error: response.error ?? null,
+        // No `error` to read: `claude-code.list` reports "that directory does
+        // not exist" as `available: false` with an empty list, which is an
+        // answer rather than an error. The field this used to read was invented
+        // by the hand-written mirror.
+        error: null,
       }));
     } catch (error) {
       if (!isCurrentRequest()) {
@@ -376,15 +392,20 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
       if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
+      // The two halves are told apart by shape, because the contract is
+      // `#[serde(untagged)]` — there is no discriminator to switch on. `'error'
+      // in response` is the test the contract implies, and it is the same one
+      // this code was making by reading a field it should not have been able
+      // to read.
       updateScope(setScopeStates, scope, (state) => ({
         ...state,
-        content: response.error ? '' : response.content,
-        contentType: response.error ? '' : response.content_type,
-        totalSize: response.error ? 0 : response.total_size,
-        hasMore: response.error ? false : response.has_more,
-        nextOffset: response.error ? state.nextOffset : responseNextOffset(response),
+        content: 'error' in response ? '' : response.content,
+        contentType: 'error' in response ? '' : response.content_type,
+        totalSize: 'error' in response ? 0 : response.total_size,
+        hasMore: 'error' in response ? false : response.has_more,
+        nextOffset: 'error' in response ? state.nextOffset : responseNextOffset(response),
         readLoading: false,
-        readError: response.error ?? null,
+        readError: 'error' in response ? response.error : null,
       }));
     } catch (error) {
       if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
@@ -417,13 +438,14 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
       if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {
         return;
       }
+      // Shape, not a discriminator — see the note on the first read above.
       updateScope(setScopeStates, scope, (current) => ({
         ...current,
-        content: response.error ? current.content : current.content + response.content,
-        hasMore: response.error ? current.hasMore : response.has_more,
-        nextOffset: response.error ? current.nextOffset : responseNextOffset(response),
+        content: 'error' in response ? current.content : current.content + response.content,
+        hasMore: 'error' in response ? current.hasMore : response.has_more,
+        nextOffset: 'error' in response ? current.nextOffset : responseNextOffset(response),
         readLoading: false,
-        readError: response.error ?? null,
+        readError: 'error' in response ? response.error : null,
       }));
     } catch (error) {
       if (currentRequestKey.current !== key || readRequestIds.current[scope] !== requestId) {

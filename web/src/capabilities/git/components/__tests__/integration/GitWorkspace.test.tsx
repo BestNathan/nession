@@ -62,7 +62,7 @@ function statusResponse(overrides: Partial<GitStatusResponse & { state: 'ok' }> 
   return {
     state: 'ok',
     truncated: false,
-    truncatedBytes: 0,
+    truncated_bytes: 0,
     status: {
       branch: 'main',
       detached: false,
@@ -79,7 +79,7 @@ function statusResponse(overrides: Partial<GitStatusResponse & { state: 'ok' }> 
 function diffResponse(text: string, overrides: Partial<GitDiffResponse & { state: 'ok' }> = {}) {
   return {
     state: 'ok',
-    diff: { path: 'src/a.ts', text, binary: false, truncatedBytes: 0, truncated: false },
+    diff: { path: 'src/a.ts', text, binary: false, truncated_bytes: 0, truncated: false },
     ...overrides,
   } as GitDiffResponse;
 }
@@ -215,7 +215,7 @@ describe('GitWorkspace', () => {
           path: 'src/a.ts',
           text: '@@ -1 +1 @@\n-old\n+new\n',
           binary: false,
-          truncatedBytes: 4096,
+          truncated_bytes: 4096,
           truncated: true,
         },
       } as Partial<GitDiffResponse & { state: 'ok' }>),
@@ -271,7 +271,7 @@ describe('GitWorkspace', () => {
           path: 'logo.png',
           text: '',
           binary: true,
-          truncatedBytes: 0,
+          truncated_bytes: 0,
           truncated: false,
         },
       } as Partial<GitDiffResponse & { state: 'ok' }>),
@@ -285,7 +285,7 @@ describe('GitWorkspace', () => {
 
   describe('failure states are readable and distinct (SC4)', () => {
     it('says the Session is not in a repository', async () => {
-      mockedStatus.mockResolvedValue({ state: 'not_a_repository' });
+      mockedStatus.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
       render(<GitWorkspace ctx={context()} />);
 
@@ -295,7 +295,7 @@ describe('GitWorkspace', () => {
     });
 
     it('says git is missing, which is a different problem with a different fix', async () => {
-      mockedStatus.mockResolvedValue({ state: 'unavailable', reason: 'git_not_installed' });
+      mockedStatus.mockResolvedValue({ state: 'unavailable', reason: 'git_not_installed', message: 'git is not installed on this host' });
 
       render(<GitWorkspace ctx={context()} />);
 
