@@ -1,5 +1,8 @@
 # Minimal agent image — packages pre-built binary + nginx + web UI + tmux
-FROM debian:bullseye-slim
+#
+# bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and its
+# security pool is gone, so the `apt-get install` below 404s on every package.
+FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \

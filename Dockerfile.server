@@ -46,7 +46,14 @@ COPY . .
 RUN cargo build --release --bin nession-server
 
 # Stage 5: Server runtime (no tmux needed)
-FROM debian:bullseye-slim AS runtime
+#
+# bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and
+# `deb.debian.org/debian-security` stopped carrying bullseye packages, so the
+# `apt-get install` below 404s on every package. Measured 2026-09-20 — the same
+# three URLs fail from a laptop as from a runner. The builder stages above stay
+# on `rust:1.96-bullseye` on purpose: they install nothing, and a binary linked
+# against glibc 2.31 runs fine on bookworm's 2.36.
+FROM debian:bookworm-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         nginx ca-certificates curl gettext-base && \
