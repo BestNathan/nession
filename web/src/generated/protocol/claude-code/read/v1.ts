@@ -27,7 +27,7 @@ offset: number,
 limit: number | null, };
 export type ReadResponseV1 = ReadOkV1 | ReadFailureV1;
 export type ReadOkV1 = { content: string, content_type: string, total_size: number, offset: number, has_more: boolean, };
-export type ReadFailureV1 = { error: string, total_size: number | null, content: string | null, content_type: string | null, };
+export type ReadFailureV1 = { error: string, total_size?: number | null, content?: string | null, content_type?: string | null, };
 export type Scope = "global" | "project";
 
 // ── Operations ──

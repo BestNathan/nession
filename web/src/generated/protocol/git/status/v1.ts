@@ -24,7 +24,7 @@ export type RepoStatus = {
 /**
  * Branch name, or `None` when detached.
  */
-branch: string | null, detached: boolean, upstream: string | null, ahead: number, behind: number, 
+branch?: string | null, detached: boolean, upstream?: string | null, ahead: number, behind: number, 
 /**
  * Tracked paths, Modified/Added/Deleted/Renamed — #750's "Modified" group.
  */
@@ -42,7 +42,7 @@ export type ChangedFile = { path: string,
 /**
  * Present only for renames/copies.
  */
-originalPath: string | null, kind: ChangeKind, 
+originalPath?: string | null, kind: ChangeKind, 
 /**
  * Staged in the index (porcelain `X`).
  */

@@ -14,7 +14,7 @@ pub struct Worktree {
     pub path: String,
     /// The branch checked out there, without `refs/heads/`. `None` when the
     /// entry is detached, bare, or has no `branch` line at all.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// This is the work tree the Session is sitting in.
     pub current: bool,
@@ -23,10 +23,10 @@ pub struct Worktree {
     pub bare: bool,
     /// `git worktree lock` reason, when it was locked. An empty string means
     /// locked with no reason given, which is a different sentence from unlocked.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<String>,
     /// The directory is gone and the entry is waiting for `git worktree prune`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prunable: Option<String>,
 }
 

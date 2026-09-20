@@ -19,7 +19,7 @@ pub struct Branch {
     pub current: bool,
     /// The configured upstream, `None` when the branch has none. Still set when
     /// the upstream has been deleted — that is what `upstream_gone` reports.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
     /// Commits this branch has that its upstream does not.
     pub ahead: u32,

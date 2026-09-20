@@ -90,12 +90,12 @@ pub struct ClientEnvGetPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     /// Session ids currently using this file (empty when not in use).
     #[serde(default)]
     pub in_use_by: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -119,7 +119,7 @@ pub struct ClientEnvWriteResponsePayload {
     /// `overwrite` was false (UI prompts for confirmation).
     #[serde(default)]
     pub exists: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
@@ -137,7 +137,7 @@ pub struct ClientEnvDeletePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeleteResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 

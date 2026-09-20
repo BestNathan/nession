@@ -33,7 +33,7 @@ current: boolean,
  * The configured upstream, `None` when the branch has none. Still set when
  * the upstream has been deleted — that is what `upstream_gone` reports.
  */
-upstream: string | null, 
+upstream?: string | null, 
 /**
  * Commits this branch has that its upstream does not.
  */

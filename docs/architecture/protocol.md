@@ -323,13 +323,26 @@ Four things about the output that are decisions rather than details:
   the condition it is testing: the run after a failure would diff an already-
   regenerated tree, pass, and leave the committed files stale.
 
-One thing ts-rs cannot express, and it is not yet handled: a `#[serde(default)]`
-field on a non-`Option` is emitted as **required**. `#[ts(optional)]` is refused
+**A skippable `Option` needs both serde attributes, and that is not obvious.**
+ts-rs makes a field optional in TypeScript only when `skip_serializing_if` **and**
+`default` are both present. Serde needs only the first — measured: a missing
+`Option` field deserializes to `None` with no `default` — so the two disagree
+about twenty-four fields, and ts-rs's answer (`branch: string | null`) was wrong
+twice: the wire omits it, and it is never null. The fix is not a codegen
+annotation. It is adding `default`, which is the spelling the rest of these
+contracts already used and is a **no-op on the wire** — `default` affects
+deserialization only, and serde's `Option` behaviour is unchanged by writing it
+down. So: `#[serde(default, skip_serializing_if = "Option::is_none")]` wherever
+a field may be absent. `field?: T | null` is ts-rs's `Option` rendering and the
+`| null` is loose — no such field ever serialises as null — but it rejects
+nothing that is valid, which is the direction that matters.
+
+Still unhandled, and it should land with the first consumer: a `#[serde(default)]`
+field on a **non-`Option`** is emitted as required. `#[ts(optional)]` is refused
 on anything but `Option`, so `AgentMetadata.image_tag`, `protocol_version`,
 `preferred_mode` and the `Vec`s beside them are omittable on the wire and
 required in the generated type. Nothing consumes these bindings yet, so nothing
-is broken by it; whichever of the two fixes lands — an annotation the generator
-applies, or `Option` in the Rust — should land with the first consumer.
+is broken by it.
 
 ### Retire a contract
 

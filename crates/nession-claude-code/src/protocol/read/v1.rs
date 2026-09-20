@@ -65,11 +65,19 @@ pub struct ReadOkV1 {
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ReadFailureV1 {
     pub error: String,
-    #[serde(rename = "total_size", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "total_size",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub total_size: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    #[serde(rename = "content_type", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "content_type",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub content_type: Option<String>,
 }
 

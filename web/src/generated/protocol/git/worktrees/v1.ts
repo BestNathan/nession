@@ -25,7 +25,7 @@ path: string,
  * The branch checked out there, without `refs/heads/`. `None` when the
  * entry is detached, bare, or has no `branch` line at all.
  */
-branch: string | null, 
+branch?: string | null, 
 /**
  * This is the work tree the Session is sitting in.
  */
@@ -38,11 +38,11 @@ bare: boolean,
  * `git worktree lock` reason, when it was locked. An empty string means
  * locked with no reason given, which is a different sentence from unlocked.
  */
-locked: string | null, 
+locked?: string | null, 
 /**
  * The directory is gone and the entry is waiting for `git worktree prune`.
  */
-prunable: string | null, };
+prunable?: string | null, };
 export type SessionTargetV1 = { session: string, };
 
 // ── Operations ──

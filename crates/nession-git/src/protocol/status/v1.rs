@@ -35,7 +35,7 @@ pub struct StatusRequestV1 {
 pub struct ChangedFile {
     pub path: String,
     /// Present only for renames/copies.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_path: Option<String>,
     pub kind: ChangeKind,
     /// Staged in the index (porcelain `X`).
@@ -63,10 +63,10 @@ pub enum ChangeKind {
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct RepoStatus {
     /// Branch name, or `None` when detached.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     pub detached: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
