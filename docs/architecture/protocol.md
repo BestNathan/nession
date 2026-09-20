@@ -15,7 +15,7 @@ Consumer ──▶ Contract ──▶ Provider ──▶ Generation
 
 | Term | Means | Lives in |
 |---|---|---|
-| **Protocol Unit** | One independently evolving, consumer-visible protocol semantic — `git.status`, `session.attach` | its owner's `protocol/` |
+| **Protocol Unit** | One independently evolving, consumer-visible protocol semantic — `git.status`, `session.attach` | the owner's `protocol/`, or `contracts/` when the owner is Nession itself |
 | **Contract Version** | The wire/semantic version of that unit | the unit's contract |
 | **Provider** | Who implements it | a crate (`nession-git`, `nession-agent`, …) |
 | **Consumer** | Who depends on it | Web, CLI, Server, MCP |
@@ -132,14 +132,26 @@ is Nession, for `git.diff` it is `nession-git`.
 
 ```text
 crates/nession-git/src/
-├── protocol/
+├── protocol/          the contract: typed request/response + descriptor
 │   ├── status/
-│   │   └── v1.rs      typed request/response + descriptor
+│   │   └── v1.rs
 │   └── diff/
 │       └── v1.rs
-├── runtime/           the provider implementation
-└── agent.rs           the erased dispatch boundary
+├── runtime/           the implementation: what answers those contracts
+│   ├── cmd.rs         the one place a `git` process is spawned
+│   ├── security.rs    the input boundary
+│   └── status.rs …    one module per unit
+├── agent.rs           the erased dispatch boundary
+└── lib.rs
 ```
+
+The split is load-bearing rather than tidy. `protocol/` is what a consumer
+codes against and what a version bump changes; `runtime/` is what may be
+rewritten freely under the same contract version — which is the "two evolution
+speeds" distinction above, made visible in the tree instead of stated only in
+prose. A `ProtocolDescriptor` appearing under `runtime/` would mean a contract
+living in the implementation half; nothing enforces that yet, and this is what
+it would look like if it happened.
 
 Typed at the contract boundary; erased only at the dispatcher boundary. The
 outermost `handle_command(command: &str, payload: Value) -> Value` stays — it is
