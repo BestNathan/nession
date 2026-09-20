@@ -334,6 +334,49 @@ constructible. That is a stronger guarantee than detecting either after the
 fact — and it is why `AgentExtension` declares descriptors rather than the
 `message_types()` it used to, which nothing tied to the provider's own dispatch.
 
+## Open questions
+
+Written down rather than answered by whoever gets there first. Both are
+reachable only from `#678`'s later phases, and neither has an answer that is
+obviously right, so a guess would be a decision nobody recorded.
+
+### Which direction does a manifest describe?
+
+`ProtocolManifest` says what a runtime **offers** — but several core units run
+the other way. `agent.register` and `agent.heartbeat` are sent *by* the agent
+and served *by* the server; `session.attach` is served by the server and
+`server.session.create` by the agent, for the same Session.
+
+So "Phase 6: version `agent.register`" has no immediate answer to *whose*
+manifest lists it. Three readings, none yet chosen:
+
+1. **Served only.** A manifest lists what the peer answers. `agent.register`
+   belongs in a *server* manifest, which does not exist yet — which makes
+   Phase 6's agent-side slice just the units the agent serves
+   (`server.session.*`, `server.env.*`, `sessions.list`), and the rest wait.
+2. **Both directions, distinguished.** `ContractSupport` gains a direction, and
+   the manifest says what a peer speaks as well as what it serves. More
+   faithful, and more surface than anything consumes today.
+3. **A set of units, not of roles.** The manifest lists contracts the peer
+   participates in, and direction is a property of the operation rather than of
+   the peer.
+
+Today only extension units are advertised, all of them served, so the question
+has not had to be asked. It is asked the moment a core unit is added.
+
+### Where does a core unit's descriptor live?
+
+"For a core unit, the contract is the DTOs, and those are in
+`nession-protocol/src/contracts/`. But this document's other rule is that the
+crate that *implements* a contract owns its declaration, because that crate is
+the only one that can answer "what changed?" — and the implementer of
+`server.session.create` is `nession-agent`, not `nession-protocol`.
+
+Both rules are right about different things and they collide here, for core
+units only. Until it is settled, core units have DTOs and no descriptors, which
+is why an agent's manifest currently advertises `git.*` and `claude-code.*` and
+says nothing about the session and env protocols it has always served.
+
 ## Related
 
 - `#678` — the requirement this document implements.
