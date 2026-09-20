@@ -5,4 +5,7 @@
 
 mod server_client;
 
-pub use server_client::{msg_types, ServerClient, ServerClientHandle};
+// `core_descriptors` is generated in `server_client` because the handlers it
+// describes need that module's private state; it is re-exported here so callers
+// composing the manifest name it without opening the module.
+pub use server_client::{core_descriptors, msg_types, ServerClient, ServerClientHandle};
