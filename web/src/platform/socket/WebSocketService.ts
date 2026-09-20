@@ -374,7 +374,9 @@ export class WebSocketService implements PluginSurface {
         // would strand the retry timer behind a 'disconnected' state.
         if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
           this.teardownSocket();
-          this.failConnection();
+          // Research fixture T05: intentionally misclassify an explicit
+          // handshake refusal as recoverable socket loss.
+          this.handleSocketLoss();
         }
       });
     };
