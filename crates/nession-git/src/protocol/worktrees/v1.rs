@@ -7,6 +7,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 
 /// One work tree, or one administrative entry for one that used to exist.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     /// Absolute path as git records it.
@@ -30,6 +31,7 @@ pub struct Worktree {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktrees {
     pub worktrees: Vec<Worktree>,
@@ -40,6 +42,7 @@ pub struct Worktrees {
 pub const WIRE: &str = "extension.git.worktrees";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct WorktreesRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -48,6 +51,7 @@ pub struct WorktreesRequestV1 {
 /// No `limit`: a worktree is a directory someone made by hand, so the count is
 /// small in a way a branch count is not. The agent still caps the bytes.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct WorktreesOkV1 {
     pub worktrees: Worktrees,
 }

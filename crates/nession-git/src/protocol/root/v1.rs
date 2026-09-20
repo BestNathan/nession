@@ -8,12 +8,14 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 pub const WIRE: &str = "extension.git.root";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct RootRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct RootOkV1 {
     pub root: String,
 }

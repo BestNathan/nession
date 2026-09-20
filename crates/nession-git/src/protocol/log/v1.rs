@@ -11,6 +11,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// and a field named `short_hash` would arrive as `undefined` with nothing to
 /// say so.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
     /// Full object name.
@@ -32,6 +33,7 @@ pub struct Commit {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct History {
     pub commits: Vec<Commit>,
@@ -45,6 +47,7 @@ pub struct History {
 pub const WIRE: &str = "extension.git.log";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct LogRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -58,6 +61,7 @@ pub struct LogRequestV1 {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct LogOkV1 {
     pub history: History,
 }

@@ -32,8 +32,25 @@ coverage:
 # Fast pre-commit checks (fmt + clippy)
 quick: fmt lint
 
-# Full CI checks (fmt + lint + tmux-socket gate + coverage — coverage runs all tests)
-check: fmt lint check-tmux-socket coverage
+# Full CI checks (fmt + lint + tmux-socket gate + codegen drift + coverage — coverage runs all tests)
+check: fmt lint check-tmux-socket check-codegen coverage
+
+# ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
+
+# Regenerate the Web's TypeScript bindings from the Rust contracts.
+# Committed output: run this and commit the result whenever a contract changes.
+codegen:
+    cargo run --quiet -p nession-protocol-codegen -- web/src/generated/protocol
+
+# The drift gate: the generated bindings must be what the contracts say.
+#
+# Regenerating into a temporary directory and diffing is deliberate. Running the
+# generator over the committed tree and asking git whether anything moved would
+# also work — and would leave the tree modified on failure, so the check would
+# report the same thing on every subsequent run until someone rebuilt it by
+# hand. A scratch directory leaves the working tree untouched either way.
+check-codegen:
+    ./scripts/check-codegen-drift.sh
 
 # ── Design tokens + UI contracts ────────────────────────────────────────────
 

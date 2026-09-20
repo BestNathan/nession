@@ -9,6 +9,7 @@ use crate::protocol::v1_descriptor;
 pub const WIRE: &str = "extension.claude_code.list";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ListRequestV1 {
     #[serde(default)]
     pub scope: Scope,
@@ -23,6 +24,7 @@ pub struct ListRequestV1 {
 /// a generator asked "what shape is `claude-code.list`?" has to be able to
 /// answer from the contract alone.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ConfigCategory {
     pub name: String,
     pub icon: Option<String>,
@@ -30,6 +32,7 @@ pub struct ConfigCategory {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ConfigFile {
     pub path: String,
     pub size: usize,
@@ -44,6 +47,7 @@ pub struct ConfigFile {
 /// struct rather than a variant because that is what ships; a discriminated
 /// shape would be a contract change.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ListResponseV1 {
     pub available: bool,
     pub categories: Vec<ConfigCategory>,
