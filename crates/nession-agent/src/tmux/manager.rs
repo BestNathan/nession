@@ -1,7 +1,6 @@
 //! tmux session lifecycle management: create, list, and kill sessions.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
@@ -51,20 +50,14 @@ fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
     NEVER_FORWARDED_ENV.contains(&key) || caller_keys.contains(&key)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionInfo {
-    pub name: String,
-    pub created_at: u64,
-    pub window_count: u32,
-    pub attached_clients: u32,
-    pub width: u16,
-    pub height: u16,
-    /// Foreground command of the session's active pane (`#{pane_current_command}`).
-    ///
-    /// Runtime observation, not durable session metadata: it changes as the user
-    /// runs things, and it is absent when tmux reports nothing.
-    pub foreground_command: Option<String>,
-}
+// Re-exported from the Protocol Kernel (#678).
+//
+// This was declared here, and it is serialised straight onto the wire by
+// `session.list` — so the agent's tmux model *was* the wire contract, and the
+// kernel could not see it. It lives in `contracts/session/v1.rs` now, unchanged
+// field for field; a second struct with the same fields would have been two
+// definitions of one contract kept in step by nothing.
+pub use nession_protocol::contracts::session::v1::SessionInfo;
 
 /// Parse one `list-sessions -F` row.
 ///

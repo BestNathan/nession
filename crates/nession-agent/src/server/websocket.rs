@@ -26,7 +26,7 @@
 
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
-use crate::tmux::manager::{SessionInfo, SessionManager};
+use crate::tmux::manager::SessionManager;
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -166,60 +166,6 @@ pub use nession_protocol::Message;
 
 // --- Request payloads (client → agent) ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionCreatePayload {
-    pub name: String,
-    #[serde(default = "default_width")]
-    pub width: u16,
-    #[serde(default = "default_height")]
-    pub height: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionKillPayload {
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientAttachPayload {
-    pub session_name: String,
-    #[serde(default = "default_width")]
-    pub width: u16,
-    #[serde(default = "default_height")]
-    pub height: u16,
-    /// Resolved env-file snapshots to apply via `tmux set-environment`
-    /// before PTY creation. Empty (default) preserves pre-env behaviour.
-    #[serde(default)]
-    pub env_snapshots: Vec<EnvSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientDetachPayload {
-    pub session_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionCapturePreviewPayload {
-    pub session_name: String,
-    pub lines: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionCapturePreviewResponse {
-    pub ansi_b64: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cols: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rows: Option<u16>,
-}
-
-fn default_width() -> u16 {
-    80
-}
-fn default_height() -> u16 {
-    24
-}
-
 // --- Web UI compatibility payloads ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,95 +199,7 @@ pub struct WebAgentsListResponse {
     pub agents: Vec<WebAgentInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionInfo {
-    pub session_id: String,
-    pub agent_id: String,
-    pub session_name: String,
-    pub status: String,
-    pub window_count: u32,
-    pub attached_clients: u32,
-    pub last_activity: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionsListResponse {
-    pub sessions: Vec<WebSessionInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionAttachPayload {
-    pub session_id: String,
-    #[serde(default = "default_p2p")]
-    pub preferred_mode: String,
-}
-
-fn default_p2p() -> String {
-    "p2p".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebAttachInfo {
-    pub mode: String,
-    pub session_id: String,
-    pub session_name: String,
-    pub agent_address: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionCreatePayload {
-    pub agent_id: String,
-    pub name: String,
-    #[serde(default = "default_width")]
-    pub width: u16,
-    #[serde(default = "default_height")]
-    pub height: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionCreateResponse {
-    pub success: bool,
-    pub session_id: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionKillPayload {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebSessionKillResponse {
-    pub success: bool,
-    pub error: Option<String>,
-}
-
 // --- Response payloads (agent → client) ---
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionListResponse {
-    pub sessions: Vec<SessionInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionCreateResponse {
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionKillResponse {
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientAttachResponse {
-    pub session_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientDetachResponse {
-    pub session_name: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OkPayload {
@@ -355,6 +213,16 @@ pub struct ErrorPayload {
 }
 
 // --- File operation payloads ---
+
+// --- Session wire shapes, re-exported from the Protocol Kernel (#678) ---
+pub use nession_protocol::contracts::session::v1::{
+    ClientAttachPayload, ClientAttachResponse, ClientDetachPayload, ClientDetachResponse,
+    SessionCapturePreviewPayload, SessionCapturePreviewResponse, SessionCreatePayload,
+    SessionCreateResponse, SessionInfo, SessionKillPayload, SessionKillResponse,
+    SessionListResponse, WebAttachInfo, WebSessionAttachPayload, WebSessionCreatePayload,
+    WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
+    WebSessionsListResponse,
+};
 
 // --- Wire shapes, re-exported from the Protocol Kernel (#678) ---
 //
@@ -2666,17 +2534,6 @@ mod tests {
         assert_eq!(msg.msg_type, "test.type");
         assert!(!msg.id.is_empty());
         assert!(uuid::Uuid::parse_str(&msg.id).is_ok());
-    }
-
-    #[test]
-    fn test_default_width_height() {
-        assert_eq!(default_width(), 80);
-        assert_eq!(default_height(), 24);
-    }
-
-    #[test]
-    fn test_default_p2p_mode() {
-        assert_eq!(default_p2p(), "p2p");
     }
 
     #[test]
