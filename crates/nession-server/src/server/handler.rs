@@ -5,6 +5,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use crate::env::EnvService;
+use crate::protocol::server_routes;
 use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, WsMessageSender};
@@ -152,48 +153,22 @@ impl ConnectionHandler {
         if msg.msg_type.starts_with("extension.") {
             return self.handle_extension_message(msg).await;
         }
-        match msg.msg_type.as_str() {
-            "agent.register" => self.handle_agent_register(msg).await,
-            "agent.heartbeat" => self.handle_agent_heartbeat(msg).await,
-            "agent.session.update" => self.handle_agent_session_update(msg).await,
-            "agent.session.command.response" => self.handle_agent_command_response(msg).await,
-            "agent.terminal.resize" => self.handle_agent_terminal_resize(msg).await,
-            "agent.address_update" => self.handle_agent_address_update(msg).await,
-            "client.auth" => self.handle_client_auth(msg).await,
-            "client.agents.list" => self.handle_client_agents_list(msg).await,
-            "client.sessions.list" => self.handle_client_sessions_list(msg).await,
-            "client.session.attach" => self.handle_client_session_attach(msg).await,
-            "client.session.relay.begin" => self.handle_client_session_relay_begin(msg).await,
-            // client.session.relay.end is intercepted by the relay function
-            // (relay_bidirectional_via_channel) and never reaches here during
-            // active relay.  After relay exits the duplicate lands here; it is
-            // a safe no-op.
-            "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
-            "client.session.create" => self.handle_client_session_create(msg).await,
-            "client.session.kill" => self.handle_client_session_kill(msg).await,
-            "client.session.capture_preview" => {
-                self.handle_client_session_capture_preview(msg).await
-            }
-            "client.env.list" => self.handle_client_env_list(msg).await,
-            "client.env.get" => self.handle_client_env_get(msg).await,
-            "client.env.write" => self.handle_client_env_write(msg).await,
-            "client.env.delete" => self.handle_client_env_delete(msg).await,
-            "client.session.env.apply" => self.handle_client_session_env_apply(msg).await,
-            "client.server.info" => self.handle_client_server_info(msg).await,
-            "client.session.env.unset" => self.handle_client_session_env_unset(msg).await,
-            "client.session.env.active" => self.handle_client_session_env_active(msg).await,
-            "client.session.env.query" => self.handle_client_session_env_query(msg).await,
-            "client.agent.rename" => self.handle_client_agent_rename(msg).await,
-            "client.agent.delete" => self.handle_client_agent_delete(msg).await,
-            "client.commands.list" => self.handle_client_commands_list(msg).await,
-            "client.commands.add" => self.handle_client_commands_add(msg).await,
-            "client.commands.remove" => self.handle_client_commands_remove(msg).await,
-            "client.commands.update" => self.handle_client_commands_update(msg).await,
-            _ => {
-                warn!("Unknown message type: {}", msg.msg_type);
-                Ok(HandlerAction::Reply(None))
-            }
+        // One list, not two: `SERVER_WIRES` and `dispatch_server` come from the
+        // same `server_routes!` invocation below, so a unit cannot be
+        // advertised in the Server's manifest without a handler, or handled
+        // without being advertised. The Server is a provider like any other —
+        // it serves `agent.register`, `session.attach`, `env.*` and the rest —
+        // and before this it was the one peer whose offer was invisible.
+        if SERVER_WIRES.contains(&msg.msg_type.as_str()) {
+            return dispatch_server(self, msg).await;
         }
+
+        // Not a declared unit. Nothing is served here — `client.session.relay.end`
+        // reaches this only as a duplicate after the relay function
+        // (`relay_bidirectional_via_channel`) has already handled it during
+        // active relay, and is a safe no-op.
+        warn!("Unknown message type: {}", msg.msg_type);
+        Ok(HandlerAction::Reply(None))
     }
 
     async fn handle_agent_register(
@@ -642,6 +617,10 @@ impl ConnectionHandler {
                     "online_agent_count": online,
                     "session_count": sessions,
                     "build_time": option_env!("BUILD_TIME").unwrap_or("unknown"),
+                    // What this server serves (`#678`). Derived from the same
+                    // declaration that dispatches, so it cannot claim a unit
+                    // this server does not answer.
+                    "protocol_manifest": crate::protocol::server_manifest()?,
                 }
             })
             .to_string(),
@@ -3627,6 +3606,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_server_advertises_what_it_serves() {
+        // The Server is a provider like any other (`#678`), and this is where a
+        // client learns what it answers — on the call a client already makes to
+        // ask what this server is, rather than a message of its own.
+        let mut h = test_handler("").await;
+        h.authenticated_client = true;
+
+        let action = h
+            .handle_message(proto_msg("client.server.info", json!({})))
+            .await
+            .unwrap();
+        let reply = parse_reply(action);
+        let manifest = &reply["payload"]["protocol_manifest"];
+
+        assert_eq!(manifest["provider"], "nession-server");
+        // Named units, not a count: the manifest answers "may I send this peer
+        // this message?", so the assertion should be about a message. These two
+        // are the ones Phase 6 named and that had no declaration anywhere.
+        assert!(manifest["protocols"]["session.attach"].is_object());
+        assert!(manifest["protocols"]["agent.register"].is_object());
+        // And a unit this server does not serve stays absent — the manifest
+        // exists to refuse, so claiming an offer that does not exist would be
+        // the one failure it cannot make.
+        assert!(manifest["protocols"]["git.status"].is_null());
+    }
+
+    #[test]
+    fn every_unit_the_server_dispatches_is_in_its_manifest() {
+        // The derivation, asserted. `SERVER_WIRES` and `server_descriptors()`
+        // come from one `server_routes!` invocation, so neither can name a unit
+        // the other does not — and this is the test that says so rather than
+        // the comment that claims it.
+        //
+        // It matters in one direction especially: a wire this server answers
+        // but does not advertise would make its manifest understate it, and a
+        // consumer resolving against that manifest would refuse a call this
+        // server would have served.
+        let manifest = crate::protocol::server_manifest().unwrap();
+        assert!(
+            !SERVER_WIRES.is_empty(),
+            "a declaration with no units is a mistake, not a peer that serves nothing"
+        );
+        for wire in SERVER_WIRES {
+            assert!(
+                manifest.carries(wire),
+                "`{wire}` is dispatched but not advertised"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn the_agents_list_carries_what_each_agent_can_serve() {
         // Served from the list rather than a query of its own: it is already
         // the discover-agents call, so a consumer resolving per target has the
@@ -5983,3 +6013,54 @@ mod tests {
             .contains("not found"));
     }
 }
+
+// ── The Protocol Units this server serves ──
+//
+// One invocation, three artefacts: `server_descriptors()` (the manifest's
+// half), `SERVER_WIRES` (what the message loop tests) and `dispatch_server()`
+// (the routing half). A unit cannot be advertised without a handler, or handled
+// without being advertised, because there is one list.
+//
+// The ids are the *operations*, not the wire types. Where an operation has a
+// provider on each side — `session.create` is served by this server for a
+// browser and by the agent for this server — both declare the same id and each
+// declares its own wire projection, which is exactly the model: one contract,
+// several providers, `ContractSupport.wire` carrying the difference.
+
+server_routes!(handler, msg;
+    "agent.register" => "agent.register" => handler.handle_agent_register(msg).await,
+    "agent.heartbeat" => "agent.heartbeat" => handler.handle_agent_heartbeat(msg).await,
+    "agent.session-update" => "agent.session.update" => handler.handle_agent_session_update(msg).await,
+    "agent.command-response" => "agent.session.command.response" => handler.handle_agent_command_response(msg).await,
+    "agent.terminal-resize" => "agent.terminal.resize" => handler.handle_agent_terminal_resize(msg).await,
+    "agent.address-update" => "agent.address_update" => handler.handle_agent_address_update(msg).await,
+    "client.auth" => "client.auth" => handler.handle_client_auth(msg).await,
+    "agent.list" => "client.agents.list" => handler.handle_client_agents_list(msg).await,
+    "session.list" => "client.sessions.list" => handler.handle_client_sessions_list(msg).await,
+    "session.attach" => "client.session.attach" => handler.handle_client_session_attach(msg).await,
+    "session.relay.begin" => "client.session.relay.begin" => handler.handle_client_session_relay_begin(msg).await,
+    // `client.session.relay.end` is intercepted by the relay function
+    // (`relay_bidirectional_via_channel`) and never reaches the dispatcher
+    // during active relay. It is declared here anyway, because the Server does
+    // serve it — the relay loop is the handler — and a manifest that omitted it
+    // would understate what this peer answers.
+    "session.relay.end" => "client.session.relay.end" => Ok(HandlerAction::Reply(None)),
+    "session.create" => "client.session.create" => handler.handle_client_session_create(msg).await,
+    "session.kill" => "client.session.kill" => handler.handle_client_session_kill(msg).await,
+    "session.capture-preview" => "client.session.capture_preview" => handler.handle_client_session_capture_preview(msg).await,
+    "env.list" => "client.env.list" => handler.handle_client_env_list(msg).await,
+    "env.get" => "client.env.get" => handler.handle_client_env_get(msg).await,
+    "env.write" => "client.env.write" => handler.handle_client_env_write(msg).await,
+    "env.delete" => "client.env.delete" => handler.handle_client_env_delete(msg).await,
+    "session.env.apply" => "client.session.env.apply" => handler.handle_client_session_env_apply(msg).await,
+    "session.env.unset" => "client.session.env.unset" => handler.handle_client_session_env_unset(msg).await,
+    "session.env.active" => "client.session.env.active" => handler.handle_client_session_env_active(msg).await,
+    "session.env.query" => "client.session.env.query" => handler.handle_client_session_env_query(msg).await,
+    "server.info" => "client.server.info" => handler.handle_client_server_info(msg).await,
+    "agent.rename" => "client.agent.rename" => handler.handle_client_agent_rename(msg).await,
+    "agent.delete" => "client.agent.delete" => handler.handle_client_agent_delete(msg).await,
+    "commands.list" => "client.commands.list" => handler.handle_client_commands_list(msg).await,
+    "commands.add" => "client.commands.add" => handler.handle_client_commands_add(msg).await,
+    "commands.remove" => "client.commands.remove" => handler.handle_client_commands_remove(msg).await,
+    "commands.update" => "client.commands.update" => handler.handle_client_commands_update(msg).await,
+);
