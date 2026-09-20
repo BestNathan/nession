@@ -9,7 +9,8 @@ import type { WebSocketService } from '../platform/socket';
  *
  * Only a stopped transport ('disconnected') is re-armed here: 'connecting' has
  * an in-flight attempt (connect() is shared), 'reconnecting' already has a
- * timer scheduled, and 'connected' needs nothing.
+ * timer scheduled, and 'connected' needs nothing. A disposed service is
+ * terminal and must never be re-armed.
  */
 export function useVisibilityReconnect(
   wasEverAuthed: boolean,
@@ -20,6 +21,7 @@ export function useVisibilityReconnect(
       if (document.visibilityState !== 'visible') { return; }
       if (!wasEverAuthed) { return; }
       if (!wsService) { return; }
+      if (wsService.isDisposed) { return; }
       if (wsService.connectionState !== 'disconnected') { return; }
 
       console.log('[visibility] Tab became visible — reconnecting WebSocket');
