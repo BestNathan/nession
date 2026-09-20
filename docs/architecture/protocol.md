@@ -216,6 +216,59 @@ Everything else answers `protocol_not_advertised`. It is forbidden to guess a
 payload shape from a software version, to downgrade unconditionally when a
 manifest is missing, or to silently fall back semantically.
 
+**Convergence debt — the blanket relay is still what runs.** Today a target with
+no manifest has *everything* relayed to it, which is the unconditional fallback
+this section forbids. Recorded here rather than left to be rediscovered:
+
+- **Why it is still that way.** Every agent built before `#854` has no manifest,
+  so refusing them would take the extension surface down for the whole fleet to
+  enforce a rule about a case that has not happened yet. A peer that *has* a
+  manifest is checked strictly, and that is where the mechanism is proven.
+- **What would end it.** Manifests are universal once `#854` has been deployed
+  long enough that no live agent predates it. The change is then a second
+  condition in the relay gate — "no manifest *and* no declared adapter" — and a
+  `legacy_wire` field on `ContractDescriptor` for providers to populate.
+- **What will not work.** The Server cannot decide this on its own: it composes
+  no provider, by design, so it cannot know which contracts declare an adapter.
+  The declaration has to travel — in the descriptor, carried to the relay by
+  whatever composes the provider.
+
+### Resolve as a consumer
+
+A consumer declares what it can read, per unit, and resolves that against each
+target's manifest. Both halves exist and the Rust one is
+`nession-protocol`'s `select_version`:
+
+```text
+Consumer Requirements  ∩  Provider Manifest  →  the contract version to use
+```
+
+The Web's copy is `web/src/platform/protocol/` — `resolveContract`,
+`addressedPayload`, and the per-connection `ProtocolDirectory` that
+`product/agent` fills from `client.agents.list`. A capability declares its
+requirements next to the wire strings it already owns
+(`capabilities/git/GitPlugin.ts`), because the versions and the DTOs it reads
+them with are the same fact written twice, and today only a comment keeps them
+in step — `### Generate consumer types` is what removes the comment.
+
+Four rules, each of which is a way this goes wrong quietly:
+
+- **Per target, never per connection.** The Web reaches several agents through
+  one server, and one agent's versions say nothing about another's. Resolving
+  once and reusing it is the failure the design names outright.
+- **Highest common version**, not the target's newest. A consumer speaking v1
+  talking to a target offering v1 and v3 lands on v1.
+- **Versions are not contiguous.** `[1, 3]` is a legitimate answer set.
+- **Naming no version is not a refusal.** A target with no manifest is a Legacy
+  Peer and is addressed exactly as it was before any of this existed. A
+  consumer that *knows* it shares no version with the target must refuse
+  locally: sending nothing would be relayed as a Legacy Peer request and put a
+  v1-shaped payload in front of a v2-only target. The server's check is a second
+  boundary against a stale manifest, not the first one.
+
+A refusal names both sides, on the client exactly as on the server:
+`` `agent-a` offers `git.status` at [v2], which this client cannot read ``.
+
 ### Generate consumer types
 
 Rust contracts are the source of truth. Generated TS carries the DTOs, the
@@ -255,6 +308,10 @@ generated.
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
 | A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
+| A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
+| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed as a Legacy Peer |
+| Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
+| The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 
 ### Why the manifest carries the wire projection
 
@@ -288,6 +345,49 @@ and the routed set are two lists. `ExtensionRegistry` builds its routing table
 constructible. That is a stronger guarantee than detecting either after the
 fact — and it is why `AgentExtension` declares descriptors rather than the
 `message_types()` it used to, which nothing tied to the provider's own dispatch.
+
+## Open questions
+
+Written down rather than answered by whoever gets there first. Both are
+reachable only from `#678`'s later phases, and neither has an answer that is
+obviously right, so a guess would be a decision nobody recorded.
+
+### Which direction does a manifest describe?
+
+`ProtocolManifest` says what a runtime **offers** — but several core units run
+the other way. `agent.register` and `agent.heartbeat` are sent *by* the agent
+and served *by* the server; `session.attach` is served by the server and
+`server.session.create` by the agent, for the same Session.
+
+So "Phase 6: version `agent.register`" has no immediate answer to *whose*
+manifest lists it. Three readings, none yet chosen:
+
+1. **Served only.** A manifest lists what the peer answers. `agent.register`
+   belongs in a *server* manifest, which does not exist yet — which makes
+   Phase 6's agent-side slice just the units the agent serves
+   (`server.session.*`, `server.env.*`, `sessions.list`), and the rest wait.
+2. **Both directions, distinguished.** `ContractSupport` gains a direction, and
+   the manifest says what a peer speaks as well as what it serves. More
+   faithful, and more surface than anything consumes today.
+3. **A set of units, not of roles.** The manifest lists contracts the peer
+   participates in, and direction is a property of the operation rather than of
+   the peer.
+
+Today only extension units are advertised, all of them served, so the question
+has not had to be asked. It is asked the moment a core unit is added.
+
+### Where does a core unit's descriptor live?
+
+"For a core unit, the contract is the DTOs, and those are in
+`nession-protocol/src/contracts/`. But this document's other rule is that the
+crate that *implements* a contract owns its declaration, because that crate is
+the only one that can answer "what changed?" — and the implementer of
+`server.session.create` is `nession-agent`, not `nession-protocol`.
+
+Both rules are right about different things and they collide here, for core
+units only. Until it is settled, core units have DTOs and no descriptors, which
+is why an agent's manifest currently advertises `git.*` and `claude-code.*` and
+says nothing about the session and env protocols it has always served.
 
 ## Related
 

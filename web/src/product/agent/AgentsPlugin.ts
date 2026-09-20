@@ -1,3 +1,4 @@
+import { manifestsOf } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { Agent } from '@/types';
 import type { AgentDeleteResponse, AgentRenameResponse, AgentsListResponse } from './types';
@@ -72,12 +73,25 @@ export class AgentsPlugin implements TransportPlugin {
     };
   }
 
-  /** Fetch the full agent registry. */
+  /**
+   * Fetch the full agent registry.
+   *
+   * Publishes the manifests it carried before returning, and it has to be here
+   * rather than left to the `client.agents.list.response` subscription below:
+   * `MessageRouter.handleIncoming` **returns** once it has correlated a reply
+   * with its pending request, so a response never reaches subscribers. That
+   * subscription therefore does not fire for this call — it is kept for an
+   * unsolicited push of the same type, which nothing sends today. Publishing
+   * only from there would have left the directory permanently empty, and an
+   * empty directory is not a visible failure: every call resolves as a Legacy
+   * Peer and goes out unversioned, which is the pre-`#678` request.
+   */
   async listAgents(): Promise<Agent[]> {
     const response = await this.requireConnection().request<AgentsListResponse>(
       'client.agents.list',
       {},
     );
+    this.publishProtocols(response.agents);
     return response.agents;
   }
 
@@ -114,9 +128,27 @@ export class AgentsPlugin implements TransportPlugin {
   }
 
   private notify(agents: Agent[]): void {
+    this.publishProtocols(agents);
     for (const entry of this.callbacks) {
       entry.cb(agents);
     }
+  }
+
+  /**
+   * Hand each agent's advertised protocol set to the connection's directory
+   * (`#678`, Phase 4).
+   *
+   * Called from both paths that actually receive an agent list — `listAgents`
+   * and the `agents.changed` push, the latter via {@link notify}. Wholesale
+   * replacement, not a merge: this list is a snapshot, and keeping an entry for
+   * an agent it no longer contains would resolve against a manifest nobody
+   * serves any more.
+   */
+  private publishProtocols(agents: Agent[]): void {
+    if (!this.connection) {
+      return;
+    }
+    this.connection.protocols.publish(manifestsOf(agents));
   }
 
   /** Drop the registrations made under one (now-released) install generation. */
