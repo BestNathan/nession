@@ -34,7 +34,7 @@ use anyhow::{Context, Result};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::security::MAX_LINE_BYTES;
+use crate::runtime::security::MAX_LINE_BYTES;
 
 /// Environment variables that describe a repository we are not addressing.
 /// Stripped from every child so behaviour never depends on inheritance.

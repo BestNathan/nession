@@ -7,7 +7,7 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::status::RepoStatus;
+use crate::runtime::status::RepoStatus;
 
 /// This contract's wire message type — its transport projection.
 ///

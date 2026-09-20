@@ -27,8 +27,8 @@
 
 use serde::Serialize;
 
-use crate::cmd::GitCmd;
-use crate::security::{DEFAULT_BRANCH_LIMIT, MAX_BRANCH_BYTES, MAX_BRANCH_LIMIT};
+use crate::runtime::cmd::GitCmd;
+use crate::runtime::security::{DEFAULT_BRANCH_LIMIT, MAX_BRANCH_BYTES, MAX_BRANCH_LIMIT};
 
 const FIELD_SEP: char = '\u{1f}';
 const RECORD_SEP: char = '\u{1e}';

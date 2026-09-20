@@ -41,10 +41,6 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::debug;
 
-use crate::branches;
-use crate::cmd::GitCmd;
-use crate::diff;
-use crate::log;
 use crate::protocol::branches::{BranchesOkV1, BranchesRequestV1};
 use crate::protocol::diff::{DiffOkV1, DiffRequestV1};
 use crate::protocol::log::{LogOkV1, LogRequestV1};
@@ -52,9 +48,13 @@ use crate::protocol::root::{RootOkV1, RootRequestV1};
 use crate::protocol::status::{StatusOkV1, StatusRequestV1};
 use crate::protocol::worktrees::{WorktreesOkV1, WorktreesRequestV1};
 use crate::protocol::{self, GitFailure, GitResponseV1};
-use crate::security::MAX_STATUS_BYTES;
-use crate::status;
-use crate::worktrees;
+use crate::runtime::branches;
+use crate::runtime::cmd::GitCmd;
+use crate::runtime::diff;
+use crate::runtime::log;
+use crate::runtime::security::MAX_STATUS_BYTES;
+use crate::runtime::status;
+use crate::runtime::worktrees;
 
 /// Resolves a Session identifier to its current working directory, or `None`
 /// when the session is unknown. Injected by the agent.

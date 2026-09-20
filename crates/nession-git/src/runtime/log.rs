@@ -24,8 +24,8 @@
 
 use serde::Serialize;
 
-use crate::cmd::GitCmd;
-use crate::security::{MAX_LOG_BYTES, MAX_LOG_LIMIT};
+use crate::runtime::cmd::GitCmd;
+use crate::runtime::security::{MAX_LOG_BYTES, MAX_LOG_LIMIT};
 
 /// Field and record separators, chosen so no field can contain them.
 const FIELD_SEP: char = '\u{1f}';
@@ -76,7 +76,7 @@ const FORMAT: &str = "--format=%H\x1f%h\x1f%an\x1f%ar\x1f%aI\x1f%s\x1f%D\x1e";
 /// Recent commits on the current branch, newest first.
 pub async fn history(cmd: &GitCmd, limit: Option<usize>) -> anyhow::Result<History> {
     let limit = limit
-        .unwrap_or(crate::security::DEFAULT_LOG_LIMIT)
+        .unwrap_or(crate::runtime::security::DEFAULT_LOG_LIMIT)
         .clamp(1, MAX_LOG_LIMIT);
     let max_count = format!("--max-count={limit}");
 
