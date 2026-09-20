@@ -26,4 +26,20 @@ pub struct ServerInfoResponse {
     /// ISO 8601 timestamp when the binary was built (injected via BUILD_TIME env var at compile time).
     #[serde(default = "default_build_time")]
     pub build_time: String,
+    /// What this server serves (`#678`).
+    ///
+    /// The Server is a provider like any other, and until this field existed it
+    /// was the one peer whose offer was invisible: an agent advertised a
+    /// manifest, the web resolved against it, and the server brokering both
+    /// said nothing about itself.
+    ///
+    /// It travels here rather than in a message of its own because
+    /// `client.server.info` is already the call a client makes to ask what this
+    /// server is — one field on an existing round trip, not a new one.
+    ///
+    /// Optional for the same reason the agent's is: a server predating this
+    /// field serves `null` rather than failing to parse, and a client reading it
+    /// gets "this server did not say" rather than a decode error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_manifest: Option<crate::ProtocolManifest>,
 }

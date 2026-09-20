@@ -400,6 +400,8 @@ is broken by it.
 | The same holds for the agent's core units | `core_routes!` (`crates/nession-agent/src/protocol/mod.rs`) — one invocation emits `core_descriptors()` **and** `dispatch_core()` |
 | One wire type, one claimant, across both halves | `ExtensionRegistry::new` — `DuplicateCoreWireType` names both, whichever side lost |
 | A core unit the agent does not serve is not advertised | the same invocation — `CORE_WIRES` and `core_descriptors()` are the same list |
+| The same holds for the Server's units | `server_routes!` (`crates/nession-server/src/protocol/mod.rs`) — one invocation, and `every_unit_the_server_dispatches_is_in_its_manifest` says so |
+| A client can ask the Server what it serves | `client.server.info` → `ServerInfoResponse.protocol_manifest` |
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
 | A peer with no manifest does not connect | `handle_agent_register` — `protocol_manifest` is required, and its absence is a rejection |
@@ -499,14 +501,15 @@ command. The two arms it left behind — `agent.register.response` and
 `server.heartbeat.ack` — are replies to something the agent itself sent, and
 advertising them would claim an offer that does not exist. So the agent's slice
 of Phase 6 is the units the agent serves, and the other three units the phase
-names are served by the **server**, where no manifest exists yet:
+names are served by the **server** — which composes a manifest of its own, so
+all four are declared, two of them on each side:
 
-| Phase 6 unit | Served by | In the agent's manifest |
+| Phase 6 unit | Served by | Declared in |
 |---|---|---|
-| `session.create` | the agent (`server.session.create`) | yes |
-| `session.attach` | the **server** (`client.session.attach`) | no — waits for a server manifest |
-| `agent.register` | the **server** | no — same |
-| `agent.heartbeat` | the **server** | no — same |
+| `session.create` | the agent for the server (`server.session.create`) **and** the server for a browser (`client.session.create`) | both manifests, one id |
+| `session.attach` | the **server** (`client.session.attach`) | the server's |
+| `agent.register` | the **server** (`agent.register`) | the server's |
+| `agent.heartbeat` | the **server** (`agent.heartbeat`) | the server's |
 
 ### Where does a core unit's descriptor live?
 
@@ -539,17 +542,45 @@ above; the point here is only that option 1's guarantee was reachable without
 option 1's blast radius, and that neither a behavioural test nor "do not
 advertise core units yet" was needed.
 
+### The Server is a provider too
+
+For most of `#678`'s life it was not, in the only sense that mattered: it served
+`agent.register`, `session.attach`, `env.*`, `commands.*` and the rest, and
+declared none of them. Its dispatch was a `match` in `server/handler.rs`, and a
+`match` cannot be read to produce the set it handles — the same problem the
+agent's core units had, and the same answer.
+
+`crates/nession-server/src/protocol/mod.rs` carries `server_routes!`, one
+invocation emitting `server_descriptors()`, `SERVER_WIRES` and
+`dispatch_server()`. Deliberately the same shape as the agent's `core_routes!`:
+two mechanisms for one rule would be a second thing to keep in step, and the
+hygiene workaround is identical — `self` cannot be captured by a `$body`, so the
+dispatcher is a free function taking the handler and the bodies say `handler`
+where they said `self`.
+
+One difference is worth knowing, because it is not cosmetic. The agent's
+dispatcher matches on `$msg.msg_type.as_str()`; this one clones the wire type
+first. The agent's handlers *borrow* the message, so a borrow held across the
+match is fine — these take it **by value**, and a borrow in the scrutinee would
+conflict with every arm that moves it.
+
+The ids are the **operations**, not the wire types, which is what lets one
+contract have a provider on each side: `session.create` is served by this server
+for a browser and by the agent for this server, both declare the same id, and
+each declares its own wire projection in `ContractSupport.wire`. That is the
+model working rather than a coincidence — a browser asking for a session and a
+server asking for one are the same operation seen from two sides.
+
+**Where it is read.** `client.server.info` carries it as `protocol_manifest` —
+one field on the call a client already makes to ask what this server is, rather
+than a message of its own. The Web already calls it (`platform/server/`), and
+`ServerInfoResponse.protocol_manifest` is the contract.
+
 ### What is still not versioned
 
 Stated rather than implied, because a reader who finds an unadvertised protocol
 should know whether it was overlooked.
 
-- **The server's units.** `agent.register`, `agent.heartbeat` and
-  `client.session.attach` are served by `nession-server`, which composes no
-  manifest at all. Under *served only* they belong in one. Nothing consumes a
-  server manifest today, so building one now would be architecture for its own
-  sake — but it is the next real increment of Phase 6, and it is the reason
-  three of the phase's four named units are not in the table above.
 - **The P2P path.** `server/websocket.rs` dispatches a second, larger match —
   `client.session.list`, `terminal.input`, `client.attach`, `file.read` — that
   the browser speaks to an agent directly. Those *are* served by the agent and

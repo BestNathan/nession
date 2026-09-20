@@ -163,6 +163,18 @@ export interface ServerInfo {
   session_count: number;
   /** ISO 8601 timestamp when the binary was built. */
   build_time?: string;
+  /**
+   * What the server serves (`#678`).
+   *
+   * The Server is a provider like any other — it answers `session.attach`,
+   * `env.*`, `agent.register` — and this is where it says so, on the call a
+   * client already makes to ask what this server is. `null`/absent is a server
+   * that did not say, which is a different claim from an empty set.
+   *
+   * Same shape as an agent's `protocols`, deliberately: one manifest type for
+   * every peer, so resolving against the server is not a second mechanism.
+   */
+  protocols?: ProtocolManifest | null;
 }
 
 /**
