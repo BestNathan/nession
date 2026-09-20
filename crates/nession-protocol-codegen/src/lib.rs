@@ -76,6 +76,7 @@ pub fn run(out: &Path) -> Result<usize, String> {
     // same check runs as a test, which is where it is normally read; here it is
     // also the reason a `just codegen` run cannot leave a broken tree behind.
     check_self_contained(&units, &cfg)?;
+    check_paths_are_unique(&units)?;
 
     // Wholesale, not incremental. A contract removed from the catalog must take
     // its file with it, and an incremental writer would leave it behind for the
@@ -118,6 +119,29 @@ pub fn check_self_contained(units: &[Unit], cfg: &Config) -> Result<(), String> 
     Ok(())
 }
 
+/// No two units write to the same file.
+///
+/// The path is derived from the id ([`operation`]), and the kernel's ids span
+/// families — so the derivation is doing real work and can be got wrong. Two
+/// units landing on one path would not fail anything: the second write would
+/// simply replace the first, and the Web would import a contract that is not
+/// the one it asked for. Silent, and in the one artefact nobody reads.
+pub fn check_paths_are_unique(units: &[Unit]) -> Result<(), String> {
+    let mut seen: std::collections::BTreeMap<PathBuf, &str> = std::collections::BTreeMap::new();
+    for unit in units {
+        let path = unit_path(unit);
+        if let Some(first) = seen.insert(path.clone(), unit.id) {
+            return Err(format!(
+                "`{}` and `{}` both generate to {} — two contracts cannot share a file",
+                first,
+                unit.id,
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// `git/status/v1.ts` — the owner, the unit's operation, the contract version.
 ///
 /// The version is a path segment rather than a suffix so that two versions can
@@ -125,8 +149,27 @@ pub fn check_self_contained(units: &[Unit], cfg: &Config) -> Result<(), String> 
 /// point of versioning them.
 fn unit_path(unit: &Unit) -> PathBuf {
     Path::new(unit.owner)
-        .join(unit.id.rsplit('.').next().unwrap_or(unit.id))
+        .join(operation(unit))
         .join(format!("v{}.ts", unit.version))
+}
+
+/// The unit's directory segment: its id with the owner's prefix removed.
+///
+/// One rule, and it covers both halves without a special case. For a provider
+/// the prefix *is* the owner — `git.status` under `git` is `status`, and
+/// `claude-code.read` under `claude-code` is `read`. The kernel's units have no
+/// such prefix: `session.create` and `client.session.create` are both the
+/// kernel's, so they keep their whole id — which is also what keeps them apart,
+/// since both would otherwise end in `create`, as would `client.attach` and
+/// `client.session.attach` in `attach`.
+///
+/// Dots become dashes because the segment is a directory name.
+fn operation(unit: &Unit) -> String {
+    let prefix = format!("{}.", unit.owner);
+    unit.id
+        .strip_prefix(&prefix)
+        .unwrap_or(unit.id)
+        .replace('.', "-")
 }
 
 /// The one `Config`, so every file in one run is generated under the same rules.
@@ -153,9 +196,24 @@ fn render(unit: &Unit, cfg: &Config) -> String {
     let _ = writeln!(out, "export const PROTOCOL = '{}';", unit.id);
     let _ = writeln!(
         out,
-        "/** The transport projection this contract travels as. */"
+        "/** Every transport projection this contract travels as. */"
     );
-    let _ = writeln!(out, "export const WIRE = '{}';", unit.wire);
+    let _ = writeln!(
+        out,
+        "export const WIRES = [{}] as const;",
+        unit.wires
+            .iter()
+            .map(|w| format!("'{w}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if let [only] = unit.wires {
+        let _ = writeln!(
+            out,
+            "/**\n * The only projection this contract travels as.\n *\n * Absent, deliberately, on a contract served over more than one transport: it\n * has no single wire, and a caller that needs one has to say which it means.\n * `WIRES` is always there.\n */"
+        );
+        let _ = writeln!(out, "export const WIRE = '{only}';");
+    }
     let _ = writeln!(out, "/** The contract version these shapes are. */");
     let _ = writeln!(out, "export const VERSION = {};", unit.version);
 

@@ -29,8 +29,16 @@ pub struct Unit {
     /// The canonical protocol id, `git.status`.
     pub id: &'static str,
     pub version: u32,
-    /// The wire message type, `extension.git.status`.
-    pub wire: &'static str,
+    /// The wire message types this contract travels as.
+    ///
+    /// A list rather than one string because a unit can be served on more than
+    /// one transport, and `#678` is explicit that the unit is the semantic
+    /// boundary while the wire is a projection of it. `session.create` is the
+    /// case that forced this: the server answers it for a browser on
+    /// `server.session.create` and the agent answers it for the server on
+    /// `session.create`, and those are one unit seen from two sides. A single
+    /// field would have had to pick one and quietly drop the other.
+    pub wires: &'static [&'static str],
     /// The declarations this unit's file carries, in emit order.
     pub decls: Vec<Decl>,
     /// The name the request alias takes, and the shape it aliases.
@@ -59,7 +67,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.status",
             version: 1,
-            wire: "extension.git.status",
+            wires: &["extension.git.status"],
             decls: vec![
                 decl_of::<nession_git::protocol::status::v1::StatusRequestV1>(cfg),
                 decl_of::<nession_git::protocol::status::v1::StatusOkV1>(cfg),
@@ -81,7 +89,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.diff",
             version: 1,
-            wire: "extension.git.diff",
+            wires: &["extension.git.diff"],
             decls: vec![
                 decl_of::<nession_git::protocol::diff::v1::DiffRequestV1>(cfg),
                 decl_of::<nession_git::protocol::diff::v1::DiffOkV1>(cfg),
@@ -101,7 +109,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.root",
             version: 1,
-            wire: "extension.git.root",
+            wires: &["extension.git.root"],
             decls: vec![
                 decl_of::<nession_git::protocol::root::v1::RootRequestV1>(cfg),
                 decl_of::<nession_git::protocol::root::v1::RootOkV1>(cfg),
@@ -120,7 +128,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.log",
             version: 1,
-            wire: "extension.git.log",
+            wires: &["extension.git.log"],
             decls: vec![
                 decl_of::<nession_git::protocol::log::v1::LogRequestV1>(cfg),
                 decl_of::<nession_git::protocol::log::v1::LogOkV1>(cfg),
@@ -141,7 +149,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.branches",
             version: 1,
-            wire: "extension.git.branches",
+            wires: &["extension.git.branches"],
             decls: vec![
                 decl_of::<nession_git::protocol::branches::v1::BranchesRequestV1>(cfg),
                 decl_of::<nession_git::protocol::branches::v1::BranchesOkV1>(cfg),
@@ -162,7 +170,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "git",
             id: "git.worktrees",
             version: 1,
-            wire: "extension.git.worktrees",
+            wires: &["extension.git.worktrees"],
             decls: vec![
                 decl_of::<nession_git::protocol::worktrees::v1::WorktreesRequestV1>(cfg),
                 decl_of::<nession_git::protocol::worktrees::v1::WorktreesOkV1>(cfg),
@@ -183,7 +191,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "claude-code",
             id: "claude-code.list",
             version: 1,
-            wire: "extension.claude_code.list",
+            wires: &["extension.claude_code.list"],
             decls: vec![
                 decl_of::<nession_claude_code::protocol::list::v1::ListRequestV1>(cfg),
                 decl_of::<nession_claude_code::protocol::list::v1::ListResponseV1>(cfg),
@@ -209,7 +217,7 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
             owner: "claude-code",
             id: "claude-code.read",
             version: 1,
-            wire: "extension.claude_code.read",
+            wires: &["extension.claude_code.read"],
             decls: vec![
                 decl_of::<nession_claude_code::protocol::read::v1::ReadRequestV1>(cfg),
                 decl_of::<nession_claude_code::protocol::read::v1::ReadResponseV1>(cfg),
