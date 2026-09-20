@@ -2002,6 +2002,46 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
+        // The pipeline's first step (`#678`), and the one that was missing
+        // until `#877`.
+        //
+        // **Before the payload is read, deliberately.** Everything below this
+        // point answers differently depending on which agent was named — a
+        // target that does not exist and a target that exists but does not
+        // advertise the unit are both `contract_not_supported`, with different
+        // text. An unauthenticated caller must not be able to tell those apart,
+        // so the refusal cannot consult the payload at all: it is the same
+        // answer for every request, which is also the answer that tells the
+        // caller nothing about the fleet.
+        //
+        // Every other client-facing handler in this file has had this gate all
+        // along; the extension relay reaches further than any of them — it
+        // crosses into another machine and can read that machine's repositories
+        // and `~/.claude/` — and was the one path that did not check.
+        //
+        // `client.auth` sets `authenticated_client` (`handler.rs`, the
+        // `CLIENT_AUTH` arm), and the Web sends it as a handshake before the
+        // socket is usable, so nothing that works today stops working.
+        if !self.authenticated_client {
+            warn!(
+                "Rejected unauthenticated extension request `{}` id={}",
+                msg.msg_type, msg.id
+            );
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": format!("{}.response", msg.msg_type),
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "error": "not_authenticated",
+                        "available": false,
+                        "message": "this connection has not authenticated; send `client.auth` first",
+                    },
+                })
+                .to_string(),
+            ))));
+        }
+
         let agent_id = msg
             .payload
             .get("agent_id")
@@ -3503,11 +3543,23 @@ mod tests {
         relay_payload(h, wire, json!({"agent_id": "agent-a"})).await
     }
 
+    /// Relay an extension message **as an authenticated client**.
+    ///
+    /// The authentication is part of the helper because it is a precondition
+    /// now (`#877`): a connection that has not authenticated is refused before
+    /// the payload is read, so a test that relays without this flag is a test
+    /// of the refusal, not of the relay. Every other handler in this file has
+    /// always worked this way — `listed_protocols` below sets the same flag —
+    /// and these tests only ever got away without it because the extension path
+    /// was the one that forgot to check.
+    ///
+    /// Tests asserting the refusal deliberately do **not** call this.
     async fn relay_payload(
         h: &mut ConnectionHandler,
         wire: &str,
         payload: serde_json::Value,
     ) -> serde_json::Value {
+        h.authenticated_client = true;
         let action = h.handle_message(proto_msg(wire, payload)).await.unwrap();
         parse_reply(action)["payload"].clone()
     }
@@ -3591,6 +3643,85 @@ mod tests {
         // Refusing is unit-scoped, so the connection and every other unit are
         // untouched — the difference between this and a registration refusal.
         assert_eq!(payload["available"], false);
+    }
+
+    // ---- the pipeline's first step (#877) ----
+
+    /// Relay without authenticating, which is the state the gate exists for.
+    ///
+    /// Deliberately not `relay_payload`: that helper authenticates, so using it
+    /// here would assert nothing about the refusal.
+    async fn relay_unauthenticated(h: &mut ConnectionHandler, wire: &str) -> serde_json::Value {
+        let action = h
+            .handle_message(proto_msg(wire, json!({ "agent_id": "agent-a" })))
+            .await
+            .unwrap();
+        parse_reply(action)["payload"].clone()
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_extension_request_is_refused_before_it_reaches_an_agent() {
+        // The finding in `#877`: every other client-facing handler checked
+        // `authenticated_client` and this one did not, so any client that could
+        // open a socket could relay to any agent with no credentials — and the
+        // target was named by the caller, so it was not merely "some agent".
+        //
+        // The target here *does* carry the wire type and *is* registered, so
+        // without the gate this would get as far as the relay and fail with
+        // `agent_disconnected`. `not_authenticated` is therefore the proof it
+        // stopped at the gate rather than somewhere further down.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let payload = relay_unauthenticated(&mut h, "extension.git.status").await;
+        assert_eq!(payload["error"], "not_authenticated");
+        assert_eq!(payload["available"], false);
+    }
+
+    #[tokio::test]
+    async fn the_refusal_does_not_depend_on_which_target_was_named() {
+        // The property that decides where the gate sits. Below it, the answers
+        // differ by target: an agent that does not exist and one that exists
+        // but does not carry the unit are both `contract_not_supported`, with
+        // different text naming the agent. An unauthenticated caller able to
+        // tell those apart has a way to enumerate the fleet without a
+        // credential.
+        //
+        // The gate reads nothing from the payload, so the two are not merely
+        // similar — they are the same bytes.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let known_target = relay_unauthenticated(&mut h, "extension.git.status").await;
+
+        let action = h
+            .handle_message(proto_msg(
+                "extension.git.status",
+                json!({ "agent_id": "an-agent-that-was-never-registered" }),
+            ))
+            .await
+            .unwrap();
+        let unknown_target = parse_reply(action)["payload"].clone();
+
+        assert_eq!(
+            known_target, unknown_target,
+            "the refusal must not vary with the target"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_client_still_relays() {
+        // The other half of the gate: it must refuse exactly the connections
+        // that have not authenticated and nothing else. Without this, deleting
+        // the relay would leave the two tests above passing.
+        let mut h = test_handler("tok").await;
+        register_agent(&h, Some(manifest_carrying("extension.git.status"))).await;
+
+        let payload = relay(&mut h, "extension.git.status").await;
+        assert_ne!(
+            payload["error"], "not_authenticated",
+            "an authenticated client must get past the gate"
+        );
     }
 
     // ---- the target's protocol support is queryable (#678, Phase 3) ----
