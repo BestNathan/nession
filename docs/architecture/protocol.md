@@ -378,16 +378,52 @@ has not had to be asked. It is asked the moment a core unit is added.
 
 ### Where does a core unit's descriptor live?
 
-"For a core unit, the contract is the DTOs, and those are in
+For a core unit, the contract is the DTOs, and those are in
 `nession-protocol/src/contracts/`. But this document's other rule is that the
 crate that *implements* a contract owns its declaration, because that crate is
 the only one that can answer "what changed?" — and the implementer of
 `server.session.create` is `nession-agent`, not `nession-protocol`.
 
 Both rules are right about different things and they collide here, for core
-units only. Until it is settled, core units have DTOs and no descriptors, which
-is why an agent's manifest currently advertises `git.*` and `claude-code.*` and
-says nothing about the session and env protocols it has always served.
+units only. The collision is resolvable — the DTOs and the descriptor both stay
+in `contracts/`, and the agent *composes* them, which is the extension pattern
+with the ownership inverted: for an extension the provider owns contract and
+implementation both, and for a core unit Nession owns the contract while the
+agent is one of its providers. What it is not is *decided*, and the answer
+changes where a version bump is written down.
+
+### How does a core unit stay derived rather than listed?
+
+This is the sharper one, and it is why the question above is not the only thing
+standing in the way.
+
+`ExtensionRegistry` builds its routing table **from** the descriptors, and that
+is what makes *advertises no handler* and *handler exists but not advertised*
+unconstructible instead of merely detectable. The guarantee does not extend to
+core units: the agent's core dispatch is a `match` on the wire type, in two
+places (`connection/server_client.rs` for server-sent commands and
+`server/websocket.rs` for the P2P path), and a `match` cannot be read to produce
+the set it handles.
+
+So advertising core units today would mean two lists — the descriptors, and the
+match arms — kept in step by nothing. That is exactly the failure the derived
+design exists to remove, reintroduced in the one place the design has not yet
+reached. Three ways out, none chosen:
+
+1. **Restructure the core dispatch** into a registry keyed by wire type, the way
+   extensions already are, so derivation holds uniformly and the agent's message
+   loop becomes a lookup. The largest change and the only one that leaves the
+   guarantee intact.
+2. **A behavioural test instead of a structural one**: for each advertised core
+   wire type, dispatch a payload and assert the agent answered rather than
+   falling through to *unknown message type is ignored*. Weaker — it shows the
+   handler exists, not that the two lists are one — and several units need a
+   live tmux to answer at all.
+3. **Do not advertise core units yet.** The manifest keeps describing the
+   extension surface, and the gap is stated here, where a reader will look.
+
+Until one is chosen, an agent's manifest advertises `git.*` and `claude-code.*`
+and says nothing about the session and env protocols it has always served.
 
 ## Related
 
@@ -396,3 +432,9 @@ says nothing about the session and env protocols it has always served.
   copying Nession DTOs.
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
   client side.
+
+Reached from the root `CLAUDE.md` crate tree, where `nession-protocol` sits, and
+from that crate's own `lib.rs`. Deliberately **not** linked from
+`docs/design/README.md`: that tree's rule is one canonical owner per concept, and
+a wire protocol is not a product design concept — a link there would read as the
+design tree owning this one.

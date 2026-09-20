@@ -16,7 +16,7 @@ the design system, the source layout and the lint gate all use one language.
 | **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
 | **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
 | **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`Plugin.ts`, `types.ts`, `components/`, `contribution.tsx`) | `capabilities/<name>/` |
-| **platform** | How does the machinery work? | transport, runtime, attach, persistence — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin) | `platform/<domain>/` |
+| **platform** | How does the machinery work? | transport, runtime, attach, persistence, contract resolution — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin, `protocol/`) | `platform/<domain>/` |
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
 
@@ -58,8 +58,8 @@ PRINCIPLE #5 — a capability may contribute views and state but must not define
 global structure, so `capabilities/*` reaches the shell only through a
 contribution contract (`app/workspace/capabilities.ts` +
 `viewBindings.ts`), never by importing `app/` internals. And `platform/terminal-runtime`
-is React-free; that is a property of the module, not of `platform`, and the
-layer rule cannot enforce either.
+and `platform/protocol` are React-free; that is a property of the module, not of
+`platform`, and the layer rule cannot enforce either.
 
 ### Current layout → target owner
 
