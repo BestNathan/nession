@@ -1,3 +1,4 @@
+import { ProtocolDirectory } from '@/platform/protocol';
 import type {
   ConnectionState,
   PluginSurface,
@@ -56,6 +57,14 @@ interface Waiter {
 export class MockPluginSurfaceImpl implements MockPluginSurface {
   readonly sent: MockSentMessage[] = [];
   readonly requests: MockRequest[] = [];
+  /**
+   * Empty until a test fills it, which is the honest default: a surface that
+   * has seen no agent list is a connection whose targets are all Legacy Peers,
+   * so a capability under test sends no contract version — the pre-`#678`
+   * request. A test that wants resolution exercises it by publishing first,
+   * rather than getting it for free from a mock that guessed.
+   */
+  readonly protocols = new ProtocolDirectory();
 
   private state: ConnectionState;
   private readonly handlers = new Map<string, Set<(payload: unknown, raw: SocketMessage) => void>>();

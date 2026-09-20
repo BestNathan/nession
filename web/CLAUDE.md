@@ -77,7 +77,8 @@ src/
 │                          #   contribution.tsx (claude-code is the reference)
 ├── platform/              # transport, runtime, attach — and framework-level
 │                          #   code with no product semantics: socket/, server/,
-│                          #   explorer/, terminal-runtime/ (React-free),
+│                          #   protocol/ (React-free — consumer-side contract
+│                          #   resolution, #678), explorer/, terminal-runtime/ (React-free),
 │                          #   session-runtime/, attach/
 ├── shared/                # Shared layer: hooks/, lib/ (generic pure helpers),
 │                          #   markdown/. May import nothing above it.
