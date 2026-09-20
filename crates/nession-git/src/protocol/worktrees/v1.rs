@@ -4,7 +4,38 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::runtime::worktrees::Worktrees;
+
+/// One work tree, or one administrative entry for one that used to exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    /// Absolute path as git records it.
+    pub path: String,
+    /// The branch checked out there, without `refs/heads/`. `None` when the
+    /// entry is detached, bare, or has no `branch` line at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// This is the work tree the Session is sitting in.
+    pub current: bool,
+    pub detached: bool,
+    /// A bare repository has no work tree; git lists the repository itself.
+    pub bare: bool,
+    /// `git worktree lock` reason, when it was locked. An empty string means
+    /// locked with no reason given, which is a different sentence from unlocked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locked: Option<String>,
+    /// The directory is gone and the entry is waiting for `git worktree prune`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prunable: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktrees {
+    pub worktrees: Vec<Worktree>,
+    pub truncated_bytes: usize,
+    pub truncated: bool,
+}
 
 pub const WIRE: &str = "extension.git.worktrees";
 

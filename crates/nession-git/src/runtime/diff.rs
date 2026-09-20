@@ -11,23 +11,9 @@
 //! "everything is added" diff for a large or binary file runs straight into the
 //! byte cap, and the view already gives untracked entries no expander.
 
-use serde::Serialize;
-
+use crate::protocol::diff::v1::FileDiff;
 use crate::runtime::cmd::GitCmd;
 use crate::runtime::security::{self, MAX_DIFF_BYTES};
-
-#[derive(Debug, Clone, Serialize)]
-pub struct FileDiff {
-    pub path: String,
-    /// Unified diff text, already capped and lossily decoded for transport.
-    pub text: String,
-    /// True when the file is binary — git reports that instead of a diff.
-    pub binary: bool,
-    /// Bytes dropped by the cap. Non-zero means `text` is a prefix, and the UI
-    /// must say so (#750 C3).
-    pub truncated_bytes: usize,
-    pub truncated: bool,
-}
 
 impl FileDiff {
     /// Whether the diff carries no hunks, e.g. a mode-only change.

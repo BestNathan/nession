@@ -7,7 +7,6 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::runtime::status::RepoStatus;
 
 /// This contract's wire message type — its transport projection.
 ///
@@ -21,6 +20,59 @@ pub const WIRE: &str = "extension.git.status";
 pub struct StatusRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
+}
+
+/// `camelCase` because that is what the client reads, and every other field on
+/// this wire already is: the hand-written `truncatedBytes` beside it in
+/// `agent.rs`, and every single-word field whose spelling the case rule cannot
+/// touch. Without it this struct alone emitted `original_path`, so a renamed
+/// file's tooltip read `undefined → new-name` — a field that is only populated
+/// for renames, which is exactly the case no fixture exercised over the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFile {
+    pub path: String,
+    /// Present only for renames/copies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
+    pub kind: ChangeKind,
+    /// Staged in the index (porcelain `X`).
+    pub staged: bool,
+    /// Changed in the working tree (porcelain `Y`).
+    pub unstaged: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeKind {
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Unmerged,
+    Unknown,
+}
+
+/// A repository's state as of one `status` call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RepoStatus {
+    /// Branch name, or `None` when detached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub detached: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    /// Tracked paths, Modified/Added/Deleted/Renamed — #750's "Modified" group.
+    pub modified: Vec<ChangedFile>,
+    /// Untracked paths. No diff is available for these, which is why the view
+    /// gives them no expander (#750 SC2).
+    pub untracked: Vec<String>,
+    /// Unmerged paths, present during a conflicted merge/rebase/cherry-pick.
+    pub unmerged: Vec<String>,
 }
 
 /// What the answer carries when there is one.
