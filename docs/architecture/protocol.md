@@ -286,7 +286,21 @@ Generated output is deterministic, committed, never hand-edited, and CI
 regenerates and diffs it so drift fails the build.
 
 Product Capability UI state stays hand-written — only real wire contracts are
-generated.
+generated. `capabilities/git/types.ts` is the shape that leaves behind: 238
+lines of hand-copied shapes became alias declarations, and the plugins read
+`WIRE`, `PROTOCOL` and `VERSION` out of the generated files instead of writing
+the strings themselves.
+
+**What replacing them found is the argument for doing it.** Thirteen type errors
+appeared the moment the imports changed, one per place the copy had drifted from
+the contract — `truncatedBytes` where the wire says `truncated_bytes` (so a
+truncation notice had been rendering `NaN`), `reason` read off variants that do
+not have it, a two-variant union flattened into one interface, and a field the
+contract never had. None was visible by reading the mirror, because the mirror
+defined what the code was written against. One of them is worth keeping in mind
+when a test suite looks reassuring: a component test asserted the truncation
+notice said "4.0 KB" and **passed**, because the test's mock and the component
+agreed on a field name the agent never sends.
 
 It runs as `just codegen` and reads:
 
