@@ -1,4 +1,33 @@
+import type { ProtocolManifest } from '@/platform/protocol';
 import type { Agent, Session } from '@/types';
+
+/**
+ * What the fixture's agents advertise (`#678`).
+ *
+ * The three fixture agents run the same build, so they serve the same set —
+ * exactly as three real agents started from one image would. Declared here
+ * rather than left off because a fixture agent with no manifest is a **Legacy
+ * Peer**: every git and Claude Code request would go out naming no contract
+ * version, and the resolution path those capabilities now have would be
+ * exercised by nothing on the fixture route.
+ *
+ * The ids are canonical (`git.status`), not wire strings
+ * (`extension.git.status`) — the wire spelling is the projection, and this is
+ * the contract.
+ */
+const FIXTURE_MANIFEST: ProtocolManifest = {
+  provider: 'fixture',
+  protocols: {
+    'git.status': { versions: [1], wire: ['extension.git.status'] },
+    'git.diff': { versions: [1], wire: ['extension.git.diff'] },
+    'git.root': { versions: [1], wire: ['extension.git.root'] },
+    'git.log': { versions: [1], wire: ['extension.git.log'] },
+    'git.branches': { versions: [1], wire: ['extension.git.branches'] },
+    'git.worktrees': { versions: [1], wire: ['extension.git.worktrees'] },
+    'claude-code.list': { versions: [1], wire: ['extension.claude_code.list'] },
+    'claude-code.read': { versions: [1], wire: ['extension.claude_code.read'] },
+  },
+};
 
 /**
  * Deterministic fixture for the canonical screen (/fixture route).
@@ -28,6 +57,7 @@ export const FIXTURE_AGENTS: Agent[] = [
     session_count: 3,
     last_heartbeat: '2026-09-01T08:00:00Z',
     registered_at: '2026-08-01T00:00:00Z',
+    protocols: FIXTURE_MANIFEST,
   },
   {
     agent_id: 'macbook',
@@ -39,6 +69,7 @@ export const FIXTURE_AGENTS: Agent[] = [
     session_count: 2,
     last_heartbeat: '2026-09-01T08:00:00Z',
     registered_at: '2026-08-15T00:00:00Z',
+    protocols: FIXTURE_MANIFEST,
   },
   {
     agent_id: 'sg-prod',
@@ -50,6 +81,7 @@ export const FIXTURE_AGENTS: Agent[] = [
     session_count: 1,
     last_heartbeat: '2026-09-01T07:30:00Z',
     registered_at: '2026-08-20T00:00:00Z',
+    protocols: FIXTURE_MANIFEST,
   },
 ];
 

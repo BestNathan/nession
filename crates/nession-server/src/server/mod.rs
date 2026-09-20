@@ -1,3 +1,4 @@
+mod agent_view;
 pub mod client_registry;
 pub mod command_broker;
 mod handler;

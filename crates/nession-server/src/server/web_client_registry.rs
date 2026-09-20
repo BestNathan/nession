@@ -88,30 +88,13 @@ impl WebClientRegistry {
                 .unwrap_or_default()
                 .as_secs(),
             "payload": {
-                "agents": agents.iter().map(|a| {
-                    serde_json::json!({
-                        "agent_id": a.agent_id,
-                        "hostname": a.hostname,
-                        "display_name": a.display_name,
-                        "ip_address": a.ip_address,
-                        "port": a.port,
-                        "status": match a.status {
-                            crate::registry::AgentStatus::Online => "online",
-                            crate::registry::AgentStatus::Offline => "offline",
-                            crate::registry::AgentStatus::Degraded => "degraded",
-                        },
-                        "session_count": a.session_count,
-                        "active_sessions": a.active_sessions,
-                        "last_heartbeat": a.last_heartbeat.to_rfc3339(),
-                        "registered_at": a.registered_at.to_rfc3339(),
-                        "addresses": serde_json::to_value(&a.addresses).unwrap_or(serde_json::json!([])),
-                        "metadata": {
-                            "nession_version": a.metadata.nession_version,
-                            "tmux_version": a.metadata.tmux_version,
-                            "os_version": a.metadata.os_version,
-                        },
-                    })
-                }).collect::<Vec<_>>(),
+                // Not hand-built, and that is a fix rather than a tidy-up: this
+                // block used to be a second `json!` with its own field list, and
+                // it had already lost `protocols` and `metadata.image_tag`
+                // relative to `client.agents.list`. A client that had resolved a
+                // contract version from the list lost it on the next push. See
+                // `agent_view`.
+                "agents": agents.iter().map(super::agent_view::agent_json).collect::<Vec<_>>(),
             }
         });
         match serde_json::to_string(&payload) {

@@ -1,11 +1,32 @@
+import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type { ClaudeCodeListRequest, ClaudeCodeListResponse, ClaudeCodeReadRequest, ClaudeCodeReadResponse } from './types';
+
+/**
+ * The contract versions this client can read, per unit (`#678`, Phase 4).
+ *
+ * Note the ids: `claude-code.list`, not `claude_code.list`. The wire spells the
+ * family with an underscore and the canonical id does not — `ProtocolId`
+ * refuses them — so the two are genuinely different strings and this map is
+ * keyed by the id. Phase 5 replaces these hand-kept numbers with generated
+ * consumer types that carry the version beside the DTO.
+ */
+const CONSUMER_REQUIREMENTS = {
+  'claude-code.list': [1],
+  'claude-code.read': [1],
+} as const satisfies Record<string, readonly number[]>;
+
+type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
 
 /**
  * claude-code capability — the Claude Code config-browser extension
  * (`extension.claude_code.list|read`, issue #593). The request objects are
  * forwarded whole — the transport never sees individual fields. Wire strings
  * live only in this file; the typed API is what consumers import.
+ *
+ * `contract_version` is added on the way past, resolved per target against what
+ * that agent advertises — see the git plugin, which does the same and records
+ * why the resolution is per target rather than per connection.
  */
 export class ClaudeCodePlugin implements TransportPlugin {
   readonly name = 'claude-code';
@@ -33,7 +54,7 @@ export class ClaudeCodePlugin implements TransportPlugin {
   async claudeCodeList(req: ClaudeCodeListRequest): Promise<ClaudeCodeListResponse> {
     return this.requireConnection().request<ClaudeCodeListResponse>(
       'extension.claude_code.list',
-      { ...req },
+      this.addressed('claude-code.list', req.agent_id, req),
     );
   }
 
@@ -41,8 +62,32 @@ export class ClaudeCodePlugin implements TransportPlugin {
   async claudeCodeRead(req: ClaudeCodeReadRequest): Promise<ClaudeCodeReadResponse> {
     return this.requireConnection().request<ClaudeCodeReadResponse>(
       'extension.claude_code.read',
-      { ...req },
+      this.addressed('claude-code.read', req.agent_id, req),
     );
+  }
+
+  /**
+   * The payload to address `unit` to `agentId` with — see the git plugin.
+   *
+   * `req` is typed by what addressing needs from it rather than by the request
+   * interface: an `interface` has no index signature, so it is not assignable
+   * to the `Record<string, unknown>` the transport takes. Spreading it into a
+   * fresh object literal at the call below is what widens it, and that is the
+   * same `{ ...req }` the methods used before.
+   */
+  private addressed(
+    unit: ClaudeCodeUnit,
+    agentId: string,
+    req: { agent_id: string },
+  ): Record<string, unknown> {
+    const connection = this.requireConnection();
+    return addressedPayload({
+      unit,
+      target: agentId,
+      requirements: CONSUMER_REQUIREMENTS[unit],
+      manifest: connection.protocols.manifestFor(agentId),
+      payload: { ...req },
+    });
   }
 
   private requireConnection(): PluginSurface {

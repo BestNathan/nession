@@ -204,6 +204,42 @@ Everything else answers `protocol_not_advertised`. It is forbidden to guess a
 payload shape from a software version, to downgrade unconditionally when a
 manifest is missing, or to silently fall back semantically.
 
+### Resolve as a consumer
+
+A consumer declares what it can read, per unit, and resolves that against each
+target's manifest. Both halves exist and the Rust one is
+`nession-protocol`'s `select_version`:
+
+```text
+Consumer Requirements  ∩  Provider Manifest  →  the contract version to use
+```
+
+The Web's copy is `web/src/platform/protocol/` — `resolveContract`,
+`addressedPayload`, and the per-connection `ProtocolDirectory` that
+`product/agent` fills from `client.agents.list`. A capability declares its
+requirements next to the wire strings it already owns
+(`capabilities/git/GitPlugin.ts`), because the versions and the DTOs it reads
+them with are the same fact written twice, and today only a comment keeps them
+in step — `### Generate consumer types` is what removes the comment.
+
+Four rules, each of which is a way this goes wrong quietly:
+
+- **Per target, never per connection.** The Web reaches several agents through
+  one server, and one agent's versions say nothing about another's. Resolving
+  once and reusing it is the failure the design names outright.
+- **Highest common version**, not the target's newest. A consumer speaking v1
+  talking to a target offering v1 and v3 lands on v1.
+- **Versions are not contiguous.** `[1, 3]` is a legitimate answer set.
+- **Naming no version is not a refusal.** A target with no manifest is a Legacy
+  Peer and is addressed exactly as it was before any of this existed. A
+  consumer that *knows* it shares no version with the target must refuse
+  locally: sending nothing would be relayed as a Legacy Peer request and put a
+  v1-shaped payload in front of a v2-only target. The server's check is a second
+  boundary against a stale manifest, not the first one.
+
+A refusal names both sides, on the client exactly as on the server:
+`` `agent-a` offers `git.status` at [v2], which this client cannot read ``.
+
 ### Generate consumer types
 
 Rust contracts are the source of truth. Generated TS carries the DTOs, the
@@ -243,6 +279,10 @@ generated.
 | A router can name a protocol without knowing any provider | `ContractSupport.wire` — the projection is declared by the provider, not derived by the router |
 | A target is never asked for a wire type it does not carry | the Server's extension relay, gated on the target's manifest |
 | A peer without a manifest still works | the same gate, skipped when there is no manifest — a Legacy Peer, not a peer that said no |
+| A consumer resolves per target, not per connection | `ProtocolDirectory` is keyed by agent id and replaced wholesale by each agent-list snapshot |
+| A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed as a Legacy Peer |
+| Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
+| The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 
 ### Why the manifest carries the wire projection
 

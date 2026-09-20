@@ -1,3 +1,5 @@
+import type { ProtocolDirectory } from '@/platform/protocol';
+
 export interface SocketMessage {
   msg_type: string;
   id: string;
@@ -29,6 +31,21 @@ export interface PluginSurface {
   onBinary(handler: (data: ArrayBuffer) => void): () => void;
   waitForConnection(timeoutMs?: number): Promise<void>;
   onConnectionStateChange(handler: (state: ConnectionState) => void): () => void;
+  /**
+   * What each reachable target advertises (`#678`, Phase 4).
+   *
+   * It hangs off the surface because the surface is the only thing two plugins
+   * already share: `product/agent` fills it from `client.agents.list`, and
+   * `capabilities/git` and `capabilities/claude-code` read it to resolve a
+   * contract version per target before addressing a call. Routing it through
+   * the service instead would make either the socket layer or one capability
+   * depend on the other.
+   *
+   * One instance per service, so it is emptied with the connection — a manifest
+   * outliving the socket it was learned on is a stale answer waiting to be
+   * resolved against.
+   */
+  readonly protocols: ProtocolDirectory;
 }
 
 /**

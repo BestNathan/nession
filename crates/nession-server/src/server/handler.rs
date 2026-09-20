@@ -558,49 +558,8 @@ impl ConnectionHandler {
 
         let agents = self.agent_registry.list().await;
 
-        let agents_json: Vec<serde_json::Value> = agents
-            .iter()
-            .map(|a| {
-                json!({
-                    "agent_id": a.agent_id,
-                    "hostname": a.hostname,
-                    "display_name": a.display_name,
-                    "ip_address": a.ip_address,
-                    "port": a.port,
-                    "status": match a.status {
-                        AgentStatus::Online => "online",
-                        AgentStatus::Offline => "offline",
-                        AgentStatus::Degraded => "degraded",
-                    },
-                    "session_count": a.session_count,
-                    "active_sessions": a.active_sessions,
-                    "last_heartbeat": a.last_heartbeat.to_rfc3339(),
-                    "registered_at": a.registered_at.to_rfc3339(),
-                    "addresses": serde_json::to_value(&a.addresses).unwrap_or(json!([])),
-                    // What this agent reported it can serve (`#678`).
-                    //
-                    // Served from the agents list rather than a query of its
-                    // own: this is already the "discover agents" call the
-                    // design's data flow names, so a consumer resolving per
-                    // target has the manifests in hand without a second round
-                    // trip per agent.
-                    //
-                    // `null` — not an absent key, and not an empty object —
-                    // when the agent advertised none. A consumer must be able
-                    // to tell "this peer predates manifests" from "this peer
-                    // has an empty protocol set", because the design resolves
-                    // the first as a Legacy Peer and would resolve the second
-                    // as a peer that serves nothing.
-                    "protocols": a.protocol_manifest.as_ref(),
-                    "metadata": {
-                        "nession_version": a.metadata.nession_version,
-                        "tmux_version": a.metadata.tmux_version,
-                        "os_version": a.metadata.os_version,
-                        "image_tag": a.metadata.image_tag,
-                    },
-                })
-            })
-            .collect();
+        let agents_json: Vec<serde_json::Value> =
+            agents.iter().map(super::agent_view::agent_json).collect();
 
         info!(
             "Client requested agents list, returning {} agents",

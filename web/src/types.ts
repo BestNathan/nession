@@ -1,5 +1,7 @@
 // Type definitions for nession Web UI
 
+import type { ProtocolManifest } from '@/platform/protocol';
+
 export interface Agent {
   agent_id: string;
   hostname: string;
@@ -21,6 +23,19 @@ export interface Agent {
   /** Candidate P2P endpoints with server probe status (issue #51). Empty for
    *  legacy servers that don't yet send them in agents.list. */
   addresses?: ProbedAddress[];
+  /**
+   * What this agent reported it can serve (`#678`).
+   *
+   * `null` — not absent — for an agent that advertised none, which the design
+   * calls a **Legacy Peer** and relays to exactly as it did before manifests
+   * existed. `undefined` here means the server did not say, which is the same
+   * answer for the same reason; `ProtocolDirectory` collapses them, so nothing
+   * downstream has to care which it got.
+   *
+   * Type-only import: `ProtocolManifest` is the wire shape of a peer's protocol
+   * set, and this is the record that carries it. No runtime edge is created.
+   */
+  protocols?: ProtocolManifest | null;
 }
 
 export interface Session {
