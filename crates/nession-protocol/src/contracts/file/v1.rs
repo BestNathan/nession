@@ -65,3 +65,70 @@ pub struct FileCwdPayload {
 pub struct FileCwdResponse {
     pub path: String,
 }
+
+// --- The listing and the mutation acknowledgements ---
+//
+// Four responses that were `serde_json::json!({ … })` at the handler until this
+// family moved into the kernel. A fixed structure built inline is a contract
+// nothing can name: no consumer can be typed against it, and no codegen can see
+// it. `FileEntry` comes with them for the same reason `SessionInfo` came with
+// the session family — the agent's filesystem model *was* the wire shape.
+
+/// A filesystem entry returned by directory listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    /// Absolute path on the filesystem, for actions like "copy full path".
+    pub full_path: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: u64,
+    /// Inferred MIME type (from file extension). Directories use "inode/directory".
+    pub mime_type: String,
+    /// Whether the file is binary (non-text) content.
+    pub is_binary: bool,
+}
+
+/// Data returned by a file read operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileData {
+    pub path: String,
+    /// Base64-encoded file content.
+    pub content: String,
+    /// MIME type (e.g. "text/plain", "application/json").
+    pub mime_type: String,
+    /// Byte offset into the file where this chunk starts.
+    #[serde(default)]
+    pub offset: u64,
+    /// Total file size in bytes.
+    #[serde(default)]
+    pub total_size: u64,
+    /// Whether more bytes remain after this chunk.
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileListResponse {
+    pub entries: Vec<FileEntry>,
+}
+
+/// The acknowledgement `file.delete` and `file.create_dir` answer with.
+///
+/// `success` is always `true` when this is sent — a failure travels as the
+/// error envelope — but it is carried, not dropped: it is on the wire today,
+/// and a consumer reading it is not wrong to. Removing a field is a contract
+/// version, not a transcription.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMutationResponse {
+    pub path: String,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRenameResponse {
+    pub from: String,
+    pub to: String,
+    pub success: bool,
+}

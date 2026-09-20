@@ -202,6 +202,15 @@ impl ExtensionRegistry {
 
         // The core half, after the extension half so a collision can name which
         // side claimed the wire type first.
+        //
+        // `core` is the union of this agent's own dispatchers — one list per
+        // transport, both answering for this one provider — so the same unit
+        // legitimately arrives twice with the wire types each path uses. A wire
+        // claimed by two *units* is still a failure: the generated `match` would
+        // take the first arm and leave the second unreachable, which is the
+        // state the two derivations exist to make unconstructible. A wire
+        // claimed twice by the *same* unit is that unit being served on two
+        // transports, and both arms dispatch it.
         let mut core_wires: BTreeMap<String, String> = BTreeMap::new();
 
         for descriptor in core {
@@ -228,16 +237,20 @@ impl ExtensionRegistry {
                         });
                     }
 
-                    // Core against core. The generated `match` would take the
-                    // first arm and leave the second unreachable, so a unit
-                    // could be advertised and never dispatched — the failure
-                    // both derivations exist to make unconstructible.
+                    // Core against core. A repeat of the *same* unit is not a
+                    // collision: `session.capture_preview` is answered for the
+                    // central server and for a browser connecting directly, and
+                    // that is one contract on two transports — the framing
+                    // around it is the transport's, and the two payloads differ
+                    // only by the server's `request_id` correlation.
                     if let Some(first) = core_wires.insert(wire.clone(), unit.clone()) {
-                        return Err(RegistryError::DuplicateCoreWireType {
-                            wire: wire.clone(),
-                            first,
-                            second: unit,
-                        });
+                        if first != unit {
+                            return Err(RegistryError::DuplicateCoreWireType {
+                                wire: wire.clone(),
+                                first,
+                                second: unit,
+                            });
+                        }
                     }
                 }
             }
@@ -579,5 +592,66 @@ mod tests {
             matches!(err, RegistryError::DuplicateCoreWireType { .. }),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn one_unit_on_two_transports_composes_and_keeps_both_wire_types() {
+        // The agent's own dispatchers are one list per transport, and this is
+        // what the union of them looks like: the same unit arriving twice, once
+        // per path. Refusing it would make the agent refuse to start over a
+        // unit it serves correctly, which is why the check compares units and
+        // not wire types alone.
+        let registry = compose_with_core(
+            Vec::new(),
+            vec![
+                core("session.capture-preview", "session.capture_preview"),
+                core("session.capture-preview", "session.capture_preview"),
+            ],
+        )
+        .unwrap();
+
+        let manifest = registry.manifest();
+        let id = ProtocolId::new("session.capture-preview").unwrap();
+        assert!(manifest.offers(&id));
+        let support = &manifest.protocols[&id];
+        assert_eq!(
+            support.wire,
+            vec!["session.capture_preview".to_string()],
+            "one wire, named once even though two paths serve it"
+        );
+    }
+
+    #[test]
+    fn the_agent_composes_the_units_it_actually_serves() {
+        // The real composition, not a pair of `core(…)` stand-ins: the two
+        // invocations that dispatch the agent's own handlers, unioned the way
+        // `main` does. It fails if either list grows a unit the other cannot be
+        // composed with — which is how the `session.capture_preview` overlap
+        // was found.
+        let mut served = crate::connection::core_descriptors().unwrap();
+        served.extend(crate::server::websocket::p2p_descriptors().unwrap());
+
+        let registry = compose_with_core(Vec::new(), served).unwrap();
+        let manifest = registry.manifest();
+
+        // Served on both transports: one unit, both wire types.
+        let both = ProtocolId::new("session.create").unwrap();
+        assert!(manifest.offers(&both));
+        let mut wires = manifest.protocols[&both].wire.clone();
+        wires.sort();
+        assert_eq!(
+            wires,
+            vec![
+                "server.session.create".to_string(),
+                "session.create".to_string()
+            ],
+            "the relay wire and the direct wire are the same unit"
+        );
+
+        // Served only on the agent's own socket.
+        assert!(manifest.offers(&ProtocolId::new("terminal.input").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("file.read").unwrap()));
+        // Served only on the server connection.
+        assert!(manifest.offers(&ProtocolId::new("env.write").unwrap()));
     }
 }

@@ -26,6 +26,7 @@
 
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
+use crate::protocol::p2p_routes;
 use crate::tmux::manager::SessionManager;
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
@@ -206,7 +207,8 @@ pub use nession_protocol::contracts::session::v1::{
 // existing path in this crate keeps resolving.
 pub use nession_protocol::contracts::file::v1::{
     FileCreateDirPayload, FileCwdPayload, FileCwdResponse, FileDeletePayload, FileListPayload,
-    FileReadPayload, FileRenamePayload, FileWritePayload, FileWriteResponse,
+    FileListResponse, FileMutationResponse, FileReadPayload, FileRenamePayload, FileRenameResponse,
+    FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
     TerminalInputPayload, TerminalOutputPayload, TerminalResizePayload,
@@ -423,6 +425,830 @@ impl ServerHandle {
             .await
             .context("failed to send shutdown signal")
     }
+}
+
+/// Everything one peer-to-peer request needs in order to be answered.
+///
+/// The arms of the P2P dispatch used to close over thirteen locals of
+/// [`Self::handle_request`]. That is *why* the dispatch could not be
+/// declared: a declaration emits both the descriptor list and the
+/// dispatcher, and a dispatcher that needs thirteen things in scope cannot
+/// be a free function — while a generated one taking thirteen parameters
+/// trips `clippy::too_many_arguments`, and the fixes for that are an
+/// `#[allow]` or a threshold change, neither of which this repository
+/// permits. Bundling them makes it one parameter, which is the whole point.
+///
+/// The payload is deliberately **not** a field. Eighteen arms *consume* it
+/// (`serde_json::from_value`), so a borrowed field would put a clone on
+/// every one of them; it travels alongside instead, which also keeps the
+/// eventual dispatcher at three parameters.
+///
+/// Borrowed rather than owned: this lives for the length of one request and
+/// the caller already holds every one of these.
+pub(crate) struct P2pRequest<'a> {
+    /// The request id, echoed on the reply.
+    id: &'a str,
+    tmux: &'a Arc<SessionManager>,
+    sessions: &'a Arc<Mutex<SessionMap>>,
+    client_id: &'a Arc<Mutex<Option<String>>>,
+    sink: &'a Arc<Mutex<futures_util::stream::SplitSink<WebSocketStream<TcpOrTls>, WsMessage>>>,
+    default_working_dir: &'a str,
+    file_ops: &'a Arc<FileOps>,
+    listen_address: &'a str,
+    agent_id: &'a str,
+    /// Borrowed rather than held: `AttachMode` is not `Copy`, and taking it by
+    /// value would move it out of `handle_request` for every arm that still
+    /// names the local directly.
+    attach_mode: &'a AttachMode,
+    resize_tx: &'a mpsc::UnboundedSender<(String, u16, u16)>,
+}
+
+impl P2pRequest<'_> {
+    /// The error reply, which was a closure over `id` before it was a field.
+    ///
+    /// A method rather than a field holding a closure: a closure field would
+    /// have to be generic over its captures, and every arm calls this the
+    /// same way.
+    fn err(&self, code: &str, message: &str) -> String {
+        serde_json::to_string(&make_error(self.id, code, message)).unwrap_or_default()
+    }
+}
+
+// The peer-to-peer surface, declared once (`#678`). Invoked at module scope
+// rather than inside `handle_request` so the context type above and the units
+// below read together: this is what an agent answers on its own socket, and
+// `handle_request` is only the envelope parsing in front of it.
+p2p_routes! { ctx, msg_type, payload_value;
+            "session.list" => "session.list" => { match ctx.tmux.list_sessions().await {
+                Ok(sessions_list) => {
+                    let payload = SessionListResponse {
+                        sessions: sessions_list,
+                    };
+                    serde_json::to_string(&make_response(ctx.id, msg_types::OK, payload))
+                        .unwrap_or_default()
+                }
+                Err(e) => ctx.err("list_failed", &e.to_string()),
+            } }
+            "session.create" => "session.create" => {
+                let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                match ctx
+                    .tmux
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        ctx.default_working_dir,
+                        &[],
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        let resp = SessionCreateResponse { name: payload.name };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("create_failed", &e.to_string()),
+                }
+            }
+            "session.kill" => "session.kill" => {
+                let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                match ctx.tmux.kill_session(&payload.name).await {
+                    Ok(()) => {
+                        let resp = SessionKillResponse { name: payload.name };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("kill_failed", &e.to_string()),
+                }
+            }
+            "session.capture-preview" => "session.capture_preview" => {
+                info!(
+                    "agent: received session.capture_preview request id={}",
+                    ctx.id
+                );
+                let payload: SessionCapturePreviewPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!("agent: failed to parse SessionCapturePreviewPayload: {}", e);
+                            return ctx.err("parse_error", &e.to_string());
+                        }
+                    };
+                info!(
+                    "agent: capture_preview session_name={} lines={}",
+                    payload.session_name, payload.lines
+                );
+                if payload.lines == 0 {
+                    warn!("agent: capture_preview invalid lines=0");
+                    return ctx.err("invalid_lines", "lines must be > 0");
+                }
+                if payload.lines > 100_000 {
+                    warn!("agent: capture_preview lines too large: {}", payload.lines);
+                    return ctx.err("lines_too_large", "lines exceeds 100000 ceiling");
+                }
+                match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
+                    .await
+                {
+                    Ok(Some((bytes, cols, rows))) => {
+                        use base64::Engine;
+                        let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        info!(
+                            "agent: capture_preview success, ansi_b64 length={}, cols={}, rows={}",
+                            ansi_b64.len(),
+                            cols,
+                            rows
+                        );
+                        let resp = SessionCapturePreviewResponse {
+                            ansi_b64,
+                            cols: Some(cols),
+                            rows: Some(rows),
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Ok(None) => {
+                        info!("agent: capture_preview success but empty (no scrollback)");
+                        let resp = SessionCapturePreviewResponse {
+                            ansi_b64: String::new(),
+                            cols: Some(80),
+                            rows: Some(24),
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        warn!("agent: capture_preview failed: {}", e);
+                        ctx.err("capture_failed", &e.to_string())
+                    }
+                }
+            }
+            "client.attach" => "client.attach" => {
+                let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+
+                if matches!(ctx.attach_mode, AttachMode::Plain) {
+                    // ---- Plain PTY path (session-shared) ----
+                    let session_name = payload.session_name.clone();
+
+                    // Apply env snapshots before PTY creation (non-fatal).
+                    let env_warnings =
+                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await;
+                    if !env_warnings.is_empty() {
+                        for w in &env_warnings {
+                            warn!(
+                                "env set-environment warning for session {}: {w}",
+                                session_name
+                            );
+                        }
+                    }
+
+                    let mut sessions_guard = ctx.sessions.lock().await;
+
+                    if let Some(shared) = sessions_guard.get_mut(&session_name) {
+                        // Session already exists: add a new subscriber.
+                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                        shared.subscribers.push(tx);
+                        drop(sessions_guard);
+
+                        let sink_output = Arc::clone(ctx.sink);
+                        let session_name_output = session_name.clone();
+                        tokio::spawn(async move {
+                            while let Some(bytes) = rx.recv().await {
+                                use base64::Engine;
+                                let encoded =
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                let output = TerminalOutputPayload {
+                                    session_name: session_name_output.clone(),
+                                    data: encoded,
+                                };
+                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                if let Ok(json) = serde_json::to_string(&msg) {
+                                    let mut s = sink_output.lock().await;
+                                    if s.send(WsMessage::Text(json)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+
+                        let resp = ClientAttachResponse {
+                            session_name: payload.session_name,
+                        };
+                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+
+                    // Session doesn't exist yet: create PtySession + first subscriber.
+                    match crate::tmux::pty::PtySession::attach(
+                        &session_name,
+                        payload.width,
+                        payload.height,
+                    ) {
+                        Ok((pty_session, mut output_rx)) => {
+                            let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
+                            let attached = AttachedSession {
+                                backend: Box::new(pty_session),
+                                subscribers: vec![tx],
+                            };
+                            sessions_guard.insert(session_name.clone(), attached);
+                            drop(sessions_guard);
+
+                            // Spawn forwarding task for the first subscriber.
+                            let sink_first = Arc::clone(ctx.sink);
+                            let session_name_first = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = first_rx.recv().await {
+                                    use base64::Engine;
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let output = TerminalOutputPayload {
+                                        session_name: session_name_first.clone(),
+                                        data: encoded,
+                                    };
+                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let mut s = sink_first.lock().await;
+                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Spawn ONE broadcast task for this session.
+                            // It reads from output_rx and fans out to ALL subscribers.
+                            let sessions_clone = Arc::clone(ctx.sessions);
+                            let session_name_clone = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = output_rx.recv().await {
+                                    let mut guard = sessions_clone.lock().await;
+                                    if let Some(s) = guard.get_mut(&session_name_clone) {
+                                        // Broadcast to all subscribers; prune dead ones.
+                                        s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
+                                        if s.subscribers.is_empty() {
+                                            break;
+                                        }
+                                    } else {
+                                        break; // session removed
+                                    }
+                                }
+                            });
+
+                            let resp = ClientAttachResponse {
+                                session_name: payload.session_name,
+                            };
+                            serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default()
+                        }
+                        Err(e) => ctx.err("attach_failed", &e.to_string()),
+                    }
+                } else {
+                    // ---- Control mode path ----
+
+                    // Apply env snapshots before control-mode attach (non-fatal).
+                    let env_warnings =
+                        apply_env_snapshots(ctx.tmux, &payload.session_name, &payload.env_snapshots)
+                            .await;
+                    if !env_warnings.is_empty() {
+                        for w in &env_warnings {
+                            warn!(
+                                "env set-environment warning for session {}: {w}",
+                                payload.session_name
+                            );
+                        }
+                    }
+
+                    match crate::tmux::control::ControlModeSession::attach(
+                        &payload.session_name,
+                        payload.width,
+                        payload.height,
+                    )
+                    .await
+                    {
+                        Ok((session, mut output_rx, mut resize_rx)) => {
+                            let session_name = payload.session_name.clone();
+                            ctx.sessions.lock().await.insert(
+                                session_name.clone(),
+                                AttachedSession {
+                                    backend: Box::new(session),
+                                    subscribers: Vec::new(),
+                                },
+                            );
+
+                            // Capture scrollback BEFORE starting the live output stream.
+                            // Done synchronously (not spawned) to guarantee it arrives
+                            // before any live output from the control-mode attach.
+                            let scrollback_bytes =
+                                match crate::tmux::util::capture_scrollback(&session_name, 2000)
+                                    .await
+                                {
+                                    Ok(Some((bytes, _cols, _rows))) => bytes,
+                                    Ok(None) | Err(_) => Vec::new(),
+                                };
+
+                            // Send captured scrollback so xterm.js can pre-fill its buffer.
+                            if !scrollback_bytes.is_empty() {
+                                use base64::Engine;
+                                let encoded = base64::engine::general_purpose::STANDARD
+                                    .encode(&scrollback_bytes);
+                                let output = TerminalOutputPayload {
+                                    session_name: session_name.clone(),
+                                    data: encoded,
+                                };
+                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                if let Ok(json) = serde_json::to_string(&msg) {
+                                    let mut s = ctx.sink.lock().await;
+                                    let _ = s.send(WsMessage::Text(json)).await;
+                                }
+                            }
+
+                            // Spawn a background task that consumes the output
+                            // channel from the control-mode subprocess and
+                            // forwards bytes to the client as `terminal.output`
+                            // messages.
+                            let sink_clone = Arc::clone(ctx.sink);
+                            let session_name_clone = session_name.clone();
+                            tokio::spawn(async move {
+                                while let Some(bytes) = output_rx.recv().await {
+                                    use base64::Engine;
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    let output = TerminalOutputPayload {
+                                        session_name: session_name_clone.clone(),
+                                        data: encoded,
+                                    };
+                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let mut s = sink_clone.lock().await;
+                                        if s.send(WsMessage::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Channel closed — tmux subprocess exited or
+                                // session was closed by the detach handler.
+                            });
+
+                            // Spawn a second task that emits an initial
+                            // `terminal.resize` (so xterm.js can size its grid
+                            // to match the tmux pane before any output flows
+                            // in) and then forwards ongoing `%window-resize`
+                            // events on the same message type.
+                            //
+                            // Each resize is ALSO forwarded upstream to the
+                            // central server via `resize_tx` so relay clients
+                            // (browser → server → agent) receive the same size
+                            // updates through the server's `agent.terminal.resize`
+                            // broadcast. The upstream message carries the FULL
+                            // session id (`agent:name`); the P2P sink message
+                            // keeps the bare session name.
+                            let sink_resize = Arc::clone(ctx.sink);
+                            let session_name_resize = session_name.clone();
+                            let resize_tx_resize = ctx.resize_tx.clone();
+                            let agent_id_resize = ctx.agent_id.to_string();
+                            tokio::spawn(async move {
+                                // Initial resize: query tmux for the pane's
+                                // current size and forward it as one message.
+                                // Runs inside the spawned task so the attach
+                                // OK response reaches the client first.
+                                match query_window_size(&session_name_resize).await {
+                                    Ok((cols, rows)) => {
+                                        send_terminal_resize_msg(
+                                            &sink_resize,
+                                            &session_name_resize,
+                                            cols,
+                                            rows,
+                                        )
+                                        .await;
+                                    }
+                                    Err(e) => warn!(
+                                        "failed to query initial window size for {}: {:#}",
+                                        session_name_resize, e
+                                    ),
+                                }
+                                while let Some((cols, rows)) = resize_rx.recv().await {
+                                    let full_id =
+                                        format!("{agent_id_resize}:{session_name_resize}");
+                                    let _ = resize_tx_resize.send((full_id, cols, rows));
+                                    if !send_terminal_resize_msg(
+                                        &sink_resize,
+                                        &session_name_resize,
+                                        cols,
+                                        rows,
+                                    )
+                                    .await
+                                    {
+                                        break;
+                                    }
+                                }
+                            });
+
+                            let resp = ClientAttachResponse {
+                                session_name: payload.session_name,
+                            };
+                            serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default()
+                        }
+                        Err(e) => ctx.err("attach_failed", &e.to_string()),
+                    }
+                }
+            }
+            "client.detach" => "client.detach" => {
+                let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let mut sessions_guard = ctx.sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
+                    Some(session) => {
+                        // Drop this client's dead subscriber senders. When no
+                        // live subscribers remain (always true for control
+                        // mode, which keeps none), close the backend and
+                        // remove the session so its tmux child is terminated.
+                        session.subscribers.retain(|tx| !tx.is_closed());
+                        if session.subscribers.is_empty() {
+                            if let Some(mut removed) = sessions_guard.remove(&payload.session_name)
+                            {
+                                if let Err(e) = removed.backend.close().await {
+                                    warn!(
+                                        "Error closing session {}: {:#}",
+                                        payload.session_name, e
+                                    );
+                                }
+                            }
+                        }
+                        let resp = ClientDetachResponse {
+                            session_name: payload.session_name,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    None => ctx.err(
+                        "not_attached",
+                        &format!("not attached to session: {}", payload.session_name),
+                    ),
+                }
+            }
+            "terminal.input" => "terminal.input" => {
+                let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                use base64::Engine;
+                let data = match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
+                    Ok(d) => d,
+                    Err(e) => return ctx.err("decode_error", &e.to_string()),
+                };
+                let mut sessions_guard = ctx.sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
+                    Some(session) => match session.backend.write_input(&data).await {
+                        Ok(_) => serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default(),
+                        Err(e) => ctx.err("write_error", &e.to_string()),
+                    },
+                    None => ctx.err(
+                        "not_attached",
+                        &format!("not attached to session: {}", payload.session_name),
+                    ),
+                }
+            }
+            "terminal.resize" => "terminal.resize" => {
+                let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let mut sessions_guard = ctx.sessions.lock().await;
+                match sessions_guard.get_mut(&payload.session_name) {
+                    Some(session) => match session.backend.resize(payload.cols, payload.rows).await
+                    {
+                        Ok(_) => serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default(),
+                        Err(e) => ctx.err("resize_error", &e.to_string()),
+                    },
+                    None => ctx.err(
+                        "not_attached",
+                        &format!("not attached to session: {}", payload.session_name),
+                    ),
+                }
+            }
+
+            // --- Web UI compatibility handlers ---
+            "client.auth" => "client.auth" => {
+                let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!("Invalid client.auth payload: {e}");
+                        let resp = AuthResponsePayload {
+                            status: "error".to_string(),
+                            message: format!("invalid payload: {e}"),
+                            client_id: String::new(),
+                        };
+                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+
+                // Use provided client_id or generate a new one
+                let assigned_client_id = payload
+                    .client_id
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                // Store the client_id for this connection
+                {
+                    let mut cid = ctx.client_id.lock().await;
+                    *cid = Some(assigned_client_id.clone());
+                }
+
+                let resp = AuthResponsePayload {
+                    status: "success".to_string(),
+                    message: "ok".to_string(),
+                    client_id: assigned_client_id,
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
+            }
+            "client.agents.list" => "client.agents.list" => { match ctx.tmux.list_sessions().await {
+                Ok(sessions_list) => {
+                    let hostname = nession_common::system::get_hostname();
+                    let (ip, port) = parse_listen_address(ctx.listen_address);
+                    let agent = WebAgentInfo {
+                        agent_id: ctx.agent_id.to_string(),
+                        hostname,
+                        ip_address: ip,
+                        port,
+                        status: "online".to_string(),
+                        session_count: u32::try_from(sessions_list.len()).unwrap_or(0),
+                        last_heartbeat: chrono::Utc::now().to_rfc3339(),
+                    };
+                    let resp = WebAgentsListResponse {
+                        agents: vec![agent],
+                    };
+                    serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                        .unwrap_or_default()
+                }
+                Err(e) => ctx.err("list_failed", &e.to_string()),
+            } }
+            "client.sessions.list" => "client.sessions.list" => { match ctx.tmux.list_sessions().await {
+                Ok(sessions_list) => {
+                    let sessions: Vec<WebSessionInfo> = sessions_list
+                        .into_iter()
+                        .map(|s| {
+                            let session_id = format!("{}:{}", ctx.agent_id, s.name);
+                            WebSessionInfo {
+                                session_id,
+                                agent_id: ctx.agent_id.to_string(),
+                                session_name: s.name,
+                                status: if s.attached_clients > 0 {
+                                    "active".to_string()
+                                } else {
+                                    "detached".to_string()
+                                },
+                                window_count: s.window_count,
+                                attached_clients: s.attached_clients,
+                                last_activity: chrono::Utc::now().to_rfc3339(),
+                            }
+                        })
+                        .collect();
+                    let resp = WebSessionsListResponse { sessions };
+                    serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                        .unwrap_or_default()
+                }
+                Err(e) => ctx.err("list_failed", &e.to_string()),
+            } }
+            "client.session.attach" => "client.session.attach" => {
+                let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let session_name = extract_session_name(&payload.session_id);
+                let resp = WebAttachInfo {
+                    mode: "p2p".to_string(),
+                    session_id: payload.session_id,
+                    session_name,
+                    agent_address: ctx.listen_address.to_string(),
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                    .unwrap_or_default()
+            }
+            "client.session.create" => "client.session.create" => {
+                let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let resp = WebSessionCreateResponse {
+                            success: false,
+                            session_id: None,
+                            error: Some(e.to_string()),
+                        };
+                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+                match ctx
+                    .tmux
+                    .create_session(
+                        &payload.name,
+                        payload.width,
+                        payload.height,
+                        ctx.default_working_dir,
+                        &[],
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        let session_id = format!("{}:{}", ctx.agent_id, payload.name);
+                        let resp = WebSessionCreateResponse {
+                            success: true,
+                            session_id: Some(session_id),
+                            error: None,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        let resp = WebSessionCreateResponse {
+                            success: false,
+                            session_id: None,
+                            error: Some(e.to_string()),
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                }
+            }
+            "client.session.kill" => "client.session.kill" => {
+                let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let resp = WebSessionKillResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                        };
+                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default();
+                    }
+                };
+                let session_name = extract_session_name(&payload.session_id);
+                match ctx.tmux.kill_session(&session_name).await {
+                    Ok(()) => {
+                        let resp = WebSessionKillResponse {
+                            success: true,
+                            error: None,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => {
+                        let resp = WebSessionKillResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                }
+            }
+
+            // --- Keepalive ---
+            "keepalive.ping" => "keepalive.ping" => {
+                serde_json::to_string(&make_response(ctx.id, msg_types::KEEPALIVE_PONG, ()))
+                    .unwrap_or_default()
+            }
+
+            // --- File operations ---
+            "file.list" => "file.list" => {
+                let payload: FileListPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                match ctx.file_ops.list_dir(&payload.path).await {
+                    Ok(entries) => {
+                        let resp = FileListResponse { entries };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
+                }
+            }
+            "file.read" => "file.read" => {
+                let payload: FileReadPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                match ctx
+                    .file_ops
+                    .read_file(&payload.path, payload.offset, payload.limit)
+                    .await
+                {
+                    Ok(data) => serde_json::to_string(&make_response(ctx.id, msg_types::OK, data))
+                        .unwrap_or_default(),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("permission_denied") {
+                            ctx.err("permission_denied", &msg)
+                        } else if msg.contains("is_directory") {
+                            ctx.err("is_directory", &msg)
+                        } else if msg.contains("file_too_large") {
+                            ctx.err("file_too_large", &msg)
+                        } else {
+                            ctx.err("io_error", &msg)
+                        }
+                    }
+                }
+            }
+            "file.write" => "file.write" => {
+                let payload: FileWritePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match ctx.file_ops.write_file(&payload.path, &payload.content).await {
+                    Ok(written) => {
+                        let resp = FileWriteResponse { path, written };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("write_error", &e.to_string()),
+                }
+            }
+            "file.delete" => "file.delete" => {
+                let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match ctx.file_ops.delete(&payload.path, payload.recursive).await {
+                    Ok(()) => {
+                        let resp = FileMutationResponse {
+                            path,
+                            success: true,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
+                }
+            }
+            "file.create-dir" => "file.create_dir" => {
+                let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let path = payload.path.clone();
+                match ctx.file_ops.create_dir(&payload.path).await {
+                    Ok(()) => {
+                        let resp = FileMutationResponse {
+                            path,
+                            success: true,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
+                }
+            }
+            "file.rename" => "file.rename" => {
+                let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let from = payload.from.clone();
+                let to = payload.to.clone();
+                match ctx.file_ops.rename(&payload.from, &payload.to).await {
+                    Ok(()) => {
+                        let resp = FileRenameResponse {
+                            from,
+                            to,
+                            success: true,
+                        };
+                        serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                            .unwrap_or_default()
+                    }
+                    Err(e) => ctx.err("rename_failed", &e.to_string()),
+                }
+            }
+            "file.cwd" => "file.cwd" => {
+                let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let session_name = extract_session_name(&payload.session_id);
+                match ctx.tmux.get_session_cwd(&session_name).await {
+                    Ok(abs_path) => match ctx.file_ops.relative_path(&abs_path) {
+                        Ok(rel_path) => {
+                            let resp = FileCwdResponse { path: rel_path };
+                            serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default()
+                        }
+                        Err(e) => ctx.err("cwd_failed", &e.to_string()),
+                    },
+                    Err(e) => ctx.err("cwd_failed", &e.to_string()),
+                }
+            }
 }
 
 impl AgentServer {
@@ -748,790 +1574,24 @@ impl AgentServer {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        // Helper for building error responses without repeating the
-        // serde dance.
-        let err = |code: &str, msg: &str| -> String {
-            serde_json::to_string(&make_error(&id, code, msg)).unwrap_or_default()
+        // Everything an arm needs to read, borrowed once. Before this the arms
+        // named the locals directly, which is how the handler grew a closure
+        // per arm to reach `id`; the struct is the same borrows with names.
+        let ctx = P2pRequest {
+            id: &id,
+            tmux: &tmux,
+            sessions: &sessions,
+            client_id: &client_id,
+            sink: &sink,
+            default_working_dir,
+            file_ops: &file_ops,
+            listen_address,
+            agent_id,
+            attach_mode: &attach_mode,
+            resize_tx: &resize_tx,
         };
 
-        match msg_type {
-            msg_types::SESSION_LIST => match tmux.list_sessions().await {
-                Ok(sessions_list) => {
-                    let payload = SessionListResponse {
-                        sessions: sessions_list,
-                    };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, payload))
-                        .unwrap_or_default()
-                }
-                Err(e) => err("list_failed", &e.to_string()),
-            },
-
-            msg_types::SESSION_CREATE => {
-                let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                match tmux
-                    .create_session(
-                        &payload.name,
-                        payload.width,
-                        payload.height,
-                        default_working_dir,
-                        &[],
-                    )
-                    .await
-                {
-                    Ok(()) => {
-                        let resp = SessionCreateResponse { name: payload.name };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("create_failed", &e.to_string()),
-                }
-            }
-
-            msg_types::SESSION_KILL => {
-                let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                match tmux.kill_session(&payload.name).await {
-                    Ok(()) => {
-                        let resp = SessionKillResponse { name: payload.name };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("kill_failed", &e.to_string()),
-                }
-            }
-
-            msg_types::SESSION_CAPTURE_PREVIEW => {
-                info!("agent: received session.capture_preview request id={}", id);
-                let payload: SessionCapturePreviewPayload =
-                    match serde_json::from_value(payload_value) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            warn!("agent: failed to parse SessionCapturePreviewPayload: {}", e);
-                            return err("parse_error", &e.to_string());
-                        }
-                    };
-                info!(
-                    "agent: capture_preview session_name={} lines={}",
-                    payload.session_name, payload.lines
-                );
-                if payload.lines == 0 {
-                    warn!("agent: capture_preview invalid lines=0");
-                    return err("invalid_lines", "lines must be > 0");
-                }
-                if payload.lines > 100_000 {
-                    warn!("agent: capture_preview lines too large: {}", payload.lines);
-                    return err("lines_too_large", "lines exceeds 100000 ceiling");
-                }
-                match crate::tmux::util::capture_scrollback(&payload.session_name, payload.lines)
-                    .await
-                {
-                    Ok(Some((bytes, cols, rows))) => {
-                        use base64::Engine;
-                        let ansi_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        info!(
-                            "agent: capture_preview success, ansi_b64 length={}, cols={}, rows={}",
-                            ansi_b64.len(),
-                            cols,
-                            rows
-                        );
-                        let resp = SessionCapturePreviewResponse {
-                            ansi_b64,
-                            cols: Some(cols),
-                            rows: Some(rows),
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Ok(None) => {
-                        info!("agent: capture_preview success but empty (no scrollback)");
-                        let resp = SessionCapturePreviewResponse {
-                            ansi_b64: String::new(),
-                            cols: Some(80),
-                            rows: Some(24),
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => {
-                        warn!("agent: capture_preview failed: {}", e);
-                        err("capture_failed", &e.to_string())
-                    }
-                }
-            }
-
-            msg_types::CLIENT_ATTACH => {
-                let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-
-                if matches!(attach_mode, AttachMode::Plain) {
-                    // ---- Plain PTY path (session-shared) ----
-                    let session_name = payload.session_name.clone();
-
-                    // Apply env snapshots before PTY creation (non-fatal).
-                    let env_warnings =
-                        apply_env_snapshots(&tmux, &session_name, &payload.env_snapshots).await;
-                    if !env_warnings.is_empty() {
-                        for w in &env_warnings {
-                            warn!(
-                                "env set-environment warning for session {}: {w}",
-                                session_name
-                            );
-                        }
-                    }
-
-                    let mut sessions_guard = sessions.lock().await;
-
-                    if let Some(shared) = sessions_guard.get_mut(&session_name) {
-                        // Session already exists: add a new subscriber.
-                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                        shared.subscribers.push(tx);
-                        drop(sessions_guard);
-
-                        let sink_output = Arc::clone(&sink);
-                        let session_name_output = session_name.clone();
-                        tokio::spawn(async move {
-                            while let Some(bytes) = rx.recv().await {
-                                use base64::Engine;
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name_output.clone(),
-                                    data: encoded,
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = sink_output.lock().await;
-                                    if s.send(WsMessage::Text(json)).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-
-                        let resp = ClientAttachResponse {
-                            session_name: payload.session_name,
-                        };
-                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default();
-                    }
-
-                    // Session doesn't exist yet: create PtySession + first subscriber.
-                    match crate::tmux::pty::PtySession::attach(
-                        &session_name,
-                        payload.width,
-                        payload.height,
-                    ) {
-                        Ok((pty_session, mut output_rx)) => {
-                            let (tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
-                            let attached = AttachedSession {
-                                backend: Box::new(pty_session),
-                                subscribers: vec![tx],
-                            };
-                            sessions_guard.insert(session_name.clone(), attached);
-                            drop(sessions_guard);
-
-                            // Spawn forwarding task for the first subscriber.
-                            let sink_first = Arc::clone(&sink);
-                            let session_name_first = session_name.clone();
-                            tokio::spawn(async move {
-                                while let Some(bytes) = first_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_first.clone(),
-                                        data: encoded,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_first.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            });
-
-                            // Spawn ONE broadcast task for this session.
-                            // It reads from output_rx and fans out to ALL subscribers.
-                            let sessions_clone = Arc::clone(&sessions);
-                            let session_name_clone = session_name.clone();
-                            tokio::spawn(async move {
-                                while let Some(bytes) = output_rx.recv().await {
-                                    let mut guard = sessions_clone.lock().await;
-                                    if let Some(s) = guard.get_mut(&session_name_clone) {
-                                        // Broadcast to all subscribers; prune dead ones.
-                                        s.subscribers.retain(|tx| tx.send(bytes.clone()).is_ok());
-                                        if s.subscribers.is_empty() {
-                                            break;
-                                        }
-                                    } else {
-                                        break; // session removed
-                                    }
-                                }
-                            });
-
-                            let resp = ClientAttachResponse {
-                                session_name: payload.session_name,
-                            };
-                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                                .unwrap_or_default()
-                        }
-                        Err(e) => err("attach_failed", &e.to_string()),
-                    }
-                } else {
-                    // ---- Control mode path ----
-
-                    // Apply env snapshots before control-mode attach (non-fatal).
-                    let env_warnings =
-                        apply_env_snapshots(&tmux, &payload.session_name, &payload.env_snapshots)
-                            .await;
-                    if !env_warnings.is_empty() {
-                        for w in &env_warnings {
-                            warn!(
-                                "env set-environment warning for session {}: {w}",
-                                payload.session_name
-                            );
-                        }
-                    }
-
-                    match crate::tmux::control::ControlModeSession::attach(
-                        &payload.session_name,
-                        payload.width,
-                        payload.height,
-                    )
-                    .await
-                    {
-                        Ok((session, mut output_rx, mut resize_rx)) => {
-                            let session_name = payload.session_name.clone();
-                            sessions.lock().await.insert(
-                                session_name.clone(),
-                                AttachedSession {
-                                    backend: Box::new(session),
-                                    subscribers: Vec::new(),
-                                },
-                            );
-
-                            // Capture scrollback BEFORE starting the live output stream.
-                            // Done synchronously (not spawned) to guarantee it arrives
-                            // before any live output from the control-mode attach.
-                            let scrollback_bytes =
-                                match crate::tmux::util::capture_scrollback(&session_name, 2000)
-                                    .await
-                                {
-                                    Ok(Some((bytes, _cols, _rows))) => bytes,
-                                    Ok(None) | Err(_) => Vec::new(),
-                                };
-
-                            // Send captured scrollback so xterm.js can pre-fill its buffer.
-                            if !scrollback_bytes.is_empty() {
-                                use base64::Engine;
-                                let encoded = base64::engine::general_purpose::STANDARD
-                                    .encode(&scrollback_bytes);
-                                let output = TerminalOutputPayload {
-                                    session_name: session_name.clone(),
-                                    data: encoded,
-                                };
-                                let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let mut s = sink.lock().await;
-                                    let _ = s.send(WsMessage::Text(json)).await;
-                                }
-                            }
-
-                            // Spawn a background task that consumes the output
-                            // channel from the control-mode subprocess and
-                            // forwards bytes to the client as `terminal.output`
-                            // messages.
-                            let sink_clone = Arc::clone(&sink);
-                            let session_name_clone = session_name.clone();
-                            tokio::spawn(async move {
-                                while let Some(bytes) = output_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_clone.clone(),
-                                        data: encoded,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        let mut s = sink_clone.lock().await;
-                                        if s.send(WsMessage::Text(json)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Channel closed — tmux subprocess exited or
-                                // session was closed by the detach handler.
-                            });
-
-                            // Spawn a second task that emits an initial
-                            // `terminal.resize` (so xterm.js can size its grid
-                            // to match the tmux pane before any output flows
-                            // in) and then forwards ongoing `%window-resize`
-                            // events on the same message type.
-                            //
-                            // Each resize is ALSO forwarded upstream to the
-                            // central server via `resize_tx` so relay clients
-                            // (browser → server → agent) receive the same size
-                            // updates through the server's `agent.terminal.resize`
-                            // broadcast. The upstream message carries the FULL
-                            // session id (`agent:name`); the P2P sink message
-                            // keeps the bare session name.
-                            let sink_resize = Arc::clone(&sink);
-                            let session_name_resize = session_name.clone();
-                            let resize_tx_resize = resize_tx.clone();
-                            let agent_id_resize = agent_id.to_string();
-                            tokio::spawn(async move {
-                                // Initial resize: query tmux for the pane's
-                                // current size and forward it as one message.
-                                // Runs inside the spawned task so the attach
-                                // OK response reaches the client first.
-                                match query_window_size(&session_name_resize).await {
-                                    Ok((cols, rows)) => {
-                                        send_terminal_resize_msg(
-                                            &sink_resize,
-                                            &session_name_resize,
-                                            cols,
-                                            rows,
-                                        )
-                                        .await;
-                                    }
-                                    Err(e) => warn!(
-                                        "failed to query initial window size for {}: {:#}",
-                                        session_name_resize, e
-                                    ),
-                                }
-                                while let Some((cols, rows)) = resize_rx.recv().await {
-                                    let full_id =
-                                        format!("{agent_id_resize}:{session_name_resize}");
-                                    let _ = resize_tx_resize.send((full_id, cols, rows));
-                                    if !send_terminal_resize_msg(
-                                        &sink_resize,
-                                        &session_name_resize,
-                                        cols,
-                                        rows,
-                                    )
-                                    .await
-                                    {
-                                        break;
-                                    }
-                                }
-                            });
-
-                            let resp = ClientAttachResponse {
-                                session_name: payload.session_name,
-                            };
-                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                                .unwrap_or_default()
-                        }
-                        Err(e) => err("attach_failed", &e.to_string()),
-                    }
-                }
-            }
-
-            msg_types::CLIENT_DETACH => {
-                let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let mut sessions_guard = sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => {
-                        // Drop this client's dead subscriber senders. When no
-                        // live subscribers remain (always true for control
-                        // mode, which keeps none), close the backend and
-                        // remove the session so its tmux child is terminated.
-                        session.subscribers.retain(|tx| !tx.is_closed());
-                        if session.subscribers.is_empty() {
-                            if let Some(mut removed) = sessions_guard.remove(&payload.session_name)
-                            {
-                                if let Err(e) = removed.backend.close().await {
-                                    warn!(
-                                        "Error closing session {}: {:#}",
-                                        payload.session_name, e
-                                    );
-                                }
-                            }
-                        }
-                        let resp = ClientDetachResponse {
-                            session_name: payload.session_name,
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    None => err(
-                        "not_attached",
-                        &format!("not attached to session: {}", payload.session_name),
-                    ),
-                }
-            }
-
-            msg_types::TERMINAL_INPUT => {
-                let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                use base64::Engine;
-                let data = match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
-                    Ok(d) => d,
-                    Err(e) => return err("decode_error", &e.to_string()),
-                };
-                let mut sessions_guard = sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.backend.write_input(&data).await {
-                        Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
-                        Err(e) => err("write_error", &e.to_string()),
-                    },
-                    None => err(
-                        "not_attached",
-                        &format!("not attached to session: {}", payload.session_name),
-                    ),
-                }
-            }
-
-            msg_types::TERMINAL_RESIZE => {
-                let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let mut sessions_guard = sessions.lock().await;
-                match sessions_guard.get_mut(&payload.session_name) {
-                    Some(session) => match session.backend.resize(payload.cols, payload.rows).await
-                    {
-                        Ok(_) => serde_json::to_string(&make_ok(&id, "ok")).unwrap_or_default(),
-                        Err(e) => err("resize_error", &e.to_string()),
-                    },
-                    None => err(
-                        "not_attached",
-                        &format!("not attached to session: {}", payload.session_name),
-                    ),
-                }
-            }
-
-            // --- Web UI compatibility handlers ---
-            msg_types::CLIENT_AUTH => {
-                let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!("Invalid client.auth payload: {e}");
-                        let resp = AuthResponsePayload {
-                            status: "error".to_string(),
-                            message: format!("invalid payload: {e}"),
-                            client_id: String::new(),
-                        };
-                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default();
-                    }
-                };
-
-                // Use provided client_id or generate a new one
-                let assigned_client_id = payload
-                    .client_id
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-                // Store the client_id for this connection
-                {
-                    let mut cid = client_id.lock().await;
-                    *cid = Some(assigned_client_id.clone());
-                }
-
-                let resp = AuthResponsePayload {
-                    status: "success".to_string(),
-                    message: "ok".to_string(),
-                    client_id: assigned_client_id,
-                };
-                serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
-            }
-
-            msg_types::CLIENT_AGENTS_LIST => match tmux.list_sessions().await {
-                Ok(sessions_list) => {
-                    let hostname = nession_common::system::get_hostname();
-                    let (ip, port) = parse_listen_address(listen_address);
-                    let agent = WebAgentInfo {
-                        agent_id: agent_id.to_string(),
-                        hostname,
-                        ip_address: ip,
-                        port,
-                        status: "online".to_string(),
-                        session_count: u32::try_from(sessions_list.len()).unwrap_or(0),
-                        last_heartbeat: chrono::Utc::now().to_rfc3339(),
-                    };
-                    let resp = WebAgentsListResponse {
-                        agents: vec![agent],
-                    };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                        .unwrap_or_default()
-                }
-                Err(e) => err("list_failed", &e.to_string()),
-            },
-
-            msg_types::CLIENT_SESSIONS_LIST => match tmux.list_sessions().await {
-                Ok(sessions_list) => {
-                    let sessions: Vec<WebSessionInfo> = sessions_list
-                        .into_iter()
-                        .map(|s| {
-                            let session_id = format!("{}:{}", agent_id, s.name);
-                            WebSessionInfo {
-                                session_id,
-                                agent_id: agent_id.to_string(),
-                                session_name: s.name,
-                                status: if s.attached_clients > 0 {
-                                    "active".to_string()
-                                } else {
-                                    "detached".to_string()
-                                },
-                                window_count: s.window_count,
-                                attached_clients: s.attached_clients,
-                                last_activity: chrono::Utc::now().to_rfc3339(),
-                            }
-                        })
-                        .collect();
-                    let resp = WebSessionsListResponse { sessions };
-                    serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                        .unwrap_or_default()
-                }
-                Err(e) => err("list_failed", &e.to_string()),
-            },
-
-            msg_types::CLIENT_SESSION_ATTACH => {
-                let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let session_name = extract_session_name(&payload.session_id);
-                let resp = WebAttachInfo {
-                    mode: "p2p".to_string(),
-                    session_id: payload.session_id,
-                    session_name,
-                    agent_address: listen_address.to_string(),
-                };
-                serde_json::to_string(&make_response(&id, msg_types::OK, resp)).unwrap_or_default()
-            }
-
-            msg_types::CLIENT_SESSION_CREATE => {
-                let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let resp = WebSessionCreateResponse {
-                            success: false,
-                            session_id: None,
-                            error: Some(e.to_string()),
-                        };
-                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default();
-                    }
-                };
-                match tmux
-                    .create_session(
-                        &payload.name,
-                        payload.width,
-                        payload.height,
-                        default_working_dir,
-                        &[],
-                    )
-                    .await
-                {
-                    Ok(()) => {
-                        let session_id = format!("{}:{}", agent_id, payload.name);
-                        let resp = WebSessionCreateResponse {
-                            success: true,
-                            session_id: Some(session_id),
-                            error: None,
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => {
-                        let resp = WebSessionCreateResponse {
-                            success: false,
-                            session_id: None,
-                            error: Some(e.to_string()),
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                }
-            }
-
-            msg_types::CLIENT_SESSION_KILL => {
-                let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let resp = WebSessionKillResponse {
-                            success: false,
-                            error: Some(e.to_string()),
-                        };
-                        return serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default();
-                    }
-                };
-                let session_name = extract_session_name(&payload.session_id);
-                match tmux.kill_session(&session_name).await {
-                    Ok(()) => {
-                        let resp = WebSessionKillResponse {
-                            success: true,
-                            error: None,
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => {
-                        let resp = WebSessionKillResponse {
-                            success: false,
-                            error: Some(e.to_string()),
-                        };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                }
-            }
-
-            // --- Keepalive ---
-            msg_types::KEEPALIVE_PING => {
-                serde_json::to_string(&make_response(&id, msg_types::KEEPALIVE_PONG, ()))
-                    .unwrap_or_default()
-            }
-
-            // --- File operations ---
-            msg_types::FILE_LIST => {
-                let payload: FileListPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                match file_ops.list_dir(&payload.path).await {
-                    Ok(entries) => {
-                        let resp = serde_json::json!({ "entries": entries });
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("list_failed", &format_error_chain(&e)),
-                }
-            }
-
-            msg_types::FILE_READ => {
-                let payload: FileReadPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                match file_ops
-                    .read_file(&payload.path, payload.offset, payload.limit)
-                    .await
-                {
-                    Ok(data) => serde_json::to_string(&make_response(&id, msg_types::OK, data))
-                        .unwrap_or_default(),
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("permission_denied") {
-                            err("permission_denied", &msg)
-                        } else if msg.contains("is_directory") {
-                            err("is_directory", &msg)
-                        } else if msg.contains("file_too_large") {
-                            err("file_too_large", &msg)
-                        } else {
-                            err("io_error", &msg)
-                        }
-                    }
-                }
-            }
-
-            msg_types::FILE_WRITE => {
-                let payload: FileWritePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let path = payload.path.clone();
-                match file_ops.write_file(&payload.path, &payload.content).await {
-                    Ok(written) => {
-                        let resp = FileWriteResponse { path, written };
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("write_error", &e.to_string()),
-                }
-            }
-
-            msg_types::FILE_DELETE => {
-                let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let path = payload.path.clone();
-                match file_ops.delete(&payload.path, payload.recursive).await {
-                    Ok(()) => {
-                        let resp = serde_json::json!({ "path": path, "success": true });
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("delete_failed", &format_error_chain(&e)),
-                }
-            }
-
-            msg_types::FILE_CREATE_DIR => {
-                let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let path = payload.path.clone();
-                match file_ops.create_dir(&payload.path).await {
-                    Ok(()) => {
-                        let resp = serde_json::json!({ "path": path, "success": true });
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("create_dir_failed", &format_error_chain(&e)),
-                }
-            }
-
-            msg_types::FILE_RENAME => {
-                let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let from = payload.from.clone();
-                let to = payload.to.clone();
-                match file_ops.rename(&payload.from, &payload.to).await {
-                    Ok(()) => {
-                        let resp = serde_json::json!({ "from": from, "to": to, "success": true });
-                        serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                            .unwrap_or_default()
-                    }
-                    Err(e) => err("rename_failed", &e.to_string()),
-                }
-            }
-
-            msg_types::FILE_CWD => {
-                let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => return err("parse_error", &e.to_string()),
-                };
-                let session_name = extract_session_name(&payload.session_id);
-                match tmux.get_session_cwd(&session_name).await {
-                    Ok(abs_path) => match file_ops.relative_path(&abs_path) {
-                        Ok(rel_path) => {
-                            let resp = FileCwdResponse { path: rel_path };
-                            serde_json::to_string(&make_response(&id, msg_types::OK, resp))
-                                .unwrap_or_default()
-                        }
-                        Err(e) => err("cwd_failed", &e.to_string()),
-                    },
-                    Err(e) => err("cwd_failed", &e.to_string()),
-                }
-            }
-
-            unknown => err(
-                "unknown_message_type",
-                &format!("unknown message type: {unknown}"),
-            ),
-        }
+        dispatch_p2p(ctx, msg_type, payload_value).await
     }
 
     /// Build a TLS acceptor from PEM file paths. Returns `None` if both
@@ -2805,5 +2865,88 @@ mod tests {
     async fn test_tls_load_only_key_fails() {
         let result = AgentServer::load_tls(None, Some("/tmp/key.pem"));
         assert!(result.is_err());
+    }
+
+    // --- The declared P2P surface (#678) ---
+
+    /// Every wire this agent answers on its own socket, as the constants that
+    /// name them.
+    ///
+    /// The response types in `msg_types` — `ok`, `error`, `terminal.output`,
+    /// `keepalive.pong` — are deliberately absent: they are what an answer
+    /// looks like, not something a peer asks for, and a manifest that offered
+    /// them would be claiming a call that does not exist.
+    const REQUEST_WIRES: &[&str] = &[
+        msg_types::SESSION_LIST,
+        msg_types::SESSION_CREATE,
+        msg_types::SESSION_KILL,
+        msg_types::SESSION_CAPTURE_PREVIEW,
+        msg_types::CLIENT_ATTACH,
+        msg_types::CLIENT_DETACH,
+        msg_types::TERMINAL_INPUT,
+        msg_types::TERMINAL_RESIZE,
+        msg_types::CLIENT_AUTH,
+        msg_types::CLIENT_AGENTS_LIST,
+        msg_types::CLIENT_SESSIONS_LIST,
+        msg_types::CLIENT_SESSION_ATTACH,
+        msg_types::CLIENT_SESSION_CREATE,
+        msg_types::CLIENT_SESSION_KILL,
+        msg_types::KEEPALIVE_PING,
+        msg_types::FILE_LIST,
+        msg_types::FILE_READ,
+        msg_types::FILE_WRITE,
+        msg_types::FILE_DELETE,
+        msg_types::FILE_CREATE_DIR,
+        msg_types::FILE_RENAME,
+        msg_types::FILE_CWD,
+    ];
+
+    #[test]
+    fn every_request_wire_the_agent_speaks_is_declared_as_a_unit() {
+        // The invocation derives its descriptors and its arms from one list, so
+        // "advertised but unrouted" and "routed but unadvertised" cannot happen
+        // *inside* it. What this holds is the seam in front: a constant added
+        // here and never routed is a wire the rest of the crate can build a
+        // request for and the agent will answer `unknown_message_type`.
+        for wire in REQUEST_WIRES {
+            assert!(
+                P2P_WIRES.contains(wire),
+                "`{wire}` has a message-type constant but no route — a client can \
+                 build this request and nothing answers it"
+            );
+        }
+    }
+
+    #[test]
+    fn every_declared_p2p_wire_is_one_the_agent_names() {
+        // The other direction of the same seam, and the one that catches an arm
+        // whose wire was written as a literal instead of the constant that is
+        // supposed to name it.
+        for wire in P2P_WIRES {
+            assert!(
+                REQUEST_WIRES.contains(wire),
+                "`{wire}` is routed but has no message-type constant"
+            );
+        }
+    }
+
+    #[test]
+    fn the_declared_units_are_the_ones_the_manifest_will_offer() {
+        let descriptors = p2p_descriptors().expect("the p2p units name themselves");
+        let ids: Vec<&str> = descriptors.iter().map(|d| d.id.as_str()).collect();
+
+        assert_eq!(descriptors.len(), P2P_WIRES.len());
+        assert!(ids.contains(&"session.create"));
+        assert!(ids.contains(&"terminal.input"));
+        assert!(ids.contains(&"file.read"));
+
+        // `ProtocolId` refuses underscores, so three units are spelled
+        // differently from the wire they answer. A provider that passed the
+        // wire string through would produce an id the registry rejects — which
+        // these three would have done silently had `v1_descriptor` not been the
+        // only way to build one.
+        assert!(ids.contains(&"session.capture-preview"));
+        assert!(ids.contains(&"file.create-dir"));
+        assert!(!ids.contains(&"session.capture_preview"));
     }
 }

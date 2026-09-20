@@ -108,6 +108,91 @@ macro_rules! core_routes {
 
 pub(crate) use core_routes;
 
+/// Declare the units this agent serves **on its own socket**, once.
+///
+/// The same shape as [`core_routes`], for the same reason: a `match` cannot be
+/// read to produce the set it handles, so a hand-written list of the peer-to-peer
+/// wires would be a second list, free to drift from the arms it claims to
+/// describe. Invoked in `server::websocket`, where the request context and the
+/// handlers' helpers are in scope.
+///
+/// ## Why this is a second invocation rather than more arms on the first
+///
+/// The two dispatchers are reached by different transports and are the same
+/// provider either way. A unit served on both is **one unit** — `session.create`
+/// is answered for the central server on `server.session.create` and for a
+/// browser on `session.create` — so the two lists are *unioned by id* into one
+/// manifest ([`ProtocolManifest::from_descriptors`]), which is exactly the
+/// several-wires-one-unit case that function keeps both of.
+///
+/// The alternative — one macro invocation emitting both dispatchers — would have
+/// to reconcile two different contexts (a `ServerClient` and a `P2pRequest`) and
+/// two different return types, for no guarantee the two invocations do not
+/// already give: each half is derived from its own arms.
+///
+/// ## What is not here
+///
+/// Same test as [`core_routes`]: is it an offer a peer can call? `keepalive.ping`
+/// passes it, thinly, and is declared — a handler that exists and is not
+/// advertised is one of the two states this macro exists to make
+/// unconstructible, and carving out an exception for the one arm that feels
+/// unworthy would put the list back in someone's memory.
+macro_rules! p2p_routes {
+    ($ctx:ident, $msg_type:ident, $payload:ident $(,)? ; $( $id:literal => $wire:literal => $body:block )* $(,)?) => {
+        /// Every Protocol Unit this agent serves on its peer-to-peer socket.
+        ///
+        /// Unioned with [`crate::connection::core_descriptors`] into the one
+        /// manifest the agent registers — a unit on both lists is one unit with
+        /// two wires.
+        pub fn p2p_descriptors() -> Result<
+            Vec<nession_protocol::ProtocolDescriptor>,
+            nession_protocol::IdentityError,
+        > {
+            Ok(vec![$( crate::protocol::v1_descriptor($id, $wire)?, )*])
+        }
+
+        /// The wire types the same invocation covers.
+        ///
+        /// Read by the tests that hold this list against the message-type
+        /// constants, so a request wire that exists as a constant and not as an
+        /// arm is a failing test rather than an arm nobody notices is missing
+        /// — and the other way round, which is what catches a wire written as a
+        /// literal instead of the constant that is supposed to name it.
+        ///
+        /// Test-only, and deliberately: unlike `CORE_WIRES`, nothing in the
+        /// agent gates on it at runtime, because there is no second match for an
+        /// unrouted peer-to-peer message to fall through to.
+        #[cfg(test)]
+        pub(crate) const P2P_WIRES: &[&str] = &[$( $wire, )*];
+
+        /// Route one peer-to-peer request to the handler that serves it.
+        ///
+        /// A free function for the same hygiene reason as `dispatch_core`: a
+        /// name written in this definition is a different identifier from the
+        /// one a `$body` mentions, `self` included. The context is passed in
+        /// rather than reached for, which is what `P2pRequest` is.
+        ///
+        /// Returns the reply as JSON text — the caller writes it to the socket.
+        /// The arms return early on some paths, so this returns their value
+        /// rather than collecting it.
+        pub(crate) async fn dispatch_p2p(
+            $ctx: crate::server::websocket::P2pRequest<'_>,
+            $msg_type: &str,
+            $payload: serde_json::Value,
+        ) -> String {
+            match $msg_type {
+                $( $wire => $body, )*
+                unknown => $ctx.err(
+                    "unknown_message_type",
+                    &format!("unknown message type: {unknown}"),
+                ),
+            }
+        }
+    };
+}
+
+pub(crate) use p2p_routes;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -576,18 +576,49 @@ one field on the call a client already makes to ask what this server is, rather
 than a message of its own. The Web already calls it (`platform/server/`), and
 `ServerInfoResponse.protocol_manifest` is the contract.
 
+### The agent answers on two sockets
+
+An agent serves its own units over two transports — the connection it opens to
+the central server, and the WebSocket it listens on for a browser to reach it
+directly — and until now only the first was declared. `server/websocket.rs`
+dispatched a second, larger `match` that no manifest described.
+
+`p2p_routes!` is the second invocation, deliberately the same shape as
+`core_routes!` and for the same reason: a `match` cannot be read to produce the
+set it handles, so a hand-written list of peer-to-peer wires would be a second
+list free to drift from the arms it claims to describe. Thirty-five payload
+types moved into `contracts/` with it, including `FileEntry` and `FileData` —
+the agent's filesystem model *was* the wire shape, exactly as `SessionInfo`
+was — and four responses that were `json!({ … })` at the handler are now named
+types. No `json!` remains on that path.
+
+**One provider, so one list.** `main` unions `core_descriptors()` with
+`p2p_descriptors()` and composes one registry from the result, because it is one
+agent offering one set of units over two wires. `session.create` is the clearest
+case: the relay wire is `server.session.create` and the direct wire is
+`session.create`, and they are the same unit seen from two sides. The manifest's
+`ProtocolManifest::from_descriptors` already unions wire sets by id, so the
+union is what states that rather than a coincidence of ordering.
+
+**One unit can share a wire name across transports.** `session.capture_preview`
+is claimed by both halves — the server sends it to the agent, and a browser
+connecting directly sends it too. The registry's core-against-core check exists
+so that two *units* cannot claim one wire, which would leave one of them
+advertised and never dispatched; it now compares units rather than wire types
+alone, because the same unit arriving twice is both dispatchers serving it. The
+two payloads differ only by the server's `request_id` correlation — framing, not
+contract semantics.
+
+**What remains here.** The server's own `json!` payloads, which are a larger and
+separate ledger (276 uses in `server/handler.rs`), and the fact that `contracts/`
+does not feed the TypeScript codegen at all: that catalog is a hand-written list
+of the git and Claude Code units, and nothing links a manifest to it. So an
+advertised contract need not have generated bindings today — which is worth
+knowing, because it means the codegen's coverage is not the guarantee it reads
+as.
+
 ### What is still not versioned
 
-Stated rather than implied, because a reader who finds an unadvertised protocol
-should know whether it was overlooked.
-
-- **The P2P path.** `server/websocket.rs` dispatches a second, larger match —
-  `client.session.list`, `terminal.input`, `client.attach`, `file.read` — that
-  the browser speaks to an agent directly. Those *are* served by the agent and
-  do belong in its manifest, but not yet: their payloads are `json!` literals
-  with no typed contract in `contracts/`, and the catalog requires every
-  advertised contract to have generated bindings. The units come after their
-  contracts, not before.
 - **The global `protocol_version`.** Gone. It rode in `agent.register` and no
   consumer ever read it — not the server, the CLI, the Web, or the database —
   so it was the *shape* of a compatibility statement rather than one, and
