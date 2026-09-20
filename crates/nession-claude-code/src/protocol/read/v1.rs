@@ -28,6 +28,7 @@ pub struct ReadRequestV1 {
     #[serde(default)]
     pub scope: Scope,
     #[serde(default)]
+    #[cfg_attr(feature = "codegen", ts(optional))]
     pub session_id: Option<String>,
     #[serde(default)]
     pub path: String,
@@ -39,6 +40,7 @@ pub struct ReadRequestV1 {
     /// A **request**, clamped to [`MAX_CHUNK_SIZE`] — which it was not before
     /// this contract existed. See [`chunk`] for what an unclamped one did.
     #[serde(default)]
+    #[cfg_attr(feature = "codegen", ts(optional))]
     pub limit: Option<u64>,
 }
 

@@ -176,7 +176,7 @@ describe('GitWorktreesView', () => {
   });
 
   it('reports the agent’s failure states with their own copy', async () => {
-    mockedWorktrees.mockResolvedValue({ state: 'not_a_repository' });
+    mockedWorktrees.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
     render(<GitWorktreesView ctx={ctx()} />);
 

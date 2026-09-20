@@ -1,3 +1,33 @@
+import {
+  PROTOCOL as BRANCHES_PROTOCOL,
+  VERSION as BRANCHES_VERSION,
+  WIRE as BRANCHES_WIRE,
+} from '@/generated/protocol/git/branches/v1';
+import {
+  PROTOCOL as DIFF_PROTOCOL,
+  VERSION as DIFF_VERSION,
+  WIRE as DIFF_WIRE,
+} from '@/generated/protocol/git/diff/v1';
+import {
+  PROTOCOL as LOG_PROTOCOL,
+  VERSION as LOG_VERSION,
+  WIRE as LOG_WIRE,
+} from '@/generated/protocol/git/log/v1';
+import {
+  PROTOCOL as ROOT_PROTOCOL,
+  VERSION as ROOT_VERSION,
+  WIRE as ROOT_WIRE,
+} from '@/generated/protocol/git/root/v1';
+import {
+  PROTOCOL as STATUS_PROTOCOL,
+  VERSION as STATUS_VERSION,
+  WIRE as STATUS_WIRE,
+} from '@/generated/protocol/git/status/v1';
+import {
+  PROTOCOL as WORKTREES_PROTOCOL,
+  VERSION as WORKTREES_VERSION,
+  WIRE as WORKTREES_WIRE,
+} from '@/generated/protocol/git/worktrees/v1';
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
@@ -17,27 +47,23 @@ import type {
  * The contract versions this client can read, per unit (`#678`, Phase 4).
  *
  * A **Consumer Requirement** in the design's terms: not what any agent offers,
- * but what the TypeScript in this capability was written against. It is `1`
- * everywhere because it mirrors the v1 wire shapes in `./types` exactly — and
- * that is the honest statement of today's situation rather than a placeholder.
+ * but what this capability was written against. Both halves now come from the
+ * generated bindings rather than from a comment — the id and the version are
+ * read out of the contract that produced the TypeScript, so a version bump in
+ * Rust moves this with it instead of leaving a stale number behind.
  *
- * **This map is the thing Phase 5 replaces.** Generated consumer types will
- * carry the version alongside the DTO it describes, so the two cannot disagree;
- * until then they are kept in step by hand, which is why the numbers live here
- * next to the wire strings and not somewhere a reader would have to go looking.
- *
- * The `satisfies` clause is what makes the key type usable as `GitUnit` below:
- * a method cannot address a unit this map does not name, so adding one to the
- * plugin without declaring what it speaks is a compile error rather than a call
- * that silently goes out unversioned.
+ * The import path is the third half: `git/status/v1` is the shape these types
+ * *are*. If the contract moved to v2, this file would import `v2` and the
+ * numbers below would change with it, or the build would fail — either way not
+ * silently.
  */
 const CONSUMER_REQUIREMENTS = {
-  'git.status': [1],
-  'git.diff': [1],
-  'git.root': [1],
-  'git.log': [1],
-  'git.branches': [1],
-  'git.worktrees': [1],
+  [STATUS_PROTOCOL]: [STATUS_VERSION],
+  [DIFF_PROTOCOL]: [DIFF_VERSION],
+  [ROOT_PROTOCOL]: [ROOT_VERSION],
+  [LOG_PROTOCOL]: [LOG_VERSION],
+  [BRANCHES_PROTOCOL]: [BRANCHES_VERSION],
+  [WORKTREES_PROTOCOL]: [WORKTREES_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -47,8 +73,10 @@ type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
  * (`extension.git.{status,diff,root}`, #750).
  *
  * The request objects are forwarded whole, exactly as the Claude Code plugin
- * does: the transport never sees individual fields, and the wire strings live
- * only in this file. Consumers import the typed API.
+ * does: the transport never sees individual fields. The wire strings and the
+ * protocol ids are **not** written here any more — they are the generated
+ * bindings, so they cannot disagree with the Rust. Consumers import the typed
+ * API.
  *
  * One field is added on the way past: `contract_version`, resolved per target
  * from what that agent advertises against what this client speaks
@@ -85,8 +113,8 @@ export class GitPlugin implements TransportPlugin {
   /** Branch, upstream relationship and changed files for a Session's repository. */
   async gitStatus(req: GitStatusRequest): Promise<GitStatusResponse> {
     return this.requireConnection().request<GitStatusResponse>(
-      'extension.git.status',
-      this.addressed('git.status', req.agent_id, req),
+      STATUS_WIRE,
+      this.addressed(STATUS_PROTOCOL, req.agent_id, req),
     );
   }
 
@@ -99,16 +127,16 @@ export class GitPlugin implements TransportPlugin {
    */
   async gitDiff(req: GitDiffRequest): Promise<GitDiffResponse> {
     return this.requireConnection().request<GitDiffResponse>(
-      'extension.git.diff',
-      this.addressed('git.diff', req.agent_id, req),
+      DIFF_WIRE,
+      this.addressed(DIFF_PROTOCOL, req.agent_id, req),
     );
   }
 
   /** The repository root — the context a Workspace handoff carries (#826). */
   async gitRoot(req: GitStatusRequest): Promise<GitRootResponse> {
     return this.requireConnection().request<GitRootResponse>(
-      'extension.git.root',
-      this.addressed('git.root', req.agent_id, req),
+      ROOT_WIRE,
+      this.addressed(ROOT_PROTOCOL, req.agent_id, req),
     );
   }
 
@@ -120,8 +148,8 @@ export class GitPlugin implements TransportPlugin {
    */
   async gitLog(req: GitLogRequest): Promise<GitLogResponse> {
     return this.requireConnection().request<GitLogResponse>(
-      'extension.git.log',
-      this.addressed('git.log', req.agent_id, req),
+      LOG_WIRE,
+      this.addressed(LOG_PROTOCOL, req.agent_id, req),
     );
   }
 
@@ -133,8 +161,8 @@ export class GitPlugin implements TransportPlugin {
    */
   async gitBranches(req: GitBranchesRequest): Promise<GitBranchesResponse> {
     return this.requireConnection().request<GitBranchesResponse>(
-      'extension.git.branches',
-      this.addressed('git.branches', req.agent_id, req),
+      BRANCHES_WIRE,
+      this.addressed(BRANCHES_PROTOCOL, req.agent_id, req),
     );
   }
 
@@ -146,8 +174,8 @@ export class GitPlugin implements TransportPlugin {
    */
   async gitWorktrees(req: GitStatusRequest): Promise<GitWorktreesResponse> {
     return this.requireConnection().request<GitWorktreesResponse>(
-      'extension.git.worktrees',
-      this.addressed('git.worktrees', req.agent_id, req),
+      WORKTREES_WIRE,
+      this.addressed(WORKTREES_PROTOCOL, req.agent_id, req),
     );
   }
 

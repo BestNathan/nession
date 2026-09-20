@@ -98,7 +98,7 @@ describe('Git Signal (L1)', () => {
     // A Signal that cannot say anything is not worth the room it takes from the
     // work surface. The readable copy for each failure lives in the Workspace,
     // which is where someone can act on it.
-    mockedStatus.mockResolvedValue({ state: 'not_a_repository' });
+    mockedStatus.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
     renderProjection('signal');
 

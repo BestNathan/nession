@@ -13,7 +13,7 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ListRequestV1 = { scope: Scope, session_id: string | null, };
+export type ListRequestV1 = { scope: Scope, session_id?: string, };
 export type ListResponseV1 = { available: boolean, categories: Array<ConfigCategory>, };
 export type ConfigCategory = { name: string, icon: string | null, files: Array<ConfigFile>, };
 export type ConfigFile = { path: string, size: number, content_type: string, };
@@ -22,7 +22,7 @@ export type Scope = "global" | "project";
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ListRequest = { scope: Scope, session_id: string | null, };
+export type ListRequest = { scope: Scope, session_id?: string, };
 
 /** The payload the provider answers with. */
 export type ListResponse = { available: boolean, categories: Array<ConfigCategory>, };

@@ -13,7 +13,7 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ReadRequestV1 = { scope: Scope, session_id: string | null, path: string, 
+export type ReadRequestV1 = { scope: Scope, session_id?: string, path: string, 
 /**
  * Byte offset into the file.
  */
@@ -24,7 +24,7 @@ offset: number,
  * A **request**, clamped to [`MAX_CHUNK_SIZE`] — which it was not before
  * this contract existed. See [`chunk`] for what an unclamped one did.
  */
-limit: number | null, };
+limit?: number, };
 export type ReadResponseV1 = ReadOkV1 | ReadFailureV1;
 export type ReadOkV1 = { content: string, content_type: string, total_size: number, offset: number, has_more: boolean, };
 export type ReadFailureV1 = { error: string, total_size?: number | null, content?: string | null, content_type?: string | null, };
@@ -33,7 +33,7 @@ export type Scope = "global" | "project";
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ReadRequest = { scope: Scope, session_id: string | null, path: string, 
+export type ReadRequest = { scope: Scope, session_id?: string, path: string, 
 /**
  * Byte offset into the file.
  */
@@ -44,7 +44,7 @@ offset: number,
  * A **request**, clamped to [`MAX_CHUNK_SIZE`] — which it was not before
  * this contract existed. See [`chunk`] for what an unclamped one did.
  */
-limit: number | null, };
+limit?: number, };
 
 /** The payload the provider answers with. */
 export type ReadResponse = ReadOkV1 | ReadFailureV1;

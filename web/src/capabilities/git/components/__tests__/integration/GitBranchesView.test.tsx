@@ -193,7 +193,7 @@ describe('GitBranchesView', () => {
   });
 
   it('reports the agent’s failure states with their own copy', async () => {
-    mockedBranches.mockResolvedValue({ state: 'not_a_repository' });
+    mockedBranches.mockResolvedValue({ state: 'not_a_repository', message: 'not a git repository' });
 
     render(<GitBranchesView ctx={ctx()} />);
 
