@@ -4,7 +4,39 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::runtime::branches::Branches;
+
+/// One local branch.
+///
+/// `camelCase` for the reason `ChangedFile` records: the client reads camelCase,
+/// and a multi-word field without the rule arrives as `undefined` with nothing
+/// to say so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub name: String,
+    /// HEAD points here.
+    pub current: bool,
+    /// The configured upstream, `None` when the branch has none. Still set when
+    /// the upstream has been deleted — that is what `upstream_gone` reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Commits this branch has that its upstream does not.
+    pub ahead: u32,
+    /// Commits the upstream has that this branch does not.
+    pub behind: u32,
+    /// The configured upstream no longer exists — git's `[gone]`.
+    pub upstream_gone: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branches {
+    pub branches: Vec<Branch>,
+    /// The count that was answered for, so the view can offer "more" honestly.
+    pub limit: usize,
+    pub truncated_bytes: usize,
+    pub truncated: bool,
+}
 
 pub const WIRE: &str = "extension.git.branches";
 

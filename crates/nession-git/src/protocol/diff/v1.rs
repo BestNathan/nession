@@ -4,7 +4,20 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::runtime::diff::FileDiff;
+
+/// One file's diff against HEAD, as the caller receives it.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileDiff {
+    pub path: String,
+    /// Unified diff text, already capped and lossily decoded for transport.
+    pub text: String,
+    /// True when the file is binary — git reports that instead of a diff.
+    pub binary: bool,
+    /// Bytes dropped by the cap. Non-zero means `text` is a prefix, and the UI
+    /// must say so (#750 C3).
+    pub truncated_bytes: usize,
+    pub truncated: bool,
+}
 
 pub const WIRE: &str = "extension.git.diff";
 

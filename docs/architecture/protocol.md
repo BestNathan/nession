@@ -132,15 +132,15 @@ is Nession, for `git.diff` it is `nession-git`.
 
 ```text
 crates/nession-git/src/
-├── protocol/          the contract: typed request/response + descriptor
+├── protocol/          the contract: typed request/response + wire shape
 │   ├── status/
-│   │   └── v1.rs
+│   │   └── v1.rs      request, ok-payload, descriptor, and every type it carries
 │   └── diff/
 │       └── v1.rs
 ├── runtime/           the implementation: what answers those contracts
 │   ├── cmd.rs         the one place a `git` process is spawned
 │   ├── security.rs    the input boundary
-│   └── status.rs …    one module per unit
+│   └── status.rs …    the parsers, and the `impl` blocks for the shapes
 ├── agent.rs           the erased dispatch boundary
 └── lib.rs
 ```
@@ -149,9 +149,18 @@ The split is load-bearing rather than tidy. `protocol/` is what a consumer
 codes against and what a version bump changes; `runtime/` is what may be
 rewritten freely under the same contract version — which is the "two evolution
 speeds" distinction above, made visible in the tree instead of stated only in
-prose. A `ProtocolDescriptor` appearing under `runtime/` would mean a contract
-living in the implementation half; nothing enforces that yet, and this is what
-it would look like if it happened.
+prose.
+
+**Every type on the wire is a type in `protocol/`, including the payloads.**
+That was not true until `#678` Phase 5 needed it: the requests and ok-wrappers
+were typed, but their payloads (`RepoStatus`, `Branches`, `History`, …) were the
+*parser's* types, living under `runtime/`. Nothing enforced the rule, so nothing
+noticed — until a generator asked "what shape is this contract?" and the answer
+was in the implementation half. `runtime/` now imports those shapes instead of
+declaring them, and keeps only what it does with them.
+
+The `impl` blocks stayed in `runtime/` on purpose. A shape is what the wire
+carries; `RepoStatus::is_clean()` is a question someone asks *about* one.
 
 Typed at the contract boundary; erased only at the dispatcher boundary. The
 outermost `handle_command(command: &str, payload: Value) -> Value` stays — it is

@@ -4,7 +4,43 @@ use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
-use crate::runtime::log::History;
+
+/// One commit, as the history view reads it.
+///
+/// `camelCase` for the same reason `ChangedFile` is: the client reads camelCase,
+/// and a field named `short_hash` would arrive as `undefined` with nothing to
+/// say so.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    /// Full object name.
+    pub hash: String,
+    /// Abbreviated, as git would print it.
+    pub short_hash: String,
+    pub author: String,
+    /// git's own relative phrasing ("3 days ago"). Not re-derived here: the
+    /// agent host's clock and the browser's are not the same clock, and a view
+    /// that computed "3 days ago" from a timestamp would disagree with `git log`
+    /// run in the Session beside it.
+    pub relative_date: String,
+    /// Committer date, ISO-8601 with the author's offset.
+    pub date: String,
+    /// First line of the commit message.
+    pub subject: String,
+    /// Decoration git would print — branch and tag names pointing here.
+    pub refs: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct History {
+    pub commits: Vec<Commit>,
+    /// The count that was asked for, so the view can offer "more" honestly.
+    pub limit: usize,
+    /// Bytes the cap dropped. Non-zero means this is a prefix of the answer.
+    pub truncated_bytes: usize,
+    pub truncated: bool,
+}
 
 pub const WIRE: &str = "extension.git.log";
 

@@ -49,9 +49,16 @@ pub mod runtime;
 pub use runtime::{branches, cmd, diff, log, security, status, worktrees};
 
 pub use agent::{GitAgentExtension, WorkdirResolver};
-pub use branches::{Branch, Branches};
 pub use cmd::{GitCmd, GitOutput};
-pub use diff::FileDiff;
-pub use log::{Commit, History};
-pub use status::{ChangeKind, ChangedFile, RepoStatus};
-pub use worktrees::{Worktree, Worktrees};
+
+// The wire shapes come from `protocol/`, not from the module of the same name
+// under `runtime/`. Those modules now hold only what *does* something with
+// them — `status::parse`, `worktrees::worktrees` — and an implementation module
+// that also owned the shape is the arrangement this split exists to end. The
+// public paths are unchanged either way, which is why the move is invisible
+// from outside the crate.
+pub use protocol::branches::v1::{Branch, Branches};
+pub use protocol::diff::v1::FileDiff;
+pub use protocol::log::v1::{Commit, History};
+pub use protocol::status::v1::{ChangeKind, ChangedFile, RepoStatus};
+pub use protocol::worktrees::v1::{Worktree, Worktrees};

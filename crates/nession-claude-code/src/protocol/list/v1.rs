@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::read::Scope;
 use crate::protocol::v1_descriptor;
-use crate::scanner::ConfigCategory;
 
 pub const WIRE: &str = "extension.claude_code.list";
 
@@ -15,6 +14,26 @@ pub struct ListRequestV1 {
     pub scope: Scope,
     #[serde(default)]
     pub session_id: Option<String>,
+}
+
+/// One group of config files, as the view renders it.
+///
+/// Here rather than in `scanner` — which is where it was — for the reason the
+/// git provider records: a shape the wire carries belongs to the contract, and
+/// a generator asked "what shape is `claude-code.list`?" has to be able to
+/// answer from the contract alone.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigCategory {
+    pub name: String,
+    pub icon: Option<String>,
+    pub files: Vec<ConfigFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigFile {
+    pub path: String,
+    pub size: usize,
+    pub content_type: String,
 }
 
 /// The listing, or the statement that there is nothing to list.
