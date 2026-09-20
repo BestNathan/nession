@@ -11,6 +11,7 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 /// and a multi-word field without the rule arrives as `undefined` with nothing
 /// to say so.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub name: String,
@@ -18,7 +19,7 @@ pub struct Branch {
     pub current: bool,
     /// The configured upstream, `None` when the branch has none. Still set when
     /// the upstream has been deleted — that is what `upstream_gone` reports.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
     /// Commits this branch has that its upstream does not.
     pub ahead: u32,
@@ -29,6 +30,7 @@ pub struct Branch {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Branches {
     pub branches: Vec<Branch>,
@@ -41,6 +43,7 @@ pub struct Branches {
 pub const WIRE: &str = "extension.git.branches";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct BranchesRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -50,6 +53,7 @@ pub struct BranchesRequestV1 {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct BranchesOkV1 {
     pub branches: Branches,
 }

@@ -217,7 +217,7 @@ pub struct ClientAgentDeletePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeleteResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 

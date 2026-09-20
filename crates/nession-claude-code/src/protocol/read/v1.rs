@@ -14,6 +14,7 @@ pub const WIRE: &str = "extension.claude_code.read";
 /// to `"global"`, and an unrecognised value silently resolved to *no* directory
 /// — a typo became an empty answer rather than a refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     #[default]
@@ -22,6 +23,7 @@ pub enum Scope {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ReadRequestV1 {
     #[serde(default)]
     pub scope: Scope,
@@ -42,6 +44,7 @@ pub struct ReadRequestV1 {
 
 /// The success shape.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ReadOkV1 {
     pub content: String,
     #[serde(rename = "content_type")]
@@ -59,13 +62,22 @@ pub struct ReadOkV1 {
 /// explains it. Typed faithfully: turning `error: "access_denied"` into a rich
 /// error object is a contract change, not a migration.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ReadFailureV1 {
     pub error: String,
-    #[serde(rename = "total_size", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "total_size",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub total_size: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    #[serde(rename = "content_type", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "content_type",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub content_type: Option<String>,
 }
 
@@ -98,6 +110,7 @@ impl ReadFailureV1 {
 /// nothing deserialises one, so the usual caution about untagged enums does not
 /// apply here.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum ReadResponseV1 {
     Ok(ReadOkV1),

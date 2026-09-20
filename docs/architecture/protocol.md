@@ -288,6 +288,62 @@ regenerates and diffs it so drift fails the build.
 Product Capability UI state stays hand-written — only real wire contracts are
 generated.
 
+It runs as `just codegen` and reads:
+
+```text
+crates/nession-protocol-codegen/src/catalog.rs   which types are which contract
+        ↓  ts-rs answers "what TypeScript shape is this Rust type?"
+web/src/generated/protocol/<owner>/<unit>/v<N>.ts
+```
+
+**ts-rs owns the type translation; this repository owns everything else** — the
+layout, the identity constants, the request/response aliases and which types a
+contract is made of. A generator that also translated types would be a second,
+worse ts-rs; one that let ts-rs own the layout would emit one file per type with
+imports, which is not the layout above.
+
+Four things about the output that are decisions rather than details:
+
+- **One file per unit, self-contained.** No imports between generated files, so
+  a reader answers "what does `git.status` look like?" by opening one file. The
+  duplication that costs is generated, so it cannot drift — and it is *checked*,
+  not assumed: the generator refuses to write a file that refers to a name it
+  does not declare, using ts-rs's own dependency data.
+- **There is no `index.ts`.** The first version had one and `tsc` refused it —
+  every unit exports `PROTOCOL`, `WIRE` and `VERSION`, so a barrel is a wall of
+  ambiguity errors. The fix is not to rename the constants: a barrel would let a
+  consumer import a shape without saying which contract version it is, which is
+  the thing this whole document is against. The version is in the import path.
+- **`u64` is `number`, not ts-rs's default `bigint`.** Every integer here
+  arrives through `JSON.parse` as a `number`, so `bigint` would describe a value
+  the runtime never produces. The design requires the number range be explicit;
+  this is where it is, in one `Config`.
+- **The gate compares against a scratch directory**, not against the working
+  tree. Regenerating in place and diffing with `git diff --exit-code` repairs
+  the condition it is testing: the run after a failure would diff an already-
+  regenerated tree, pass, and leave the committed files stale.
+
+**A skippable `Option` needs both serde attributes, and that is not obvious.**
+ts-rs makes a field optional in TypeScript only when `skip_serializing_if` **and**
+`default` are both present. Serde needs only the first — measured: a missing
+`Option` field deserializes to `None` with no `default` — so the two disagree
+about twenty-four fields, and ts-rs's answer (`branch: string | null`) was wrong
+twice: the wire omits it, and it is never null. The fix is not a codegen
+annotation. It is adding `default`, which is the spelling the rest of these
+contracts already used and is a **no-op on the wire** — `default` affects
+deserialization only, and serde's `Option` behaviour is unchanged by writing it
+down. So: `#[serde(default, skip_serializing_if = "Option::is_none")]` wherever
+a field may be absent. `field?: T | null` is ts-rs's `Option` rendering and the
+`| null` is loose — no such field ever serialises as null — but it rejects
+nothing that is valid, which is the direction that matters.
+
+Still unhandled, and it should land with the first consumer: a `#[serde(default)]`
+field on a **non-`Option`** is emitted as required. `#[ts(optional)]` is refused
+on anything but `Option`, so `AgentMetadata.image_tag`, `protocol_version`,
+`preferred_mode` and the `Vec`s beside them are omittable on the wire and
+required in the generated type. Nothing consumes these bindings yet, so nothing
+is broken by it.
+
 ### Retire a contract
 
 1. Mark the descriptor `Lifecycle::Deprecated`. It stays advertised: if it
@@ -321,6 +377,9 @@ generated.
 | A consumer never sends a version it cannot read | `addressedPayload` refuses locally — the server's gate cannot catch this case, because a caller that names nothing is relayed as a Legacy Peer |
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `agents.changed` push, both calling one `publishProtocols` |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
+| Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
+| Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against the providers' own `descriptors()` |
+| A generated file refers to nothing it does not declare | the same crate's `check_self_contained`, run by the generator *and* as a test |
 
 ### Why the manifest carries the wire projection
 

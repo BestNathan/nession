@@ -7,13 +7,14 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 
 /// One work tree, or one administrative entry for one that used to exist.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     /// Absolute path as git records it.
     pub path: String,
     /// The branch checked out there, without `refs/heads/`. `None` when the
     /// entry is detached, bare, or has no `branch` line at all.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// This is the work tree the Session is sitting in.
     pub current: bool,
@@ -22,14 +23,15 @@ pub struct Worktree {
     pub bare: bool,
     /// `git worktree lock` reason, when it was locked. An empty string means
     /// locked with no reason given, which is a different sentence from unlocked.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<String>,
     /// The directory is gone and the entry is waiting for `git worktree prune`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prunable: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Worktrees {
     pub worktrees: Vec<Worktree>,
@@ -40,6 +42,7 @@ pub struct Worktrees {
 pub const WIRE: &str = "extension.git.worktrees";
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct WorktreesRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -48,6 +51,7 @@ pub struct WorktreesRequestV1 {
 /// No `limit`: a worktree is a directory someone made by hand, so the count is
 /// small in a way a branch count is not. The agent still caps the bytes.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct WorktreesOkV1 {
     pub worktrees: Worktrees,
 }

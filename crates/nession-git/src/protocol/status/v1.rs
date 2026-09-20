@@ -17,6 +17,7 @@ pub const WIRE: &str = "extension.git.status";
 
 /// What a caller asks for.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct StatusRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
@@ -29,11 +30,12 @@ pub struct StatusRequestV1 {
 /// file's tooltip read `undefined → new-name` — a field that is only populated
 /// for renames, which is exactly the case no fixture exercised over the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedFile {
     pub path: String,
     /// Present only for renames/copies.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_path: Option<String>,
     pub kind: ChangeKind,
     /// Staged in the index (porcelain `X`).
@@ -43,6 +45,7 @@ pub struct ChangedFile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
     Modified,
@@ -57,12 +60,13 @@ pub enum ChangeKind {
 
 /// A repository's state as of one `status` call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct RepoStatus {
     /// Branch name, or `None` when detached.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     pub detached: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
@@ -81,6 +85,7 @@ pub struct RepoStatus {
 /// Signal's worktree identity and the Workspace header both read it, and the
 /// probe that decided "this is a repository" already knew it.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct StatusOkV1 {
     pub status: RepoStatus,
     pub root: String,

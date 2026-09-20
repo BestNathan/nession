@@ -39,7 +39,7 @@ pub struct ClientCommandsAddPayload {
 pub struct ClientCommandsAddResponsePayload {
     pub id: String,
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -52,7 +52,7 @@ pub struct ClientCommandsRemovePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsRemoveResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -71,6 +71,6 @@ pub struct ClientCommandsUpdatePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsUpdateResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

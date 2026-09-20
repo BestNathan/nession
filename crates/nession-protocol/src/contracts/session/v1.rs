@@ -40,9 +40,9 @@ pub struct AgentCommandResponsePayload {
     pub request_id: String,
     pub command: String,
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_name: Option<String>,
 }
 
@@ -64,16 +64,16 @@ pub struct ClientSessionKillPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCreateResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -147,7 +147,7 @@ pub struct ClientSessionEnvUnsetPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvResponsePayload {
     pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
