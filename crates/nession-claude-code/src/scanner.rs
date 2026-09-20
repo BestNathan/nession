@@ -1,20 +1,7 @@
 use crate::security;
-use serde::Serialize;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ConfigCategory {
-    pub name: String,
-    pub icon: Option<String>,
-    pub files: Vec<ConfigFile>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ConfigFile {
-    pub path: String,
-    pub size: usize,
-    pub content_type: String,
-}
+use crate::protocol::list::v1::{ConfigCategory, ConfigFile};
 
 const CATEGORIES: &[(&str, &[&str], Option<&str>)] = &[
     (
